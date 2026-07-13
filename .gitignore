@@ -1,4 +1,5 @@
 DerivedData/
+.codex-derived-device/
 artifacts/device-derived/
 build/
 *.xcuserstate

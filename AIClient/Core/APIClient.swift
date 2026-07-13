@@ -8,7 +8,7 @@ struct APIClient {
         self.baseURL = baseURL
         if let session { self.session = session } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 15
+            config.timeoutIntervalForRequest = 30
             config.requestCachePolicy = .reloadIgnoringLocalCacheData
             config.urlCache = .shared
             self.session = URLSession(configuration: config)
@@ -33,9 +33,9 @@ struct APIClient {
         let isSpecialRSS = source == .laozhong || source == .youtube
         components?.queryItems = [
             .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
-            .init(name: "final_score", value: "0"), .init(name: "sort", value: "time_desc"),
+            .init(name: "final_score", value: String(Post.minimumFeedScore)), .init(name: "sort", value: "time_desc"),
             .init(name: "group_similar", value: "1"), .init(name: "group_threshold", value: "70"),
-            .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue), .init(name: "include_zero_score", value: "true")
+            .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue), .init(name: "include_zero_score", value: "false")
         ]
         if isSpecialRSS {
             let name = source == .laozhong ? "老中" : "YouTube"
@@ -44,7 +44,7 @@ struct APIClient {
         if source == .x { components?.queryItems?.append(.init(name: "x_feed_view", value: "tracked")) }
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: PostListResponse = try await get(url)
-        return response.data
+        return response.data.filter(\.meetsMinimumFeedScore)
     }
 
     private func fetchHotTopics(page: Int, limit: Int, source: FeedSource) async throws -> [HotTopic] {
@@ -90,11 +90,30 @@ struct APIClient {
     }
 
     private func get<Response: Decodable>(_ url: URL) async throws -> Response {
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
-        do { return try JSONDecoder().decode(Response.self, from: data) }
-        catch { throw APIError.decoding(error) }
+        for attempt in 0..<3 {
+            do {
+                let (data, response) = try await session.data(from: url)
+                guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+                if [500, 502, 503, 504].contains(http.statusCode), attempt < 2 {
+                    try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
+                    continue
+                }
+                guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+                do { return try JSONDecoder().decode(Response.self, from: data) }
+                catch {
+                    #if DEBUG
+                    print("Feed request decoding failed: \(url.absoluteString) — \(error)")
+                    #endif
+                    throw APIError.decoding(error)
+                }
+            } catch let error as URLError where error.code != .cancelled && attempt < 2 {
+                #if DEBUG
+                print("Feed request failed (attempt \(attempt + 1)): \(url.absoluteString) — \(error)")
+                #endif
+                try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
+            }
+        }
+        throw APIError.invalidResponse
     }
 }
 

@@ -58,6 +58,8 @@ struct CategoryResponse: Decodable {
 struct FeedCategory: Decodable { let id: Int; let name: String }
 
 struct Post: Decodable, Identifiable, Hashable {
+    static let minimumFeedScore = 5.0
+
     let id: Int
     let title, text, summary, content, source, formattedTime: String?
     let finalScore, weight: Double?
@@ -67,6 +69,7 @@ struct Post: Decodable, Identifiable, Hashable {
     let images: [PostImage]?
     let videos: [PostVideo]?
     let feedRank: Int?
+    let meta: PostMeta?
 
     var displayTitle: String { clean(title) ?? clean(summary) ?? clean(text) ?? "无标题" }
     var displaySummary: String? {
@@ -93,6 +96,7 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var normalizedSource: String { sourceName }
     var score: Double? { finalScore ?? weight }
+    var meetsMinimumFeedScore: Bool { score.map { $0 >= Self.minimumFeedScore } ?? false }
     var imageURLs: [URL] { (images ?? []).compactMap { MediaURL.image($0.url) } }
     var videoURLs: [URL] { (videos ?? []).compactMap { $0.url ?? $0.playURL }.compactMap(MediaURL.video) }
     var previewURL: URL? {
@@ -129,7 +133,7 @@ struct Post: Decodable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, text, summary, content, source, weight, user, images, videos, feedRank
+        case id, title, text, summary, content, source, weight, user, images, videos, feedRank, meta
         case formattedTime = "formatted_time"
         case finalScore = "final_score"
         case postLink = "post_link"
@@ -148,7 +152,7 @@ struct Post: Decodable, Identifiable, Hashable {
             postLink: topic.searchLink, articlePostAt: nil,
             user: .init(userName: nil, userScreenName: source.title + "热榜", avatarURL: nil, userDesc: nil),
             postTags: topic.rankChange.map { $0 > 0 ? [.init(id: 0, name: "上升 \($0)")] : [] } ?? [],
-            images: [], videos: [], feedRank: rank
+            images: [], videos: [], feedRank: rank, meta: nil
         )
     }
 
@@ -160,7 +164,7 @@ struct Post: Decodable, Identifiable, Hashable {
             postLink: item.linkURL, articlePostAt: nil,
             user: .init(userName: nil, userScreenName: flashSourceName(item.source), avatarURL: item.avatarURL, userDesc: nil),
             postTags: item.isImportant == true ? [.init(id: 0, name: "重要")] : [],
-            images: [], videos: [], feedRank: nil
+            images: [], videos: [], feedRank: nil, meta: nil
         )
     }
 
@@ -177,6 +181,14 @@ struct Post: Decodable, Identifiable, Hashable {
         if source.contains("eastmoney") { return "东方财富" }
         return "快讯"
     }
+}
+
+struct PostMeta: Decodable, Hashable {
+    let metrics: PostMetrics?
+}
+
+struct PostMetrics: Decodable, Hashable {
+    let bookmarks, likes, quotes, replies, retweets, views: Int?
 }
 
 struct PostUser: Decodable, Hashable {

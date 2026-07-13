@@ -63,6 +63,10 @@ struct RemoteImage: View {
         }
         .frame(maxWidth: .infinity).frame(height: height).aspectRatio(height == nil ? 16 / 9 : nil, contentMode: .fill)
         .clipped().clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .transaction { transaction in
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
         .task(id: url) {
             finished = false
             image = await ImageLoader.load(url)

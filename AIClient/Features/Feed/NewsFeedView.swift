@@ -138,8 +138,9 @@ struct NewsFeedView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(model.posts) { post in
-                        Button { path.append(post) } label: { NewsCardView(post: post) }
-                            .buttonStyle(.plain)
+                        NewsCardView(post: post)
+                            .contentShape(Rectangle())
+                            .onTapGesture { path.append(post) }
                             .task { await model.loadMoreIfNeeded(current: post) }
                         Divider().opacity(0.6)
                     }
@@ -153,12 +154,28 @@ struct NewsFeedView: View {
                 }
             }
             .refreshable { await model.refresh() }
+            .simultaneousGesture(channelSwipeGesture)
         }
+    }
+
+    private var channelSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                let horizontal = value.predictedEndTranslation.width
+                let vertical = value.predictedEndTranslation.height
+                guard abs(horizontal) >= 64, abs(horizontal) > abs(vertical) * 1.35 else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    model.selectAdjacent(offset: horizontal < 0 ? 1 : -1)
+                }
+            }
     }
 
     private func open(_ path: String) {
         if let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL { openURL(url) }
     }
+
 }
 
 private extension FeedSource {
@@ -247,7 +264,6 @@ private struct NewsCardView: View {
             PostAuthorHeader(post: post)
             Text(post.displayContent).font(.body).lineSpacing(3).multilineTextAlignment(.leading).lineLimit(12)
             PostMediaGrid(post: post)
-            tags
         }.padding(.horizontal, 14).padding(.vertical, 12).contentShape(Rectangle())
     }
 

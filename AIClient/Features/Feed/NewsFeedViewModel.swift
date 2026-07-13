@@ -38,6 +38,14 @@ final class NewsFeedViewModel: ObservableObject {
         errorMessage = nil
     }
 
+    func selectAdjacent(offset: Int) {
+        let sources = FeedSource.allCases
+        guard let current = sources.firstIndex(of: source) else { return }
+        let next = current + offset
+        guard sources.indices.contains(next) else { return }
+        select(sources[next])
+    }
+
     func loadInitial() async {
         if !posts.isEmpty { return }
         await refresh()
@@ -93,7 +101,8 @@ final class NewsFeedViewModel: ObservableObject {
     private func handleRealtime(_ event: RealtimeFeedClient.Event) {
         switch event {
         case .post(let post):
-            guard matchesCurrentSource(post) else { return }
+            guard matchesCurrentSource(post), post.meetsMinimumFeedScore else { return }
+            errorMessage = nil
             if let index = posts.firstIndex(where: { $0.id == post.id }) {
                 posts[index] = post
             } else {

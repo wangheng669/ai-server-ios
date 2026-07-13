@@ -26,6 +26,7 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.first?.authorName, "示例来源")
         XCTAssertEqual(response.data.first?.normalizedSource, "RSS")
         XCTAssertEqual(response.data.first?.score, 8.6)
+        XCTAssertEqual(response.data.first?.meetsMinimumFeedScore, true)
     }
 
     func testDecodesDetailAndStripsHTML() throws {
@@ -36,6 +37,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.post.id, 7)
         XCTAssertTrue(response.post.displayContent.contains("第一段"))
         XCTAssertFalse(response.post.displayContent.contains("<p>"))
+    }
+
+    func testMinimumFeedScoreBoundary() throws {
+        let json = #"{"data":[{"id":1,"final_score":5},{"id":2,"final_score":4.99},{"id":3}]}"#.data(using: .utf8)!
+        let posts = try JSONDecoder().decode(PostListResponse.self, from: json).data
+
+        XCTAssertTrue(posts[0].meetsMinimumFeedScore)
+        XCTAssertFalse(posts[1].meetsMinimumFeedScore)
+        XCTAssertFalse(posts[2].meetsMinimumFeedScore)
     }
 
     func testStripsEntityEncodedHTML() throws {
