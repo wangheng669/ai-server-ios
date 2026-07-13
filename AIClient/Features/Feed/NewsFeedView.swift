@@ -8,6 +8,7 @@ struct NewsFeedView: View {
     @State private var rootTab: RootTab = .home
     @State private var showsSettings = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $rootTab) {
@@ -35,6 +36,16 @@ struct NewsFeedView: View {
                 .tabItem { Label("事件", systemImage: "point.3.connected.trianglepath.dotted") }
         }
         .tint(.blue)
+        .onAppear { model.startRealtime() }
+        .onDisappear { model.stopRealtime() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                model.startRealtime()
+                Task { await model.refresh() }
+            } else {
+                model.stopRealtime()
+            }
+        }
         .onChange(of: rootTab) { _, tab in
             guard tab != .home else { return }
             rootTab = .home

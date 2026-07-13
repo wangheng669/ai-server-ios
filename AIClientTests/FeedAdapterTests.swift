@@ -35,4 +35,9 @@ final class FeedAdapterTests: XCTestCase {
         let url = try XCTUnwrap(MediaURL.image("https://example.com/image.jpg"))
         XCTAssertEqual(url.absoluteString, "https://example.com/image.jpg")
     }
+
+    func testBuildsWebSocketURLFromServerURL() throws {
+        let url = try XCTUnwrap(RealtimeFeedClient.webSocketURL(from: URL(string: "https://example.com:3001/api")!))
+        XCTAssertEqual(url.absoluteString, "wss://example.com:3001/post")
+    }
 }

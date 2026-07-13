@@ -16,6 +16,7 @@ final class NewsFeedViewModel: ObservableObject {
     private var cache: [FeedSource: Snapshot] = [:]
     private var page = 1
     private let pageSize = 20
+    private var realtimeClient: RealtimeFeedClient?
 
     init() {
         #if DEBUG
@@ -40,6 +41,19 @@ final class NewsFeedViewModel: ObservableObject {
     func loadInitial() async {
         if !posts.isEmpty { return }
         await refresh()
+    }
+
+    func startRealtime() {
+        let client = RealtimeFeedClient(baseURL: ServerConfiguration.currentURL)
+        client.onEvent = { [weak self] event in self?.handleRealtime(event) }
+        realtimeClient?.stop()
+        realtimeClient = client
+        client.start()
+    }
+
+    func stopRealtime() {
+        realtimeClient?.stop()
+        realtimeClient = nil
     }
 
     func refresh() async {
@@ -75,4 +89,46 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private var client: APIClient { APIClient(baseURL: ServerConfiguration.currentURL) }
+
+    private func handleRealtime(_ event: RealtimeFeedClient.Event) {
+        switch event {
+        case .post(let post):
+            guard matchesCurrentSource(post) else { return }
+            if let index = posts.firstIndex(where: { $0.id == post.id }) {
+                posts[index] = post
+            } else {
+                posts.insert(post, at: 0)
+            }
+            cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+        case .taskCompleted(let name):
+            guard task(name, updates: source) else { return }
+            Task { await refresh() }
+        }
+    }
+
+    private func matchesCurrentSource(_ post: Post) -> Bool {
+        switch source {
+        case .x: return post.sourceName == "X"
+        case .bilibili: return post.isBilibili
+        case .zhihu: return post.sourceName == "知乎"
+        case .truth: return post.sourceName == "Truth"
+        case .rss: return post.isRSS
+        case .laozhong: return post.isRSS && post.tagNames.contains("老中")
+        case .youtube: return post.isRSS && post.tagNames.contains("YouTube")
+        case .weibo, .douyin, .flash: return false
+        }
+    }
+
+    private func task(_ name: String, updates source: FeedSource) -> Bool {
+        switch source {
+        case .x: return name == "x" || name == "x_home" || name == "x_home_following"
+        case .weibo: return name == "weibo_hot"
+        case .douyin: return name == "douyin_hot"
+        case .bilibili: return name == "bilibili"
+        case .zhihu: return name == "zhihu"
+        case .truth: return name == "truth"
+        case .rss, .laozhong, .youtube: return name == "rss"
+        case .flash: return name.contains("flash")
+        }
+    }
 }

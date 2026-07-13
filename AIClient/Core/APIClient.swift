@@ -9,7 +9,7 @@ struct APIClient {
         if let session { self.session = session } else {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 15
-            config.requestCachePolicy = .returnCacheDataElseLoad
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
             config.urlCache = .shared
             self.session = URLSession(configuration: config)
         }
