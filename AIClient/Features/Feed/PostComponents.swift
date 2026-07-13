@@ -1,0 +1,142 @@
+import SwiftUI
+import UIKit
+
+struct PostAuthorHeader: View {
+    let post: Post
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: compact ? 8 : 10) {
+            AvatarView(url: post.avatarURL, name: post.authorName, size: compact ? 34 : 42)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(post.authorName).font(compact ? .subheadline.weight(.semibold) : .body.weight(.semibold)).lineLimit(1)
+                    if post.sourceName == "X" { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue) }
+                }
+                HStack(spacing: 5) {
+                    if let handle = post.authorHandle { Text(handle) }
+                    if let time = post.formattedTime { Text(time) }
+                    if post.isRSS { Text("来自\(post.sourceName)") }
+                }
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if let score = post.score, score > 0 {
+                Text(score.formatted(.number.precision(.fractionLength(1))))
+                    .font(.caption2.weight(.semibold)).foregroundStyle(score >= 8 ? .green : .secondary)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.09), in: Capsule())
+            }
+            Image(systemName: "ellipsis").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct AvatarView: View {
+    let url: URL?
+    let name: String
+    let size: CGFloat
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else { Circle().fill(Color.blue.opacity(0.11)).overlay { Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue) } }
+        }
+        .frame(width: size, height: size).clipShape(Circle())
+        .task(id: url) { image = await ImageLoader.load(url) }
+    }
+}
+
+struct RemoteImage: View {
+    let url: URL
+    var height: CGFloat? = nil
+    var cornerRadius: CGFloat = 0
+    @State private var image: UIImage?
+    @State private var finished = false
+
+    var body: some View {
+        Group {
+            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else if finished { placeholder(Image(systemName: "photo")) }
+            else { placeholder(ProgressView()) }
+        }
+        .frame(maxWidth: .infinity).frame(height: height).aspectRatio(height == nil ? 16 / 9 : nil, contentMode: .fill)
+        .clipped().clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .task(id: url) {
+            finished = false
+            image = await ImageLoader.load(url)
+            finished = true
+        }
+    }
+
+    private func placeholder<V: View>(_ view: V) -> some View {
+        Color(uiColor: .secondarySystemBackground).overlay { view.foregroundStyle(.secondary) }
+    }
+}
+
+private enum ImageLoader {
+    static let cache = NSCache<NSURL, UIImage>()
+
+    static func load(_ url: URL?) async -> UIImage? {
+        guard let url else { return nil }
+        if let cached = cache.object(forKey: url as NSURL) { return cached }
+
+        var candidates = [url]
+        if url.path.hasSuffix("image-proxy"),
+           let target = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "url" })?.value,
+           let direct = URL(string: target) {
+            candidates.append(direct)
+        }
+
+        for candidate in candidates {
+            var request = URLRequest(url: candidate, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+            request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+            if let (data, response) = try? await URLSession.shared.data(for: request),
+               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) != false,
+               let image = UIImage(data: data) {
+                cache.setObject(image, forKey: url as NSURL)
+                return image
+            }
+        }
+        return nil
+    }
+}
+
+struct PostMediaGrid: View {
+    let post: Post
+
+    var body: some View {
+        let urls = Array(post.imageURLs.prefix(4))
+        if urls.count == 1, let url = urls.first {
+            RemoteImage(url: url, height: 210, cornerRadius: 8)
+                .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
+        } else if !urls.isEmpty {
+            LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
+                ForEach(urls, id: \.self) { RemoteImage(url: $0, height: 132, cornerRadius: 4) }
+            }
+        } else if let preview = post.previewURL {
+            RemoteImage(url: preview, height: 210, cornerRadius: 8).overlay { playButton }
+        }
+    }
+
+    private var playButton: some View {
+        Image(systemName: "play.circle.fill").font(.system(size: 48)).symbolRenderingMode(.palette)
+            .foregroundStyle(.white, .black.opacity(0.45)).shadow(radius: 4)
+    }
+}
+
+struct PostActionRow: View {
+    let post: Post
+    var body: some View {
+        HStack {
+            action("arrowshape.turn.up.left", "回复")
+            Spacer(); action("arrow.2.squarepath", "转发")
+            Spacer(); action("heart", "赞")
+            Spacer(); Image(systemName: "bookmark").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private func action(_ icon: String, _ text: String) -> some View {
+        Label(text, systemImage: icon).font(.caption).foregroundStyle(.secondary)
+    }
+}
