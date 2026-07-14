@@ -52,16 +52,25 @@ struct RemoteImage: View {
     let url: URL
     var height: CGFloat? = nil
     var cornerRadius: CGFloat = 0
+    var contentMode: ContentMode = .fill
     @State private var image: UIImage?
     @State private var finished = false
 
     var body: some View {
-        Group {
-            if let image { Image(uiImage: image).resizable().scaledToFill() }
-            else if finished { placeholder(Image(systemName: "photo")) }
-            else { placeholder(ProgressView()) }
+        ZStack {
+            Color.clear
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else if finished {
+                Image(systemName: "photo").foregroundStyle(.secondary)
+            } else {
+                ProgressView().foregroundStyle(.secondary)
+            }
         }
-        .frame(maxWidth: .infinity).frame(height: height).aspectRatio(height == nil ? 16 / 9 : nil, contentMode: .fill)
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
         .clipped().clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .transaction { transaction in
             transaction.animation = nil
@@ -74,9 +83,6 @@ struct RemoteImage: View {
         }
     }
 
-    private func placeholder<V: View>(_ view: V) -> some View {
-        Color(uiColor: .secondarySystemBackground).overlay { view.foregroundStyle(.secondary) }
-    }
 }
 
 private enum ImageLoader {
@@ -97,8 +103,12 @@ private enum ImageLoader {
             var request = URLRequest(url: candidate, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
             request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
             if let (data, response) = try? await URLSession.shared.data(for: request),
-               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) != false,
-               let image = UIImage(data: data) {
+               let http = response as? HTTPURLResponse,
+               (200..<300).contains(http.statusCode),
+               http.mimeType?.lowercased() != "image/svg+xml",
+               let image = UIImage(data: data),
+               image.size.width > 1,
+               image.size.height > 1 {
                 cache.setObject(image, forKey: url as NSURL)
                 return image
             }
@@ -109,25 +119,204 @@ private enum ImageLoader {
 
 struct PostMediaGrid: View {
     let post: Post
+    var singleImageHeight: CGFloat? = nil
+    var availableWidth: CGFloat? = nil
+    @State private var previewURL: URL?
+
+    private var resolvedSingleImageHeight: CGFloat {
+        if let singleImageHeight { return singleImageHeight }
+        let availableWidth = availableWidth ?? UIScreen.main.bounds.width - 28
+        guard let image = post.images?.first,
+              let width = image.width,
+              let height = image.height,
+              width > 0,
+              height > 0 else {
+            return 210
+        }
+        return min(availableWidth * CGFloat(height) / CGFloat(width), 560)
+    }
+
+    private func showPreview(_ url: URL) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { previewURL = url }
+    }
 
     var body: some View {
-        let urls = Array(post.imageURLs.prefix(4))
-        if urls.count == 1, let url = urls.first {
-            RemoteImage(url: url, height: 210, cornerRadius: 8)
-                .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
-        } else if !urls.isEmpty {
-            LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
-                ForEach(urls, id: \.self) { RemoteImage(url: $0, height: 132, cornerRadius: 4) }
+        Group {
+            let urls = Array(post.imageURLs.prefix(4))
+            if urls.count == 1, let url = urls.first {
+                RemoteImage(url: url, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: .fit)
+                    .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
+                    .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+            } else if !urls.isEmpty {
+                LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
+                    ForEach(urls, id: \.self) { url in
+                        RemoteImage(url: url, height: 132, cornerRadius: 4)
+                            .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+                    }
+                }
+            } else if let preview = post.previewURL {
+                RemoteImage(url: preview, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: .fit)
+                    .overlay { playButton }
+                    .highPriorityGesture(TapGesture().onEnded { showPreview(preview) })
             }
-        } else if let preview = post.previewURL {
-            RemoteImage(url: preview, height: 210, cornerRadius: 8).overlay { playButton }
         }
+        .fullScreenCover(item: $previewURL) { url in ZoomableImageView(url: url) }
     }
 
     private var playButton: some View {
         Image(systemName: "play.circle.fill").font(.system(size: 48)).symbolRenderingMode(.palette)
             .foregroundStyle(.white, .black.opacity(0.45)).shadow(radius: 4)
     }
+}
+
+struct FeedEngagementRow: View {
+    let post: Post
+    var showsOnlyLikeAndBookmark = false
+
+    var body: some View {
+        Group {
+            if showsOnlyLikeAndBookmark {
+                HStack {
+                    metric("heart", post.meta?.metrics?.likes)
+                        .accessibilityLabel("喜欢")
+                    Spacer()
+                    Image(systemName: "bookmark")
+                        .accessibilityLabel("书签")
+                }
+            } else {
+                HStack {
+                    metric("bubble", post.meta?.metrics?.replies)
+                    Spacer()
+                    metric("arrow.2.squarepath", post.meta?.metrics?.retweets)
+                    Spacer()
+                    metric("heart", post.meta?.metrics?.likes)
+                    Spacer()
+                    metric("chart.bar", post.meta?.metrics?.views)
+                    Spacer()
+                    Image(systemName: "bookmark")
+                    Spacer()
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+        }
+        .font(.system(size: 16, weight: .regular))
+        .foregroundStyle(.secondary)
+        .frame(height: 24)
+        .contentShape(Rectangle())
+    }
+
+    private func metric(_ symbol: String, _ value: Int?) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+            if let value, value > 0 { Text(compactCount(value)).font(.system(size: 13)) }
+        }
+    }
+
+    private func compactCount(_ value: Int) -> String {
+        if value >= 10_000 {
+            return String(format: "%.1f万", Double(value) / 10_000)
+                .replacingOccurrences(of: ".0万", with: "万")
+        }
+        return value.formatted()
+    }
+}
+
+struct ZoomableImageView: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: UIImage?
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var settledOffset: CGSize = .zero
+    @State private var isPresented = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.opacity(isPresented ? 1 : 0).ignoresSafeArea()
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(magnificationGesture.simultaneously(with: dragGesture))
+                        .onTapGesture(count: 2) { toggleZoom() }
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scaleEffect(isPresented ? 1 : 0.82)
+            .opacity(isPresented ? 1 : 0)
+
+            Button { close() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.55), in: Circle())
+            }
+            .padding(.top, 12).padding(.trailing, 16)
+            .accessibilityLabel("关闭图片")
+        }
+        .task(id: url) { image = await ImageLoader.load(url) }
+        .onAppear {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { isPresented = true }
+        }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in scale = min(max(settledScale * value.magnification, 1), 5) }
+            .onEnded { _ in
+                settledScale = scale
+                if scale == 1 { resetPosition() }
+            }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                if scale > 1 {
+                    offset = CGSize(width: settledOffset.width + value.translation.width, height: settledOffset.height + value.translation.height)
+                } else if value.translation.height > 0 {
+                    offset = CGSize(width: 0, height: value.translation.height)
+                }
+            }
+            .onEnded { value in
+                if scale > 1 {
+                    settledOffset = offset
+                } else if value.translation.height > 120,
+                          abs(value.translation.height) > abs(value.translation.width) {
+                    close()
+                } else {
+                    withAnimation(.snappy) { resetPosition() }
+                }
+            }
+    }
+
+    private func toggleZoom() {
+        if scale > 1 { scale = 1; settledScale = 1; resetPosition() }
+        else { scale = 2; settledScale = 2 }
+    }
+
+    private func resetPosition() { offset = .zero; settledOffset = .zero }
+
+    private func close() {
+        withAnimation(.easeIn(duration: 0.18)) { isPresented = false }
+        Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            dismiss()
+        }
+    }
+}
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
 }
 
 struct PostActionRow: View {

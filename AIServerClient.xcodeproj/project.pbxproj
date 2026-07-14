@@ -198,6 +198,9 @@
 					1BA618CF45A696DF721357E4 = {
 						DevelopmentTeam = 9M7P4VLHY3;
 					};
+					9B03021EF69495E5B996EA2D = {
+						DevelopmentTeam = 9M7P4VLHY3;
+					};
 				};
 			};
 			buildConfigurationList = 1CB8E601656193E6689EF54E /* Build configuration list for PBXProject "AIServerClient" */;
@@ -274,6 +277,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -448,6 +452,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -58,10 +58,10 @@ struct CategoryResponse: Decodable {
 struct FeedCategory: Decodable { let id: Int; let name: String }
 
 struct Post: Decodable, Identifiable, Hashable {
-    static let minimumFeedScore = 5.0
+    static let minimumFeedScore = 5
 
     let id: Int
-    let title, text, summary, content, source, formattedTime: String?
+    let title, text, summary, content, contentZH, source, formattedTime: String?
     let finalScore, weight: Double?
     let postLink, articlePostAt: String?
     let user: PostUser?
@@ -71,15 +71,17 @@ struct Post: Decodable, Identifiable, Hashable {
     let feedRank: Int?
     let meta: PostMeta?
 
-    var displayTitle: String { clean(title) ?? clean(summary) ?? clean(text) ?? "无标题" }
+    var displayTitle: String { clean(contentZH) ?? clean(title) ?? clean(summary) ?? clean(text) ?? "无标题" }
     var displaySummary: String? {
         let value = clean(summary) ?? clean(text)
         return value == displayTitle ? nil : value
     }
-    var displayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
-    var authorName: String { clean(user?.userScreenName) ?? clean(user?.userName) ?? sourceName }
+    var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
+    var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
+    var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
+    var authorName: String { clean(user?.userName) ?? clean(user?.userScreenName) ?? sourceName }
     var authorHandle: String? {
-        guard let handle = clean(user?.userName), handle != authorName else { return nil }
+        guard let handle = clean(user?.userScreenName), handle != authorName else { return nil }
         return handle.hasPrefix("@") ? handle : "@\(handle)"
     }
     var sourceName: String {
@@ -96,7 +98,6 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var normalizedSource: String { sourceName }
     var score: Double? { finalScore ?? weight }
-    var meetsMinimumFeedScore: Bool { score.map { $0 >= Self.minimumFeedScore } ?? false }
     var imageURLs: [URL] { (images ?? []).compactMap { MediaURL.image($0.url) } }
     var videoURLs: [URL] { (videos ?? []).compactMap { $0.url ?? $0.playURL }.compactMap(MediaURL.video) }
     var previewURL: URL? {
@@ -105,8 +106,11 @@ struct Post: Decodable, Identifiable, Hashable {
     var linkURL: URL? { clean(postLink).flatMap(URL.init(string:)) }
     var avatarURL: URL? { clean(user?.avatarURL).flatMap(MediaURL.image) }
     var tagNames: [String] { (postTags ?? []).map(\.name) }
+    var photoCredit: String? { clean(meta?.photoCredit) ?? (images ?? []).compactMap(\.altText).first(where: { !$0.isEmpty }) }
+    var externalURL: URL? { (meta?.urls ?? []).compactMap(URL.init(string:)).first }
     var isBilibili: Bool { sourceName == "B站" }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
+    var isNewYorkTimes: Bool { source == FeedSource.newYorkTimes.rawValue }
     var isHotTopic: Bool { source == "weibo" || source == "douyin-hot" }
     var isFlash: Bool { source == "flash" }
     var isSynthetic: Bool { isHotTopic || isFlash }
@@ -129,11 +133,13 @@ struct Post: Decodable, Identifiable, Hashable {
         let text = decoded
             .replacingOccurrences(of: "<br\\s*/?>|</p>|</div>|</blockquote>", with: "\n", options: .regularExpression)
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "<[^>]*$", with: "", options: .regularExpression)
         return clean(text)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, text, summary, content, source, weight, user, images, videos, feedRank, meta
+        case contentZH = "content_zh"
         case formattedTime = "formatted_time"
         case finalScore = "final_score"
         case postLink = "post_link"
@@ -147,7 +153,7 @@ struct Post: Decodable, Identifiable, Hashable {
         let meta = [rank.map { "第 \($0) 名" }, heat.map { "热度 \($0)" }].compactMap { $0 }.joined(separator: " · ")
         return Post(
             id: syntheticID("\(source.rawValue):\(topic.id ?? 0):\(topic.keyword ?? "")"),
-            title: topic.keyword, text: nil, summary: topic.summary, content: topic.summary?.isEmpty == false ? topic.summary : topic.reason,
+            title: topic.keyword, text: nil, summary: topic.summary, content: topic.summary?.isEmpty == false ? topic.summary : topic.reason, contentZH: nil,
             source: source.rawValue, formattedTime: meta, finalScore: nil, weight: nil,
             postLink: topic.searchLink, articlePostAt: nil,
             user: .init(userName: nil, userScreenName: source.title + "热榜", avatarURL: nil, userDesc: nil),
@@ -159,7 +165,7 @@ struct Post: Decodable, Identifiable, Hashable {
     static func flash(_ item: FlashItem) -> Post {
         Post(
             id: syntheticID("flash:\(item.id ?? ""):\(item.text ?? "")"),
-            title: nil, text: item.text, summary: nil, content: item.text,
+            title: nil, text: item.text, summary: nil, content: item.text, contentZH: nil,
             source: "flash", formattedTime: item.time, finalScore: nil, weight: nil,
             postLink: item.linkURL, articlePostAt: nil,
             user: .init(userName: nil, userScreenName: flashSourceName(item.source), avatarURL: item.avatarURL, userDesc: nil),
@@ -185,6 +191,13 @@ struct Post: Decodable, Identifiable, Hashable {
 
 struct PostMeta: Decodable, Hashable {
     let metrics: PostMetrics?
+    let lang: String?
+    let urls: [String]?
+    let photoCredit: String?
+    enum CodingKeys: String, CodingKey {
+        case metrics, lang, urls
+        case photoCredit = "photo_credit"
+    }
 }
 
 struct PostMetrics: Decodable, Hashable {
@@ -202,7 +215,15 @@ struct PostUser: Decodable, Hashable {
 }
 
 struct PostTag: Decodable, Hashable { let id: Int; let name: String }
-struct PostImage: Decodable, Hashable { let url: String }
+struct PostImage: Decodable, Hashable {
+    let url: String
+    let width, height: Int?
+    let altText: String?
+    enum CodingKeys: String, CodingKey {
+        case url, width, height
+        case altText = "alt_text"
+    }
+}
 struct PostVideo: Decodable, Hashable {
     let url, playURL, coverURL, previewImageURL: String?
     enum CodingKeys: String, CodingKey {
@@ -214,7 +235,7 @@ struct PostVideo: Decodable, Hashable {
 }
 
 enum MediaURL {
-    private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com"]
+    private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com"]
 
     static func image(_ raw: String) -> URL? { resolved(raw, proxy: "image-proxy", hosts: imageHostSuffixes) }
     static func video(_ raw: String) -> URL? { resolved(raw, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"]) }
@@ -230,6 +251,7 @@ enum MediaURL {
 }
 
 enum FeedSource: String, CaseIterable, Identifiable {
+    case newYorkTimes = "rss:47"
     case x, weibo
     case douyin = "douyin-hot"
     case bilibili, zhihu, truth, rss, laozhong, youtube, flash
@@ -237,6 +259,7 @@ enum FeedSource: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .newYorkTimes: "纽约时报"
         case .x: "X"
         case .weibo: "微博"
         case .douyin: "抖音"

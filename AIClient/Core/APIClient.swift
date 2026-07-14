@@ -33,10 +33,14 @@ struct APIClient {
         let isSpecialRSS = source == .laozhong || source == .youtube
         components?.queryItems = [
             .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
-            .init(name: "final_score", value: String(Post.minimumFeedScore)), .init(name: "sort", value: "time_desc"),
+            .init(name: "sort", value: "time_desc"),
             .init(name: "group_similar", value: "1"), .init(name: "group_threshold", value: "70"),
-            .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue), .init(name: "include_zero_score", value: "false")
+            .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue),
+            .init(name: "include_zero_score", value: source == .newYorkTimes ? "true" : "false")
         ]
+        if source != .newYorkTimes {
+            components?.queryItems?.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
+        }
         if isSpecialRSS {
             let name = source == .laozhong ? "老中" : "YouTube"
             components?.queryItems?.append(.init(name: "categoryId", value: String(try await categoryID(named: name))))
@@ -44,7 +48,7 @@ struct APIClient {
         if source == .x { components?.queryItems?.append(.init(name: "x_feed_view", value: "tracked")) }
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: PostListResponse = try await get(url)
-        return response.data.filter(\.meetsMinimumFeedScore)
+        return response.data
     }
 
     private func fetchHotTopics(page: Int, limit: Int, source: FeedSource) async throws -> [HotTopic] {
@@ -89,6 +93,20 @@ struct APIClient {
         return response.post
     }
 
+    func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        guard let html = String(data: data, encoding: .utf8),
+              let article = NewYorkTimesArticleParser.extract(from: html) else {
+            throw APIError.decoding(NYTimesArticleError.bodyMissing)
+        }
+        return article
+    }
+
     private func get<Response: Decodable>(_ url: URL) async throws -> Response {
         for attempt in 0..<3 {
             do {
@@ -116,6 +134,109 @@ struct APIClient {
         throw APIError.invalidResponse
     }
 }
+
+struct NewYorkTimesArticle: Equatable {
+    let blocks: [NewYorkTimesArticleBlock]
+}
+
+enum NewYorkTimesArticleBlock: Equatable {
+    case paragraph(String)
+    case image(url: URL, caption: String?, credit: String?)
+}
+
+enum NewYorkTimesArticleParser {
+    private static let paragraphOpeningRegex = try! NSRegularExpression(
+        pattern: #"<div\b[^>]*\bclass=["'][^"']*\barticle-paragraph\b[^"']*["'][^>]*>"#,
+        options: [.caseInsensitive]
+    )
+    private static let divTokenRegex = try! NSRegularExpression(
+        pattern: #"</?div\b[^>]*>"#,
+        options: [.caseInsensitive]
+    )
+
+    static func extract(from html: String) -> NewYorkTimesArticle? {
+        let range = NSRange(html.startIndex..<html.endIndex, in: html)
+        let blocks = paragraphOpeningRegex.matches(in: html, range: range).compactMap { match -> NewYorkTimesArticleBlock? in
+            guard let fragment = balancedContent(for: match, in: html) else { return nil }
+            if let url = imageURL(in: fragment) {
+                return .image(
+                    url: url,
+                    caption: attribute(named: "alt", in: fragment).flatMap(decodeHTML),
+                    credit: element(named: "cite", in: fragment).flatMap(decodeHTML)
+                )
+            }
+            guard let paragraph = decodeHTML(fragment), !paragraph.isEmpty else { return nil }
+            return .paragraph(paragraph)
+        }
+        return blocks.isEmpty ? nil : NewYorkTimesArticle(blocks: blocks)
+    }
+
+    private static func balancedContent(for opening: NSTextCheckingResult, in html: String) -> String? {
+        let contentLocation = opening.range.location + opening.range.length
+        let searchRange = NSRange(location: contentLocation, length: (html as NSString).length - contentLocation)
+        var depth = 1
+        for token in divTokenRegex.matches(in: html, range: searchRange) {
+            let value = (html as NSString).substring(with: token.range).lowercased()
+            if value.hasPrefix("</div") { depth -= 1 } else { depth += 1 }
+            if depth == 0 {
+                return (html as NSString).substring(
+                    with: NSRange(location: contentLocation, length: token.range.location - contentLocation)
+                )
+            }
+        }
+        return nil
+    }
+
+    private static func imageURL(in fragment: String) -> URL? {
+        for attributeName in ["data-src", "src"] {
+            if let value = attribute(named: attributeName, in: fragment),
+               let decoded = decodeHTML(value),
+               let url = URL(string: decoded) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private static func attribute(named name: String, in fragment: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: name)
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\b"# + escaped + #"\s*=\s*["']([^"']+)["']"#,
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let range = NSRange(fragment.startIndex..<fragment.endIndex, in: fragment)
+        guard let match = regex.firstMatch(in: fragment, range: range),
+              let valueRange = Range(match.range(at: 1), in: fragment) else { return nil }
+        return String(fragment[valueRange])
+    }
+
+    private static func element(named name: String, in fragment: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: name)
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<"# + escaped + #"\b[^>]*>(.*?)</"# + escaped + #"\s*>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else { return nil }
+        let range = NSRange(fragment.startIndex..<fragment.endIndex, in: fragment)
+        guard let match = regex.firstMatch(in: fragment, range: range),
+              let valueRange = Range(match.range(at: 1), in: fragment) else { return nil }
+        return String(fragment[valueRange])
+    }
+
+    private static func decodeHTML(_ fragment: String) -> String? {
+        guard let data = ("<span>\(fragment)</span>").data(using: .utf8),
+              let attributed = try? NSAttributedString(
+                data: data,
+                options: [
+                    .documentType: NSAttributedString.DocumentType.html,
+                    .characterEncoding: String.Encoding.utf8.rawValue
+                ],
+                documentAttributes: nil
+              ) else { return nil }
+        return attributed.string.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private enum NYTimesArticleError: Error { case bodyMissing }
 
 private struct HealthResponse: Decodable { let status: String }
 enum APIError: LocalizedError {

@@ -4,18 +4,23 @@ import AVKit
 struct PostDetailView: View {
     @State private var post: Post
     @State private var player: AVPlayer?
+    @State private var showsOriginal = false
+    @State private var newYorkTimesArticle: NewYorkTimesArticle?
+    @State private var isLoadingNewYorkTimesBody = false
     @Environment(\.openURL) private var openURL
 
     init(post: Post) { _post = State(initialValue: post) }
 
     var body: some View {
         Group {
-            if post.sourceName == "X" { xDetail }
+            if post.isNewYorkTimes { newYorkTimesDetail }
+            else if post.sourceName == "X" { xDetail }
             else { standardDetail }
         }
-        .navigationTitle(post.sourceName == "X" ? "帖子" : "详情")
+        .navigationTitle(post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : "详情"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if post.sourceName == "X" {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -31,6 +36,89 @@ struct PostDetailView: View {
         .onDisappear { player?.pause() }
     }
 
+    private var newYorkTimesDetail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle)
+                    .font(.system(size: 30, weight: .bold, design: .serif))
+                    .lineSpacing(3)
+
+                if let lead = newYorkTimesLead, lead != post.displayTitle {
+                    Text(lead)
+                        .font(.system(size: 18, design: .serif))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(5)
+                }
+
+                HStack(spacing: 5) {
+                    if post.authorName != "RSS" && post.authorName != "纽约时报中文网 国际纵览" {
+                        Text(post.authorName.uppercased())
+                    }
+                    if let time = post.formattedTime { Text("· \(time)") }
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+                ForEach(post.imageURLs.prefix(1), id: \.self) {
+                    NewYorkTimesArticleImage(url: $0, height: 245)
+                }
+
+                Divider()
+
+                if isLoadingNewYorkTimesBody {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("正在加载完整正文…")
+                    }
+                    .font(.system(size: 16, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 30)
+                } else if let article = newYorkTimesArticle {
+                    LazyVStack(alignment: .leading, spacing: 22) {
+                        ForEach(Array(article.blocks.enumerated()), id: \.offset) { _, block in
+                            switch block {
+                            case .paragraph(let text):
+                                Text(text)
+                                    .font(.system(size: 18, weight: .regular, design: .serif))
+                                    .lineSpacing(8)
+                                    .textSelection(.enabled)
+                            case .image(let url, let caption, let credit):
+                                NewYorkTimesArticleImage(
+                                    url: url,
+                                    caption: caption,
+                                    credit: credit,
+                                    height: 230
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text("正文暂未收录，请打开原文阅读。")
+                        .font(.system(size: 17, design: .serif))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let link = post.linkURL {
+                    Button("在纽约时报阅读原文") { openURL(link) }
+                        .font(.system(size: 15, weight: .semibold, design: .serif))
+                        .foregroundStyle(.primary)
+                        .padding(.vertical, 8)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+            .padding(.bottom, 30)
+        }
+    }
+
+    private var newYorkTimesLead: String? {
+        guard let raw = post.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        let lead = raw.split(separator: "<", maxSplits: 1).first.map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return lead?.isEmpty == false ? lead : nil
+    }
+
     private var standardDetail: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
@@ -38,7 +126,7 @@ struct PostDetailView: View {
                 if post.displayTitle != post.displayContent {
                     Text(post.displayTitle).font(.title3.bold())
                 }
-                Text(post.displayContent).font(.body).lineSpacing(5).textSelection(.enabled)
+                Text(post.displayContent).font(.system(size: 17, weight: .regular)).lineSpacing(2).textSelection(.enabled)
 
                 ForEach(post.imageURLs, id: \.self) { RemoteImage(url: $0, height: 300, cornerRadius: 8) }
                 if let player { VideoPlayer(player: player).frame(height: 240).clipShape(RoundedRectangle(cornerRadius: 8)) }
@@ -68,12 +156,37 @@ struct PostDetailView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 11) {
                     xAuthorHeader
-                    Text(post.displayContent)
+                    if post.hasTranslation {
+                        HStack(spacing: 5) {
+                            Image(systemName: "character.bubble")
+                            Text(showsOriginal ? "英语原文" : "翻译自英语")
+                            Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
+                                .foregroundStyle(.blue)
+                        }
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Text(showsOriginal ? post.originalDisplayContent : post.displayContent)
                         .font(.system(size: 17))
                         .lineSpacing(3)
                         .textSelection(.enabled)
 
-                    PostMediaGrid(post: post)
+                    if let link = post.externalURL {
+                        Button { openURL(link) } label: {
+                            Text("阅读更多：\(link.host() ?? link.absoluteString)")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if let credit = post.photoCredit {
+                        Text(credit.hasPrefix("📷") ? credit : "📷：\(credit)")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+
+                    PostMediaGrid(post: post, singleImageHeight: detailImageHeight)
 
                     HStack(spacing: 4) {
                         Text(xTimestamp)
@@ -190,6 +303,12 @@ struct PostDetailView: View {
         return date.formatted(.dateTime.hour().minute().month().day().year().locale(Locale(identifier: "zh_CN")))
     }
 
+    private var detailImageHeight: CGFloat {
+        guard let image = post.images?.first, let width = image.width, let height = image.height, width > 0 else { return 300 }
+        let availableWidth = UIScreen.main.bounds.width - 30
+        return min(availableWidth * CGFloat(height) / CGFloat(width), 620)
+    }
+
     private func compactCount(_ value: Int) -> String {
         if value >= 10_000 { return String(format: "%.1f万", Double(value) / 10_000).replacingOccurrences(of: ".0万", with: "万") }
         return value.formatted()
@@ -201,7 +320,45 @@ struct PostDetailView: View {
 
     private func loadDetail() async {
         guard !post.isSynthetic else { return }
-        if let detail = try? await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: post.id) { post = detail }
+        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        if let detail = try? await client.fetchPost(id: post.id) { post = detail }
         if let video = post.videoURLs.first { player = AVPlayer(url: video) }
+        guard post.isNewYorkTimes, let link = post.linkURL else { return }
+        isLoadingNewYorkTimesBody = true
+        defer { isLoadingNewYorkTimesBody = false }
+        newYorkTimesArticle = try? await client.fetchNewYorkTimesArticle(url: link)
     }
+}
+
+private struct NewYorkTimesArticleImage: View {
+    let url: URL
+    var caption: String? = nil
+    var credit: String? = nil
+    var height: CGFloat
+    @State private var previewURL: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            RemoteImage(url: url, height: height, contentMode: .fit)
+                .contentShape(Rectangle())
+                .onTapGesture { previewURL = url }
+
+            if let caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.system(size: 13, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+            }
+            if let credit, !credit.isEmpty {
+                Text(credit)
+                    .font(.system(size: 11, weight: .medium, design: .serif))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .fullScreenCover(item: $previewURL) { ZoomableImageView(url: $0) }
+    }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

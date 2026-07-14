@@ -101,7 +101,7 @@ final class NewsFeedViewModel: ObservableObject {
     private func handleRealtime(_ event: RealtimeFeedClient.Event) {
         switch event {
         case .post(let post):
-            guard matchesCurrentSource(post), post.meetsMinimumFeedScore else { return }
+            guard matchesCurrentSource(post) else { return }
             errorMessage = nil
             if let index = posts.firstIndex(where: { $0.id == post.id }) {
                 posts[index] = post
@@ -117,6 +117,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func matchesCurrentSource(_ post: Post) -> Bool {
         switch source {
+        case .newYorkTimes: return post.source == FeedSource.newYorkTimes.rawValue
         case .x: return post.sourceName == "X"
         case .bilibili: return post.isBilibili
         case .zhihu: return post.sourceName == "知乎"
@@ -130,6 +131,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func task(_ name: String, updates source: FeedSource) -> Bool {
         switch source {
+        case .newYorkTimes: return name == "rss"
         case .x: return name == "x" || name == "x_home" || name == "x_home_following"
         case .weibo: return name == "weibo_hot"
         case .douyin: return name == "douyin_hot"

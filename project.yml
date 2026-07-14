@@ -34,4 +34,5 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wangheng.aiserverclient.tests
+        DEVELOPMENT_TEAM: 9M7P4VLHY3
         GENERATE_INFOPLIST_FILE: YES
