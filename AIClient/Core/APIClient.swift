@@ -3,9 +3,11 @@ import Foundation
 struct APIClient {
     let baseURL: URL
     private let session: URLSession
+    private let authorizationToken: String?
 
-    init(baseURL: URL, session: URLSession? = nil) {
+    init(baseURL: URL, session: URLSession? = nil, authorizationToken: String? = ServerConfiguration.xBookmarkAPIKey) {
         self.baseURL = baseURL
+        self.authorizationToken = authorizationToken
         if let session { self.session = session } else {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 30
@@ -91,6 +93,25 @@ struct APIClient {
     func fetchPost(id: Int) async throws -> Post {
         let response: PostDetailResponse = try await get(baseURL.appending(path: "api/v1/post/\(id)/raw"))
         return response.post
+    }
+
+    func bookmarkXPost(tweetID: String) async throws -> XBookmarkResult {
+        let value = tweetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.allSatisfy(\.isNumber) else { throw APIError.invalidXPostID }
+        guard let authorizationToken, !authorizationToken.isEmpty else { throw APIError.missingBookmarkCredential }
+
+        var request = URLRequest(url: baseURL.appending(path: "api/v1/x/bookmark"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 35
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(authorizationToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(XBookmarkRequest(articleID: value))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+        do { return try JSONDecoder().decode(XBookmarkResponse.self, from: data).data }
+        catch { throw APIError.decoding(error) }
     }
 
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
@@ -239,8 +260,23 @@ enum NewYorkTimesArticleParser {
 private enum NYTimesArticleError: Error { case bodyMissing }
 
 private struct HealthResponse: Decodable { let status: String }
+private struct XBookmarkRequest: Encodable {
+    let articleID: String
+    enum CodingKeys: String, CodingKey { case articleID = "article_id" }
+}
+private struct XBookmarkResponse: Decodable { let success: Bool; let data: XBookmarkResult }
+struct XBookmarkResult: Decodable, Equatable {
+    let articleID: String
+    let bookmarked: Bool
+    let url, savedAt: String?
+    enum CodingKeys: String, CodingKey {
+        case bookmarked, url
+        case articleID = "article_id"
+        case savedAt = "saved_at"
+    }
+}
 enum APIError: LocalizedError {
-    case invalidURL, invalidResponse, httpStatus(Int), decoding(Error), missingCategory(String)
+    case invalidURL, invalidResponse, httpStatus(Int), decoding(Error), missingCategory(String), invalidXPostID, missingBookmarkCredential
     var errorDescription: String? {
         switch self {
         case .invalidURL: "服务器地址无效"
@@ -248,6 +284,8 @@ enum APIError: LocalizedError {
         case .httpStatus(let code): "服务器返回错误（\(code)）"
         case .decoding: "新闻数据格式暂时无法识别"
         case .missingCategory(let name): "找不到 \(name) 数据分类"
+        case .invalidXPostID: "这条内容缺少有效的 X 帖子 ID"
+        case .missingBookmarkCredential: "书签服务尚未配置认证信息"
         }
     }
 }

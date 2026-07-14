@@ -40,4 +40,10 @@ final class FeedAdapterTests: XCTestCase {
         let url = try XCTUnwrap(RealtimeFeedClient.webSocketURL(from: URL(string: "https://example.com:3001/api")!))
         XCTAssertEqual(url.absoluteString, "wss://example.com:3001/post")
     }
+
+    func testExtractsXTweetIDFromPostLink() throws {
+        let data = #"{"id":7,"source":"x","post_link":"https://x.com/example/status/2076997109048308052?ref=feed"}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+        XCTAssertEqual(post.xTweetID, "2076997109048308052")
+    }
 }

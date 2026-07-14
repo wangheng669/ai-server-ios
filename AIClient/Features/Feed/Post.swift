@@ -104,6 +104,13 @@ struct Post: Decodable, Identifiable, Hashable {
         imageURLs.first ?? (videos ?? []).compactMap { $0.coverURL ?? $0.previewImageURL }.compactMap(MediaURL.image).first
     }
     var linkURL: URL? { clean(postLink).flatMap(URL.init(string:)) }
+    var xTweetID: String? {
+        guard sourceName == "X", let linkURL else { return nil }
+        let parts = linkURL.pathComponents
+        guard let statusIndex = parts.firstIndex(of: "status"), parts.indices.contains(statusIndex + 1) else { return nil }
+        let value = parts[statusIndex + 1]
+        return !value.isEmpty && value.allSatisfy(\.isNumber) ? value : nil
+    }
     var avatarURL: URL? { clean(user?.avatarURL).flatMap(MediaURL.image) }
     var tagNames: [String] { (postTags ?? []).map(\.name) }
     var photoCredit: String? { clean(meta?.photoCredit) ?? (images ?? []).compactMap(\.altText).first(where: { !$0.isEmpty }) }

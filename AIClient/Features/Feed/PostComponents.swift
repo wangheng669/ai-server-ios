@@ -174,6 +174,15 @@ struct PostMediaGrid: View {
 struct FeedEngagementRow: View {
     let post: Post
     var showsOnlyLikeAndBookmark = false
+    @State private var isBookmarking = false
+    @State private var isBookmarked = false
+    @State private var bookmarkError: String?
+
+    init(post: Post, showsOnlyLikeAndBookmark: Bool = false) {
+        self.post = post
+        self.showsOnlyLikeAndBookmark = showsOnlyLikeAndBookmark
+        _isBookmarked = State(initialValue: post.xTweetID.map(XBookmarkStore.contains) ?? false)
+    }
 
     var body: some View {
         Group {
@@ -182,8 +191,7 @@ struct FeedEngagementRow: View {
                     metric("heart", post.meta?.metrics?.likes)
                         .accessibilityLabel("喜欢")
                     Spacer()
-                    Image(systemName: "bookmark")
-                        .accessibilityLabel("书签")
+                    bookmarkButton
                 }
             } else {
                 HStack {
@@ -205,6 +213,53 @@ struct FeedEngagementRow: View {
         .foregroundStyle(.secondary)
         .frame(height: 24)
         .contentShape(Rectangle())
+        .sensoryFeedback(.success, trigger: isBookmarked)
+        .alert("书签保存失败", isPresented: bookmarkErrorBinding) {
+            Button("知道了", role: .cancel) { bookmarkError = nil }
+        } message: {
+            Text(bookmarkError ?? "请稍后重试")
+        }
+    }
+
+    private var bookmarkButton: some View {
+        Button { saveBookmark() } label: {
+            Group {
+                if isBookmarking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                }
+            }
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isBookmarked ? Color.blue : Color.secondary)
+        .disabled(isBookmarking || isBookmarked || post.xTweetID == nil)
+        .accessibilityLabel(isBookmarked ? "已加入书签" : "加入书签")
+    }
+
+    private var bookmarkErrorBinding: Binding<Bool> {
+        Binding(
+            get: { bookmarkError != nil },
+            set: { if !$0 { bookmarkError = nil } }
+        )
+    }
+
+    private func saveBookmark() {
+        guard let tweetID = post.xTweetID, !isBookmarking, !isBookmarked else { return }
+        isBookmarking = true
+        Task {
+            defer { isBookmarking = false }
+            do {
+                let result = try await APIClient(baseURL: ServerConfiguration.currentURL).bookmarkXPost(tweetID: tweetID)
+                guard result.bookmarked else { throw APIError.invalidResponse }
+                XBookmarkStore.insert(tweetID)
+                isBookmarked = true
+            } catch {
+                bookmarkError = error.localizedDescription
+            }
+        }
     }
 
     private func metric(_ symbol: String, _ value: Int?) -> some View {
@@ -220,6 +275,20 @@ struct FeedEngagementRow: View {
                 .replacingOccurrences(of: ".0万", with: "万")
         }
         return value.formatted()
+    }
+}
+
+private enum XBookmarkStore {
+    private static let key = "x.bookmarkedTweetIDs"
+
+    static func contains(_ tweetID: String) -> Bool {
+        Set(UserDefaults.standard.stringArray(forKey: key) ?? []).contains(tweetID)
+    }
+
+    static func insert(_ tweetID: String) {
+        var values = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        values.insert(tweetID)
+        UserDefaults.standard.set(values.sorted(), forKey: key)
     }
 }
 

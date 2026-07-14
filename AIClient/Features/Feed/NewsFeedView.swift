@@ -7,28 +7,37 @@ struct NewsFeedView: View {
     @StateObject private var model = NewsFeedViewModel()
     @State private var path: [Post] = []
     @State private var isFeedChromeHidden = false
+    @State private var sourceContentOffset: CGFloat = 0
+    @State private var pendingSourceContentOffset: CGFloat = 14
+    @State private var sourceContentOpacity = 1.0
+    @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                feedHeader
+            ZStack(alignment: .top) {
                 content
+                    .id(model.sourceContentRevision)
+                    .offset(x: sourceContentOffset)
+                    .opacity(sourceContentOpacity)
+                feedHeader
+                    .zIndex(1)
             }
-            .animation(.easeOut(duration: 0.2), value: isFeedChromeHidden)
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Post.self) { post in
-                if post.source == FeedSource.weibo.rawValue, let link = post.linkURL {
-                    EmbeddedWebPage(url: link, title: post.displayTitle)
+                if let source = FeedSource(rawValue: post.source ?? ""),
+                   source == .weibo || source == .douyin,
+                   let link = post.linkURL {
+                    EmbeddedWebPage(url: link, source: source)
                 } else {
                     PostDetailView(post: post)
                 }
             }
             .task(id: model.source) { await model.loadInitial() }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .overlay(alignment: .bottom) {
             if path.isEmpty {
                 EditorialTabBar(selected: .observation) { tab in
                     switch tab {
@@ -37,15 +46,13 @@ struct NewsFeedView: View {
                     case .events: open("events")
                     }
                 }
-                .offset(y: isFeedChromeHidden ? 55 : 0)
-                .frame(height: isFeedChromeHidden ? 0 : 55, alignment: .top)
-                .clipped()
+                .offset(y: isFeedChromeHidden ? 88 : 0)
                 .opacity(isFeedChromeHidden ? 0 : 1)
                 .allowsHitTesting(!isFeedChromeHidden)
                 .accessibilityHidden(isFeedChromeHidden)
+                .animation(.easeOut(duration: 0.18), value: isFeedChromeHidden)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: isFeedChromeHidden)
         .onAppear { model.startRealtime() }
         .onDisappear { model.stopRealtime() }
         .onChange(of: scenePhase) { _, phase in
@@ -56,6 +63,9 @@ struct NewsFeedView: View {
                 model.stopRealtime()
             }
         }
+        .onChange(of: model.sourceContentRevision) { _, _ in
+            animateSourceContentEntrance()
+        }
     }
 
     private var feedHeader: some View {
@@ -64,12 +74,19 @@ struct NewsFeedView: View {
             Divider().opacity(0.55)
         }
         .frame(height: 53)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottom) {
+            if model.isSwitchingSource {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(.blue)
+            }
+        }
         .offset(y: isFeedChromeHidden ? -53 : 0)
-        .frame(height: isFeedChromeHidden ? 0 : 53, alignment: .top)
-        .clipped()
         .opacity(isFeedChromeHidden ? 0 : 1)
         .allowsHitTesting(!isFeedChromeHidden)
         .accessibilityHidden(isFeedChromeHidden)
+        .animation(.easeOut(duration: 0.18), value: isFeedChromeHidden)
     }
 
     private var sourceBar: some View {
@@ -98,16 +115,22 @@ struct NewsFeedView: View {
         }
         .frame(height: 52)
         .background(Color.clear)
+        .animation(.snappy(duration: 0.25), value: model.source)
         .sensoryFeedback(.selection, trigger: model.source)
     }
 
     private func sourceButton(_ source: FeedSource) -> some View {
-        Button { model.select(source) } label: {
+        let isSelected = model.source == source
+        return Button { selectSource(source) } label: {
             VStack(spacing: 4) {
                 sourceIcon(source)
-                    .opacity(model.source == source ? 1 : 0.78)
-                if model.source == source {
-                    Capsule().fill(.blue).frame(width: 18, height: 2)
+                    .opacity(isSelected ? 1 : 0.78)
+                    .scaleEffect(isSelected ? 1 : 0.94)
+                if isSelected {
+                    Capsule()
+                        .fill(.blue)
+                        .frame(width: 18, height: 2)
+                        .matchedGeometryEffect(id: "source-selection", in: sourceSelectionAnimation)
                 } else {
                     Color.clear.frame(width: 18, height: 2)
                 }
@@ -117,7 +140,7 @@ struct NewsFeedView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(source.title)
-        .accessibilityAddTraits(model.source == source ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     @ViewBuilder private func sourceIcon(_ source: FeedSource) -> some View {
@@ -165,6 +188,7 @@ struct NewsFeedView: View {
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    Color.clear.frame(height: 53)
                     ForEach(model.posts) { post in
                         NewsCardView(post: post)
                             .contentShape(Rectangle())
@@ -179,6 +203,7 @@ struct NewsFeedView: View {
                         }
                             .font(.footnote).padding(16)
                     }
+                    Color.clear.frame(height: 55)
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -194,12 +219,36 @@ struct NewsFeedView: View {
                 let horizontal = value.predictedEndTranslation.width
                 let vertical = value.predictedEndTranslation.height
                 guard abs(horizontal) >= 64, abs(horizontal) > abs(vertical) * 1.35 else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    model.selectAdjacent(offset: horizontal < 0 ? 1 : -1)
-                }
+                selectAdjacentSource(offset: horizontal < 0 ? 1 : -1)
             }
+    }
+
+    private func selectSource(_ source: FeedSource) {
+        guard source != model.source,
+              let current = FeedSource.allCases.firstIndex(of: model.source),
+              let next = FeedSource.allCases.firstIndex(of: source) else { return }
+        pendingSourceContentOffset = next > current ? 14 : -14
+        isFeedChromeHidden = false
+        model.select(source)
+    }
+
+    private func animateSourceContentEntrance() {
+        sourceContentOffset = pendingSourceContentOffset
+        sourceContentOpacity = 0.84
+        DispatchQueue.main.async {
+            withAnimation(.smooth(duration: 0.28)) {
+                sourceContentOffset = 0
+                sourceContentOpacity = 1
+            }
+        }
+    }
+
+    private func selectAdjacentSource(offset: Int) {
+        let sources = FeedSource.allCases
+        guard let current = sources.firstIndex(of: model.source) else { return }
+        let next = current + offset
+        guard sources.indices.contains(next) else { return }
+        selectSource(sources[next])
     }
 
     private func open(_ path: String) {
@@ -210,9 +259,8 @@ struct NewsFeedView: View {
 
 private struct EmbeddedWebPage: View {
     let url: URL
-    let title: String
+    let source: FeedSource
     @StateObject private var model = EmbeddedWebViewModel()
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(spacing: 0) {
@@ -225,20 +273,22 @@ private struct EmbeddedWebPage: View {
             EmbeddedWebView(url: url, model: model)
         }
         .background(Color(uiColor: .systemBackground))
-        .navigationTitle(title)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { model.reload() } label: {
-                    Image(systemName: "arrow.clockwise")
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Image(source == .weibo ? "WeiboMark" : "TikTokMark")
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .foregroundStyle(source == .weibo ? Color.red : Color.primary)
+                        .frame(width: 19, height: 19)
+                    Text(source == .weibo ? "微博热搜" : "抖音热榜")
+                        .font(.system(size: 16, weight: .semibold))
                 }
-                .accessibilityLabel("刷新")
-
-                Button { openURL(url) } label: {
-                    Image(systemName: "safari")
-                }
-                .accessibilityLabel("在浏览器中打开")
+                .accessibilityElement(children: .combine)
             }
         }
     }
@@ -266,6 +316,15 @@ private struct EmbeddedWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        if isWeiboURL(url) {
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: Self.weiboEmbeddedStyleScript,
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: true
+                )
+            )
+        }
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -277,6 +336,151 @@ private struct EmbeddedWebView: UIViewRepresentable {
         webView.load(URLRequest(url: url))
         return webView
     }
+
+    private func isWeiboURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "weibo.com" || host.hasSuffix(".weibo.com") || host == "weibo.cn" || host.hasSuffix(".weibo.cn")
+    }
+
+    private static let weiboEmbeddedStyleScript = #"""
+    (() => {
+      const styleID = 'zhongxiang-weibo-embedded-style';
+      const installStyle = () => {
+        if (document.getElementById(styleID)) return;
+        const style = document.createElement('style');
+        style.id = styleID;
+        style.textContent = `
+          .m-top-nav,
+          header.m-top-nav {
+            display: none !important;
+          }
+          body,
+          #app,
+          .m-container-max {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+          }
+          [data-ad],
+          [data-adid],
+          [data-ad-id],
+          [class*="ad-card"],
+          [class*="card-ad"],
+          [class*="advert"],
+          .m-ad {
+            display: none !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      };
+
+      const hideTopNavigation = () => {
+        if (!document.documentElement) return;
+        const searchField = document.querySelector(
+          'input[type="search"], input[placeholder*="搜索"], .m-search input'
+        );
+        if (!searchField) return;
+
+        let candidate = searchField;
+        let topNavigation = null;
+        while (candidate && candidate !== document.body) {
+          const rect = candidate.getBoundingClientRect();
+          if (
+            rect.top <= 6 &&
+            rect.width >= window.innerWidth * 0.82 &&
+            rect.height >= 36 &&
+            rect.height <= 96
+          ) {
+            topNavigation = candidate;
+          }
+          candidate = candidate.parentElement;
+        }
+        topNavigation?.remove();
+      };
+
+      const removeContainingCard = (element) => {
+        if (!element?.isConnected) return;
+        const card = element.closest(
+          'article, .card, .m-panel, [class*="card-wrap"], [class*="card-item"]'
+        ) || element;
+        const rect = card.getBoundingClientRect();
+        if (rect.width >= window.innerWidth * 0.72 && rect.height > 0 && rect.height <= 900) {
+          card.remove();
+        }
+      };
+
+      const removePromotions = () => {
+        document.querySelectorAll(
+          '[data-ad], [data-adid], [data-ad-id], [class*="ad-card"], ' +
+          '[class*="card-ad"], [class*="advert"], .m-ad, ' +
+          'a[href*="ad.weibo.com"], a[href*="biz.weibo.com"]'
+        ).forEach(removeContainingCard);
+
+        document.querySelectorAll('span, em, i, a, button').forEach((element) => {
+          const label = (element.textContent || '').replace(/\s+/g, ' ').trim();
+          if (/^(广告|推广|微博广告)$/.test(label) || /^(打开微博|打开微博App|下载微博客户端)$/.test(label)) {
+            removeContainingCard(element);
+          }
+        });
+      };
+
+      const hideBrokenImages = () => {
+        document.querySelectorAll('img').forEach((image) => {
+          const hide = () => image.style.setProperty('visibility', 'hidden', 'important');
+          if (image.complete && image.naturalWidth === 0) hide();
+          if (!image.dataset.zhongxiangErrorHandler) {
+            image.dataset.zhongxiangErrorHandler = '1';
+            image.addEventListener('error', hide, { once: true });
+          }
+        });
+      };
+
+      const removeBottomPromotionBar = () => {
+        document.querySelectorAll('span, div, a, button').forEach((element) => {
+          const label = (element.textContent || '').replace(/\s+/g, ' ').trim();
+          if (label !== '问智搜' && !/^和当前\d+人一起讨论$/.test(label)) return;
+
+          let candidate = element;
+          while (candidate && candidate !== document.body) {
+            const rect = candidate.getBoundingClientRect();
+            const position = getComputedStyle(candidate).position;
+            if (
+              (position === 'fixed' || position === 'sticky') &&
+              rect.width >= window.innerWidth * 0.86 &&
+              rect.height >= 36 &&
+              rect.height <= 100 &&
+              rect.bottom >= window.innerHeight - 8
+            ) {
+              candidate.remove();
+              return;
+            }
+            candidate = candidate.parentElement;
+          }
+        });
+      };
+
+      const updateEmbeddedLayout = () => {
+        installStyle();
+        hideTopNavigation();
+        removePromotions();
+        hideBrokenImages();
+        removeBottomPromotionBar();
+      };
+      updateEmbeddedLayout();
+      let updateQueued = false;
+      const scheduleUpdate = () => {
+        if (updateQueued) return;
+        updateQueued = true;
+        requestAnimationFrame(() => {
+          updateQueued = false;
+          updateEmbeddedLayout();
+        });
+      };
+      new MutationObserver(scheduleUpdate).observe(document.documentElement, {
+        childList: true,
+        subtree: true
+      });
+    })();
+    """#
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         guard webView.url == nil else { return }
@@ -426,7 +630,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
 
     private func setHidden(_ hidden: Bool) {
         guard isHidden != hidden else { return }
-        withAnimation(.easeOut(duration: 0.2)) { isHidden = hidden }
+        isHidden = hidden
     }
 }
 
@@ -528,7 +732,9 @@ private struct NewsCardView: View {
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: 3) {
                 Text(post.displayTitle).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
-                if let summary = post.displaySummary, !summary.isEmpty {
+                if post.source != FeedSource.douyin.rawValue,
+                   let summary = post.displaySummary,
+                   !summary.isEmpty {
                     Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }

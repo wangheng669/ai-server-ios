@@ -36,6 +36,8 @@
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>XBookmarkAPIKey</key>
+	<string>$(X_BOOKMARK_API_KEY)</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

@@ -7,6 +7,8 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var canLoadMore = true
+    @Published private(set) var isSwitchingSource = false
+    @Published private(set) var sourceContentRevision = 0
     @Published var errorMessage: String?
     @Published var source: FeedSource {
         didSet { UserDefaults.standard.set(source.rawValue, forKey: "feed.source") }
@@ -29,12 +31,22 @@ final class NewsFeedViewModel: ObservableObject {
 
     func select(_ next: FeedSource) {
         guard next != source else { return }
-        cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+        if !isSwitchingSource {
+            cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+        }
         source = next
         let saved = cache[next]
-        posts = saved?.posts ?? []
-        page = saved?.page ?? 1
-        canLoadMore = saved?.canLoadMore ?? true
+        if let saved {
+            posts = saved.posts
+            page = saved.page
+            canLoadMore = saved.canLoadMore
+            isSwitchingSource = false
+            sourceContentRevision += 1
+        } else {
+            page = 1
+            canLoadMore = true
+            isSwitchingSource = true
+        }
         errorMessage = nil
     }
 
@@ -47,7 +59,7 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func loadInitial() async {
-        if !posts.isEmpty { return }
+        if !posts.isEmpty && !isSwitchingSource { return }
         await refresh()
     }
 
@@ -67,6 +79,7 @@ final class NewsFeedViewModel: ObservableObject {
     func refresh() async {
         guard !isLoading else { return }
         let requestedSource = source
+        let completesSourceSwitch = isSwitchingSource
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -76,12 +89,27 @@ final class NewsFeedViewModel: ObservableObject {
             posts = result
             page = 1
             canLoadMore = result.count >= pageSize
+            if completesSourceSwitch {
+                isSwitchingSource = false
+                sourceContentRevision += 1
+            }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
-        } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
+        } catch is CancellationError { } catch {
+            guard source == requestedSource else { return }
+            if completesSourceSwitch {
+                isSwitchingSource = false
+                posts = []
+            }
+            errorMessage = error.localizedDescription
+        }
     }
 
     func loadMoreIfNeeded(current post: Post) async {
-        guard post.id == posts.last?.id, canLoadMore, !isLoadingMore, !isLoading else { return }
+        guard !isSwitchingSource,
+              post.id == posts.last?.id,
+              canLoadMore,
+              !isLoadingMore,
+              !isLoading else { return }
         let requestedSource = source
         isLoadingMore = true
         defer { isLoadingMore = false }
@@ -101,7 +129,7 @@ final class NewsFeedViewModel: ObservableObject {
     private func handleRealtime(_ event: RealtimeFeedClient.Event) {
         switch event {
         case .post(let post):
-            guard matchesCurrentSource(post) else { return }
+            guard !isSwitchingSource, matchesCurrentSource(post) else { return }
             errorMessage = nil
             if let index = posts.firstIndex(where: { $0.id == post.id }) {
                 posts[index] = post
