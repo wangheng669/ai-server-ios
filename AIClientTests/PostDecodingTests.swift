@@ -60,6 +60,86 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data[0].displayContent, "正文")
     }
 
+    func testDecodesZhihuPresentationMetadata() throws {
+        let json = #"""
+        {
+          "data": [{
+            "id": 99,
+            "title": "如何评价新的 AI 模型？",
+            "content": "如何评价新的 AI 模型？\n热度: 119 万热度\n回答数: 15",
+            "source": "zhihu",
+            "user": { "user_name": "知乎热榜" },
+            "postTags": [{ "id": 1, "name": "人工智能" }],
+            "meta": {
+              "zhihu_heat": "119 万热度",
+              "zhihu_answers": 15,
+              "zhihu_answer_excerpt": "这是高赞回答的摘要。",
+              "zhihu_answer_author": {
+                "name": "张俊林",
+                "headline": "AI 算法研究员",
+                "avatar_url": "https://example.com/avatar.jpg"
+              },
+              "zhihu_answer_voteup_count": 1200,
+              "zhihu_answer_comment_count": 86
+            }
+          }]
+        }
+        """#.data(using: .utf8)!
+
+        let post = try JSONDecoder().decode(PostListResponse.self, from: json).data[0]
+
+        XCTAssertEqual(post.zhihuQuestionTitle, "如何评价新的 AI 模型？")
+        XCTAssertEqual(post.zhihuTopicLabel, "人工智能")
+        XCTAssertEqual(post.zhihuAnswerPreview, "这是高赞回答的摘要。")
+        XCTAssertEqual(post.zhihuAnswerAuthorName, "张俊林")
+        XCTAssertEqual(post.zhihuAnswerAuthorHeadline, "AI 算法研究员")
+        XCTAssertTrue(post.hasZhihuAnswer)
+        XCTAssertEqual(post.zhihuHeat, "119 万热度")
+        XCTAssertEqual(post.zhihuAnswerCount, 15)
+        XCTAssertEqual(post.zhihuHotMeta, "119 万热度")
+    }
+
+    func testBuildsHonestZhihuFallbackFromExistingContent() throws {
+        let json = #"{"post":{"id":100,"title":"一个问题？","content":"一个问题？\n热度: 67 万热度\n回答数: 19","source":"zhihu","user":{"user_name":"知乎热榜"}}}"#.data(using: .utf8)!
+
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.zhihuHeat, "67 万热度")
+        XCTAssertEqual(post.zhihuAnswerCount, 19)
+        XCTAssertEqual(post.zhihuAnswerPreview, "当前热度 67 万热度。打开查看高赞回答与完整讨论。")
+        XCTAssertEqual(post.zhihuAnswerAuthorName, "知乎热榜")
+        XCTAssertEqual(post.zhihuAnswerAuthorHeadline, "今日热榜")
+        XCTAssertFalse(post.hasZhihuAnswer)
+    }
+
+    func testZhihuAnswerWithoutAvatarDoesNotReuseSourceAvatar() throws {
+        let json = #"{"post":{"id":101,"title":"一个问题？","source":"zhihu","user":{"user_name":"知乎热榜","avatar_url":"/img/source-avatars/zhihu.svg"},"meta":{"zhihu_answer_excerpt":"真实回答","zhihu_answer_author":{"name":"真实答主"},"zhihu_rank":3}}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertTrue(post.hasZhihuAnswer)
+        XCTAssertEqual(post.zhihuHotMeta, "热榜 #3")
+        XCTAssertEqual(post.zhihuAnswerAuthorName, "真实答主")
+        XCTAssertNil(post.zhihuAnswerAvatarURL)
+    }
+
+    func testBuildsBilibiliPlaybackResolverAndDecodesPreview() throws {
+        let json = #"{"post":{"id":101,"source":"bilibili","videos":[{"url":"https://www.bilibili.com/video/BV1c3NY6kERj","preview":"https://i0.hdslb.com/cover.jpg"}]}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        let playbackURL = try XCTUnwrap(post.videoURLs.first)
+        let components = try XCTUnwrap(URLComponents(url: playbackURL, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.path, "/api/v1/bilibili/play")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, "https://www.bilibili.com/video/BV1c3NY6kERj")
+        XCTAssertEqual(post.previewURL?.path, "/api/v1/image-proxy")
+    }
+
+    func testPrefersExplicitVideoPlayURL() throws {
+        let json = #"{"post":{"id":102,"videos":[{"url":"https://example.com/page","play_url":"https://cdn.example.com/video.mp4"}]}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.videoURLs.first?.absoluteString, "https://cdn.example.com/video.mp4")
+    }
+
     func testExtractsCompleteNewYorkTimesArticleBody() throws {
         let html = """
         <section class="article-body">

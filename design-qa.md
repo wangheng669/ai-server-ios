@@ -1,40 +1,40 @@
-# Market Redesign Design QA
+# Zhihu Feed Redesign Design QA
 
-- source visual truth path: `/Users/wangheng/.codex/generated_images/019f6392-579d-77e2-b48d-df618cf47589/exec-f3610e60-a4ab-4928-9cc7-42cc42045a8e.png`
-- implementation screenshot path: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-implementation-final.png`
-- viewport: iPhone 17 Pro simulator, 390 × 844 points (1206 × 2622 pixels)
-- state: Market tab, United States selected, US session closed, live production dashboard data
-- full-view comparison evidence: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-comparison-preview.png`
-- focused hero comparison: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-hero-comparison.png`
-- focused table comparison: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-table-comparison.png`
-- detail regression evidence: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/04-detail-regression.png`
+- source visual truth path: `/Users/wangheng/Desktop/ai-server-ios/artifacts/reference/zhihu-redesign-option-2.png`
+- implementation screenshot path: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/zhihu-redesign/pass-3-real-answers.png`
+- viewport: iPhone 17 Pro simulator, 402 × 874 points (1206 × 2622 pixels)
+- state: Observation tab, Zhihu selected, light mode, live production feed data
+- full-view comparison evidence: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/zhihu-redesign/comparison-pass-2.png`
+- focused first-card comparison evidence: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/zhihu-redesign/comparison-pass-2-focused.png`
 
 ## Findings
 
-No actionable P0, P1, or P2 differences remain.
+No actionable P0, P1, or P2 visual differences remain.
 
-- Typography: The implementation uses system typography with tabular numerals, matching the mock's hierarchy. The lead price, region selector, table headers, quote names, and changes remain legible without wrapping or truncation in the captured state.
-- Spacing and layout rhythm: The dark hero, rounded light content sheet, region selector, quote table, and global overview follow the reference composition. Native iOS status-bar space moves the content slightly lower than the frameless mock; this is an accepted platform constraint.
-- Colors and visual tokens: The implementation matches the near-black header, warm light content surface, blue selection state, and red-up/green-down semantics. Dividers and fills remain restrained.
-- Image and asset fidelity: The target contains no required raster imagery. Charts and the sentiment ring are live data-driven UI. Country flags from the generated concept were intentionally omitted rather than replaced with fake or inconsistent assets.
-- Copy and content: Visible labels match the selected concept where backed by available data. Russell 2000, TOPIX, and KOSDAQ shown in the generated concept were not implemented because the current backend does not provide reliable real data for them.
-- Accessibility: Region controls and quote rows retain button semantics, selected state, 44-point-or-larger interaction targets, and accessible contrast. VoiceOver reading order and Dynamic Type still require a separate device audit.
+- Fonts and typography: The implementation uses native iOS Chinese system typography with a clear 18-point question title, 15.5-point preview, and compact secondary metadata. It is intentionally slightly larger and more readable than the generated mock's unusually small rasterized text.
+- Spacing and layout rhythm: The selected concept's topic label, question title, pale-blue preview region, source row, lightweight divider, bookmark, and overflow sequence are preserved. The live implementation shows about three complete rows instead of four because it maintains platform-readable type and touch targets.
+- Colors and visual tokens: System white, near-black text, secondary gray, restrained Zhihu blue, pale-blue preview surfaces, and subtle dividers match the selected direction and the existing app.
+- Image quality and asset fidelity: No decorative raster assets are required. The implementation uses the existing Zhihu source asset and real remote avatars when the backend supplies an answer author. It does not substitute generated people for missing real identities.
+- Copy and content: Question titles, heat, answer counts, timestamps, and topics come from the live backend. When answer metadata is present, the card switches to a real “高赞回答” excerpt, vote/comment metrics, and answer-author identity. The production feed captured in pass 3 still omitted those fields, so it correctly rendered an honest “热榜概览” fallback rather than fabricated answer content.
+- Affordances and accessibility: Bookmark is a working local action with selected feedback and an accessibility label. Overflow exposes real “open original” and share actions. The current channel renders as visible “知乎” text. Full card navigation remains on the existing feed tap gesture.
 
 ## Comparison History
 
-1. Initial implementation: P1 — the lead price wrapped onto a second line at 390 points wide. Fix: reduced the display size, tightened tracking, and added a single-line scaling guard. Post-fix evidence: `03-hero-comparison.png`; the full price now renders on one line.
-2. Initial table density: P2 — quote rows delayed the global overview too far below the fold. Fix: reduced table header, row, and session-note heights while preserving readable type and touch targets. Post-fix evidence: `03-table-comparison.png`; the global overview heading now appears above the persistent tab bar.
+1. Pass 1: P2 — short question fragments such as “才有最佳体验吗” could be mistaken for a topic label. Fix: replaced permissive tag selection with deterministic stable topic categories and a small safe-label fallback set. Post-fix evidence: `pass-2.jpg`.
+2. Pass 1: P2 — heat and answer count were duplicated in the preview and metadata row. Fix: preview now communicates heat and the action to open discussion; metadata shows answer count plus recency. Post-fix evidence: `comparison-pass-2-focused.png`.
+3. Pass 1: P2 — the icon-only selected channel remained less explicit than the chosen mock. Fix: the active Zhihu source now renders the visible label “知乎” while keeping the surrounding app navigation system unchanged. Post-fix evidence: `pass-2.jpg`.
+4. Pass 3: P2 — answer metrics competed with author identity and a missing answer avatar could reuse the source logo. Fix: moved vote/comment metrics into the answer panel, separated real-answer and fallback labels, and restricted avatar fallback to the “知乎热榜” state. Post-fix evidence: `pass-3-real-answers.png` for the live fallback state; answer-state decoding and avatar behavior are covered by unit tests.
 
 ## Interaction Verification
 
-- The market screen loads real dashboard data and live connection state.
-- The primary quote and table rows remain wired to the existing index-detail route.
-- The detail route was launched after the redesign and rendered successfully; existing chart ranges, watchlist, share, and edge-swipe return code remain intact.
-- Region selection uses local SwiftUI state and changes the lead quote, table rows, and session footnote together.
+- Live Zhihu metadata was verified from the production list API after the posts-api deployment: rank, heat, answer count, question ID, and canonical URL are present.
+- Local bookmark state has a real toggle and persistence path; overflow contains real open-original and share actions.
+- Navigation and refresh/load-more reuse the existing feed flow.
+- Automated UI tapping and VoiceOver tree capture were not available because the local Xcode Beta installation is missing the SimulatorKit private framework expected by the UI-inspection tool. The app was launched directly in the simulator and captured in the Zhihu state. Build and 22 unit tests passed.
 
 ## Follow-up Polish
 
-- P3: Run a dedicated VoiceOver and largest-Dynamic-Type pass on physical hardware.
-- P3: Consider adding verified TOPIX or KOSDAQ feeds later; do not add placeholder values.
+- P3: Complete the backend/Browser Bridge answer-metadata path so the live list consistently supplies answer excerpt, author, vote count, and comment count; the iOS rendering and decoding path is ready.
+- P3: Run VoiceOver, largest Dynamic Type, and dark-mode checks on a physical device or a repaired Simulator installation.
 
 final result: passed

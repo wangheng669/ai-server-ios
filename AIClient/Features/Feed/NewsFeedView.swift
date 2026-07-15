@@ -123,9 +123,16 @@ struct NewsFeedView: View {
         let isSelected = model.source == source
         return Button { selectSource(source) } label: {
             VStack(spacing: 4) {
-                sourceIcon(source)
-                    .opacity(isSelected ? 1 : 0.78)
-                    .scaleEffect(isSelected ? 1 : 0.94)
+                if isSelected && source == .zhihu {
+                    Text("知乎")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.blue)
+                        .frame(width: 32, height: 22)
+                } else {
+                    sourceIcon(source)
+                        .opacity(isSelected ? 1 : 0.78)
+                        .scaleEffect(isSelected ? 1 : 0.94)
+                }
                 if isSelected {
                     Capsule()
                         .fill(.blue)
@@ -774,7 +781,131 @@ private struct NewsCardView: View {
         else if post.isBilibili { bilibiliCard }
         else if post.isNewYorkTimes { newYorkTimesCard }
         else if post.isRSS { rssCard }
+        else if post.sourceName == "知乎" { zhihuCard }
         else { socialCard }
+    }
+
+    private var zhihuCard: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 8) {
+                if let topic = post.zhihuTopicLabel {
+                    Text(topic)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                }
+                Spacer(minLength: 4)
+                if let hotMeta = post.zhihuHotMeta {
+                    Text(hotMeta)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Text(post.zhihuQuestionTitle)
+                .font(.system(size: 18, weight: .semibold))
+                .lineSpacing(3)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+
+            zhihuAnswerPanel
+
+            HStack(spacing: 9) {
+                AvatarView(url: post.zhihuAnswerAvatarURL, name: post.zhihuAnswerAuthorName, size: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(post.zhihuAnswerAuthorName)
+                        .font(.system(size: 14, weight: .medium))
+                        .lineLimit(1)
+                    if let headline = post.zhihuAnswerAuthorHeadline {
+                        Text(headline)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                ZhihuBookmarkButton(postID: post.id)
+                zhihuMenu
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
+    }
+
+    private var zhihuAnswerPanel: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                Text(post.hasZhihuAnswer ? "高赞回答" : "热榜概览")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.blue)
+                Spacer(minLength: 4)
+                zhihuMetrics
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                Capsule()
+                    .fill(Color.blue)
+                    .frame(width: 3)
+                Text(post.zhihuAnswerPreview)
+                    .font(.system(size: 15.5))
+                    .foregroundStyle(.primary.opacity(0.84))
+                    .lineSpacing(3)
+                    .lineLimit(post.hasZhihuAnswer ? 4 : 3)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 9)
+        .padding(.horizontal, 10)
+        .background(Color.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var zhihuMetrics: some View {
+        let votes = post.meta?.zhihuAnswerVoteupCount
+        let comments = post.meta?.zhihuAnswerCommentCount
+        if votes != nil || comments != nil {
+            Text([
+                votes.map { "赞同 \($0.formattedFeedCount)" },
+                comments.map { "\($0.formattedFeedCount) 评论" }
+            ].compactMap { $0 }.joined(separator: " · "))
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        } else {
+            Text([
+                post.zhihuAnswerCount.map { "\($0) 回答" },
+                post.formattedTime
+            ].compactMap { $0 }.joined(separator: " · "))
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder private var zhihuMenu: some View {
+        if let link = post.linkURL {
+            Menu {
+                Link(destination: link) {
+                    Label("打开知乎原文", systemImage: "safari")
+                }
+                ShareLink(item: link) {
+                    Label("分享", systemImage: "square.and.arrow.up")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("更多操作")
+        }
     }
 
     private var hotTopicCard: some View {
@@ -1034,6 +1165,51 @@ private struct NewsCardView: View {
             Text(post.tagNames.prefix(3).map { "#\($0)" }.joined(separator: "  "))
                 .font(.caption).foregroundStyle(.blue).lineLimit(2).multilineTextAlignment(.leading)
         }
+    }
+}
+
+private struct ZhihuBookmarkButton: View {
+    let postID: Int
+    @State private var isBookmarked: Bool
+
+    init(postID: Int) {
+        self.postID = postID
+        _isBookmarked = State(initialValue: ZhihuBookmarkStore.contains(postID))
+    }
+
+    var body: some View {
+        Button {
+            isBookmarked = ZhihuBookmarkStore.toggle(postID)
+        } label: {
+            Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                .font(.system(size: 15))
+                .foregroundStyle(isBookmarked ? Color.blue : Color.secondary)
+                .frame(width: 36, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isBookmarked ? "取消收藏" : "收藏")
+        .sensoryFeedback(.success, trigger: isBookmarked)
+    }
+}
+
+private enum ZhihuBookmarkStore {
+    private static let key = "zhihu.bookmarkedPostIDs"
+
+    static func contains(_ postID: Int) -> Bool {
+        Set(UserDefaults.standard.array(forKey: key) as? [Int] ?? []).contains(postID)
+    }
+
+    @discardableResult
+    static func toggle(_ postID: Int) -> Bool {
+        var values = Set(UserDefaults.standard.array(forKey: key) as? [Int] ?? [])
+        if values.contains(postID) {
+            values.remove(postID)
+        } else {
+            values.insert(postID)
+        }
+        UserDefaults.standard.set(values.sorted(), forKey: key)
+        return values.contains(postID)
     }
 }
 

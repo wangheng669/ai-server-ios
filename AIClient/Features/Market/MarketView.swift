@@ -44,11 +44,18 @@ private struct MarketHomeView: View {
     let store: MarketStore
     let onSelectIndex: (String) -> Void
     @State private var selectedMarket = MarketRegion.unitedStates
+    @State private var suppressIndexSelection = false
+    @State private var selectionResetTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+                ZStack {
+                    MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+                        .id(selectedMarket)
+                        .transition(.opacity)
+                }
+                .animation(.easeInOut(duration: 0.18), value: selectedMarket)
 
                 VStack(spacing: 14) {
                     if let error = store.errorMessage {
@@ -58,8 +65,12 @@ private struct MarketHomeView: View {
                     MarketIndexTable(
                         region: selectedMarket,
                         store: store,
-                        onSelectIndex: onSelectIndex
+                        onSelectIndex: selectIndex
                     )
+                    .id(selectedMarket)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.16), value: selectedMarket)
+                    .simultaneousGesture(regionSwipeGesture)
                     MarketCountryStrip(store: store, onSelectIndex: onSelectIndex)
                     VStack(alignment: .leading, spacing: 8) {
                         Text("热门板块")
@@ -77,6 +88,47 @@ private struct MarketHomeView: View {
         .background(MarketTerminalPalette.header.ignoresSafeArea())
         .scrollIndicators(.hidden)
         .refreshable { await store.refresh() }
+    }
+
+    private var regionSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                selectionResetTask?.cancel()
+                suppressIndexSelection = true
+            }
+            .onEnded { value in
+                let horizontalDistance = value.translation.width
+                let verticalDistance = value.translation.height
+                if abs(horizontalDistance) > abs(verticalDistance), abs(horizontalDistance) >= 56 {
+                    selectAdjacentRegion(offset: horizontalDistance < 0 ? 1 : -1)
+                }
+                allowIndexSelectionAfterGesture()
+            }
+    }
+
+    private func selectIndex(_ symbol: String) {
+        guard !suppressIndexSelection else { return }
+        onSelectIndex(symbol)
+    }
+
+    private func allowIndexSelectionAfterGesture() {
+        selectionResetTask?.cancel()
+        selectionResetTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            suppressIndexSelection = false
+        }
+    }
+
+    private func selectAdjacentRegion(offset: Int) {
+        let regions = MarketRegion.allCases
+        guard let currentIndex = regions.firstIndex(of: selectedMarket) else { return }
+        let nextIndex = currentIndex + offset
+        guard regions.indices.contains(nextIndex) else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            selectedMarket = regions[nextIndex]
+        }
     }
 }
 

@@ -4,11 +4,10 @@ import AVKit
 struct PostDetailView: View {
     @State private var post: Post
     @State private var player: AVPlayer?
-    @State private var isPlayingVideo = false
     @State private var showsOriginal = false
     @State private var isDescriptionExpanded = false
-    @State private var isLiked = false
-    @State private var isBookmarked = false
+    @State private var videoPlaybackFailed = false
+    @State private var isVideoReady = false
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = false
     @Environment(\.openURL) private var openURL
@@ -49,6 +48,12 @@ struct PostDetailView: View {
             }
         }
         .task { await loadDetail() }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
+            guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
+            player = nil
+            videoPlaybackFailed = true
+            isVideoReady = false
+        }
         .onDisappear { player?.pause() }
     }
 
@@ -226,9 +231,6 @@ struct PostDetailView: View {
                         }
                     }
 
-                    Divider()
-                    bilibiliActionRow
-
                     if !post.tagNames.isEmpty {
                         Divider()
                         Text(post.tagNames.prefix(4).map { "#\($0)" }.joined(separator: "  "))
@@ -245,21 +247,34 @@ struct PostDetailView: View {
     }
 
     @ViewBuilder private var bilibiliMedia: some View {
-        if let player, isPlayingVideo {
-            VideoPlayer(player: player)
-                .frame(height: 230)
-                .background(.black)
+        if let player, let item = player.currentItem {
+            ZStack {
+                Color.black
+                if let image = post.previewURL, !isVideoReady {
+                    RemoteImage(url: image, height: 230, cornerRadius: 0)
+                }
+                VideoPlayer(player: player)
+                    .opacity(isVideoReady ? 1 : 0.01)
+                if !isVideoReady {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(12)
+                        .background(.black.opacity(0.55), in: Circle())
+                }
+            }
+            .frame(height: 230)
+            .onAppear { player.playImmediately(atRate: 1) }
+            .onReceive(item.publisher(for: \.status)) { status in
+                if status == .readyToPlay {
+                    withAnimation(.easeOut(duration: 0.15)) { isVideoReady = true }
+                }
+            }
         } else if let image = post.previewURL {
             ZStack {
                 RemoteImage(url: image, height: 230, cornerRadius: 0)
-                if player != nil || post.linkURL != nil {
+                if videoPlaybackFailed, post.linkURL != nil {
                     Button {
-                        if let player {
-                            isPlayingVideo = true
-                            player.play()
-                        } else {
-                            openOriginal()
-                        }
+                        openOriginal()
                     } label: {
                         Image(systemName: "play.fill")
                             .font(.system(size: 30, weight: .semibold))
@@ -268,13 +283,25 @@ struct PostDetailView: View {
                             .background(.black.opacity(0.58), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("在 B 站播放")
+                    .accessibilityLabel("在 B 站观看")
+                }
+                if videoPlaybackFailed {
+                    Text("播放源暂不可用，点击前往 B 站观看")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.7), in: Capsule())
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, 14)
+                        .allowsHitTesting(false)
+                } else {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(12)
+                        .background(.black.opacity(0.55), in: Circle())
                 }
             }
-        } else if let player {
-            VideoPlayer(player: player)
-                .frame(height: 230)
-                .background(.black)
         }
     }
 
@@ -290,64 +317,9 @@ struct PostDetailView: View {
                 Text(time).lineLimit(1)
             }
             Spacer(minLength: 0)
-            if let score = post.score, score > 0 {
-                Text("\(score.formatted(.number.precision(.fractionLength(1))))分")
-                    .foregroundStyle(.pink)
-            }
         }
         .font(.system(size: 13))
         .foregroundStyle(.secondary)
-    }
-
-    private var bilibiliActionRow: some View {
-        HStack {
-            bilibiliAction(
-                title: post.meta?.metrics?.likes.map(compactCount) ?? "点赞",
-                symbol: isLiked ? "hand.thumbsup.fill" : "hand.thumbsup",
-                isActive: isLiked
-            ) { isLiked.toggle() }
-            Spacer()
-            bilibiliAction(
-                title: post.meta?.metrics?.replies.map(compactCount) ?? "评论",
-                symbol: "text.bubble"
-            ) { openOriginal() }
-            Spacer()
-            bilibiliAction(
-                title: post.meta?.metrics?.bookmarks.map(compactCount) ?? "收藏",
-                symbol: isBookmarked ? "star.fill" : "star",
-                isActive: isBookmarked
-            ) { isBookmarked.toggle() }
-            Spacer()
-            if let link = post.linkURL {
-                ShareLink(item: link) {
-                    bilibiliActionLabel(title: "分享", symbol: "square.and.arrow.up", isActive: false)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func bilibiliAction(
-        title: String,
-        symbol: String,
-        isActive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            bilibiliActionLabel(title: title, symbol: symbol, isActive: isActive)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func bilibiliActionLabel(title: String, symbol: String, isActive: Bool) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.system(size: 21, weight: .medium))
-            Text(title)
-                .font(.system(size: 11))
-        }
-        .foregroundStyle(isActive ? Color.pink : Color.secondary)
-        .frame(minWidth: 48)
     }
 
     private var xDetail: some View {
@@ -521,11 +493,29 @@ struct PostDetailView: View {
         guard !post.isSynthetic else { return }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
         if let detail = try? await client.fetchPost(id: post.id) { post = detail }
-        if let video = post.videoURLs.first { player = AVPlayer(url: video) }
+        if let video = post.videoURLs.first {
+            startVideoPlayback(url: video)
+        } else if post.isBilibili {
+            videoPlaybackFailed = true
+        }
         guard post.isNewYorkTimes, let link = post.linkURL else { return }
         isLoadingNewYorkTimesBody = true
         defer { isLoadingNewYorkTimesBody = false }
         newYorkTimesArticle = try? await client.fetchNewYorkTimesArticle(url: link)
+    }
+
+    private func startVideoPlayback(url: URL) {
+        let audioSession = AVAudioSession.sharedInstance()
+        try? audioSession.setCategory(.playback, mode: .moviePlayback)
+        try? audioSession.setActive(true)
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 1
+        let newPlayer = AVPlayer(playerItem: item)
+        newPlayer.automaticallyWaitsToMinimizeStalling = false
+        player = newPlayer
+        videoPlaybackFailed = false
+        isVideoReady = false
+        newPlayer.playImmediately(atRate: 1)
     }
 }
 

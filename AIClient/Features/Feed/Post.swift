@@ -109,9 +109,9 @@ struct Post: Decodable, Identifiable, Hashable {
     var normalizedSource: String { sourceName }
     var score: Double? { finalScore ?? weight }
     var imageURLs: [URL] { (images ?? []).compactMap { MediaURL.image($0.url) } }
-    var videoURLs: [URL] { (videos ?? []).compactMap { $0.url ?? $0.playURL }.compactMap(MediaURL.video) }
+    var videoURLs: [URL] { (videos ?? []).compactMap { $0.playURL ?? $0.url }.compactMap(MediaURL.video) }
     var previewURL: URL? {
-        imageURLs.first ?? (videos ?? []).compactMap { $0.coverURL ?? $0.previewImageURL }.compactMap(MediaURL.image).first
+        imageURLs.first ?? (videos ?? []).compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.compactMap(MediaURL.image).first
     }
     var linkURL: URL? { clean(postLink).flatMap(URL.init(string:)) }
     var xTweetID: String? {
@@ -125,6 +125,62 @@ struct Post: Decodable, Identifiable, Hashable {
     var tagNames: [String] { (postTags ?? []).map(\.name) }
     var photoCredit: String? { clean(meta?.photoCredit) ?? (images ?? []).compactMap(\.altText).first(where: { !$0.isEmpty }) }
     var externalURL: URL? { (meta?.urls ?? []).compactMap(URL.init(string:)).first }
+    var zhihuQuestionTitle: String { clean(title) ?? displayTitle }
+    var zhihuTopicLabel: String? {
+        let value = zhihuQuestionTitle.lowercased()
+        let categories: [(keywords: [String], label: String)] = [
+            (["codex", "windows", "wsl", "开发者"], "软件与开发者体验"),
+            (["芯片", "半导体", "存储", "长鑫"], "半导体与产业"),
+            (["gpt", "openai", "人工智能", "大模型", "agent"], "人工智能"),
+            (["id software", "游戏", "微软"], "游戏与科技"),
+            (["苹果", "商业", "产业"], "科技商业")
+        ]
+        if let category = categories.first(where: { item in
+            item.keywords.contains { value.localizedCaseInsensitiveContains($0) }
+        }) {
+            return category.label
+        }
+        let stableLabels = Set(["技术", "人工智能", "科技", "商业", "金融", "互联网", "职场"])
+        return tagNames.first(where: stableLabels.contains)
+    }
+    var zhihuHeat: String? { clean(meta?.zhihuHeat) ?? metadataLine(named: "热度") }
+    var zhihuAnswerCount: Int? {
+        if let value = meta?.zhihuAnswers, value > 0 { return value }
+        return metadataLine(named: "回答数").flatMap(Int.init)
+    }
+    var zhihuAnswerPreview: String {
+        if let excerpt = clean(meta?.zhihuAnswerExcerpt), excerpt != zhihuQuestionTitle {
+            return excerpt
+        }
+        if let heat = zhihuHeat {
+            return "当前热度 \(heat)。打开查看高赞回答与完整讨论。"
+        }
+        if let answers = zhihuAnswerCount {
+            return "已有 \(answers) 个回答。打开查看高赞回答与完整讨论。"
+        }
+        return "打开查看高赞回答与完整讨论。"
+    }
+    var hasZhihuAnswer: Bool {
+        guard let excerpt = clean(meta?.zhihuAnswerExcerpt) else { return false }
+        return excerpt != zhihuQuestionTitle
+    }
+    var zhihuHotMeta: String? {
+        let values = [
+            meta?.zhihuRank.map { "热榜 #\($0)" },
+            zhihuHeat
+        ].compactMap { $0 }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+    var zhihuAnswerAuthorName: String { clean(meta?.zhihuAnswerAuthor?.name) ?? authorName }
+    var zhihuAnswerAuthorHeadline: String? {
+        clean(meta?.zhihuAnswerAuthor?.headline) ?? (meta?.zhihuAnswerAuthor == nil ? "今日热榜" : nil)
+    }
+    var zhihuAnswerAvatarURL: URL? {
+        if meta?.zhihuAnswerAuthor != nil {
+            return clean(meta?.zhihuAnswerAuthor?.avatarURL).flatMap(MediaURL.image)
+        }
+        return avatarURL
+    }
     var isBilibili: Bool { sourceName == "B站" }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
     var isNewYorkTimes: Bool { source == FeedSource.newYorkTimes.rawValue }
@@ -152,6 +208,16 @@ struct Post: Decodable, Identifiable, Hashable {
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "<[^>]*$", with: "", options: .regularExpression)
         return clean(text)
+    }
+
+    private func metadataLine(named name: String) -> String? {
+        let prefix = "\(name):"
+        return originalDisplayContent
+            .split(separator: "\n")
+            .map(String.init)
+            .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap(clean)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -211,9 +277,37 @@ struct PostMeta: Decodable, Hashable {
     let lang: String?
     let urls: [String]?
     let photoCredit: String?
+    let zhihuRank: Int?
+    let zhihuHeat: String?
+    let zhihuAnswers: Int?
+    let zhihuFollowerCount: Int?
+    let zhihuQuestionID: String?
+    let zhihuURL: String?
+    let zhihuAnswerExcerpt: String?
+    let zhihuAnswerAuthor: ZhihuAnswerAuthor?
+    let zhihuAnswerVoteupCount: Int?
+    let zhihuAnswerCommentCount: Int?
     enum CodingKeys: String, CodingKey {
         case metrics, lang, urls
         case photoCredit = "photo_credit"
+        case zhihuRank = "zhihu_rank"
+        case zhihuHeat = "zhihu_heat"
+        case zhihuAnswers = "zhihu_answers"
+        case zhihuFollowerCount = "zhihu_follower_count"
+        case zhihuQuestionID = "zhihu_question_id"
+        case zhihuURL = "zhihu_url"
+        case zhihuAnswerExcerpt = "zhihu_answer_excerpt"
+        case zhihuAnswerAuthor = "zhihu_answer_author"
+        case zhihuAnswerVoteupCount = "zhihu_answer_voteup_count"
+        case zhihuAnswerCommentCount = "zhihu_answer_comment_count"
+    }
+}
+
+struct ZhihuAnswerAuthor: Decodable, Hashable {
+    let name, headline, avatarURL: String?
+    enum CodingKeys: String, CodingKey {
+        case name, headline
+        case avatarURL = "avatar_url"
     }
 }
 
@@ -242,9 +336,9 @@ struct PostImage: Decodable, Hashable {
     }
 }
 struct PostVideo: Decodable, Hashable {
-    let url, playURL, coverURL, previewImageURL: String?
+    let url, playURL, coverURL, previewImageURL, preview: String?
     enum CodingKeys: String, CodingKey {
-        case url
+        case url, preview
         case playURL = "play_url"
         case coverURL = "cover_url"
         case previewImageURL = "preview_image_url"
@@ -255,7 +349,21 @@ enum MediaURL {
     private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com"]
 
     static func image(_ raw: String) -> URL? { resolved(raw, proxy: "image-proxy", hosts: imageHostSuffixes) }
-    static func video(_ raw: String) -> URL? { resolved(raw, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"]) }
+    static func video(_ raw: String) -> URL? {
+        let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
+        guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
+        if isBilibiliVideoPage(direct) {
+            var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/v1/bilibili/play"), resolvingAgainstBaseURL: false)
+            parts?.queryItems = [.init(name: "url", value: direct.absoluteString)]
+            return parts?.url
+        }
+        return resolved(value, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
+    }
+
+    private static func isBilibiliVideoPage(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased(), host == "bilibili.com" || host.hasSuffix(".bilibili.com") else { return false }
+        return url.pathComponents.contains { $0.range(of: #"^BV[0-9A-Za-z]{10}$"#, options: .regularExpression) != nil }
+    }
 
     private static func resolved(_ raw: String, proxy: String, hosts: [String]) -> URL? {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
