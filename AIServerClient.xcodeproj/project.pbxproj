@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
+		0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F23 /* MarketView.swift */; };
+		0310C5B2F83B870E8FA03AB0 /* MarketModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F20 /* MarketModels.swift */; };
+		0310C5B2F83B870E8FA03AB1 /* MarketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F21 /* MarketService.swift */; };
+		0310C5B2F83B870E8FA03AB2 /* MarketStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F22 /* MarketStore.swift */; };
 		10D34066B133EC9CD153A5B9 /* RealtimeFeedClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71E3DBE08DFCC43540E027C0 /* RealtimeFeedClient.swift */; };
 		18F1A1D11FD420E25AA227ED /* PostComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */; };
 		260E90A29878D779265564DE /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */; };
@@ -37,6 +41,10 @@
 		097BF52E5F2C1BE5326021E6 /* ServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSetupView.swift; sourceTree = "<group>"; };
 		137FDCB7037445C35ED02C74 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1A3FE9C2FF8A73D898482112 /* Post.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Post.swift; sourceTree = "<group>"; };
+		33DF2FE619F731E7105C5F23 /* MarketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketView.swift; sourceTree = "<group>"; };
+		33DF2FE619F731E7105C5F20 /* MarketModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketModels.swift; sourceTree = "<group>"; };
+		33DF2FE619F731E7105C5F21 /* MarketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketService.swift; sourceTree = "<group>"; };
+		33DF2FE619F731E7105C5F22 /* MarketStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketStore.swift; sourceTree = "<group>"; };
 		3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddressValidatorTests.swift; sourceTree = "<group>"; };
 		47F7ED7E08363D8510FC627D /* PostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDetailView.swift; sourceTree = "<group>"; };
 		4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServerClientApp.swift; sourceTree = "<group>"; };
@@ -134,9 +142,21 @@
 			isa = PBXGroup;
 			children = (
 				660608BC8DE73C89ED510152 /* Feed */,
+				D5175F49AD418B24DAF6F714 /* Market */,
 				E77736FF57176FCF2FF2FFDD /* Server */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		D5175F49AD418B24DAF6F714 /* Market */ = {
+			isa = PBXGroup;
+			children = (
+				33DF2FE619F731E7105C5F20 /* MarketModels.swift */,
+				33DF2FE619F731E7105C5F21 /* MarketService.swift */,
+				33DF2FE619F731E7105C5F22 /* MarketStore.swift */,
+				33DF2FE619F731E7105C5F23 /* MarketView.swift */,
+			);
+			path = Market;
 			sourceTree = "<group>";
 		};
 		E77736FF57176FCF2FF2FFDD /* Server */ = {
@@ -204,6 +224,7 @@
 				};
 			};
 			buildConfigurationList = 1CB8E601656193E6689EF54E /* Build configuration list for PBXProject "AIServerClient" */;
+			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -213,7 +234,6 @@
 			mainGroup = 31B803F3D04737705590B4F6;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 772B58C95655CED4643BB6A2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -251,6 +271,10 @@
 			files = (
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
+				0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */,
+				0310C5B2F83B870E8FA03AB0 /* MarketModels.swift in Sources */,
+				0310C5B2F83B870E8FA03AB1 /* MarketService.swift in Sources */,
+				0310C5B2F83B870E8FA03AB2 /* MarketStore.swift in Sources */,
 				FFAD6FA1551774C67C10B5A6 /* NewsFeedView.swift in Sources */,
 				C844C5ED835C1B08C94DC464 /* NewsFeedViewModel.swift in Sources */,
 				F04A9EB700A33E5A21544148 /* Post.swift in Sources */,

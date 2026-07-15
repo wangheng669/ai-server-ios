@@ -72,6 +72,16 @@ struct Post: Decodable, Identifiable, Hashable {
     let meta: PostMeta?
 
     var displayTitle: String { clean(contentZH) ?? clean(title) ?? clean(summary) ?? clean(text) ?? "无标题" }
+    var bilibiliTitle: String {
+        if let title = clean(title), title.count <= 120 { return title }
+        if let summary = clean(summary), summary.count <= 120 { return summary }
+        let content = displayContent.replacingOccurrences(of: "\n", with: " ")
+        if let sentenceEnd = content.firstIndex(where: { "。！？".contains($0) }) {
+            let sentence = String(content[...sentenceEnd])
+            if sentence.count <= 120 { return sentence }
+        }
+        return String(content.prefix(72)) + (content.count > 72 ? "…" : "")
+    }
     var displaySummary: String? {
         let value = clean(summary) ?? clean(text)
         return value == displayTitle ? nil : value
@@ -254,6 +264,17 @@ enum MediaURL {
         var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/v1/\(proxy)"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "url", value: direct.absoluteString), .init(name: "soft", value: "1"), .init(name: "context", value: "ios-feed")]
         return parts?.url
+    }
+}
+
+extension Int {
+    var formattedFeedCount: String {
+        switch self {
+        case 10_000...:
+            return (Double(self) / 10_000).formatted(.number.precision(.fractionLength(1))) + "万"
+        default:
+            return formatted()
+        }
     }
 }
 

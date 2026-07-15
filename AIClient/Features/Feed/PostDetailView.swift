@@ -4,7 +4,11 @@ import AVKit
 struct PostDetailView: View {
     @State private var post: Post
     @State private var player: AVPlayer?
+    @State private var isPlayingVideo = false
     @State private var showsOriginal = false
+    @State private var isDescriptionExpanded = false
+    @State private var isLiked = false
+    @State private var isBookmarked = false
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = false
     @Environment(\.openURL) private var openURL
@@ -15,6 +19,7 @@ struct PostDetailView: View {
         Group {
             if post.isNewYorkTimes { newYorkTimesDetail }
             else if post.sourceName == "X" { xDetail }
+            else if post.isBilibili { bilibiliDetail }
             else { standardDetail }
         }
         .navigationTitle(post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : "详情"))
@@ -29,6 +34,17 @@ struct PostDetailView: View {
                         if let link = post.linkURL { ShareLink(item: link) { Label("分享帖子", systemImage: "square.and.arrow.up") } }
                         Button("在 X 中打开") { openOriginal() }
                     } label: { Image(systemName: "ellipsis") }
+                }
+            } else if post.isBilibili {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if let link = post.linkURL {
+                        ShareLink(item: link) { Image(systemName: "square.and.arrow.up") }
+                    }
+                    Menu {
+                        Button("在 B 站观看") { openOriginal() }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
                 }
             }
         }
@@ -149,6 +165,189 @@ struct PostDetailView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 14)
         }
+    }
+
+    private var bilibiliDetail: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                bilibiliMedia
+
+                VStack(alignment: .leading, spacing: 15) {
+                    Text(post.bilibiliTitle)
+                        .font(.system(size: 22, weight: .bold))
+                        .lineSpacing(5)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    bilibiliMetadata
+
+                    Divider()
+
+                    HStack(spacing: 11) {
+                        AvatarView(url: post.avatarURL, name: post.authorName, size: 48)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(post.authorName)
+                                .font(.system(size: 17, weight: .semibold))
+                                .lineLimit(1)
+                            Text(post.user?.userDesc?.nonEmpty ?? "B 站内容创作者")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                        if post.linkURL != nil {
+                            Button("在 B 站观看") { openOriginal() }
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.pink)
+                                .buttonStyle(.bordered)
+                                .tint(.pink)
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(post.displayContent)
+                            .font(.system(size: 16))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(5)
+                            .lineLimit(isDescriptionExpanded ? nil : 3)
+                            .textSelection(.enabled)
+
+                        if post.displayContent.count > 90 {
+                            Button(isDescriptionExpanded ? "收起" : "展开") {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isDescriptionExpanded.toggle()
+                                }
+                            }
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.pink)
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Divider()
+                    bilibiliActionRow
+
+                    if !post.tagNames.isEmpty {
+                        Divider()
+                        Text(post.tagNames.prefix(4).map { "#\($0)" }.joined(separator: "  "))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+                .padding(.bottom, 34)
+            }
+        }
+    }
+
+    @ViewBuilder private var bilibiliMedia: some View {
+        if let player, isPlayingVideo {
+            VideoPlayer(player: player)
+                .frame(height: 230)
+                .background(.black)
+        } else if let image = post.previewURL {
+            ZStack {
+                RemoteImage(url: image, height: 230, cornerRadius: 0)
+                if player != nil || post.linkURL != nil {
+                    Button {
+                        if let player {
+                            isPlayingVideo = true
+                            player.play()
+                        } else {
+                            openOriginal()
+                        }
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 72, height: 72)
+                            .background(.black.opacity(0.58), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("在 B 站播放")
+                }
+            }
+        } else if let player {
+            VideoPlayer(player: player)
+                .frame(height: 230)
+                .background(.black)
+        }
+    }
+
+    private var bilibiliMetadata: some View {
+        HStack(spacing: 12) {
+            if let views = post.meta?.metrics?.views {
+                Label(compactCount(views), systemImage: "play")
+            }
+            if let replies = post.meta?.metrics?.replies {
+                Label(compactCount(replies), systemImage: "text.bubble")
+            }
+            if let time = post.formattedTime {
+                Text(time).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if let score = post.score, score > 0 {
+                Text("\(score.formatted(.number.precision(.fractionLength(1))))分")
+                    .foregroundStyle(.pink)
+            }
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(.secondary)
+    }
+
+    private var bilibiliActionRow: some View {
+        HStack {
+            bilibiliAction(
+                title: post.meta?.metrics?.likes.map(compactCount) ?? "点赞",
+                symbol: isLiked ? "hand.thumbsup.fill" : "hand.thumbsup",
+                isActive: isLiked
+            ) { isLiked.toggle() }
+            Spacer()
+            bilibiliAction(
+                title: post.meta?.metrics?.replies.map(compactCount) ?? "评论",
+                symbol: "text.bubble"
+            ) { openOriginal() }
+            Spacer()
+            bilibiliAction(
+                title: post.meta?.metrics?.bookmarks.map(compactCount) ?? "收藏",
+                symbol: isBookmarked ? "star.fill" : "star",
+                isActive: isBookmarked
+            ) { isBookmarked.toggle() }
+            Spacer()
+            if let link = post.linkURL {
+                ShareLink(item: link) {
+                    bilibiliActionLabel(title: "分享", symbol: "square.and.arrow.up", isActive: false)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func bilibiliAction(
+        title: String,
+        symbol: String,
+        isActive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            bilibiliActionLabel(title: title, symbol: symbol, isActive: isActive)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func bilibiliActionLabel(title: String, symbol: String, isActive: Bool) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 21, weight: .medium))
+            Text(title)
+                .font(.system(size: 11))
+        }
+        .foregroundStyle(isActive ? Color.pink : Color.secondary)
+        .frame(minWidth: 48)
     }
 
     private var xDetail: some View {

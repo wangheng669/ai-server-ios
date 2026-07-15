@@ -1,11 +1,12 @@
 import SwiftUI
 import WebKit
 
-private enum RootTab: Hashable { case observation, market, events }
+enum RootTab: Hashable { case observation, market, events }
 
 struct NewsFeedView: View {
     @StateObject private var model = NewsFeedViewModel()
     @State private var path: [Post] = []
+    @State private var isShowingLaunchCover = true
     @State private var isFeedChromeHidden = false
     @State private var sourceContentOffset: CGFloat = 0
     @State private var pendingSourceContentOffset: CGFloat = 14
@@ -35,23 +36,6 @@ struct NewsFeedView: View {
                     PostDetailView(post: post)
                 }
             }
-            .task(id: model.source) { await model.loadInitial() }
-        }
-        .overlay(alignment: .bottom) {
-            if path.isEmpty {
-                EditorialTabBar(selected: .observation) { tab in
-                    switch tab {
-                    case .observation: break
-                    case .market: open("explore")
-                    case .events: open("events")
-                    }
-                }
-                .offset(y: isFeedChromeHidden ? 88 : 0)
-                .opacity(isFeedChromeHidden ? 0 : 1)
-                .allowsHitTesting(!isFeedChromeHidden)
-                .accessibilityHidden(isFeedChromeHidden)
-                .animation(.easeOut(duration: 0.18), value: isFeedChromeHidden)
-            }
         }
         .onAppear { model.startRealtime() }
         .onDisappear { model.stopRealtime() }
@@ -65,6 +49,22 @@ struct NewsFeedView: View {
         }
         .onChange(of: model.sourceContentRevision) { _, _ in
             animateSourceContentEntrance()
+        }
+        .overlay {
+            if isShowingLaunchCover {
+                LaunchCoverView()
+                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                    .zIndex(10)
+            }
+        }
+        .task(id: model.source) {
+            await model.loadInitial()
+            guard isShowingLaunchCover, !Task.isCancelled else { return }
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.42)) {
+                isShowingLaunchCover = false
+            }
         }
     }
 
@@ -189,8 +189,11 @@ struct NewsFeedView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     Color.clear.frame(height: 53)
-                    ForEach(model.posts) { post in
-                        NewsCardView(post: post)
+                    ForEach(Array(model.posts.enumerated()), id: \.element.id) { index, post in
+                        NewsCardView(
+                            post: post,
+                            isFeaturedBilibili: model.source == .bilibili && index == 0
+                        )
                             .contentShape(Rectangle())
                             .onTapGesture { path.append(post) }
                             .task { await model.loadMoreIfNeeded(current: post) }
@@ -255,6 +258,55 @@ struct NewsFeedView: View {
         if let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL { openURL(url) }
     }
 
+}
+
+private struct LaunchCoverView: View {
+    @State private var isAnimating = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                Image("LaunchLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 190, height: 190)
+                    .scaleEffect(isAnimating || reduceMotion ? 1 : 0.92)
+                    .shadow(color: .black.opacity(0.06), radius: 18, y: 8)
+
+                VStack(spacing: 7) {
+                    Text("化繁为简")
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                        .tracking(2)
+                    Text("穿过纷繁，抵达清晰")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 9) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在梳理信息")
+                        .font(.caption)
+                }
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 6)
+            }
+            .opacity(isAnimating || reduceMotion ? 1 : 0.45)
+            .scaleEffect(isAnimating || reduceMotion ? 1 : 0.96)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("化繁为简，正在梳理信息")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 0.55)) {
+                isAnimating = true
+            }
+        }
+    }
 }
 
 private struct EmbeddedWebPage: View {
@@ -639,7 +691,7 @@ private enum FeedScrollDirection {
     case towardNewer
 }
 
-private struct EditorialTabBar: View {
+struct EditorialTabBar: View {
     let selected: RootTab
     let onSelect: (RootTab) -> Void
 
@@ -666,7 +718,7 @@ private struct EditorialTabBar: View {
                 Text(title)
                     .font(.system(size: 10.5, weight: isSelected ? .semibold : .regular))
             }
-            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .foregroundStyle(isSelected ? Color.blue : Color.secondary)
             .frame(maxWidth: .infinity, minHeight: 50)
             .contentShape(Rectangle())
         }
@@ -715,6 +767,7 @@ private extension FeedSource {
 
 private struct NewsCardView: View {
     let post: Post
+    var isFeaturedBilibili = false
     var body: some View {
         if post.isHotTopic { hotTopicCard }
         else if post.isFlash { flashCard }
@@ -830,25 +883,102 @@ private struct NewsCardView: View {
     }
 
     private var bilibiliCard: some View {
-        HStack(alignment: .top, spacing: 10) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 44)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text(post.authorName).font(.subheadline.weight(.semibold))
-                    Text(post.formattedTime ?? "").font(.caption).foregroundStyle(.secondary)
-                    if let score = post.score, score > 0 {
-                        Text("\(score.formatted(.number.precision(.fractionLength(1))))分")
-                            .font(.caption2).foregroundStyle(.blue).padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 3))
-                    }
-                    Spacer(); Image(systemName: "ellipsis").font(.caption).foregroundStyle(.secondary)
-                }
-                HStack(alignment: .top, spacing: 10) {
-                    Text(post.displayContent).font(.subheadline).fontWeight(.medium).lineSpacing(2).lineLimit(5).multilineTextAlignment(.leading)
-                    if let image = post.previewURL { RemoteImage(url: image, height: 82, cornerRadius: 6).frame(width: 112) }
-                }
+        Group {
+            if isFeaturedBilibili {
+                bilibiliFeaturedCard
+            } else {
+                bilibiliCompactCard
             }
-        }.padding(.horizontal, 14).padding(.vertical, 12).contentShape(Rectangle())
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var bilibiliFeaturedCard: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            if let image = post.previewURL {
+                RemoteImage(url: image, height: 194, cornerRadius: 8)
+                    .frame(maxWidth: .infinity)
+            }
+
+            Text(post.bilibiliTitle)
+                .font(.system(size: 19, weight: .bold))
+                .lineSpacing(4)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            HStack(spacing: 9) {
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 34)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(post.authorName)
+                            .font(.system(size: 14, weight: .medium))
+                            .lineLimit(1)
+                        if let time = post.formattedTime {
+                            Text(time).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    bilibiliMetrics
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 13))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+    }
+
+    private var bilibiliCompactCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if let image = post.previewURL {
+                RemoteImage(url: image, height: 94, cornerRadius: 7)
+                    .frame(width: 146)
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
+                Text(post.bilibiliTitle)
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineSpacing(3)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 7) {
+                    AvatarView(url: post.avatarURL, name: post.authorName, size: 24)
+                    Text(post.authorName)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    bilibiliMetrics
+                    Spacer(minLength: 0)
+                    if let time = post.formattedTime {
+                        Text(time).lineLimit(1)
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 94, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var bilibiliMetrics: some View {
+        HStack(spacing: 12) {
+            if let views = post.meta?.metrics?.views {
+                Label(views.formattedFeedCount, systemImage: "play")
+            }
+            if let replies = post.meta?.metrics?.replies {
+                Label(replies.formattedFeedCount, systemImage: "text.bubble")
+            }
+        }
+        .labelStyle(.titleAndIcon)
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
     }
 
     private var rssCard: some View {
