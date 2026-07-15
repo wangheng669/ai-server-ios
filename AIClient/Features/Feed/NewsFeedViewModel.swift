@@ -59,7 +59,8 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func loadInitial() async {
-        if !posts.isEmpty && !isSwitchingSource { return }
+        // Keep cached posts visible, but always revalidate the selected source so
+        // returning to a channel never leaves an old snapshot on screen indefinitely.
         await refresh()
     }
 

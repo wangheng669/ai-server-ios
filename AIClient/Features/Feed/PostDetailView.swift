@@ -11,6 +11,7 @@ struct PostDetailView: View {
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
 
     init(post: Post) { _post = State(initialValue: post) }
 
@@ -19,11 +20,13 @@ struct PostDetailView: View {
             if post.isNewYorkTimes { newYorkTimesDetail }
             else if post.sourceName == "X" { xDetail }
             else if post.isBilibili { bilibiliDetail }
+            else if post.sourceName == "知乎" { zhihuDetail }
             else { standardDetail }
         }
-        .navigationTitle(post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : "详情"))
+        .navigationTitle(post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.sourceName == "知乎" ? "" : "详情")))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
+        .toolbar(post.sourceName == "知乎" ? .hidden : .visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(post.sourceName == "知乎")
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if post.sourceName == "X" {
@@ -120,12 +123,6 @@ struct PostDetailView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if let link = post.linkURL {
-                    Button("在纽约时报阅读原文") { openURL(link) }
-                        .font(.system(size: 15, weight: .semibold, design: .serif))
-                        .foregroundStyle(.primary)
-                        .padding(.vertical, 8)
-                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 14)
@@ -170,6 +167,184 @@ struct PostDetailView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 14)
         }
+    }
+
+    private var zhihuDetail: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                zhihuContentToolbar
+                    .padding(.bottom, 10)
+
+                Text(post.zhihuQuestionTitle)
+                    .font(.system(size: 26, weight: .bold))
+                    .tracking(-0.35)
+                    .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !post.hasFullZhihuAnswer {
+                    Text(post.zhihuEditorialDeck)
+                        .font(.system(size: 15.5))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(7)
+                        .padding(.top, 14)
+                }
+
+                HStack(spacing: 10) {
+                    AvatarView(url: post.zhihuAnswerAvatarURL, name: post.zhihuAnswerAuthorName, size: 38)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(post.zhihuAnswerAuthorName)
+                                .font(.system(size: 15, weight: .semibold))
+                            if let headline = post.zhihuAnswerAuthorHeadline {
+                                Text("· \(headline)")
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .font(.system(size: 13))
+                        Text("2026-07-15 · \(post.zhihuReadingMinutes) 分钟阅读")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 18)
+
+                Divider().padding(.top, 18)
+
+                Text("赞同 \(post.zhihuAnswerVoteupCount) · \(post.zhihuAnswerCommentCount) 评论")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 13)
+
+                zhihuArticleBody
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 2)
+            .padding(.bottom, 28)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { zhihuBottomBar }
+    }
+
+    private var zhihuContentToolbar: some View {
+        HStack(spacing: 8) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
+                    .frame(width: 36, height: 44, alignment: .leading)
+            }
+            .foregroundStyle(.primary)
+            .accessibilityLabel("返回")
+
+            HStack(spacing: 5) {
+                Text("知乎")
+                    .foregroundStyle(.blue)
+                    .fontWeight(.semibold)
+                if let hotMeta = post.zhihuHotMeta {
+                    Text("· \(hotMeta)")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .font(.system(size: 14))
+            .minimumScaleFactor(0.82)
+
+            Spacer(minLength: 4)
+
+            if let link = post.linkURL {
+                ShareLink(item: link) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 19))
+                        .frame(width: 40, height: 44)
+                }
+                .foregroundStyle(.primary)
+                .accessibilityLabel("分享回答")
+            }
+
+            Menu {
+                Button("在知乎查看原回答") { openOriginal() }
+                if let link = post.linkURL {
+                    ShareLink(item: link) { Label("分享回答", systemImage: "square.and.arrow.up") }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(width: 36, height: 44, alignment: .trailing)
+            }
+            .foregroundStyle(.primary)
+            .accessibilityLabel("更多")
+        }
+        .frame(height: 44)
+    }
+
+    private var zhihuArticleBody: some View {
+        let paragraphs = post.zhihuArticleParagraphs
+        return LazyVStack(alignment: .leading, spacing: 20) {
+            if let first = paragraphs.first {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(String(first.prefix(1)))
+                        .font(.system(size: 52, weight: .medium))
+                        .frame(width: 44, alignment: .leading)
+                    Text(String(first.dropFirst()))
+                        .font(.system(size: 16))
+                        .lineSpacing(7)
+                }
+                .textSelection(.enabled)
+            }
+
+            if paragraphs.count > 2 {
+                Text("一、循环双覆盖猜想是什么？")
+                    .font(.system(size: 19, weight: .bold))
+                    .padding(.leading, 14)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(Color.blue).frame(width: 3, height: 24)
+                    }
+            }
+
+            ForEach(Array(paragraphs.dropFirst().enumerated()), id: \.offset) { index, paragraph in
+                if index == 1, paragraphs.count > 3 {
+                    Text("“ \(paragraph)")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(7)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                } else {
+                    Text(paragraph)
+                        .font(.system(size: 16))
+                        .lineSpacing(7)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var zhihuBottomBar: some View {
+        HStack(spacing: 0) {
+            zhihuAction("hand.thumbsup", "赞同 \(post.zhihuAnswerVoteupCount)", tint: .blue)
+            Divider().frame(height: 24)
+            zhihuAction("bubble", "\(post.zhihuAnswerCommentCount)")
+            Divider().frame(height: 24)
+            zhihuAction("bookmark", "收藏")
+            Divider().frame(height: 24)
+            Button { openOriginal() } label: {
+                Label("原文", systemImage: "doc.text.magnifyingglass")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(.secondary)
+        .frame(height: 52)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private func zhihuAction(_ icon: String, _ title: String, tint: Color? = nil) -> some View {
+        Button {} label: {
+            Label(title, systemImage: icon)
+                .frame(maxWidth: .infinity)
+        }
+        .foregroundStyle(tint ?? .secondary)
     }
 
     private var bilibiliDetail: some View {

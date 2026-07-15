@@ -19,10 +19,11 @@ private struct EditorialRootView: View {
     }()
     @Environment(\.openURL) private var openURL
     @State private var marketShowsDetail = false
+    @State private var feedShowsDetail = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NewsFeedView()
+            NewsFeedView(showsDetail: $feedShowsDetail)
                 .tag(RootTab.observation)
 
             MarketView(showsDetail: $marketShowsDetail)
@@ -30,7 +31,7 @@ private struct EditorialRootView: View {
         }
         .toolbar(.hidden, for: .tabBar)
         .overlay(alignment: .bottom) {
-            if !marketShowsDetail {
+            if !marketShowsDetail && !feedShowsDetail {
                 EditorialTabBar(selected: selectedTab) { tab in
                     if tab == .events {
                         open("events")

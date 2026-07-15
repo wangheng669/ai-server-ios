@@ -73,7 +73,8 @@ final class PostDecodingTests: XCTestCase {
             "meta": {
               "zhihu_heat": "119 万热度",
               "zhihu_answers": 15,
-              "zhihu_answer_excerpt": "这是高赞回答的摘要。",
+              "zhihu_answer_excerpt": "这是高赞回答的摘要。\n\n第二段。",
+              "zhihu_answer_content": "这是完整回答第一段。\n\n这是完整回答第二段，内容更长。",
               "zhihu_answer_author": {
                 "name": "张俊林",
                 "headline": "AI 算法研究员",
@@ -90,7 +91,11 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertEqual(post.zhihuQuestionTitle, "如何评价新的 AI 模型？")
         XCTAssertEqual(post.zhihuTopicLabel, "人工智能")
-        XCTAssertEqual(post.zhihuAnswerPreview, "这是高赞回答的摘要。")
+        XCTAssertEqual(post.zhihuAnswerPreview, "这是高赞回答的摘要。\n\n第二段。")
+        XCTAssertEqual(post.zhihuCompactAnswerPreview, "这是高赞回答的摘要。 第二段。")
+        XCTAssertEqual(post.zhihuAnswerBody, "这是完整回答第一段。\n\n这是完整回答第二段，内容更长。")
+        XCTAssertTrue(post.hasFullZhihuAnswer)
+        XCTAssertEqual(post.zhihuArticleParagraphs.count, 2)
         XCTAssertEqual(post.zhihuAnswerAuthorName, "张俊林")
         XCTAssertEqual(post.zhihuAnswerAuthorHeadline, "AI 算法研究员")
         XCTAssertTrue(post.hasZhihuAnswer)
@@ -110,6 +115,7 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.zhihuAnswerAuthorName, "知乎热榜")
         XCTAssertEqual(post.zhihuAnswerAuthorHeadline, "今日热榜")
         XCTAssertFalse(post.hasZhihuAnswer)
+        XCTAssertFalse(post.hasFullZhihuAnswer)
     }
 
     func testZhihuAnswerWithoutAvatarDoesNotReuseSourceAvatar() throws {

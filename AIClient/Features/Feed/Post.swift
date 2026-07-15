@@ -160,6 +160,17 @@ struct Post: Decodable, Identifiable, Hashable {
         }
         return "打开查看高赞回答与完整讨论。"
     }
+    var zhihuAnswerBody: String {
+        clean(meta?.zhihuAnswerContent) ?? zhihuAnswerPreview
+    }
+    var hasFullZhihuAnswer: Bool {
+        clean(meta?.zhihuAnswerContent) != nil
+    }
+    var zhihuCompactAnswerPreview: String {
+        zhihuAnswerPreview
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     var hasZhihuAnswer: Bool {
         guard let excerpt = clean(meta?.zhihuAnswerExcerpt) else { return false }
         return excerpt != zhihuQuestionTitle
@@ -180,6 +191,47 @@ struct Post: Decodable, Identifiable, Hashable {
             return clean(meta?.zhihuAnswerAuthor?.avatarURL).flatMap(MediaURL.image)
         }
         return avatarURL
+    }
+    var zhihuAnswerVoteupCount: Int { max(meta?.zhihuAnswerVoteupCount ?? 0, 0) }
+    var zhihuAnswerCommentCount: Int { max(meta?.zhihuAnswerCommentCount ?? 0, 0) }
+    var zhihuReadingMinutes: Int {
+        max(1, Int(ceil(Double(zhihuAnswerBody.count) / 350.0)))
+    }
+    var zhihuArticleParagraphs: [String] {
+        let normalized = zhihuAnswerBody
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let explicit = normalized
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if explicit.count > 1 { return explicit }
+
+        let sentences = normalized
+            .replacingOccurrences(of: #"(?<=[。！？])\s*"#, with: "\n", options: .regularExpression)
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard sentences.count > 2 else { return [normalized] }
+
+        var paragraphs: [String] = []
+        var current = ""
+        for sentence in sentences {
+            if !current.isEmpty { current += " " }
+            current += sentence
+            if current.count >= 72 {
+                paragraphs.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { paragraphs.append(current) }
+        return paragraphs
+    }
+    var zhihuEditorialDeck: String {
+        let first = zhihuAnswerPreview
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return first.count > 72 ? String(first.prefix(72)) + "…" : first
     }
     var isBilibili: Bool { sourceName == "B站" }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
@@ -284,6 +336,7 @@ struct PostMeta: Decodable, Hashable {
     let zhihuQuestionID: String?
     let zhihuURL: String?
     let zhihuAnswerExcerpt: String?
+    let zhihuAnswerContent: String?
     let zhihuAnswerAuthor: ZhihuAnswerAuthor?
     let zhihuAnswerVoteupCount: Int?
     let zhihuAnswerCommentCount: Int?
@@ -297,6 +350,7 @@ struct PostMeta: Decodable, Hashable {
         case zhihuQuestionID = "zhihu_question_id"
         case zhihuURL = "zhihu_url"
         case zhihuAnswerExcerpt = "zhihu_answer_excerpt"
+        case zhihuAnswerContent = "zhihu_answer_content"
         case zhihuAnswerAuthor = "zhihu_answer_author"
         case zhihuAnswerVoteupCount = "zhihu_answer_voteup_count"
         case zhihuAnswerCommentCount = "zhihu_answer_comment_count"

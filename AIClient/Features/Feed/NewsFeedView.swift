@@ -4,6 +4,7 @@ import WebKit
 enum RootTab: Hashable { case observation, market, events }
 
 struct NewsFeedView: View {
+    @Binding private var showsDetail: Bool
     @StateObject private var model = NewsFeedViewModel()
     @State private var path: [Post] = []
     @State private var isShowingLaunchCover = true
@@ -14,6 +15,12 @@ struct NewsFeedView: View {
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
+
+    init(showsDetail: Binding<Bool> = .constant(false)) {
+        _showsDetail = showsDetail
+        WeiboSessionCookieStore.importFromEnvironmentIfPresent()
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -50,6 +57,12 @@ struct NewsFeedView: View {
         .onChange(of: model.sourceContentRevision) { _, _ in
             animateSourceContentEntrance()
         }
+        .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
+            showsDetail = !isEmpty
+        }
+        .onDisappear {
+            showsDetail = false
+        }
         .overlay {
             if isShowingLaunchCover {
                 LaunchCoverView()
@@ -59,6 +72,13 @@ struct NewsFeedView: View {
         }
         .task(id: model.source) {
             await model.loadInitial()
+            #if DEBUG
+            if opensZhihuDetailPreview,
+               path.isEmpty,
+               let first = model.posts.first(where: { $0.sourceName == "知乎" }) {
+                path = [first]
+            }
+            #endif
             guard isShowingLaunchCover, !Task.isCancelled else { return }
             try? await Task.sleep(for: .milliseconds(650))
             guard !Task.isCancelled else { return }
@@ -320,6 +340,7 @@ private struct EmbeddedWebPage: View {
     let url: URL
     let source: FeedSource
     @StateObject private var model = EmbeddedWebViewModel()
+    @State private var isShowingWeiboAccountMenu = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -349,6 +370,66 @@ private struct EmbeddedWebPage: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+            if source == .weibo {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if model.isAuthenticating {
+                            model.finishWeiboLogin()
+                        } else if model.isWeiboLoggedIn {
+                            isShowingWeiboAccountMenu = true
+                        } else {
+                            model.beginWeiboLogin()
+                        }
+                    } label: { weiboAccountButtonLabel }
+                    .accessibilityLabel(model.isAuthenticating ? "完成微博登录" : (model.isWeiboLoggedIn ? "微博账号" : "登录微博"))
+                }
+            }
+        }
+        .confirmationDialog("微博账号", isPresented: $isShowingWeiboAccountMenu, titleVisibility: .visible) {
+            Button("重新登录") { model.beginWeiboLogin() }
+            Button("退出登录", role: .destructive) { model.logoutWeibo() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            if let displayName = model.weiboDisplayName {
+                Text("当前账号：\(displayName)")
+            }
+        }
+    }
+
+    @ViewBuilder private var weiboAccountButtonLabel: some View {
+        if let avatarURL = model.weiboAvatarURL {
+            AsyncImage(url: avatarURL) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Image(systemName: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle")
+            }
+            .frame(width: 30, height: 30)
+            .clipShape(Circle())
+            .overlay { Circle().stroke(.quaternary, lineWidth: 0.5) }
+        } else if let initial = model.weiboAccountInitial {
+            Text(initial)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(
+                    LinearGradient(
+                        colors: [Color(red: 1, green: 0.35, blue: 0.18), Color(red: 0.88, green: 0.08, blue: 0.16)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: Circle()
+                )
+                .overlay { Circle().stroke(.white.opacity(0.35), lineWidth: 0.5) }
+        } else if model.isWeiboLoggedIn {
+            Text("微")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Color.red, in: Circle())
+        } else {
+            Image(systemName: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(model.isAuthenticating ? Color.green : Color.primary)
         }
     }
 }
@@ -357,10 +438,166 @@ private struct EmbeddedWebPage: View {
 private final class EmbeddedWebViewModel: ObservableObject {
     @Published var isLoading = true
     @Published var estimatedProgress = 0.0
+    @Published var isAuthenticating = false
+    @Published var isWeiboLoggedIn = false
+    @Published var weiboAvatarURL: URL?
+    @Published var weiboDisplayName: String? = WeiboSessionCookieStore.storedDisplayName
+    var weiboAccountInitial: String? {
+        weiboDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init)?.uppercased()
+    }
     weak var webView: WKWebView?
+    private var returnURL: URL?
+    private var isFetchingAvatar = false
 
     func reload() {
         webView?.reload()
+    }
+
+    func rememberReturnURL(_ url: URL) {
+        if returnURL == nil { returnURL = url }
+    }
+
+    func beginWeiboLogin() {
+        guard let webView else { return }
+        if let current = webView.url, !isWeiboLoginURL(current) { rememberReturnURL(current) }
+        isAuthenticating = true
+        var components = URLComponents(string: "https://passport.weibo.com/sso/signin")!
+        components.queryItems = [
+            URLQueryItem(name: "entry", value: "wapsso"),
+            URLQueryItem(name: "source", value: "wapssowb"),
+            URLQueryItem(name: "url", value: returnURL?.absoluteString ?? "https://m.weibo.cn/")
+        ]
+        webView.load(URLRequest(url: components.url!))
+    }
+
+    func finishWeiboLogin() {
+        isAuthenticating = false
+        let destination = returnURL ?? URL(string: "https://s.weibo.com/top/summary")!
+        returnURL = nil
+        if let cookieStore = webView?.configuration.websiteDataStore.httpCookieStore {
+            refreshWeiboSession(from: cookieStore, persist: true)
+        }
+        webView?.load(URLRequest(url: destination))
+    }
+
+    func refreshWeiboSession(from cookieStore: WKHTTPCookieStore, persist: Bool = false) {
+        cookieStore.getAllCookies { [weak self] cookies in
+            let authenticationNames: Set<String> = ["SUB", "SUBP", "WBPSESS"]
+            let isLoggedIn = cookies.contains { cookie in
+                authenticationNames.contains(cookie.name) &&
+                (cookie.domain.lowercased().contains("weibo") || cookie.domain.lowercased().contains("sina"))
+            }
+            Task { @MainActor in
+                self?.isWeiboLoggedIn = isLoggedIn
+                if persist, isLoggedIn {
+                    WeiboSessionCookieStore.store(cookies: cookies)
+                }
+            }
+        }
+    }
+
+    func logoutWeibo() {
+        guard let webView else { return }
+        isAuthenticating = false
+        isWeiboLoggedIn = false
+        weiboAvatarURL = nil
+        weiboDisplayName = nil
+        returnURL = nil
+        WeiboSessionCookieStore.clear()
+
+        let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+        cookieStore.getAllCookies { cookies in
+            let sessionCookies = cookies.filter { cookie in
+                let domain = cookie.domain.lowercased()
+                return domain.contains("weibo") || domain.contains("sina")
+            }
+            let group = DispatchGroup()
+            for cookie in sessionCookies {
+                group.enter()
+                cookieStore.delete(cookie) { group.leave() }
+            }
+            group.notify(queue: .main) {
+                webView.reload()
+            }
+        }
+    }
+
+    func captureAccountAvatar(from webView: WKWebView) {
+        let script = #"""
+        (() => {
+          const configured = window.$CONFIG?.avatar_large || window.$CONFIG?.avatar || null;
+          const displayName = window.$CONFIG?.screen_name || window.$CONFIG?.nick || null;
+          if (configured || displayName) return { avatar: configured, displayName };
+          const selectors = [
+            'header img[class*="avatar"]',
+            'nav img[class*="avatar"]',
+            '[class*="user"] img[class*="avatar"]',
+            'img[class*="Avatar"]'
+          ];
+          for (const selector of selectors) {
+            const image = document.querySelector(selector);
+            if (image?.src) return { avatar: image.src, displayName };
+          }
+          return null;
+        })();
+        """#
+        webView.evaluateJavaScript(script) { [weak self] result, _ in
+            guard let profile = result as? [String: Any] else { return }
+            Task { @MainActor in
+                if let name = profile["displayName"] as? String, !name.isEmpty {
+                    self?.weiboDisplayName = name
+                    self?.isWeiboLoggedIn = true
+                }
+                if let raw = profile["avatar"] as? String,
+                   !raw.localizedCaseInsensitiveContains("default_avatar"),
+                   let url = URL(string: raw) {
+                    self?.weiboAvatarURL = url
+                }
+            }
+        }
+    }
+
+    func fetchAccountAvatar(from cookieStore: WKHTTPCookieStore) {
+        guard weiboAvatarURL == nil, !isFetchingAvatar else { return }
+        isFetchingAvatar = true
+        Task {
+            let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+                cookieStore.getAllCookies { continuation.resume(returning: $0) }
+            }
+            var request = URLRequest(url: URL(string: "https://weibo.com/")!)
+            request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+            request.setValue("https://weibo.com/", forHTTPHeaderField: "Referer")
+            let configuration = URLSessionConfiguration.ephemeral
+            let cookieStorage = HTTPCookieStorage()
+            cookies.forEach(cookieStorage.setCookie)
+            configuration.httpCookieStorage = cookieStorage
+            configuration.httpShouldSetCookies = true
+            let session = URLSession(configuration: configuration)
+            defer { isFetchingAvatar = false }
+            guard let (data, _) = try? await session.data(for: request),
+                  let html = String(data: data, encoding: .utf8) else { return }
+
+            if let displayName = jsonString(named: "screen_name", in: html) {
+                weiboDisplayName = displayName
+                WeiboSessionCookieStore.store(displayName: displayName)
+            }
+            let avatarFields = ["avatar_hd", "avatar_large", "profile_image_url"]
+            for field in avatarFields {
+                guard let value = jsonString(named: field, in: html),
+                      !value.localizedCaseInsensitiveContains("default_avatar"),
+                      let url = URL(string: value) else { continue }
+                weiboAvatarURL = url
+                break
+            }
+        }
+    }
+
+    private func jsonString(named field: String, in source: String) -> String? {
+        guard let marker = source.range(of: "\"\(field)\":\"") else { return nil }
+        let remainder = source[marker.upperBound...]
+        guard let end = remainder.firstIndex(of: "\"") else { return nil }
+        return remainder[..<end]
+            .replacingOccurrences(of: #"\/"#, with: "/")
     }
 }
 
@@ -375,6 +612,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.allowsInlineMediaPlayback = true
         if isWeiboURL(url) {
             configuration.userContentController.addUserScript(
                 WKUserScript(
@@ -392,7 +630,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         context.coordinator.observe(webView)
         model.webView = webView
-        webView.load(URLRequest(url: url))
+        context.coordinator.load(url, in: webView)
         return webView
     }
 
@@ -403,6 +641,14 @@ private struct EmbeddedWebView: UIViewRepresentable {
 
     private static let weiboEmbeddedStyleScript = #"""
     (() => {
+      const isAuthenticationPage =
+        location.hostname === 'passport.weibo.com' ||
+        location.hostname.endsWith('.passport.weibo.com') ||
+        location.hostname === 'passport.weibo.cn' ||
+        location.hostname.endsWith('.passport.weibo.cn') ||
+        location.pathname.includes('/signin');
+      if (isAuthenticationPage) return;
+
       const styleID = 'zhongxiang-weibo-embedded-style';
       const installStyle = () => {
         if (document.getElementById(styleID)) return;
@@ -496,7 +742,12 @@ private struct EmbeddedWebView: UIViewRepresentable {
       const removeBottomPromotionBar = () => {
         document.querySelectorAll('span, div, a, button').forEach((element) => {
           const label = (element.textContent || '').replace(/\s+/g, ' ').trim();
-          if (label !== '问智搜' && !/^和当前\d+人一起讨论$/.test(label)) return;
+          const isBottomAction =
+            label === '问智搜' ||
+            label === '讨论' ||
+            label === '和大家一起讨论' ||
+            /^和当前\d+人一起讨论$/.test(label);
+          if (!isBottomAction) return;
 
           let candidate = element;
           while (candidate && candidate !== document.body) {
@@ -517,12 +768,30 @@ private struct EmbeddedWebView: UIViewRepresentable {
         });
       };
 
+      const keepVideosInline = () => {
+        document.querySelectorAll('video').forEach((video) => {
+          video.setAttribute('playsinline', '');
+          video.setAttribute('webkit-playsinline', '');
+          video.playsInline = true;
+
+          const player = video.parentElement;
+          if (player && !player.dataset.zhongxiangInlineBounds) {
+            player.dataset.zhongxiangInlineBounds = '1';
+            player.style.setProperty('width', '100%', 'important');
+            player.style.setProperty('height', '46vh', 'important');
+            player.style.setProperty('max-height', '46vh', 'important');
+            player.style.setProperty('overflow', 'hidden', 'important');
+          }
+        });
+      };
+
       const updateEmbeddedLayout = () => {
         installStyle();
         hideTopNavigation();
         removePromotions();
         hideBrokenImages();
         removeBottomPromotionBar();
+        keepVideosInline();
       };
       updateEmbeddedLayout();
       let updateQueued = false;
@@ -542,8 +811,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
     """#
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        guard webView.url == nil else { return }
-        webView.load(URLRequest(url: url))
+        context.coordinator.load(url, in: webView)
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -555,6 +823,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let model: EmbeddedWebViewModel
         private var progressObservation: NSKeyValueObservation?
+        private var didBeginLoad = false
 
         init(model: EmbeddedWebViewModel) {
             self.model = model
@@ -569,6 +838,21 @@ private struct EmbeddedWebView: UIViewRepresentable {
             }
         }
 
+        func load(_ url: URL, in webView: WKWebView) {
+            guard !didBeginLoad else { return }
+            didBeginLoad = true
+            model.rememberReturnURL(url)
+            Task { @MainActor in
+                if isWeiboHost(url.host) {
+                    let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+                    await WeiboSessionCookieStore.install(in: cookieStore)
+                    model.refreshWeiboSession(from: cookieStore)
+                    model.fetchAccountAvatar(from: cookieStore)
+                }
+                webView.load(URLRequest(url: url))
+            }
+        }
+
         func stopObserving() {
             progressObservation?.invalidate()
             progressObservation = nil
@@ -579,7 +863,13 @@ private struct EmbeddedWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { @MainActor in model.isLoading = false }
+            Task { @MainActor in
+                model.isLoading = false
+                model.captureAccountAvatar(from: webView)
+                let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+                model.refreshWeiboSession(from: cookieStore, persist: !model.isAuthenticating)
+                model.fetchAccountAvatar(from: cookieStore)
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -588,6 +878,23 @@ private struct EmbeddedWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             Task { @MainActor in model.isLoading = false }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if isWeiboLoginURL(navigationAction.request.url) {
+                Task { @MainActor in
+                    if let current = webView.url, !isWeiboLoginURL(current) {
+                        model.rememberReturnURL(current)
+                    }
+                }
+                decisionHandler(.allow)
+            } else {
+                decisionHandler(.allow)
+            }
         }
 
         func webView(
@@ -602,6 +909,166 @@ private struct EmbeddedWebView: UIViewRepresentable {
             return nil
         }
     }
+}
+
+private struct StoredWebCookie: Codable {
+    let domain: String
+    let expirationDate: Double?
+    let httpOnly: Bool?
+    let name: String
+    let path: String
+    let secure: Bool?
+    let value: String
+
+    init(
+        domain: String,
+        expirationDate: Double?,
+        httpOnly: Bool?,
+        name: String,
+        path: String,
+        secure: Bool?,
+        value: String
+    ) {
+        self.domain = domain
+        self.expirationDate = expirationDate
+        self.httpOnly = httpOnly
+        self.name = name
+        self.path = path
+        self.secure = secure
+        self.value = value
+    }
+
+    init(cookie: HTTPCookie) {
+        domain = cookie.domain
+        expirationDate = cookie.expiresDate?.timeIntervalSince1970
+        httpOnly = cookie.isHTTPOnly
+        name = cookie.name
+        path = cookie.path
+        secure = cookie.isSecure
+        value = cookie.value
+    }
+
+    var httpCookie: HTTPCookie? {
+        var properties: [HTTPCookiePropertyKey: Any] = [
+            .domain: domain,
+            .name: name,
+            .path: path,
+            .value: value
+        ]
+        if let expirationDate {
+            properties[.expires] = Date(timeIntervalSince1970: expirationDate)
+        }
+        if secure == true { properties[.secure] = "TRUE" }
+        if httpOnly == true { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+        return HTTPCookie(properties: properties)
+    }
+}
+
+private enum WeiboSessionCookieStore {
+    private static let defaultsKey = "weibo.session.cookies"
+    private static let environmentKey = "WEIBO_COOKIES_JSON"
+    private static let displayNameDefaultsKey = "weibo.session.displayName"
+    private static let displayNameEnvironmentKey = "WEIBO_DISPLAY_NAME"
+    private static let logoutSuppressedKey = "weibo.session.logoutSuppressed"
+
+    static var storedDisplayName: String? {
+        importFromEnvironmentIfPresent()
+        return UserDefaults.standard.string(forKey: displayNameDefaultsKey)
+    }
+
+    static func store(displayName: String) {
+        UserDefaults.standard.set(displayName, forKey: displayNameDefaultsKey)
+    }
+
+    static func store(cookies: [HTTPCookie]) {
+        let weiboCookies = cookies.filter { cookie in
+            let domain = cookie.domain.lowercased()
+            return domain.contains("weibo") || domain.contains("sina")
+        }
+        guard !weiboCookies.isEmpty,
+              let data = try? JSONEncoder().encode(weiboCookies.map(StoredWebCookie.init(cookie:))) else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+        UserDefaults.standard.set(false, forKey: logoutSuppressedKey)
+    }
+
+    static func importFromEnvironmentIfPresent() {
+        guard !UserDefaults.standard.bool(forKey: logoutSuppressedKey) else { return }
+        if let displayName = ProcessInfo.processInfo.environment[displayNameEnvironmentKey],
+           !displayName.isEmpty {
+            store(displayName: displayName)
+        }
+        guard let raw = ProcessInfo.processInfo.environment[environmentKey],
+              let data = raw.data(using: .utf8),
+              (try? JSONDecoder().decode([StoredWebCookie].self, from: data)) != nil else { return }
+        UserDefaults.standard.set(data, forKey: defaultsKey)
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        UserDefaults.standard.removeObject(forKey: displayNameDefaultsKey)
+        UserDefaults.standard.set(true, forKey: logoutSuppressedKey)
+    }
+
+    @MainActor
+    static func install(in store: WKHTTPCookieStore) async {
+        let data = importedOrStoredData()
+        guard let data,
+              let cookies = try? JSONDecoder().decode([StoredWebCookie].self, from: data) else { return }
+        var webCookies = cookies.compactMap(\.httpCookie)
+        let sharedAuthNames: Set<String> = ["SUB", "SUBP", "SCF", "ALF", "WBPSESS", "XSRF-TOKEN"]
+        for domain in [".weibo.com", ".weibo.cn"] {
+            webCookies += cookies.compactMap { cookie in
+                guard sharedAuthNames.contains(cookie.name) else { return nil }
+                return StoredWebCookie(
+                    domain: domain,
+                    expirationDate: cookie.expirationDate,
+                    httpOnly: cookie.httpOnly,
+                    name: cookie.name,
+                    path: cookie.path,
+                    secure: cookie.secure,
+                    value: cookie.value
+                ).httpCookie
+            }
+        }
+        if let ulv = cookies.first(where: { $0.name == "ULV" }),
+           let milliseconds = ulv.value.split(separator: ":").first,
+           let loginTime = Int64(milliseconds).map({ $0 / 1_000 }) {
+            for domain in [".weibo.com", ".weibo.cn"] {
+                webCookies.append(StoredWebCookie(
+                    domain: domain,
+                    expirationDate: cookies.first(where: { $0.name == "SUB" })?.expirationDate,
+                    httpOnly: false,
+                    name: "SSOLoginState",
+                    path: "/",
+                    secure: true,
+                    value: String(loginTime)
+                ).httpCookie!)
+            }
+        }
+        for cookie in webCookies {
+            await withCheckedContinuation { continuation in
+                store.setCookie(cookie) { continuation.resume() }
+            }
+        }
+    }
+
+    private static func importedOrStoredData() -> Data? {
+        importFromEnvironmentIfPresent()
+        return UserDefaults.standard.data(forKey: defaultsKey)
+    }
+}
+
+private func isWeiboHost(_ host: String?) -> Bool {
+    guard let host = host?.lowercased() else { return false }
+    return host == "weibo.com" || host.hasSuffix(".weibo.com") || host == "weibo.cn" || host.hasSuffix(".weibo.cn")
+}
+
+private func isWeiboLoginURL(_ url: URL?) -> Bool {
+    guard let url, let host = url.host?.lowercased() else { return false }
+    if host == "passport.weibo.cn" || host.hasSuffix(".passport.weibo.cn") { return true }
+    if host == "passport.weibo.com" || host.hasSuffix(".passport.weibo.com") { return true }
+    if host == "login.sina.com.cn" || host.hasSuffix(".login.sina.com.cn") { return true }
+    return isWeiboHost(host) && url.path.lowercased().contains("login")
 }
 
 private struct FeedChromeScrollModifier: ViewModifier {
@@ -786,84 +1253,66 @@ private struct NewsCardView: View {
     }
 
     private var zhihuCard: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 8) {
-                if let topic = post.zhihuTopicLabel {
-                    Text(topic)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(.blue)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
-                Spacer(minLength: 4)
-                if let hotMeta = post.zhihuHotMeta {
-                    Text(hotMeta)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
+        VStack(alignment: .leading, spacing: 9) {
+            zhihuHotLine
 
             Text(post.zhihuQuestionTitle)
-                .font(.system(size: 18, weight: .semibold))
-                .lineSpacing(3)
+                .font(.system(size: 17, weight: .semibold))
+                .lineSpacing(2)
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)
 
-            zhihuAnswerPanel
-
-            HStack(spacing: 9) {
-                AvatarView(url: post.zhihuAnswerAvatarURL, name: post.zhihuAnswerAuthorName, size: 30)
+            HStack(spacing: 8) {
+                AvatarView(url: post.zhihuAnswerAvatarURL, name: post.zhihuAnswerAuthorName, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(post.zhihuAnswerAuthorName)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(1)
                     if let headline = post.zhihuAnswerAuthorHeadline {
                         Text(headline)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 4)
+                zhihuMetrics
                 ZhihuBookmarkButton(postID: post.id)
                 zhihuMenu
             }
+
+            Text(post.zhihuCompactAnswerPreview)
+                .font(.system(size: 14))
+                .foregroundStyle(.primary.opacity(0.88))
+                .lineSpacing(3)
+                .lineLimit(post.hasZhihuAnswer ? 4 : 3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(post.hasZhihuAnswer ? "高赞回答，\(post.zhihuCompactAnswerPreview)" : post.zhihuCompactAnswerPreview)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+        .padding(.vertical, 11)
         .contentShape(Rectangle())
     }
 
-    private var zhihuAnswerPanel: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Text(post.hasZhihuAnswer ? "高赞回答" : "热榜概览")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(.blue)
-                Spacer(minLength: 4)
-                zhihuMetrics
+    @ViewBuilder private var zhihuHotLine: some View {
+        if let hotMeta = post.zhihuHotMeta {
+            HStack(spacing: 5) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.secondary.opacity(0.72))
+                Text(hotMeta)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-
-            HStack(alignment: .top, spacing: 10) {
-                Capsule()
-                    .fill(Color.blue)
-                    .frame(width: 3)
-                Text(post.zhihuAnswerPreview)
-                    .font(.system(size: 15.5))
-                    .foregroundStyle(.primary.opacity(0.84))
-                    .lineSpacing(3)
-                    .lineLimit(post.hasZhihuAnswer ? 4 : 3)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            .accessibilityElement(children: .combine)
+        } else if let topic = post.zhihuTopicLabel {
+            Text(topic)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.blue)
         }
-        .padding(.vertical, 9)
-        .padding(.horizontal, 10)
-        .background(Color.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var zhihuMetrics: some View {
@@ -874,7 +1323,7 @@ private struct NewsCardView: View {
                 votes.map { "赞同 \($0.formattedFeedCount)" },
                 comments.map { "\($0.formattedFeedCount) 评论" }
             ].compactMap { $0 }.joined(separator: " · "))
-                .font(.system(size: 12.5))
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         } else {
@@ -882,7 +1331,7 @@ private struct NewsCardView: View {
                 post.zhihuAnswerCount.map { "\($0) 回答" },
                 post.formattedTime
             ].compactMap { $0 }.joined(separator: " · "))
-                .font(.system(size: 12.5))
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -904,6 +1353,7 @@ private struct NewsCardView: View {
                     .frame(width: 36, height: 44)
                     .contentShape(Rectangle())
             }
+            .tint(.secondary)
             .accessibilityLabel("更多操作")
         }
     }
