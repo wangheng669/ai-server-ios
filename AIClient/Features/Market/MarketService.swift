@@ -36,7 +36,15 @@ struct MarketService {
     }
 
     private func request<Response: Decodable>(_ url: URL, as type: Response.Type) async throws -> Response {
-        let (data, response) = try await session.data(from: url)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(from: url)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw MarketServiceError.transport(error)
+        }
         guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
         do { return try JSONDecoder().decode(type, from: data) }
@@ -49,6 +57,7 @@ enum MarketServiceError: LocalizedError {
     case invalidResponse
     case httpStatus(Int)
     case decoding(Error)
+    case transport(Error)
 
     var errorDescription: String? {
         switch self {
@@ -56,23 +65,33 @@ enum MarketServiceError: LocalizedError {
         case .invalidResponse: "行情服务响应无效"
         case .httpStatus(let status): "行情服务暂不可用（\(status)）"
         case .decoding: "行情数据格式不兼容"
+        case .transport: "无法连接行情服务，请检查网络后重试"
         }
     }
 }
 
 @MainActor
 final class MarketRealtimeClient {
+    enum Status: Equatable {
+        case stopped
+        case connecting
+        case connected
+        case reconnecting
+    }
+
     private let baseURL: URL
     private var socket: URLSessionWebSocketTask?
     private var task: Task<Void, Never>?
     private var active = false
     var onQuote: ((MarketQuote) -> Void)?
+    var onStatus: ((Status) -> Void)?
 
     init(baseURL: URL) { self.baseURL = baseURL }
 
     func start() {
         guard !active else { return }
         active = true
+        onStatus?(.connecting)
         connect()
     }
 
@@ -82,6 +101,7 @@ final class MarketRealtimeClient {
         task = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        onStatus?(.stopped)
     }
 
     private func connect() {
@@ -91,6 +111,12 @@ final class MarketRealtimeClient {
             let socket = URLSession.shared.webSocketTask(with: url)
             self.socket = socket
             socket.resume()
+            socket.sendPing { [weak self] error in
+                Task { @MainActor in
+                    guard let self, self.active else { return }
+                    self.onStatus?(error == nil ? .connected : .reconnecting)
+                }
+            }
             do {
                 while active, !Task.isCancelled {
                     let message = try await socket.receive()
@@ -111,6 +137,7 @@ final class MarketRealtimeClient {
             self.socket = nil
             self.task = nil
             guard active, !Task.isCancelled else { return }
+            self.onStatus?(.reconnecting)
             try? await Task.sleep(for: .seconds(2))
             connect()
         }

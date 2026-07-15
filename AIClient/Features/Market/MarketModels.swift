@@ -12,6 +12,8 @@ struct MarketDashboard: Codable {
     var coreIndices: [MarketQuote]
     var metrics: [MarketQuote]
     var components: [MarketQuote]
+    let componentsMeta: MarketComponentsMeta?
+    let freshness: MarketDashboardFreshness?
     let missingSymbols: [String]
     let ashareOverview: MarketAShareOverview?
     let sentiment: MarketSentiment?
@@ -28,6 +30,19 @@ struct MarketDashboard: Codable {
         if next.trend.isEmpty { next.trend = quotes[index].trend }
         quotes[index] = next
     }
+}
+
+struct MarketComponentsMeta: Codable {
+    let label: String
+    let selectionBasis: String
+}
+
+struct MarketDashboardFreshness: Codable {
+    let latestQuoteAt: String?
+    let latestTimestamp: Int64?
+    let hasOpenMarket: Bool
+    let hasStaleQuotes: Bool
+    let sessions: [String]
 }
 
 struct MarketQuote: Codable, Identifiable, Hashable {
@@ -99,6 +114,9 @@ struct MarketAShareOverview: Codable {
     let breadth: MarketBreadth
     let hotSectors: [MarketSector]
     let generatedAt: String?
+    let fetchedAt: String?
+    let source: String?
+    let cached: Bool?
     let stale: Bool?
 }
 
@@ -122,6 +140,7 @@ struct MarketSector: Codable, Identifiable {
     let changePercent: String
     let direction: String?
     let rank: Int?
+    let lastSeenAt: String?
 
     var percentValue: Double {
         Double(changePercent.replacingOccurrences(of: "%", with: "").replacingOccurrences(of: "+", with: "")) ?? 0
@@ -134,6 +153,8 @@ struct MarketSentiment: Codable {
     let ratingZh: String
     let reasonSummary: String?
     let updatedAt: String?
+    let source: String?
+    let available: Bool?
     let stale: Bool?
 }
 
@@ -189,22 +210,47 @@ enum MarketRange: String, CaseIterable, Identifiable {
 
 extension MarketQuote {
     var freshnessLabel: String {
+        if marketSession == "closed" {
+            return timestamp.map { "截至 \(marketShortTimestamp($0))" } ?? "已收盘"
+        }
         if let delaySeconds, delaySeconds > 0 { return "延迟\(max(1, delaySeconds / 60))分钟" }
         if stale == true { return "数据延迟" }
-        return "实时"
+        return marketSession == "regular" ? "交易中" : "行情更新"
     }
 
     var displayCode: String {
         switch symbol {
         case "^GSPC": "SPX"
         case "^NDX": "NDX"
+        case "^DJI": "DJI"
+        case "000001.SS": "000001.SH"
         case "000300.SS": "000300.SH"
+        case "000688.SS": "000688.SH"
         case "^HSTECH": "HSTECH"
+        case "^HSI": "HSI"
+        case "^N225": "N225"
+        case "^KS11": "KOSPI"
         case "^STOXX50E": "SX5E"
         case "^GDAXI": "DAX"
+        case "^FTSE": "FTSE"
+        case "^FCHI": "CAC40"
         case "^VIX": "VIX"
         case "^TNX": "US10Y"
         default: symbol
         }
     }
+}
+
+func marketShortTimestamp(_ timestamp: Int64) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.dateFormat = "MM-dd HH:mm"
+    return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
+}
+
+func marketISODate(_ value: String?) -> Date? {
+    guard let value else { return nil }
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
 }

@@ -7,9 +7,10 @@ final class MarketStore {
     private(set) var dashboard: MarketDashboard?
     private(set) var charts: [ChartKey: MarketChart] = [:]
     private(set) var loadingCharts: Set<ChartKey> = []
+    private(set) var chartErrors: [ChartKey: String] = [:]
     private(set) var isLoading = false
     private(set) var errorMessage: String?
-    private(set) var lastUpdatedAt: Date?
+    private(set) var realtimeStatus: MarketRealtimeClient.Status = .stopped
 
     private let service: MarketService
     private let realtime: MarketRealtimeClient
@@ -26,8 +27,8 @@ final class MarketStore {
             guard var dashboard = self?.dashboard else { return }
             dashboard.replace(quote)
             self?.dashboard = dashboard
-            self?.lastUpdatedAt = Date()
         }
+        realtime.onStatus = { [weak self] status in self?.realtimeStatus = status }
         realtime.start()
         defer { realtime.stop() }
 
@@ -47,7 +48,6 @@ final class MarketStore {
             let value = try await service.dashboard(refresh: force)
             guard !Task.isCancelled else { return }
             dashboard = value
-            lastUpdatedAt = Date()
             errorMessage = value.missingSymbols.isEmpty ? nil : "部分行情暂未返回"
             MarketSnapshotCache.save(value)
         } catch is CancellationError {
@@ -61,18 +61,42 @@ final class MarketStore {
         let key = ChartKey(symbol: symbol, range: range)
         guard !loadingCharts.contains(key) else { return }
         loadingCharts.insert(key)
+        chartErrors[key] = nil
         defer { loadingCharts.remove(key) }
         do {
             charts[key] = try await service.chart(symbol: symbol, range: range)
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            chartErrors[key] = error.localizedDescription
         }
     }
 
     func chart(symbol: String, range: MarketRange) -> MarketChart? {
         charts[ChartKey(symbol: symbol, range: range)]
+    }
+
+    func chartError(symbol: String, range: MarketRange) -> String? {
+        chartErrors[ChartKey(symbol: symbol, range: range)]
+    }
+
+    var latestQuoteDate: Date? {
+        if let timestamp = dashboard?.freshness?.latestTimestamp, timestamp > 0 {
+            return Date(timeIntervalSince1970: Double(timestamp) / 1000)
+        }
+        let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.metrics ?? []) + (dashboard?.components ?? [])
+        guard let timestamp = quotes.compactMap(\.timestamp).max() else { return nil }
+        return Date(timeIntervalSince1970: Double(timestamp) / 1000)
+    }
+
+    var componentsLatestQuoteDate: Date? {
+        guard let timestamp = dashboard?.components.compactMap(\.timestamp).max() else { return nil }
+        return Date(timeIntervalSince1970: Double(timestamp) / 1000)
+    }
+
+    var hasOpenMarket: Bool {
+        dashboard?.freshness?.hasOpenMarket
+            ?? ((dashboard?.coreIndices ?? []) + (dashboard?.metrics ?? [])).contains { $0.marketSession != "closed" }
     }
 
     func quote(symbol: String) -> MarketQuote? {
@@ -85,6 +109,27 @@ final class MarketStore {
         guard !loadedCache else { return }
         loadedCache = true
         dashboard = MarketSnapshotCache.load()
+    }
+}
+
+@MainActor
+@Observable
+final class MarketWatchlistStore {
+    private static let defaultsKey = "market.watchlist.symbols.v1"
+    private(set) var symbols: Set<String>
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        symbols = Set(defaults.stringArray(forKey: Self.defaultsKey) ?? [])
+    }
+
+    func contains(_ symbol: String) -> Bool { symbols.contains(symbol) }
+
+    func toggle(_ symbol: String) {
+        if symbols.contains(symbol) { symbols.remove(symbol) }
+        else { symbols.insert(symbol) }
+        defaults.set(symbols.sorted(), forKey: Self.defaultsKey)
     }
 }
 struct ChartKey: Hashable {

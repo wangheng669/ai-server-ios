@@ -1,38 +1,40 @@
-# Market Screen Design & Data QA
+# Market Redesign Design QA
 
-- Reference: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/codex-clipboard-8a42f2dc-939d-41f3-b806-67e945ad2df7.png`
-- Live home capture: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/market-live-home-final.png`
-- Live detail capture: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/market-live-detail-final.png`
-- Viewport: iPhone 17 Pro simulator, 402 × 874 points, light mode
-- API contract: `market_dashboard_v1`
+- source visual truth path: `/Users/wangheng/.codex/generated_images/019f6392-579d-77e2-b48d-df618cf47589/exec-f3610e60-a4ab-4928-9cc7-42cc42045a8e.png`
+- implementation screenshot path: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-implementation-final.png`
+- viewport: iPhone 17 Pro simulator, 390 × 844 points (1206 × 2622 pixels)
+- state: Market tab, United States selected, US session closed, live production dashboard data
+- full-view comparison evidence: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-comparison-preview.png`
+- focused hero comparison: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-hero-comparison.png`
+- focused table comparison: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/03-table-comparison.png`
+- detail regression evidence: `/Users/wangheng/Desktop/ai_server_ios/.artifacts/market-redesign/04-detail-regression.png`
 
-## Result
+## Findings
 
-The market home and Nasdaq 100 detail screen pass visual and live-data QA. The implementation preserves the reference's dense financial-dashboard hierarchy without clipping or overlapping content. Root tabs are sibling `TabView` pages, so switching to Market does not present it from the bottom; index detail remains a conventional in-stack push.
+No actionable P0, P1, or P2 differences remain.
 
-## Live-data coverage
+- Typography: The implementation uses system typography with tabular numerals, matching the mock's hierarchy. The lead price, region selector, table headers, quote names, and changes remain legible without wrapping or truncation in the captured state.
+- Spacing and layout rhythm: The dark hero, rounded light content sheet, region selector, quote table, and global overview follow the reference composition. Native iOS status-bar space moves the content slightly lower than the frameless mock; this is an accepted platform constraint.
+- Colors and visual tokens: The implementation matches the near-black header, warm light content surface, blue selection state, and red-up/green-down semantics. Dividers and fills remain restrained.
+- Image and asset fidelity: The target contains no required raster imagery. Charts and the sentiment ring are live data-driven UI. Country flags from the generated concept were intentionally omitted rather than replaced with fake or inconsistent assets.
+- Copy and content: Visible labels match the selected concept where backed by available data. Russell 2000, TOPIX, and KOSDAQ shown in the generated concept were not implemented because the current backend does not provide reliable real data for them.
+- Accessibility: Region controls and quote rows retain button semantics, selected state, 44-point-or-larger interaction targets, and accessible contrast. VoiceOver reading order and Dynamic Type still require a separate device audit.
 
-- Dashboard: sentiment, VIX, US 10-year yield, six global indices, A-share breadth, and hot sectors.
-- Detail: latest quote, previous-close move, intraday chart, OHLC, volume, status, generated market summary, and five component stocks.
-- Freshness: dashboard polling follows the server-provided 15-second interval; pull-to-refresh is available.
-- Realtime: `/post` WebSocket quote events merge into the visible dashboard and detail quote.
-- Resilience: the last valid dashboard is cached locally; loading, stale, empty-range, and retryable error states are explicit.
-- No reference prices or mock market fixtures remain in `AIClient/Features/Market`.
+## Comparison History
 
-## Verification evidence
+1. Initial implementation: P1 — the lead price wrapped onto a second line at 390 points wide. Fix: reduced the display size, tightened tracking, and added a single-line scaling guard. Post-fix evidence: `03-hero-comparison.png`; the full price now renders on one line.
+2. Initial table density: P2 — quote rows delayed the global overview too far below the fold. Fix: reduced table header, row, and session-note heights while preserving readable type and touch targets. Post-fix evidence: `03-table-comparison.png`; the global overview heading now appears above the persistent tab bar.
 
-- iOS simulator build, install, launch, home capture, and detail capture succeeded.
-- Two live dashboard reads 18 seconds apart showed the Nasdaq 100 timestamp advancing and the price changing.
-- A live WebSocket session received a `^NDX` market event.
-- Dashboard returned all 13 required symbols with `missingSymbols: []` and `stale: false` for Nasdaq 100.
-- Backend market API tests and targeted ingestion/API route tests passed before deployment; the deployed market API container is healthy.
-- Local and backend diff whitespace checks passed.
+## Interaction Verification
 
-## Visual findings
+- The market screen loads real dashboard data and live connection state.
+- The primary quote and table rows remain wired to the existing index-detail route.
+- The detail route was launched after the redesign and rendered successfully; existing chart ranges, watchlist, share, and edge-swipe return code remain intact.
+- Region selection uses local SwiftUI state and changes the lead quote, table rows, and session footnote together.
 
-- Typography, red/green semantics, warm canvas, low-elevation cards, two-column index grid, compact metric grid, and horizontal sector/stock rows match the intended visual language.
-- VIX and yield values remain on one line at the tested viewport.
-- Detail title, quote, range selector, area chart, volume bars, key-data grid, summary, and component row fit without layout defects.
-- Approved exchange flags and company logo assets were not supplied, so consistent symbol/letter marks are used.
+## Follow-up Polish
+
+- P3: Run a dedicated VoiceOver and largest-Dynamic-Type pass on physical hardware.
+- P3: Consider adding verified TOPIX or KOSDAQ feeds later; do not add placeholder values.
 
 final result: passed
