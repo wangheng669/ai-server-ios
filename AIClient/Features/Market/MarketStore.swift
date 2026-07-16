@@ -81,7 +81,7 @@ final class MarketStore {
     }
 
     func preloadCharts(symbol: String) async {
-        for range in MarketRange.allCases where range != .day {
+        for range in MarketRange.allCases where range.shouldPreload {
             guard !Task.isCancelled else { return }
             await loadChart(symbol: symbol, range: range)
         }

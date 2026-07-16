@@ -24,7 +24,10 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.week.apiInterval, "1d")
         XCTAssertEqual(MarketRange.week.apiLimit, 8)
         XCTAssertEqual(MarketRange.month.apiInterval, "1d")
-        XCTAssertEqual(MarketRange.maximum.apiLimit, 10_000)
+        XCTAssertEqual(MarketRange.maximum.apiLimit, 2_000)
+        XCTAssertTrue(MarketRange.year.shouldPreload)
+        XCTAssertFalse(MarketRange.fiveYears.shouldPreload)
+        XCTAssertFalse(MarketRange.maximum.shouldPreload)
     }
 
     func testDayRangeKeepsOnlyLatestTradingSession() {

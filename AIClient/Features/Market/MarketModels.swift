@@ -223,7 +223,14 @@ enum MarketRange: String, CaseIterable, Identifiable {
         case .quarter: 128
         case .year: 400
         case .fiveYears: 1_500
-        case .maximum: 10_000
+        case .maximum: 2_000
+        }
+    }
+
+    var shouldPreload: Bool {
+        switch self {
+        case .week, .month, .quarter, .year: true
+        case .day, .fiveYears, .maximum: false
         }
     }
 }
