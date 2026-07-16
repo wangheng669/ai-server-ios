@@ -1007,6 +1007,8 @@ private struct MarketIndexDetailView: View {
                             Text(session.symbol)
                             Text(number(session.price, digits: 2)).fontWeight(.semibold).monospacedDigit()
                             Text(session.formattedPercent).fontWeight(.semibold).monospacedDigit().foregroundStyle(quoteTint(session))
+                            Sparkline(values: session.trend, color: MarketStyle.purple, showsFill: false)
+                                .frame(width: 52, height: 20)
                         }
                         .font(.caption)
                         .padding(.horizontal, 9).padding(.vertical, 6)
