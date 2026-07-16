@@ -30,7 +30,7 @@ private struct EditorialRootView: View {
                 .tag(RootTab.market)
         }
         .toolbar(.hidden, for: .tabBar)
-        .overlay(alignment: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if !marketShowsDetail && !feedShowsDetail {
                 EditorialTabBar(selected: selectedTab) { tab in
                     if tab == .events {

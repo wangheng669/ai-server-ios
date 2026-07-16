@@ -3,19 +3,46 @@ import WebKit
 
 enum RootTab: Hashable { case observation, market, events }
 
+private enum FlashFilter: String, CaseIterable, Identifiable {
+    case all, important, ai, market, policy
+
+    var id: Self { self }
+    var title: String {
+        return switch self {
+        case .all: "全部"
+        case .important: "重要"
+        case .ai: "AI"
+        case .market: "市场"
+        case .policy: "政策"
+        }
+    }
+
+    func matches(_ post: Post) -> Bool {
+        let content = post.displayContent.lowercased()
+        return switch self {
+        case .all: true
+        case .important: post.tagNames.contains("重要")
+        case .ai: ["ai", "人工智能", "大模型", "算力", "芯片", "openai", "gpt"].contains { content.contains($0) }
+        case .market: ["股", "市场", "指数", "涨", "跌", "ipo", "营收", "利润"].contains { content.contains($0) }
+        case .policy: ["政策", "发改委", "工信部", "国务院", "监管", "标准", "方案"].contains { content.contains($0) }
+        }
+    }
+}
+
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @StateObject private var model = NewsFeedViewModel()
     @State private var path: [Post] = []
     @State private var isShowingLaunchCover = true
     @State private var isFeedChromeHidden = false
-    @State private var sourceContentOffset: CGFloat = 0
-    @State private var pendingSourceContentOffset: CGFloat = 14
-    @State private var sourceContentOpacity = 1.0
+    @State private var hasLoadedFeedOnce = false
+    @State private var flashFilter: FlashFilter = .all
+    @State private var expandedFlashIDs: Set<Int> = []
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
+    private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
@@ -26,12 +53,10 @@ struct NewsFeedView: View {
         NavigationStack(path: $path) {
             ZStack(alignment: .top) {
                 content
-                    .id(model.sourceContentRevision)
-                    .offset(x: sourceContentOffset)
-                    .opacity(sourceContentOpacity)
                 feedHeader
                     .zIndex(1)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Post.self) { post in
@@ -49,13 +74,12 @@ struct NewsFeedView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 model.startRealtime()
-                Task { await model.refresh() }
+                if hasLoadedFeedOnce {
+                    Task { await model.refresh() }
+                }
             } else {
                 model.stopRealtime()
             }
-        }
-        .onChange(of: model.sourceContentRevision) { _, _ in
-            animateSourceContentEntrance()
         }
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty
@@ -72,13 +96,23 @@ struct NewsFeedView: View {
         }
         .task(id: model.source) {
             await model.loadInitial()
+            hasLoadedFeedOnce = true
             #if DEBUG
             if opensZhihuDetailPreview,
                path.isEmpty,
                let first = model.posts.first(where: { $0.sourceName == "知乎" }) {
                 path = [first]
+            } else if opensYouTubeDetailPreview,
+                      path.isEmpty,
+                      let first = model.posts.first(where: \.isYouTube) {
+                path = [first]
             }
             #endif
+        }
+        .task {
+            await model.warmSourceCache()
+        }
+        .task {
             guard isShowingLaunchCover, !Task.isCancelled else { return }
             try? await Task.sleep(for: .milliseconds(650))
             guard !Task.isCancelled else { return }
@@ -155,7 +189,7 @@ struct NewsFeedView: View {
                 }
                 if isSelected {
                     Capsule()
-                        .fill(.blue)
+                        .fill(source == .truth ? Color.red : Color.blue)
                         .frame(width: 18, height: 2)
                         .matchedGeometryEffect(id: "source-selection", in: sourceSelectionAnimation)
                 } else {
@@ -187,8 +221,8 @@ struct NewsFeedView: View {
                 .resizable()
                 .renderingMode(.original)
                 .scaledToFit()
-                .frame(width: 22, height: 22)
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .frame(width: model.source == .truth ? 30 : 22, height: model.source == .truth ? 30 : 22)
+                .clipShape(Circle())
         } else if let asset = source.iconAsset {
             Image(asset).resizable().renderingMode(.template).scaledToFit()
                 .foregroundStyle(source.iconColor).frame(width: 20, height: 20)
@@ -199,48 +233,173 @@ struct NewsFeedView: View {
         }
     }
 
-    @ViewBuilder private var content: some View {
-        if model.isLoading && model.posts.isEmpty {
-            Spacer(); ProgressView("正在加载").font(.footnote); Spacer()
-        } else if let error = model.errorMessage, model.posts.isEmpty {
-            Spacer()
-            ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
-                description: { Text(error) }
-                actions: { Button("重新加载") { Task { await model.refresh() } } }
-            Spacer()
-        } else if model.posts.isEmpty {
-            Spacer()
-            ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
-            Spacer()
-        } else {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    Color.clear.frame(height: 53)
-                    ForEach(Array(model.posts.enumerated()), id: \.element.id) { index, post in
-                        NewsCardView(
-                            post: post,
-                            isFeaturedBilibili: model.source == .bilibili && index == 0
-                        )
-                            .contentShape(Rectangle())
-                            .onTapGesture { path.append(post) }
-                            .task { await model.loadMoreIfNeeded(current: post) }
-                        Divider().opacity(0.6)
-                    }
-                    if model.isLoadingMore { ProgressView().padding(20) }
-                    if model.errorMessage != nil {
-                        Button("加载失败，点按重试") {
-                            if let last = model.posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
-                        }
-                            .font(.footnote).padding(16)
-                    }
-                    Color.clear.frame(height: 55)
-                }
-                .frame(maxWidth: .infinity)
+    private var content: some View {
+        ZStack {
+            feedList
+                .opacity(model.posts.isEmpty ? 0 : 1)
+                .allowsHitTesting(!model.posts.isEmpty)
+
+            if model.posts.isEmpty {
+                feedStatus
             }
-            .modifier(FeedChromeScrollModifier(isHidden: $isFeedChromeHidden))
-            .refreshable { await model.refresh() }
-            .simultaneousGesture(channelSwipeGesture)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var feedList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                Color.clear.frame(height: 53)
+                if model.source == .flash {
+                    flashFeedHeader
+                }
+                if model.source == .truth {
+                    truthFeedSummary
+                    Divider().opacity(0.45)
+                }
+                ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
+                    NewsCardView(
+                        post: post,
+                        isFeaturedBilibili: model.source == .bilibili && post.id == model.posts.first?.id,
+                        isExpandedFlash: expandedFlashIDs.contains(post.id)
+                    )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if post.isFlash {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    if expandedFlashIDs.contains(post.id) {
+                                        expandedFlashIDs.remove(post.id)
+                                    } else {
+                                        expandedFlashIDs.insert(post.id)
+                                    }
+                                }
+                            } else {
+                                path.append(post)
+                            }
+                        }
+                        .task { await model.loadMoreIfNeeded(current: post) }
+                    if model.source == .flash, index == 2, visiblePosts.count > 3 {
+                        flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
+                    } else {
+                        Divider().opacity(model.source == .flash ? 0.42 : 0.6)
+                            .padding(.leading, model.source == .flash ? 84 : 0)
+                    }
+                }
+                if model.isLoadingMore { ProgressView().padding(20) }
+                if model.errorMessage != nil {
+                    Button("加载失败，点按重试") {
+                        if let last = model.posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                    }
+                        .font(.footnote).padding(16)
+                }
+                Color.clear.frame(height: 55)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .modifier(FeedChromeScrollModifier(isHidden: $isFeedChromeHidden))
+        .refreshable { await model.refresh() }
+        .simultaneousGesture(channelSwipeGesture)
+    }
+
+    private var visiblePosts: [Post] {
+        guard model.source == .flash else { return model.posts }
+        return model.posts.filter { flashFilter.matches($0) }
+    }
+
+    private var flashFeedHeader: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 9) {
+                Text("快讯")
+                    .font(.system(size: 24, weight: .bold))
+                Circle()
+                    .fill(.red)
+                    .frame(width: 6, height: 6)
+                Text("实时更新")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(FlashFilter.allCases) { filter in
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) { flashFilter = filter }
+                        } label: {
+                            Text(filter.title)
+                                .font(.system(size: 14, weight: flashFilter == filter ? .semibold : .regular))
+                                .foregroundStyle(flashFilter == filter ? Color.white : Color.primary)
+                                .padding(.horizontal, 18)
+                                .frame(height: 36)
+                                .background(
+                                    flashFilter == filter ? Color.blue : Color(uiColor: .secondarySystemBackground),
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(flashFilter == filter ? .isSelected : [])
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private func flashUnreadDivider(count: Int) -> some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color.secondary.opacity(0.2)).frame(height: 0.5)
+            Text("\(count) 条新快讯")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.blue)
+                .fixedSize()
+            Rectangle().fill(Color.secondary.opacity(0.2)).frame(height: 0.5)
+        }
+        .padding(.leading, 84)
+        .padding(.trailing, 16)
+        .frame(height: 38)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var truthFeedSummary: some View {
+        HStack {
+            HStack(spacing: 4) {
+                Text("今日动态")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("· \(model.posts.count)")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.red)
+            }
+            Spacer()
+            HStack(spacing: 3) {
+                Text("最新发布")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var feedStatus: some View {
+        VStack {
+            if model.isLoading {
+                ProgressView("正在加载").font(.footnote)
+            } else if let error = model.errorMessage {
+                ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
+                    description: { Text(error) }
+                    actions: { Button("重新加载") { Task { await model.refresh() } } }
+            } else {
+                ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
+            }
+        }
+        .padding(.top, 53)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var channelSwipeGesture: some Gesture {
@@ -254,23 +413,9 @@ struct NewsFeedView: View {
     }
 
     private func selectSource(_ source: FeedSource) {
-        guard source != model.source,
-              let current = FeedSource.allCases.firstIndex(of: model.source),
-              let next = FeedSource.allCases.firstIndex(of: source) else { return }
-        pendingSourceContentOffset = next > current ? 14 : -14
+        guard source != model.source else { return }
         isFeedChromeHidden = false
         model.select(source)
-    }
-
-    private func animateSourceContentEntrance() {
-        sourceContentOffset = pendingSourceContentOffset
-        sourceContentOpacity = 0.84
-        DispatchQueue.main.async {
-            withAnimation(.smooth(duration: 0.28)) {
-                sourceContentOffset = 0
-                sourceContentOpacity = 1
-            }
-        }
     }
 
     private func selectAdjacentSource(offset: Int) {
@@ -1173,7 +1318,7 @@ struct EditorialTabBar: View {
         VStack(spacing: 0) {
             Divider().opacity(0.65)
             HStack(spacing: 0) {
-                tabButton(.observation, title: "观察", icon: "newspaper", selectedIcon: "newspaper.fill")
+                tabButton(.observation, title: "观点", icon: "newspaper", selectedIcon: "newspaper.fill")
                 tabButton(.market, title: "市场", icon: "chart.line.uptrend.xyaxis", selectedIcon: "chart.line.uptrend.xyaxis")
                 tabButton(.events, title: "事件", icon: "calendar.badge.clock", selectedIcon: "calendar.badge.clock")
             }
@@ -1242,14 +1387,83 @@ private extension FeedSource {
 private struct NewsCardView: View {
     let post: Post
     var isFeaturedBilibili = false
+    var isExpandedFlash = false
     var body: some View {
         if post.isHotTopic { hotTopicCard }
         else if post.isFlash { flashCard }
         else if post.isBilibili { bilibiliCard }
         else if post.isNewYorkTimes { newYorkTimesCard }
+        else if post.isYouTube { youtubeCard }
         else if post.isRSS { rssCard }
         else if post.sourceName == "知乎" { zhihuCard }
+        else if post.sourceName == "Truth" { truthCard }
         else { socialCard }
+    }
+
+    private var truthCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image("TruthMark")
+                    .resizable()
+                    .renderingMode(.original)
+                    .scaledToFill()
+                    .frame(width: 34, height: 34)
+                    .clipShape(Circle())
+
+                HStack(spacing: 5) {
+                    Text("特朗普")
+                        .font(.system(size: 15.5, weight: .bold))
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.red)
+                    if let time = post.formattedTime {
+                        Text(time)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer(minLength: 6)
+
+                if let relevance = post.truthRelevanceLabel {
+                    Text(relevance)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(relevance == "高度相关" ? Color.red : Color.secondary)
+                }
+            }
+
+            Text(post.truthFeedContent)
+                .font(.system(size: 15, weight: .regular))
+                .lineSpacing(3)
+                .lineLimit(post.imageURLs.isEmpty ? 3 : 2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let impact = post.truthImpactText {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("影响")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.red)
+                    Text(impact)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            PostMediaGrid(
+                post: post,
+                singleImageMaxHeight: 210,
+                singleImageContentMode: .fill,
+                multiImageHeight: 126,
+                availableWidth: max(UIScreen.main.bounds.width - 32, 240)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
     }
 
     private var zhihuCard: some View {
@@ -1386,13 +1600,66 @@ private struct NewsCardView: View {
     }
 
     private var flashCard: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(post.formattedTime ?? "--:--").font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
-            if post.tagNames.contains("重要") { Circle().fill(Color.red).frame(width: 6, height: 6).padding(.top, 6) }
-            Text(post.displayContent).font(.subheadline).lineSpacing(3).multilineTextAlignment(.leading)
-            Spacer(minLength: 2)
+        let isImportant = post.tagNames.contains("重要")
+        return HStack(alignment: .top, spacing: 0) {
+            Capsule()
+                .fill(isImportant ? Color.red : Color.clear)
+                .frame(width: 3)
+                .padding(.vertical, 2)
+
+            Text(post.formattedTime ?? "--:--")
+                .font(.system(size: 14, weight: .regular, design: .rounded).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 66, alignment: .leading)
+                .padding(.leading, 13)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 9) {
+                    if isImportant {
+                        Text("重要")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.red)
+                    }
+                    Text(flashCategory)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(post.displayContent)
+                    .font(.system(size: 16, weight: .regular))
+                    .lineSpacing(5)
+                    .lineLimit(isExpandedFlash ? nil : 4)
+                    .multilineTextAlignment(.leading)
+
+                if post.displayContent.count > 90 {
+                    HStack(spacing: 4) {
+                        Text(isExpandedFlash ? "收起" : "展开全文")
+                        Image(systemName: isExpandedFlash ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.blue)
+                }
+
+                Text("来源：\(post.authorName)")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 14).padding(.vertical, 11).contentShape(Rectangle())
+        .padding(.leading, 16)
+        .padding(.trailing, 16)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var flashCategory: String {
+        let content = post.displayContent.lowercased()
+        if ["ai", "人工智能", "大模型", "算力", "芯片", "openai", "gpt"].contains(where: content.contains) { return "AI" }
+        if ["政策", "发改委", "工信部", "国务院", "监管", "标准"].contains(where: content.contains) { return "政策" }
+        if ["股", "市场", "指数", "涨", "跌", "ipo", "营收", "利润"].contains(where: content.contains) { return "市场" }
+        return "快讯"
     }
 
     private var socialCard: some View {
@@ -1560,6 +1827,52 @@ private struct NewsCardView: View {
         .labelStyle(.titleAndIcon)
         .font(.system(size: 12))
         .foregroundStyle(.secondary)
+    }
+
+    private var youtubeCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let cover = post.youtubeCoverURL {
+                RemoteImage(
+                    url: cover,
+                    height: max(UIScreen.main.bounds.width - 28, 240) * 9 / 16,
+                    cornerRadius: 9,
+                    contentMode: .fill
+                )
+                .overlay {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 50, height: 36)
+                        .background(Color.red.opacity(0.94), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+                }
+            }
+
+            Text(post.displayTitle)
+                .font(.system(size: 17, weight: .semibold))
+                .lineSpacing(2)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            HStack(spacing: 8) {
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 28)
+                Text(post.authorName)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                if let time = post.formattedTime {
+                    Text("· \(time)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private var rssCard: some View {

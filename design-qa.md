@@ -35,3 +35,110 @@ No actionable P0, P1, or P2 findings remain.
 - [P3] A later typography-density preference could expose compact/comfortable reading modes, but it is not needed for fidelity or usability.
 
 final result: passed
+
+---
+
+# Flash Feed — Option 3 Design QA
+
+- Source visual truth: `/Users/wangheng/.codex/generated_images/019f66f1-bddf-7512-b773-da38856ad071/exec-0ee8b1bf-0949-4a1c-9e61-b70c66e5a9f0.png`
+- Implementation screenshot: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/flash-feed/final.png`
+- Full-view comparison: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/flash-feed/comparison.png`
+- Viewport: iPhone 17 Pro simulator, 1206 × 2622 native pixels; light appearance
+- State: live flash feed, `全部` filter selected
+
+## Comparison history
+
+- Pass 1 found one P1 density mismatch: live provider copy could be much longer than the concise mock data, allowing a single item to consume nearly the full viewport.
+- Pass 2 capped feed copy at four lines while preserving the full article in the existing detail view. Build verification passed after the fix.
+
+## Required fidelity surfaces
+
+- Fonts and typography: native system Chinese typography, 16 pt feed copy, rounded monospaced times, compact metadata, and selected-filter emphasis preserve the reference hierarchy.
+- Spacing and layout rhythm: the title/live row, horizontal filters, 66 pt time rail, inset separators, and full-width flat list match the selected direction without nested cards.
+- Colors and visual tokens: system background and labels remain adaptive; blue denotes the active filter and red is reserved for live/important semantics.
+- Image quality and assets: this screen intentionally contains no content imagery; existing project source icons and SF Symbols remain sharp at native scale.
+- Copy and content: live API text and provider names replace mock copy. Long text is limited to four lines in the feed and remains fully available in detail.
+
+## Findings
+
+No actionable P0, P1, or P2 findings remain. The implementation adds functioning category filters and retains existing navigation, refresh, pagination, and detail behavior.
+
+## Follow-up polish
+
+- [P3] The static concept uses hand-curated two-line examples; live copy varies in sentence length, so row heights remain intentionally flexible within the four-line cap.
+
+final result: passed
+
+---
+
+# Truth Detail — Option 1 Design QA
+
+- Source visual truth: `/Users/wangheng/.codex/generated_images/019f660e-f757-79f1-a4d7-da2a57af196e/exec-f500121e-eaad-4299-8425-642028e6d83b.png`
+- Physical-device capture: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/truth-detail/final.png`
+- Full comparison: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/truth-detail/comparison.png`
+- Focused comparison: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/truth-detail/focused-comparison.png`
+- Viewport: iPhone 14, 1170 × 2532 native pixels; dark appearance
+- State: live Truth post with two attached images
+
+## Comparison history
+
+- Pass 1 found one P2 copy/polish issue: the API ISO timestamp was exposed verbatim in the source row. It was replaced with a localized Chinese date/time formatter.
+- Pass 2 evidence is the final physical-device capture and the full/focused comparison listed above.
+
+## Required fidelity surfaces
+
+- Fonts and typography: system Chinese typography, weights, body scale, line spacing, and hierarchy match the selected direction; live text wraps differently because the content is not the static copper-tariff example.
+- Spacing and layout rhythm: compact toolbar, author block, divider, body, media, source row, open-original row, and persistent bottom actions follow the reference proportions without clipping or horizontal overflow.
+- Colors and tokens: black system background, white primary copy, gray metadata/dividers, and red verification/relevance/impact emphasis match the established Truth feed language.
+- Image quality and assets: after user review, the detail and feed were intentionally restored to the existing anime `TruthMark` avatar rather than the mock's realistic portrait. It remains sharp at circular-avatar size. Live post images use the server originals and the shared zoomable media grid; this post has two attachments, so it intentionally uses a two-column layout instead of the mock's single hero image.
+- Copy and content: only the Chinese translation is shown. English original copy and engagement metrics remain absent. `影响` is omitted for this live post because its API response does not contain a usable impact clause.
+
+## Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+## Follow-up polish
+
+- [P3] The generated reference omits the iOS status area while the physical-device capture includes it; this is an expected platform framing difference.
+- [P3] Dynamic relevance, time, body, image count, and impact availability differ from the static concept by design.
+
+final result: passed
+
+---
+
+# Truth Feed Design QA
+
+- Reference: `/Users/wangheng/.codex/generated_images/019f660e-f757-79f1-a4d7-da2a57af196e/exec-8aa5669b-fef9-4232-a569-66d295d0612d.png`
+- Physical-device capture: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/truth-feed/final.png`
+- Full comparison: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/truth-feed/comparison.png`
+- Focused comparison: `/Users/wangheng/Desktop/ai-server-ios/artifacts/implementation/truth-feed/focused-comparison.png`
+- Device: iPhone 14, iOS 27.0, dark appearance
+
+## Iteration history
+
+- Pass 1 was too reductive: it omitted the dynamic count, red selected state, relevance tiers, impact summaries, and the reference-style avatar. It also used an oversized server avatar and changed the bottom label from `观点` to `观察`.
+- Pass 2 restored the information hierarchy, red channel treatment, count, filter affordance, relevance levels, compact density, and `观点` label.
+- Pass 3 removed the extra quote marks introduced during pass 2 and replaced the caricature/server avatar with a project-local editorial portrait asset designed for the circular slot.
+
+## Final comparison
+
+- Header structure, selected-channel color, summary row, author row, relevance placement, text density, separators, and bottom navigation now align with the reference.
+- The implementation remains live-data faithful: the current newest posts do not include media, while image posts farther down render with the same single- and multi-image grid used elsewhere.
+- `影响` appears only when `weight_reason` contains an explicit, usable impact clause. Model-fallback and “insufficient information” explanations are suppressed instead of being presented as analysis.
+- English originals, raw links, engagement controls, the left timeline, and duplicate metadata remain absent.
+- The iPhone 14 capture includes the system status area and has a narrower logical viewport than the generated reference, causing expected line-wrap differences.
+
+## Severity review
+
+- P0: none
+- P1: none
+- P2: none
+- P3: dynamic post order/content differs from the static concept because the implementation preserves the live chronological feed.
+
+## Verification
+
+- Physical-device Debug build, signing, installation, and launch succeeded.
+- All 32 unit tests passed.
+- Full and focused side-by-side comparisons were reviewed after the final installation.
+
+final result: passed

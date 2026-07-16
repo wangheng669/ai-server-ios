@@ -24,10 +24,18 @@ struct MarketDashboard: Codable {
         replace(quote, in: &components)
     }
 
+    func quote(symbol: String) -> MarketQuote? {
+        coreIndices.first(where: { $0.symbol == symbol })
+            ?? metrics.first(where: { $0.symbol == symbol })
+            ?? components.first(where: { $0.symbol == symbol })
+    }
+
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {
         guard let index = quotes.firstIndex(where: { $0.symbol == quote.symbol }) else { return }
         var next = quote
-        if next.trend.isEmpty { next.trend = quotes[index].trend }
+        if next.trend.isEmpty {
+            next.trend = marketAppendingLiveValue(next.price, to: quotes[index].trend)
+        }
         quotes[index] = next
     }
 }
@@ -173,10 +181,10 @@ struct MarketChart: Decodable {
     let latestTimestamp: Int64?
     let high: Double?
     let low: Double?
-    let points: [MarketChartPoint]
+    var points: [MarketChartPoint]
 }
 
-struct MarketChartPoint: Decodable, Identifiable {
+struct MarketChartPoint: Decodable, Identifiable, Equatable {
     var id: Int64 { timestamp }
     let timestamp: Int64
     let value: Double?
@@ -205,7 +213,131 @@ enum MarketRange: String, CaseIterable, Identifiable {
         }
     }
 
-    var apiInterval: String { self == .day || self == .week ? "1m" : "1d" }
+    var apiInterval: String { self == .day ? "1m" : "1d" }
+
+    var apiLimit: Int {
+        switch self {
+        case .day: 600
+        case .week: 8
+        case .month: 64
+        case .quarter: 128
+        case .year: 400
+        case .fiveYears: 1_500
+        case .maximum: 10_000
+        }
+    }
+}
+
+struct MarketCandleSample: Identifiable, Equatable {
+    var id: Int64 { timestamp }
+    let timestamp: Int64
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
+    let volume: Double?
+}
+
+func marketPointsForRange(_ points: [MarketChartPoint], range: MarketRange) -> [MarketChartPoint] {
+    let ordered = points.sorted { $0.timestamp < $1.timestamp }
+    guard range == .day || range == .week, ordered.count > 1 else { return ordered }
+
+    let sessionGapMs: Int64 = 4 * 60 * 60 * 1_000
+    var sessions: [[MarketChartPoint]] = [[]]
+    for point in ordered {
+        if let previous = sessions.last?.last, point.timestamp - previous.timestamp > sessionGapMs {
+            sessions.append([])
+        }
+        sessions[sessions.count - 1].append(point)
+    }
+    return sessions.suffix(range == .day ? 1 : 5).flatMap { $0 }
+}
+
+func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [MarketCandleSample] {
+    let candles = points.compactMap { point -> MarketCandleSample? in
+        guard let close = point.close ?? point.value else { return nil }
+        let open = point.open ?? close
+        return MarketCandleSample(
+            timestamp: point.timestamp,
+            open: open,
+            high: max(point.high ?? close, max(open, close)),
+            low: min(point.low ?? close, min(open, close)),
+            close: close,
+            volume: point.volume
+        )
+    }
+    guard maxCount > 0, candles.count > maxCount else { return candles }
+
+    let bucketSize = Int(ceil(Double(candles.count) / Double(maxCount)))
+    return stride(from: 0, to: candles.count, by: bucketSize).compactMap { start in
+        let bucket = candles[start..<min(start + bucketSize, candles.count)]
+        let volumes = bucket.compactMap(\.volume)
+        guard let first = bucket.first,
+              let last = bucket.last,
+              let high = bucket.map(\.high).max(),
+              let low = bucket.map(\.low).min() else { return nil }
+        return MarketCandleSample(
+            timestamp: last.timestamp,
+            open: first.open,
+            high: high,
+            low: low,
+            close: last.close,
+            volume: volumes.isEmpty ? nil : volumes.reduce(0, +)
+        )
+    }
+}
+
+func marketMergingRealtimePrice(
+    _ price: Double,
+    timestamp: Int64,
+    into points: [MarketChartPoint],
+    limit: Int = 600
+) -> [MarketChartPoint] {
+    guard price.isFinite, timestamp > 0, limit > 0 else { return points }
+    let minuteMs: Int64 = 60_000
+    let minute = timestamp - timestamp % minuteMs
+    var result = points
+
+    if let last = result.last {
+        let lastMinute = last.timestamp - last.timestamp % minuteMs
+        if lastMinute > minute { return result }
+        if lastMinute == minute {
+            let open = last.open ?? last.displayValue ?? price
+            result[result.count - 1] = MarketChartPoint(
+                timestamp: minute,
+                value: price,
+                open: open,
+                high: max(last.high ?? open, price),
+                low: min(last.low ?? open, price),
+                close: price,
+                volume: last.volume
+            )
+            return Array(result.suffix(limit))
+        }
+    }
+
+    result.append(MarketChartPoint(
+        timestamp: minute,
+        value: price,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        volume: nil
+    ))
+    return Array(result.suffix(limit))
+}
+
+func marketTrendIsUp(values: [Double], fallbackIsUp: Bool) -> Bool {
+    guard let first = values.first, let last = values.last, first != last else { return fallbackIsUp }
+    return last > first
+}
+
+func marketAppendingLiveValue(_ value: Double, to values: [Double], limit: Int = 240) -> [Double] {
+    guard value.isFinite, limit > 0 else { return Array(values.suffix(max(limit, 0))) }
+    var result = values
+    if result.last != value { result.append(value) }
+    return Array(result.suffix(limit))
 }
 
 extension MarketQuote {

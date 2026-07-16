@@ -120,6 +120,9 @@ private enum ImageLoader {
 struct PostMediaGrid: View {
     let post: Post
     var singleImageHeight: CGFloat? = nil
+    var singleImageMaxHeight: CGFloat? = nil
+    var singleImageContentMode: ContentMode = .fit
+    var multiImageHeight: CGFloat = 132
     var availableWidth: CGFloat? = nil
     @State private var previewURL: URL?
 
@@ -131,9 +134,9 @@ struct PostMediaGrid: View {
               let height = image.height,
               width > 0,
               height > 0 else {
-            return 210
+            return min(210, singleImageMaxHeight ?? 210)
         }
-        return min(availableWidth * CGFloat(height) / CGFloat(width), 560)
+        return min(availableWidth * CGFloat(height) / CGFloat(width), singleImageMaxHeight ?? 560)
     }
 
     private func showPreview(_ url: URL) {
@@ -146,18 +149,18 @@ struct PostMediaGrid: View {
         Group {
             let urls = Array(post.imageURLs.prefix(4))
             if urls.count == 1, let url = urls.first {
-                RemoteImage(url: url, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: .fit)
+                RemoteImage(url: url, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
                     .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
                     .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
-                        RemoteImage(url: url, height: 132, cornerRadius: 4)
+                        RemoteImage(url: url, height: multiImageHeight, cornerRadius: 6)
                             .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
                     }
                 }
             } else if let preview = post.previewURL {
-                RemoteImage(url: preview, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: .fit)
+                RemoteImage(url: preview, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
                     .overlay { playButton }
                     .highPriorityGesture(TapGesture().onEnded { showPreview(preview) })
             }

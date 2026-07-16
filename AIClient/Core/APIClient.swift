@@ -30,24 +30,32 @@ struct APIClient {
     private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
-        components?.queryItems = [
+        var queryItems = Self.regularPostQueryItems(page: page, limit: limit, source: source)
+        if isSpecialRSS {
+            let name = source == .laozhong ? "老中" : "YouTube"
+            queryItems.append(.init(name: "categoryId", value: String(try await categoryID(named: name))))
+        }
+        components?.queryItems = queryItems
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: PostListResponse = try await get(url)
+        return response.data
+    }
+
+    static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {
+        let isSpecialRSS = source == .laozhong || source == .youtube
+        let includesAllScores = source == .newYorkTimes || source == .youtube
+        var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc"),
             .init(name: "group_similar", value: "1"), .init(name: "group_threshold", value: "70"),
             .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue),
-            .init(name: "include_zero_score", value: source == .newYorkTimes ? "true" : "false")
+            .init(name: "include_zero_score", value: includesAllScores ? "true" : "false")
         ]
-        if source != .newYorkTimes {
-            components?.queryItems?.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
+        if !includesAllScores {
+            queryItems.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
         }
-        if isSpecialRSS {
-            let name = source == .laozhong ? "老中" : "YouTube"
-            components?.queryItems?.append(.init(name: "categoryId", value: String(try await categoryID(named: name))))
-        }
-        if source == .x { components?.queryItems?.append(.init(name: "x_feed_view", value: "tracked")) }
-        guard let url = components?.url else { throw APIError.invalidURL }
-        let response: PostListResponse = try await get(url)
-        return response.data
+        if source == .x { queryItems.append(.init(name: "x_feed_view", value: "tracked")) }
+        return queryItems
     }
 
     private func fetchHotTopics(page: Int, limit: Int, source: FeedSource) async throws -> [HotTopic] {
@@ -92,6 +100,59 @@ struct APIClient {
         return response.post
     }
 
+    func fetchXComments(tweetID: String, limit: Int = 30) async throws -> [XComment] {
+        var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/comments"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [
+            .init(name: "tweet_id", value: tweetID),
+            .init(name: "limit", value: String(limit))
+        ]
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: XCommentsResponse = try await get(url)
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data.items
+    }
+
+    func fetchXTranslation(tweetID: String) async throws -> XTranslation {
+        var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/translation"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [
+            .init(name: "tweet_id", value: tweetID),
+            .init(name: "to", value: "zh")
+        ]
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: XTranslationResponse = try await get(url)
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data
+    }
+
+    func resolveYouTubePlayback(url: URL, title: String) async throws -> VideoPlaybackSource {
+        var request = URLRequest(url: baseURL.appending(path: "api/v1/post/video-playback/source"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 35
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(
+            VideoPlaybackRequest(url: url.absoluteString, title: title, formatID: "18")
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+        let payload = try JSONDecoder().decode(VideoPlaybackResponse.self, from: data)
+        guard payload.success,
+              let source = Self.playbackURL(from: payload.data.sourceURL, baseURL: baseURL) else {
+            throw APIError.invalidURL
+        }
+        return VideoPlaybackSource(url: source, label: payload.data.label)
+    }
+
+    static func playbackURL(from value: String, baseURL: URL) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let absolute = URL(string: trimmed), absolute.scheme != nil { return absolute }
+        if trimmed.hasPrefix("/post/") {
+            return URL(string: "api/v1" + trimmed, relativeTo: baseURL)?.absoluteURL
+        }
+        return URL(string: trimmed, relativeTo: baseURL)?.absoluteURL
+    }
+
     func bookmarkXPost(tweetID: String) async throws -> XBookmarkResult {
         let value = tweetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.allSatisfy(\.isNumber) else { throw APIError.invalidXPostID }
@@ -123,11 +184,11 @@ struct APIClient {
     }
 
     private func get<Response: Decodable>(_ url: URL) async throws -> Response {
-        for attempt in 0..<3 {
+        for attempt in 0..<2 {
             do {
                 let (data, response) = try await session.data(from: url)
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-                if [500, 502, 503, 504].contains(http.statusCode), attempt < 2 {
+                if [500, 502, 503, 504].contains(http.statusCode), attempt < 1 {
                     try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
                     continue
                 }
@@ -139,7 +200,9 @@ struct APIClient {
                     #endif
                     throw APIError.decoding(error)
                 }
-            } catch let error as URLError where error.code != .cancelled && attempt < 2 {
+            } catch let error as URLError {
+                if error.code == .cancelled { throw CancellationError() }
+                guard attempt < 1 else { throw error }
                 #if DEBUG
                 print("Feed request failed (attempt \(attempt + 1)): \(url.absoluteString) — \(error)")
                 #endif
@@ -259,6 +322,20 @@ private struct XBookmarkRequest: Encodable {
     enum CodingKeys: String, CodingKey { case articleID = "article_id" }
 }
 private struct XBookmarkResponse: Decodable { let success: Bool; let data: XBookmarkResult }
+private struct VideoPlaybackRequest: Encodable {
+    let url, title, formatID: String
+    enum CodingKeys: String, CodingKey { case url, title; case formatID = "formatId" }
+}
+private struct VideoPlaybackResponse: Decodable {
+    let success: Bool
+    let data: Payload
+    struct Payload: Decodable {
+        let sourceURL: String
+        let label: String?
+        enum CodingKeys: String, CodingKey { case label; case sourceURL = "sourceUrl" }
+    }
+}
+struct VideoPlaybackSource: Equatable { let url: URL; let label: String? }
 struct XBookmarkResult: Decodable, Equatable {
     let articleID: String
     let bookmarked: Bool

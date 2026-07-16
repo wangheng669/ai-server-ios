@@ -21,6 +21,7 @@
 		8F922EC1F4F62D3B56B74D1D /* ServerSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097BF52E5F2C1BE5326021E6 /* ServerSetupView.swift */; };
 		C844C5ED835C1B08C94DC464 /* NewsFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B9ED3C144483DC5D1DFAA3A /* NewsFeedViewModel.swift */; };
 		D146819617D52DA2230A9506 /* PostDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* MarketPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F40516273849A5B6C7 /* MarketPresentationTests.swift */; };
 		D861C048F423A45336AE551F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 137FDCB7037445C35ED02C74 /* Assets.xcassets */; };
 		EC73C344C05CAB07C8B39CFB /* ServerConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F0204E08B2D0424F860EFFE /* ServerConfiguration.swift */; };
 		F04A9EB700A33E5A21544148 /* Post.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A3FE9C2FF8A73D898482112 /* Post.swift */; };
@@ -58,6 +59,7 @@
 		9F83C9F64DA0CE10A02AD089 /* NewsFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedView.swift; sourceTree = "<group>"; };
 		BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostComponents.swift; sourceTree = "<group>"; };
 		C41BF51CBE9570E400E536EE /* AIClientTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AIClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C1D2E3F40516273849A5B6C7 /* MarketPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketPresentationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -65,6 +67,7 @@
 			isa = PBXGroup;
 			children = (
 				9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */,
+				C1D2E3F40516273849A5B6C7 /* MarketPresentationTests.swift */,
 				5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */,
 				3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */,
 			);
@@ -260,6 +263,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				776DA836074F7FFF481B3A5B /* FeedAdapterTests.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5C /* MarketPresentationTests.swift in Sources */,
 				D146819617D52DA2230A9506 /* PostDecodingTests.swift in Sources */,
 				26D2AAFFCB9B9B48EE1CD558 /* ServerAddressValidatorTests.swift in Sources */,
 			);

@@ -35,6 +35,48 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.first?.externalURL?.absoluteString, "https://example.com/story")
     }
 
+    func testYouTubePostBuildsCoverFromVideoLink() throws {
+        let json = #"{"id":79,"title":"最新一期","source":"rss:79","post_link":"https://www.youtube.com/watch?v=DZR27djdRco","postTags":[]}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertTrue(post.isYouTube)
+        XCTAssertEqual(post.youtubeCoverURL?.absoluteString, "https://i.ytimg.com/vi/DZR27djdRco/hqdefault.jpg")
+    }
+
+    func testTruthFeedUsesOnlyTranslatedContentAndRelevance() throws {
+        let json = #"{"post":{"id":9,"content":"English original","content_zh":"中文翻译","source":"truth","final_score":8.2}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.truthFeedContent, "中文翻译")
+        XCTAssertEqual(post.truthRelevanceLabel, "高度相关")
+        XCTAssertFalse(post.truthFeedContent.contains("English"))
+    }
+
+    func testTruthFeedShowsMediumRelevanceAndUsefulImpactOnly() throws {
+        let useful = #"{"post":{"id":12,"content_zh":"中文翻译","source":"truth","final_score":6.2,"weight_reason":"关键事实：将发表讲话。可能影响：可能引发宏观环境波动与资金流向变化。"}}"#.data(using: .utf8)!
+        let usefulPost = try JSONDecoder().decode(PostDetailResponse.self, from: useful).post
+        XCTAssertEqual(usefulPost.truthRelevanceLabel, "中度相关")
+        XCTAssertEqual(usefulPost.truthImpactText, "可能引发宏观环境波动与资金流向变化")
+
+        let fallback = #"{"post":{"id":13,"source":"truth","weight_reason":"正式模型失败，使用本地基础评分器分数临时兜底。"}}"#.data(using: .utf8)!
+        let fallbackPost = try JSONDecoder().decode(PostDetailResponse.self, from: fallback).post
+        XCTAssertNil(fallbackPost.truthImpactText)
+    }
+
+    func testTruthFeedDoesNotFallBackToOriginalWhileTranslationIsPending() throws {
+        let json = #"{"post":{"id":10,"content":"English original","source":"truth"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.truthFeedContent, "翻译处理中")
+    }
+
+    func testTruthFeedRemovesTrailingLinkFromTranslation() throws {
+        let json = #"{"post":{"id":11,"content_zh":"美国的好消息：https://example.com/a-long-story","source":"truth"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.truthFeedContent, "美国的好消息")
+    }
+
     func testDecodesDetailAndStripsHTML() throws {
         let json = #"{"post":{"id":7,"title":"标题","content":"<p>第一段</p><p>第二段</p>","images":[]}}"#.data(using: .utf8)!
 

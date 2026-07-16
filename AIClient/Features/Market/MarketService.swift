@@ -29,7 +29,7 @@ struct MarketService {
             .init(name: "symbol", value: symbol),
             .init(name: "interval", value: range.apiInterval),
             .init(name: "range", value: range.apiRange),
-            .init(name: "limit", value: range == .day ? "600" : "1800")
+            .init(name: "limit", value: String(range.apiLimit))
         ]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketChartResponse.self).data
@@ -41,6 +41,8 @@ struct MarketService {
         do {
             (data, response) = try await session.data(from: url)
         } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch {
             throw MarketServiceError.transport(error)

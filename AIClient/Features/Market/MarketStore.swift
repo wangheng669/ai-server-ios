@@ -15,6 +15,7 @@ final class MarketStore {
     private let service: MarketService
     private let realtime: MarketRealtimeClient
     private var loadedCache = false
+    private var realtimeQuotes: [String: MarketQuote] = [:]
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -26,18 +27,19 @@ final class MarketStore {
         realtime.onQuote = { [weak self] quote in
             guard var dashboard = self?.dashboard else { return }
             dashboard.replace(quote)
+            if let mergedQuote = dashboard.quote(symbol: quote.symbol) {
+                self?.realtimeQuotes[quote.symbol] = mergedQuote
+                self?.appendRealtimePoint(mergedQuote)
+            }
             self?.dashboard = dashboard
         }
         realtime.onStatus = { [weak self] status in self?.realtimeStatus = status }
         realtime.start()
         defer { realtime.stop() }
-
-        var firstLoad = true
+        await refresh(force: true)
         while !Task.isCancelled {
-            await refresh(force: firstLoad)
-            firstLoad = false
-            let milliseconds = max(dashboard?.refreshIntervalMs ?? 15_000, 5_000)
-            try? await Task.sleep(for: .milliseconds(milliseconds))
+            do { try await Task.sleep(for: .seconds(3_600)) }
+            catch { break }
         }
     }
 
@@ -45,8 +47,12 @@ final class MarketStore {
         if dashboard == nil { isLoading = true }
         defer { isLoading = false }
         do {
-            let value = try await service.dashboard(refresh: force)
+            var value = try await service.dashboard(refresh: force)
             guard !Task.isCancelled else { return }
+            for quote in realtimeQuotes.values {
+                let serverTimestamp = value.quote(symbol: quote.symbol)?.timestamp ?? 0
+                if quote.timestamp ?? 0 >= serverTimestamp { value.replace(quote) }
+            }
             dashboard = value
             errorMessage = value.missingSymbols.isEmpty ? nil : "部分行情暂未返回"
             MarketSnapshotCache.save(value)
@@ -57,18 +63,27 @@ final class MarketStore {
         }
     }
 
-    func loadChart(symbol: String, range: MarketRange) async {
+    func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
         let key = ChartKey(symbol: symbol, range: range)
+        if !force, charts[key] != nil { return }
         guard !loadingCharts.contains(key) else { return }
         loadingCharts.insert(key)
         chartErrors[key] = nil
         defer { loadingCharts.remove(key) }
         do {
             charts[key] = try await service.chart(symbol: symbol, range: range)
+            if range == .day, let quote = realtimeQuotes[symbol] { appendRealtimePoint(quote) }
         } catch is CancellationError {
             return
         } catch {
             chartErrors[key] = error.localizedDescription
+        }
+    }
+
+    func preloadCharts(symbol: String) async {
+        for range in MarketRange.allCases where range != .day {
+            guard !Task.isCancelled else { return }
+            await loadChart(symbol: symbol, range: range)
         }
     }
 
@@ -109,6 +124,13 @@ final class MarketStore {
         guard !loadedCache else { return }
         loadedCache = true
         dashboard = MarketSnapshotCache.load()
+    }
+
+    private func appendRealtimePoint(_ quote: MarketQuote) {
+        let key = ChartKey(symbol: quote.symbol, range: .day)
+        guard var chart = charts[key], let timestamp = quote.timestamp else { return }
+        chart.points = marketMergingRealtimePrice(quote.price, timestamp: timestamp, into: chart.points)
+        charts[key] = chart
     }
 }
 

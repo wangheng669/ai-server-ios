@@ -8,7 +8,6 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isLoadingMore = false
     @Published private(set) var canLoadMore = true
     @Published private(set) var isSwitchingSource = false
-    @Published private(set) var sourceContentRevision = 0
     @Published var errorMessage: String?
     @Published var source: FeedSource {
         didSet { UserDefaults.standard.set(source.rawValue, forKey: "feed.source") }
@@ -17,16 +16,31 @@ final class NewsFeedViewModel: ObservableObject {
     private struct Snapshot { var posts: [Post]; var page: Int; var canLoadMore: Bool }
     private var cache: [FeedSource: Snapshot] = [:]
     private var page = 1
-    private let pageSize = 20
+    private let defaultPageSize = 5
     private var realtimeClient: RealtimeFeedClient?
+    private var activeRefreshID: UUID?
+    private let fetchPosts: (Int, Int, FeedSource) async throws -> [Post]
 
-    init() {
+    init(
+        source initialSource: FeedSource? = nil,
+        fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil
+    ) {
         #if DEBUG
         let override = ProcessInfo.processInfo.environment["AI_FEED_SOURCE"]
         #else
         let override: String? = nil
         #endif
-        source = FeedSource(rawValue: override ?? UserDefaults.standard.string(forKey: "feed.source") ?? "x") ?? .x
+        source = initialSource
+            ?? FeedSource(rawValue: override ?? UserDefaults.standard.string(forKey: "feed.source") ?? "x")
+            ?? .x
+        if let fetchPosts {
+            self.fetchPosts = fetchPosts
+        } else {
+            let client = APIClient(baseURL: ServerConfiguration.currentURL)
+            self.fetchPosts = { page, limit, source in
+                try await client.fetchPosts(page: page, limit: limit, source: source)
+            }
+        }
     }
 
     func select(_ next: FeedSource) {
@@ -41,7 +55,6 @@ final class NewsFeedViewModel: ObservableObject {
             page = saved.page
             canLoadMore = saved.canLoadMore
             isSwitchingSource = false
-            sourceContentRevision += 1
         } else {
             page = 1
             canLoadMore = true
@@ -64,6 +77,42 @@ final class NewsFeedViewModel: ObservableObject {
         await refresh()
     }
 
+    func warmSourceCache() async {
+        guard let selectedIndex = FeedSource.allCases.firstIndex(of: source) else { return }
+        let sources = FeedSource.allCases
+            .enumerated()
+            .filter { $0.element != source }
+            .sorted { abs($0.offset - selectedIndex) < abs($1.offset - selectedIndex) }
+            .map(\.element)
+
+        for candidate in sources {
+            guard !Task.isCancelled else { return }
+            guard cache[candidate] == nil else { continue }
+            do {
+                let pageSize = pageSize(for: candidate)
+                let result = try await fetchPosts(1, pageSize, candidate)
+                guard !Task.isCancelled, cache[candidate] == nil else { continue }
+                cache[candidate] = .init(
+                    posts: result,
+                    page: 1,
+                    canLoadMore: result.count >= pageSize
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                // Cache warming is best-effort. Selecting the channel still performs
+                // the normal foreground request and presents any resulting error.
+            }
+        }
+    }
+
+    private func pageSize(for source: FeedSource) -> Int {
+        switch source {
+        case .weibo, .douyin, .truth: 20
+        default: defaultPageSize
+        }
+    }
+
     func startRealtime() {
         let client = RealtimeFeedClient(baseURL: ServerConfiguration.currentURL)
         client.onEvent = { [weak self] event in self?.handleRealtime(event) }
@@ -78,25 +127,31 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func refresh() async {
-        guard !isLoading else { return }
+        let refreshID = UUID()
         let requestedSource = source
         let completesSourceSwitch = isSwitchingSource
+        activeRefreshID = refreshID
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer {
+            if activeRefreshID == refreshID {
+                activeRefreshID = nil
+                isLoading = false
+            }
+        }
         do {
-            let result = try await client.fetchPosts(page: 1, limit: pageSize, source: requestedSource)
-            guard source == requestedSource else { return }
+            let pageSize = pageSize(for: requestedSource)
+            let result = try await fetchPosts(1, pageSize, requestedSource)
+            guard source == requestedSource, activeRefreshID == refreshID else { return }
             posts = result
             page = 1
             canLoadMore = result.count >= pageSize
             if completesSourceSwitch {
                 isSwitchingSource = false
-                sourceContentRevision += 1
             }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         } catch is CancellationError { } catch {
-            guard source == requestedSource else { return }
+            guard source == requestedSource, activeRefreshID == refreshID else { return }
             if completesSourceSwitch {
                 isSwitchingSource = false
                 posts = []
@@ -112,10 +167,11 @@ final class NewsFeedViewModel: ObservableObject {
               !isLoadingMore,
               !isLoading else { return }
         let requestedSource = source
+        let pageSize = pageSize(for: requestedSource)
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let result = try await client.fetchPosts(page: page + 1, limit: pageSize, source: requestedSource)
+            let result = try await fetchPosts(page + 1, pageSize, requestedSource)
             guard source == requestedSource else { return }
             let ids = Set(posts.map(\.id))
             posts += result.filter { !ids.contains($0.id) }
@@ -124,8 +180,6 @@ final class NewsFeedViewModel: ObservableObject {
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
     }
-
-    private var client: APIClient { APIClient(baseURL: ServerConfiguration.currentURL) }
 
     private func handleRealtime(_ event: RealtimeFeedClient.Event) {
         switch event {
