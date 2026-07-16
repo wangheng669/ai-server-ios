@@ -18,6 +18,17 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketAppendingLiveValue(103, to: [100, 101, 102], limit: 3), [101, 102, 103])
     }
 
+    func testRealtimeNightQuoteDecodesAsIncrementAndAppendsNightPrice() throws {
+        let data = Data(#"{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","isNightSession":true,"sessionPrice":212.49,"sessionChangePercent":0.3257,"timestamp":1784174184396}"#.utf8)
+        let update = try JSONDecoder().decode(MarketQuoteUpdate.self, from: data)
+        let quote = update.merging(into: nil)
+
+        XCTAssertEqual(quote.symbol, "NVDA")
+        XCTAssertEqual(quote.sessionPrice, 212.49)
+        XCTAssertEqual(quote.nightTrend, [212.49])
+        XCTAssertTrue(quote.isNightSession == true)
+    }
+
     func testMarketRangesUseExpectedIntervalsAndLimits() {
         XCTAssertEqual(MarketRange.day.apiInterval, "1m")
         XCTAssertEqual(MarketRange.week.apiRange, "5d")

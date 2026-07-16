@@ -150,6 +150,54 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         case changePercent, timestamp, trend, nightTrend, stale
     }
 
+    init(
+        symbol: String,
+        name: String,
+        price: Double,
+        openPrice: Double?,
+        previousClose: Double?,
+        high: Double?,
+        low: Double?,
+        pe: Double?,
+        marketCap: Double?,
+        volume: Double?,
+        dataSource: String?,
+        delaySeconds: Int?,
+        marketSession: String?,
+        isNightSession: Bool?,
+        sessionPrice: Double?,
+        sessionChangePercent: Double?,
+        sessionDataSource: String?,
+        changePercent: String?,
+        timestamp: Int64?,
+        trend: [Double],
+        nightTrend: [Double],
+        stale: Bool?
+    ) {
+        self.symbol = symbol
+        self.name = name
+        self.price = price
+        self.openPrice = openPrice
+        self.previousClose = previousClose
+        self.high = high
+        self.low = low
+        self.pe = pe
+        self.marketCap = marketCap
+        self.volume = volume
+        self.dataSource = dataSource
+        self.delaySeconds = delaySeconds
+        self.marketSession = marketSession
+        self.isNightSession = isNightSession
+        self.sessionPrice = sessionPrice
+        self.sessionChangePercent = sessionChangePercent
+        self.sessionDataSource = sessionDataSource
+        self.changePercent = changePercent
+        self.timestamp = timestamp
+        self.trend = trend
+        self.nightTrend = nightTrend
+        self.stale = stale
+    }
+
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         symbol = try values.decode(String.self, forKey: .symbol)
@@ -174,6 +222,62 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         trend = try values.decodeIfPresent([Double].self, forKey: .trend) ?? []
         nightTrend = try values.decodeIfPresent([Double].self, forKey: .nightTrend) ?? []
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale)
+    }
+}
+
+struct MarketQuoteUpdate: Decodable {
+    let symbol: String
+    let name: String
+    let price: Double
+    let openPrice: Double?
+    let previousClose: Double?
+    let high: Double?
+    let low: Double?
+    let pe: Double?
+    let marketCap: Double?
+    let volume: Double?
+    let dataSource: String?
+    let delaySeconds: Int?
+    let marketSession: String?
+    let isNightSession: Bool?
+    let sessionPrice: Double?
+    let sessionChangePercent: Double?
+    let sessionDataSource: String?
+    let changePercent: String?
+    let timestamp: Int64?
+
+    func merging(into current: MarketQuote?) -> MarketQuote {
+        let regularTrend = marketAppendingLiveValue(price, to: current?.trend ?? [])
+        let extendedTrend: [Double]
+        if isNightSession == true, let sessionPrice {
+            extendedTrend = marketAppendingLiveValue(sessionPrice, to: current?.nightTrend ?? [])
+        } else {
+            extendedTrend = current?.nightTrend ?? []
+        }
+        return MarketQuote(
+            symbol: symbol,
+            name: name,
+            price: price,
+            openPrice: openPrice ?? current?.openPrice,
+            previousClose: previousClose ?? current?.previousClose,
+            high: high ?? current?.high,
+            low: low ?? current?.low,
+            pe: pe ?? current?.pe,
+            marketCap: marketCap ?? current?.marketCap,
+            volume: volume ?? current?.volume,
+            dataSource: dataSource ?? current?.dataSource,
+            delaySeconds: delaySeconds ?? current?.delaySeconds,
+            marketSession: marketSession ?? current?.marketSession,
+            isNightSession: isNightSession ?? current?.isNightSession,
+            sessionPrice: sessionPrice ?? current?.sessionPrice,
+            sessionChangePercent: sessionChangePercent ?? current?.sessionChangePercent,
+            sessionDataSource: sessionDataSource ?? current?.sessionDataSource,
+            changePercent: changePercent ?? current?.changePercent,
+            timestamp: timestamp ?? current?.timestamp,
+            trend: regularTrend,
+            nightTrend: extendedTrend,
+            stale: false
+        )
     }
 }
 

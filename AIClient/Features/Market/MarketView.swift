@@ -1460,7 +1460,7 @@ private struct MarketConstituentRow: View {
                 Text(number(quote.price, digits: 2)).font(.system(size: 14, weight: .semibold)).monospacedDigit()
                 Text(quote.formattedPercent).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
                 if quote.isNightSession == true, let nightPrice = quote.sessionPrice {
-                    Text("夜 \(number(nightPrice, digits: 2)) \(quote.formattedSessionPercent ?? "")")
+                    Text("夜 \(number(nightPrice, digits: 2)) \(quote.formattedSessionPercent ?? "")\(nightUpdateTime)")
                         .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(MarketStyle.purple)
                 }
             }
@@ -1479,6 +1479,12 @@ private struct MarketConstituentRow: View {
         }
         .padding(.bottom, 12)
         .accessibilityLabel("\(quote.name)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)，点按查看详情")
+    }
+
+    private var nightUpdateTime: String {
+        guard let timestamp = quote.timestamp else { return "" }
+        let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
+        return " · " + date.formatted(date: .omitted, time: .standard)
     }
 }
 

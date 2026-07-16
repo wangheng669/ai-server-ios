@@ -26,8 +26,9 @@ final class MarketStore {
 
     func runUpdates() async {
         loadCacheIfNeeded()
-        realtime.onQuote = { [weak self] quote in
+        realtime.onQuote = { [weak self] update in
             guard var dashboard = self?.dashboard else { return }
+            let quote = update.merging(into: self?.quote(symbol: update.symbol))
             dashboard.replace(quote)
             self?.dashboard = dashboard
             self?.replaceConstituent(quote)

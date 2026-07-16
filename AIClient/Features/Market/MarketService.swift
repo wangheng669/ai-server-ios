@@ -96,7 +96,7 @@ final class MarketRealtimeClient {
     private var socket: URLSessionWebSocketTask?
     private var task: Task<Void, Never>?
     private var active = false
-    var onQuote: ((MarketQuote) -> Void)?
+    var onQuote: ((MarketQuoteUpdate) -> Void)?
     var onStatus: ((Status) -> Void)?
 
     init(baseURL: URL) { self.baseURL = baseURL }
@@ -142,7 +142,7 @@ final class MarketRealtimeClient {
                     guard let data,
                           let header = try? JSONDecoder().decode(MarketSocketHeader.self, from: data),
                           header.type == "market",
-                          let quote = try? JSONDecoder().decode(MarketQuote.self, from: data) else { continue }
+                          let quote = try? JSONDecoder().decode(MarketQuoteUpdate.self, from: data) else { continue }
                     onQuote?(quote)
                 }
             } catch { }
