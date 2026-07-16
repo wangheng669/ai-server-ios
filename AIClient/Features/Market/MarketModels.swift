@@ -68,16 +68,9 @@ struct MarketIndexConstituents: Decodable {
     var items: [MarketIndexConstituent]
     let missingSymbols: [String]
 
-    mutating func replace(_ update: MarketQuote) {
+    mutating func merge(_ update: MarketQuoteUpdate) {
         guard let index = items.firstIndex(where: { $0.quote.symbol == update.symbol }) else { return }
-        var quote = update
-        if quote.trend.isEmpty {
-            quote.trend = marketAppendingLiveValue(quote.price, to: items[index].quote.trend)
-        }
-        if quote.nightTrend.isEmpty {
-            quote.nightTrend = marketAppendingLiveValue(quote.sessionPrice ?? quote.price, to: items[index].quote.nightTrend)
-        }
-        items[index].quote = quote
+        items[index].quote = update.merging(into: items[index].quote)
     }
 }
 

@@ -2,6 +2,20 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testSmallSquareRSSImageIsTreatedAsInlineEmoji() throws {
+        let data = #"{"url":"https://example.com/emoji.png","width":64,"height":64}"#.data(using: .utf8)!
+        let image = try JSONDecoder().decode(PostImage.self, from: data)
+
+        XCTAssertTrue(image.isLikelyInlineEmoji)
+    }
+
+    func testArticleImageIsNotTreatedAsInlineEmoji() throws {
+        let data = #"{"url":"https://example.com/photo.jpg","width":1080,"height":1080}"#.data(using: .utf8)!
+        let image = try JSONDecoder().decode(PostImage.self, from: data)
+
+        XCTAssertFalse(image.isLikelyInlineEmoji)
+    }
+
     func testDecodesPostListResponse() throws {
         let json = #"""
         {
@@ -176,8 +190,8 @@ final class PostDecodingTests: XCTestCase {
 
         let playbackURL = try XCTUnwrap(post.videoURLs.first)
         let components = try XCTUnwrap(URLComponents(url: playbackURL, resolvingAgainstBaseURL: false))
-        XCTAssertEqual(components.path, "/api/v1/bilibili/play")
-        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, "https://www.bilibili.com/video/BV1c3NY6kERj")
+        XCTAssertEqual(components.path, "/api/v1/bilibili/stream")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "bvid" })?.value, "BV1c3NY6kERj")
         XCTAssertEqual(post.previewURL?.path, "/api/v1/image-proxy")
     }
 

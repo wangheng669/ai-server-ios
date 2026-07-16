@@ -489,6 +489,13 @@ struct PostImage: Decodable, Hashable {
     let url: String
     let width, height: Int?
     let altText: String?
+
+    var isLikelyInlineEmoji: Bool {
+        guard let width, let height, width > 0, height > 0 else { return false }
+        let aspectRatio = Double(width) / Double(height)
+        return max(width, height) <= 128 && (0.75...1.33).contains(aspectRatio)
+    }
+
     enum CodingKeys: String, CodingKey {
         case url, width, height
         case altText = "alt_text"
@@ -511,17 +518,17 @@ enum MediaURL {
     static func video(_ raw: String) -> URL? {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
-        if isBilibiliVideoPage(direct) {
-            var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/v1/bilibili/play"), resolvingAgainstBaseURL: false)
-            parts?.queryItems = [.init(name: "url", value: direct.absoluteString)]
+        if let bvid = bilibiliBVID(from: direct) {
+            var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/v1/bilibili/stream"), resolvingAgainstBaseURL: false)
+            parts?.queryItems = [.init(name: "bvid", value: bvid)]
             return parts?.url
         }
         return resolved(value, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
     }
 
-    private static func isBilibiliVideoPage(_ url: URL) -> Bool {
-        guard let host = url.host?.lowercased(), host == "bilibili.com" || host.hasSuffix(".bilibili.com") else { return false }
-        return url.pathComponents.contains { $0.range(of: #"^BV[0-9A-Za-z]{10}$"#, options: .regularExpression) != nil }
+    private static func bilibiliBVID(from url: URL) -> String? {
+        guard let host = url.host?.lowercased(), host == "bilibili.com" || host.hasSuffix(".bilibili.com") else { return nil }
+        return url.pathComponents.first { $0.range(of: #"^BV[0-9A-Za-z]{10}$"#, options: .regularExpression) != nil }
     }
 
     private static func resolved(_ raw: String, proxy: String, hosts: [String]) -> URL? {

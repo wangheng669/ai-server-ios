@@ -206,6 +206,10 @@ struct PostMediaGrid: View {
         return min(availableWidth * CGFloat(height) / CGFloat(width), singleImageMaxHeight ?? 560)
     }
 
+    private var usesCompactInlineImage: Bool {
+        post.isRSS && post.images?.count == 1 && post.images?.first?.isLikelyInlineEmoji == true
+    }
+
     private func showPreview(_ url: URL) {
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -216,9 +220,16 @@ struct PostMediaGrid: View {
         Group {
             let urls = Array(post.imageURLs.prefix(4))
             if urls.count == 1, let url = urls.first {
-                RemoteImage(url: url, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
-                    .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
-                    .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+                if usesCompactInlineImage {
+                    RemoteImage(url: url, height: 44, contentMode: .fit)
+                        .frame(width: 44)
+                        .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+                        .accessibilityLabel("表情图片")
+                } else {
+                    RemoteImage(url: url, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
+                        .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
+                        .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+                }
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in

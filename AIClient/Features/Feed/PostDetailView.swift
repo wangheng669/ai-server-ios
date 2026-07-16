@@ -1206,13 +1206,20 @@ struct PostDetailView: View {
     private func loadDetail() async {
         guard !post.isSynthetic else { return }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
+
+        // The list payload already contains enough information to start Bilibili
+        // playback. Do not serialize first-frame loading behind the detail fetch.
+        if !post.isYouTube, player == nil, let video = post.videoURLs.first {
+            startVideoPlayback(url: video)
+        }
+
         if let detail = try? await client.fetchPost(id: post.id) { post = detail }
         if post.isYouTube {
             player = nil
-        } else if let video = post.videoURLs.first {
+        } else if player == nil, let video = post.videoURLs.first {
             startVideoPlayback(url: video)
         } else if post.isBilibili {
-            videoPlaybackFailed = true
+            videoPlaybackFailed = player == nil
         }
         guard post.isNewYorkTimes, let link = post.linkURL else { return }
         isLoadingNewYorkTimesBody = true

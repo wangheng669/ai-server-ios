@@ -31,7 +31,7 @@ final class MarketStore {
             let quote = update.merging(into: self?.quote(symbol: update.symbol))
             dashboard.replace(quote)
             self?.dashboard = dashboard
-            self?.replaceConstituent(quote)
+            self?.mergeConstituent(update)
             if let mergedQuote = self?.quote(symbol: quote.symbol) {
                 self?.realtimeQuotes[quote.symbol] = mergedQuote
                 self?.appendRealtimePoint(mergedQuote)
@@ -145,9 +145,9 @@ final class MarketStore {
         indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })
     }
 
-    private func replaceConstituent(_ quote: MarketQuote) {
+    private func mergeConstituent(_ update: MarketQuoteUpdate) {
         for key in indexConstituents.keys {
-            indexConstituents[key]?.replace(quote)
+            indexConstituents[key]?.merge(update)
         }
     }
 

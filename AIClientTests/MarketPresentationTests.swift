@@ -29,6 +29,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertTrue(quote.isNightSession == true)
     }
 
+    func testRealtimeUpdatePreservesConstituentNightTrend() throws {
+        let responseData = Data(#"{"indexSymbol":"^NDX","label":"主要成分股","selectionBasis":"test","asOf":"2026-07-16","generatedAt":"2026-07-16T05:00:00Z","items":[{"rank":1,"weight":null,"logoPath":null,"quote":{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"isNightSession":true,"sessionPrice":212.49,"timestamp":1784174184000,"trend":[210,211],"nightTrend":[212.1,212.2,212.3]}}],"missingSymbols":[]}"#.utf8)
+        let updateData = Data(#"{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","isNightSession":true,"sessionPrice":212.49,"sessionChangePercent":0.3257,"timestamp":1784174184396}"#.utf8)
+        var constituents = try JSONDecoder().decode(MarketIndexConstituents.self, from: responseData)
+        let update = try JSONDecoder().decode(MarketQuoteUpdate.self, from: updateData)
+
+        constituents.merge(update)
+
+        XCTAssertEqual(constituents.items[0].quote.nightTrend, [212.1, 212.2, 212.3, 212.49])
+        XCTAssertEqual(constituents.items[0].quote.trend, [210, 211, 212.5])
+    }
+
     func testMarketRangesUseExpectedIntervalsAndLimits() {
         XCTAssertEqual(MarketRange.day.apiInterval, "1m")
         XCTAssertEqual(MarketRange.week.apiRange, "5d")
