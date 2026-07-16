@@ -1285,7 +1285,7 @@ private struct AnimatedLineCanvas: View, Animatable {
     var body: some View {
         Canvas { context, size in
             let sampleCount = min(max(max(previous.count, current.count), 2), 120)
-            let from = normalizedSamples(previous, count: sampleCount)
+            let from = normalizedSamples(marketAnimationStartValues(previous: previous, current: current), count: sampleCount)
             let to = normalizedSamples(current, count: sampleCount)
             guard from.count == sampleCount, to.count == sampleCount else { return }
 
@@ -1409,10 +1409,17 @@ private struct MarketConstituentRow: View {
                 Text(number(quote.price, digits: 2)).font(.system(size: 14, weight: .semibold)).monospacedDigit()
                 Text(quote.formattedPercent).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
             }
+            Sparkline(values: quote.trend, color: quoteTint(quote), showsFill: false)
+                .frame(width: 58, height: 28)
         }
         .padding(.horizontal, 12).frame(minHeight: 66)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("第 \(item.rank)，\(quote.name)，\(quote.symbol)，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)")
+        .overlay(alignment: .bottomLeading) {
+            Text("市值 \(quote.marketCap.map(compactNumber) ?? "—")")
+                .font(.caption2).foregroundStyle(.secondary).padding(.leading, 64).padding(.bottom, 5)
+        }
+        .padding(.bottom, 12)
+        .accessibilityLabel("第 \(item.rank)，\(quote.name)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)")
     }
 }
 

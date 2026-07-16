@@ -279,7 +279,16 @@ func marketPointsForRange(_ points: [MarketChartPoint], range: MarketRange) -> [
         }
         sessions[sessions.count - 1].append(point)
     }
-    return sessions.suffix(range == .day ? 1 : 5).flatMap { $0 }
+    if range == .day {
+        return sessions.enumerated().max { lhs, rhs in
+            lhs.element.count == rhs.element.count ? lhs.offset < rhs.offset : lhs.element.count < rhs.element.count
+        }?.element ?? []
+    }
+    return sessions.suffix(5).flatMap { $0 }
+}
+
+func marketAnimationStartValues(previous: [Double], current: [Double]) -> [Double] {
+    previous.isEmpty ? current : previous
 }
 
 func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [MarketCandleSample] {

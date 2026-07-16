@@ -24,10 +24,11 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.week.apiInterval, "1d")
         XCTAssertEqual(MarketRange.week.apiLimit, 8)
         XCTAssertEqual(MarketRange.month.apiInterval, "1d")
-        XCTAssertEqual(MarketRange.maximum.apiLimit, 2_000)
+        XCTAssertEqual(MarketRange.fiveYears.apiLimit, 1_000)
+        XCTAssertEqual(MarketRange.maximum.apiLimit, 1_000)
         XCTAssertTrue(MarketRange.year.shouldPreload)
-        XCTAssertFalse(MarketRange.fiveYears.shouldPreload)
-        XCTAssertFalse(MarketRange.maximum.shouldPreload)
+        XCTAssertTrue(MarketRange.fiveYears.shouldPreload)
+        XCTAssertTrue(MarketRange.maximum.shouldPreload)
     }
 
     func testDayRangeKeepsOnlyLatestTradingSession() {
@@ -39,6 +40,16 @@ final class MarketPresentationTests: XCTestCase {
             chartPoint(timestamp: 9 * hour, close: 103)
         ]
         XCTAssertEqual(marketPointsForRange(points, range: .day).map(\.timestamp), [8 * hour, 9 * hour])
+    }
+
+    func testDayRangePrefersCompleteSessionOverShortMisalignedRealtimeTail() {
+        let hour: Int64 = 60 * 60 * 1_000
+        let historical = (0..<20).map { chartPoint(timestamp: Int64($0) * 60_000, close: Double($0)) }
+        let realtimeTail = [
+            chartPoint(timestamp: 8 * hour, close: 100),
+            chartPoint(timestamp: 8 * hour + 60_000, close: 101)
+        ]
+        XCTAssertEqual(marketPointsForRange(historical + realtimeTail, range: .day).count, historical.count)
     }
 
     func testWeekRangeKeepsFiveLatestTradingDays() {
@@ -70,6 +81,11 @@ final class MarketPresentationTests: XCTestCase {
         points = marketMergingRealtimePrice(101, timestamp: 120_000, into: points)
         XCTAssertEqual(points.count, 2)
         XCTAssertEqual(points.last?.open, 101)
+    }
+
+    func testInitialAsyncChartUsesLoadedValuesAsAnimationStart() {
+        XCTAssertEqual(marketAnimationStartValues(previous: [], current: [100, 102, 101]), [100, 102, 101])
+        XCTAssertEqual(marketAnimationStartValues(previous: [98, 99], current: [100, 101]), [98, 99])
     }
 
     private func chartPoint(
