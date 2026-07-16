@@ -65,15 +65,27 @@ struct MarketIndexConstituents: Decodable {
     let selectionBasis: String
     let asOf: String
     let generatedAt: String
-    let items: [MarketIndexConstituent]
+    var items: [MarketIndexConstituent]
     let missingSymbols: [String]
+
+    mutating func replace(_ update: MarketQuote) {
+        guard let index = items.firstIndex(where: { $0.quote.symbol == update.symbol }) else { return }
+        var quote = update
+        if quote.trend.isEmpty {
+            quote.trend = marketAppendingLiveValue(quote.price, to: items[index].quote.trend)
+        }
+        if quote.nightTrend.isEmpty {
+            quote.nightTrend = marketAppendingLiveValue(quote.sessionPrice ?? quote.price, to: items[index].quote.nightTrend)
+        }
+        items[index].quote = quote
+    }
 }
 
 struct MarketIndexConstituent: Decodable, Identifiable {
     let rank: Int
     let weight: Double?
     let logoPath: String?
-    let quote: MarketQuote
+    var quote: MarketQuote
     var id: String { quote.symbol }
 }
 

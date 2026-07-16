@@ -29,11 +29,12 @@ final class MarketStore {
         realtime.onQuote = { [weak self] quote in
             guard var dashboard = self?.dashboard else { return }
             dashboard.replace(quote)
-            if let mergedQuote = dashboard.quote(symbol: quote.symbol) {
+            self?.dashboard = dashboard
+            self?.replaceConstituent(quote)
+            if let mergedQuote = self?.quote(symbol: quote.symbol) {
                 self?.realtimeQuotes[quote.symbol] = mergedQuote
                 self?.appendRealtimePoint(mergedQuote)
             }
-            self?.dashboard = dashboard
         }
         realtime.onStatus = { [weak self] status in self?.realtimeStatus = status }
         realtime.start()
@@ -136,6 +137,17 @@ final class MarketStore {
         dashboard?.coreIndices.first(where: { $0.symbol == symbol })
             ?? dashboard?.metrics.first(where: { $0.symbol == symbol })
             ?? dashboard?.components.first(where: { $0.symbol == symbol })
+            ?? indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })?.quote
+    }
+
+    func constituent(symbol: String) -> MarketIndexConstituent? {
+        indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })
+    }
+
+    private func replaceConstituent(_ quote: MarketQuote) {
+        for key in indexConstituents.keys {
+            indexConstituents[key]?.replace(quote)
+        }
     }
 
     private func loadCacheIfNeeded() {

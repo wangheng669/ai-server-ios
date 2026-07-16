@@ -30,7 +30,12 @@ struct MarketView: View {
         NavigationStack(path: $path) {
             MarketHomeView(store: store) { path.append($0) }
                 .navigationDestination(for: String.self) { symbol in
-                    MarketIndexDetailView(symbol: symbol, store: store, watchlist: watchlist)
+                    MarketIndexDetailView(
+                        symbol: symbol,
+                        store: store,
+                        watchlist: watchlist,
+                        onSelectSymbol: { path.append($0) }
+                    )
                 }
                 .toolbar(.hidden, for: .navigationBar)
         }
@@ -940,11 +945,14 @@ private struct MarketIndexDetailView: View {
     let symbol: String
     let store: MarketStore
     let watchlist: MarketWatchlistStore
+    let onSelectSymbol: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedRange = MarketRange.day
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
     private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
+    private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
+    private var isIndex: Bool { store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true }
 
     var body: some View {
         ZStack {
@@ -955,7 +963,7 @@ private struct MarketIndexDetailView: View {
                     MarketDetailChart(selectedRange: $selectedRange, symbol: symbol, store: store)
                     keyData
                     MarketSummary(quote: quote)
-                    componentStocks
+                    if isIndex { componentStocks }
                     Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
                         .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 18)
                     Color.clear.frame(height: 20)
@@ -967,7 +975,9 @@ private struct MarketIndexDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .background(InteractivePopGestureEnabler())
-        .task { await store.loadIndexConstituents(symbol: symbol) }
+        .task {
+            if isIndex { await store.loadIndexConstituents(symbol: symbol) }
+        }
     }
 
     private var detailHeader: some View {
@@ -984,10 +994,14 @@ private struct MarketIndexDetailView: View {
             .font(.system(size: 21, weight: .medium)).foregroundStyle(.primary)
 
             HStack(spacing: 10) {
-                Image(systemName: CoreDescriptor(symbol: symbol).icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(.blue)
-                    .frame(width: 30, height: 30).background(Color.blue.opacity(0.10), in: Circle())
+                if let constituent {
+                    CompanyLogo(quote: constituent.quote, path: constituent.logoPath)
+                } else {
+                    Image(systemName: CoreDescriptor(symbol: symbol).icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(.blue)
+                        .frame(width: 30, height: 30).background(Color.blue.opacity(0.10), in: Circle())
+                }
                 Text(quote?.name ?? CoreDescriptor(symbol: symbol).name).font(.system(size: 22, weight: .semibold)).tracking(-0.35)
-                Text(CoreDescriptor(symbol: symbol).code).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text(quote?.displayCode ?? CoreDescriptor(symbol: symbol).code).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     .padding(.horizontal, 8).padding(.vertical, 5).background(Color.primary.opacity(0.06), in: Capsule())
             }
             HStack(alignment: .top) {
@@ -1014,6 +1028,18 @@ private struct MarketIndexDetailView: View {
                         .padding(.horizontal, 9).padding(.vertical, 6)
                         .background(MarketStyle.purple.opacity(0.08), in: Capsule())
                         .accessibilityLabel("期货夜盘，\(session.name)，\(number(session.price, digits: 2))，\(session.formattedPercent)")
+                    } else if quote?.isNightSession == true, let quote, let nightPrice = quote.sessionPrice {
+                        HStack(spacing: 7) {
+                            Text("个股夜盘").fontWeight(.semibold)
+                            Text(number(nightPrice, digits: 2)).fontWeight(.semibold).monospacedDigit()
+                            Text(quote.formattedSessionPercent ?? "—").fontWeight(.semibold).monospacedDigit()
+                            Sparkline(values: quote.nightTrend, color: MarketStyle.purple, showsFill: false)
+                                .frame(width: 52, height: 20)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(MarketStyle.purple)
+                        .padding(.horizontal, 9).padding(.vertical, 6)
+                        .background(MarketStyle.purple.opacity(0.08), in: Capsule())
                     }
                 }
                 Spacer()
@@ -1034,7 +1060,7 @@ private struct MarketIndexDetailView: View {
             Text("关键数据").font(.system(size: 17, weight: .semibold))
             Grid(horizontalSpacing: 10, verticalSpacing: 13) {
                 GridRow { metric("开盘", quote?.openPrice); metric("最高", quote?.high, MarketStyle.gain); metric("最低", quote?.low, MarketStyle.loss); metric("昨收", quote?.previousClose) }
-                GridRow { metric("成交量", quote?.volume, compact: true); metric("涨跌幅", quote?.percentValue, quoteTint(quote), suffix: "%"); metric("市盈率", quote?.pe); textMetric("状态", quote?.freshnessLabel ?? "更新中") }
+                GridRow { metric("成交量", quote?.volume, compact: true); metric("市值", quote?.marketCap, compact: true); metric("市盈率", quote?.pe); textMetric("状态", quote?.freshnessLabel ?? "更新中") }
             }
             .padding(12).marketCard(cornerRadius: 10)
         }
@@ -1063,7 +1089,12 @@ private struct MarketIndexDetailView: View {
             VStack(spacing: 0) {
                 let items = store.indexConstituents[symbol]?.items ?? []
                 ForEach(items) { item in
-                    MarketConstituentRow(item: item)
+                    Button {
+                        onSelectSymbol(item.quote.symbol)
+                    } label: {
+                        MarketConstituentRow(item: item)
+                    }
+                    .buttonStyle(.plain)
                     if item.id != items.last?.id { Divider().padding(.leading, 62) }
                 }
                 if let error = store.constituentErrors[symbol] {
@@ -1447,7 +1478,7 @@ private struct MarketConstituentRow: View {
                 .font(.caption2).foregroundStyle(.secondary).padding(.leading, 64).padding(.bottom, 5)
         }
         .padding(.bottom, 12)
-        .accessibilityLabel("第 \(item.rank)，\(quote.name)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)")
+        .accessibilityLabel("\(quote.name)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)，点按查看详情")
     }
 }
 
