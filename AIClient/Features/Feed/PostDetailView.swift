@@ -44,6 +44,7 @@ struct PostDetailView: View {
         .toolbar((["知乎", "Truth"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(["知乎", "Truth"].contains(post.sourceName) || post.isYouTube)
         .toolbar(.hidden, for: .tabBar)
+        .background(InteractivePopGestureEnabler())
         .toolbar {
             if post.sourceName == "X" {
                 ToolbarItemGroup(placement: .topBarTrailing) {

@@ -38,6 +38,9 @@ struct NewsFeedView: View {
     @State private var hasLoadedFeedOnce = false
     @State private var flashFilter: FlashFilter = .all
     @State private var expandedFlashIDs: Set<Int> = []
+    @State private var openingWebPostID: Int?
+    @State private var webOpenError: String?
+    @State private var preparedWebViews: [Int: WKWebView] = [:]
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -63,7 +66,7 @@ struct NewsFeedView: View {
                 if let source = FeedSource(rawValue: post.source ?? ""),
                    source == .weibo || source == .douyin,
                    let link = post.linkURL {
-                    EmbeddedWebPage(url: link, source: source)
+                    EmbeddedWebPage(url: link, source: source, preparedWebView: preparedWebViews[post.id])
                 } else {
                     PostDetailView(post: post)
                 }
@@ -83,6 +86,7 @@ struct NewsFeedView: View {
         }
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty
+            if isEmpty { preparedWebViews.removeAll() }
         }
         .onDisappear {
             showsDetail = false
@@ -274,7 +278,28 @@ struct NewsFeedView: View {
                                     }
                                 }
                             } else {
-                                path.append(post)
+                                openPost(post)
+                            }
+                        }
+                        .overlay {
+                            if openingWebPostID == post.id {
+                                HStack(spacing: 8) {
+                                    if let source = FeedSource(rawValue: post.source ?? "") {
+                                        Image(source == .weibo ? "WeiboMark" : "TikTokMark")
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(width: 18, height: 18)
+                                    }
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("正在准备页面")
+                                        .font(.system(size: 13, weight: .medium))
+                                }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(.regularMaterial, in: Capsule())
+                                    .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+                                    .allowsHitTesting(false)
                             }
                         }
                         .task { await model.loadMoreIfNeeded(current: post) }
@@ -299,6 +324,44 @@ struct NewsFeedView: View {
         .modifier(FeedChromeScrollModifier(isHidden: $isFeedChromeHidden))
         .refreshable { await model.refresh() }
         .simultaneousGesture(channelSwipeGesture)
+        .allowsHitTesting(openingWebPostID == nil)
+        .alert("页面加载失败", isPresented: Binding(
+            get: { webOpenError != nil },
+            set: { if !$0 { webOpenError = nil } }
+        )) {
+            Button("知道了", role: .cancel) { webOpenError = nil }
+        } message: {
+            Text(webOpenError ?? "请稍后重试")
+        }
+    }
+
+    private func openPost(_ post: Post) {
+        guard let source = FeedSource(rawValue: post.source ?? ""),
+              source == .weibo || source == .douyin,
+              let url = post.linkURL else {
+            path.append(post)
+            return
+        }
+        if preparedWebViews[post.id] != nil {
+            path.append(post)
+            return
+        }
+        guard openingWebPostID == nil else { return }
+        openingWebPostID = post.id
+        Task {
+            do {
+                let webView = try await EmbeddedWebPagePreloader().load(url)
+                guard !Task.isCancelled else { return }
+                preparedWebViews[post.id] = webView
+                openingWebPostID = nil
+                path.append(post)
+            } catch {
+                guard !Task.isCancelled else { return }
+                openingWebPostID = nil
+                let platformName = source == .weibo ? "微博" : "抖音"
+                webOpenError = "暂时无法打开\(platformName)页面，请检查网络后重试。"
+            }
+        }
     }
 
     private var visiblePosts: [Post] {
@@ -481,26 +544,112 @@ private struct LaunchCoverView: View {
     }
 }
 
+@MainActor
+private final class EmbeddedWebPagePreloader: NSObject, WKNavigationDelegate {
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<WKWebView, Error>?
+
+    func load(_ url: URL) async throws -> WKWebView {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let configuration = EmbeddedWebView.configuration(for: url)
+            let webView = WKWebView(frame: .zero, configuration: configuration)
+            webView.navigationDelegate = self
+            self.webView = webView
+            webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 20))
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
+                self?.finish(.failure(URLError(.timedOut)))
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { await finishWhenRendered(webView) }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finish(.failure(error))
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        finish(.failure(error))
+    }
+
+    private func finishWhenRendered(_ webView: WKWebView) async {
+        let script = #"""
+        (() => {
+          const visible = (element) => {
+            if (!element) return false;
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            return style.display !== 'none' && style.visibility !== 'hidden' &&
+              Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0;
+          };
+          const loading = Array.from(document.querySelectorAll(
+            '[aria-busy="true"], [class*="loading"], [class*="spinner"], [class*="skeleton"]'
+          )).some(visible);
+          const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+          const textLoading = /^(加载中|正在加载)[…\.]*$/.test(bodyText);
+          const hasImage = Array.from(document.images).some((image) =>
+            visible(image) && image.complete && image.naturalWidth > 0
+          );
+          const hasVideo = Array.from(document.querySelectorAll('video')).some((video) =>
+            visible(video) && video.readyState >= 2
+          );
+          const hasContent = bodyText.length >= 80 || hasImage || hasVideo;
+          return `${document.readyState}|${loading || textLoading ? 1 : 0}|${hasContent ? 1 : 0}`;
+        })();
+        """#
+
+        var stableChecks = 0
+        for _ in 0..<40 {
+            guard continuation != nil else { return }
+            if let fingerprint = try? await webView.evaluateJavaScript(script) as? String {
+                let parts = fingerprint.split(separator: "|")
+                let isReady = parts.first == "complete"
+                let isLoading = parts.count > 1 && parts[1] == "1"
+                let hasContent = parts.count > 2 && parts[2] == "1"
+                if isReady && !isLoading && hasContent {
+                    stableChecks += 1
+                    if stableChecks >= 2 {
+                        finish(.success(webView))
+                        return
+                    }
+                } else {
+                    stableChecks = 0
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        finish(.success(webView))
+    }
+
+    private func finish(_ result: Result<WKWebView, Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        webView?.navigationDelegate = nil
+        if case .failure = result { webView?.stopLoading() }
+        webView = nil
+        continuation.resume(with: result)
+    }
+}
+
 private struct EmbeddedWebPage: View {
     let url: URL
     let source: FeedSource
+    let preparedWebView: WKWebView?
     @StateObject private var model = EmbeddedWebViewModel()
     @State private var isShowingWeiboAccountMenu = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            if model.isLoading {
-                ProgressView(value: model.estimatedProgress)
-                    .progressViewStyle(.linear)
-                    .tint(.blue)
-            }
-
-            EmbeddedWebView(url: url, model: model)
-        }
+        EmbeddedWebView(url: url, model: model, preparedWebView: preparedWebView)
         .background(Color(uiColor: .systemBackground))
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .background(InteractivePopGestureEnabler())
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
@@ -749,12 +898,34 @@ private final class EmbeddedWebViewModel: ObservableObject {
 private struct EmbeddedWebView: UIViewRepresentable {
     let url: URL
     @ObservedObject var model: EmbeddedWebViewModel
+    let preparedWebView: WKWebView?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(model: model)
     }
 
     func makeUIView(context: Context) -> WKWebView {
+        let webView: WKWebView
+        if let preparedWebView {
+            webView = preparedWebView
+        } else {
+            webView = WKWebView(frame: .zero, configuration: Self.configuration(for: url))
+        }
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = true
+        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        context.coordinator.observe(webView)
+        model.webView = webView
+        if preparedWebView != nil {
+            context.coordinator.adoptLoaded(url, in: webView)
+        } else {
+            context.coordinator.load(url, in: webView)
+        }
+        return webView
+    }
+
+    static func configuration(for url: URL) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.allowsInlineMediaPlayback = true
@@ -767,19 +938,10 @@ private struct EmbeddedWebView: UIViewRepresentable {
                 )
             )
         }
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
-        context.coordinator.observe(webView)
-        model.webView = webView
-        context.coordinator.load(url, in: webView)
-        return webView
+        return configuration
     }
 
-    private func isWeiboURL(_ url: URL) -> Bool {
+    private static func isWeiboURL(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
         return host == "weibo.com" || host.hasSuffix(".weibo.com") || host == "weibo.cn" || host.hasSuffix(".weibo.cn")
     }
@@ -996,6 +1158,13 @@ private struct EmbeddedWebView: UIViewRepresentable {
                 }
                 webView.load(URLRequest(url: url))
             }
+        }
+
+        func adoptLoaded(_ url: URL, in webView: WKWebView) {
+            didBeginLoad = true
+            model.rememberReturnURL(webView.url ?? url)
+            model.estimatedProgress = 1
+            model.isLoading = false
         }
 
         func stopObserving() {

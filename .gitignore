@@ -3,6 +3,7 @@ DerivedData/
 .codex/DerivedData-*/
 artifacts/device-derived/
 build/
+.build/
 *.xcuserstate
 xcuserdata/
 .DS_Store
