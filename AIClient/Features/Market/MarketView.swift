@@ -1401,7 +1401,7 @@ private struct MarketConstituentRow: View {
             CompanyLogo(quote: quote, path: item.logoPath)
             VStack(alignment: .leading, spacing: 4) {
                 Text(quote.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text("\(quote.symbol) · 代表成分第 \(item.rank)")
+                Text(quote.symbol)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
