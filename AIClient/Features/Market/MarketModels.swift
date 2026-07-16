@@ -12,6 +12,7 @@ struct MarketDashboard: Codable {
     var coreIndices: [MarketQuote]
     var metrics: [MarketQuote]
     var components: [MarketQuote]
+    var indexSessions: [String: MarketQuote]?
     let componentsMeta: MarketComponentsMeta?
     let freshness: MarketDashboardFreshness?
     let missingSymbols: [String]
@@ -22,6 +23,11 @@ struct MarketDashboard: Codable {
         replace(quote, in: &coreIndices)
         replace(quote, in: &metrics)
         replace(quote, in: &components)
+        for key in indexSessions.map({ Array($0.keys) }) ?? [] where indexSessions?[key]?.symbol == quote.symbol {
+            var quotes = [indexSessions?[key]].compactMap { $0 }
+            replace(quote, in: &quotes)
+            indexSessions?[key] = quotes.first
+        }
     }
 
     func quote(symbol: String) -> MarketQuote? {

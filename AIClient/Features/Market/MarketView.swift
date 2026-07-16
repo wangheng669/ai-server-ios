@@ -944,6 +944,7 @@ private struct MarketIndexDetailView: View {
     @State private var selectedRange = MarketRange.day
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
+    private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
 
     var body: some View {
         ZStack {
@@ -1000,6 +1001,18 @@ private struct MarketIndexDetailView: View {
                         if let timestamp = quote?.timestamp { Text(marketTimestamp(timestamp)) }
                     }
                     .font(.caption).foregroundStyle(.secondary)
+                    if showsIndexSession, let session = indexSessionQuote {
+                        HStack(spacing: 7) {
+                            Text("期货夜盘").fontWeight(.semibold)
+                            Text(session.symbol)
+                            Text(number(session.price, digits: 2)).fontWeight(.semibold).monospacedDigit()
+                            Text(session.formattedPercent).fontWeight(.semibold).monospacedDigit().foregroundStyle(quoteTint(session))
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 9).padding(.vertical, 6)
+                        .background(MarketStyle.purple.opacity(0.08), in: Capsule())
+                        .accessibilityLabel("期货夜盘，\(session.name)，\(number(session.price, digits: 2))，\(session.formattedPercent)")
+                    }
                 }
                 Spacer()
                 Button { watchlist.toggle(symbol) } label: {
@@ -1066,6 +1079,11 @@ private struct MarketIndexDetailView: View {
         switch quote?.marketSession { case "regular": "交易中"; case "pre": "盘前"; case "post", "after": "盘后"; default: "已收盘" }
     }
     private var sessionColor: Color { quote?.marketSession == "regular" ? MarketStyle.loss : .secondary }
+
+    private var showsIndexSession: Bool {
+        guard quote?.marketSession != "regular", let session = indexSessionQuote, let timestamp = session.timestamp else { return false }
+        return Date().timeIntervalSince1970 - Double(timestamp) / 1_000 < 10 * 60
+    }
 
     private var shareText: String {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
