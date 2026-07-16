@@ -46,6 +46,7 @@ struct NewsFeedView: View {
     @Environment(\.scenePhase) private var scenePhase
     private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
     private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
+    private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
@@ -109,6 +110,10 @@ struct NewsFeedView: View {
             } else if opensYouTubeDetailPreview,
                       path.isEmpty,
                       let first = model.posts.first(where: \.isYouTube) {
+                path = [first]
+            } else if opensBilibiliDetailPreview,
+                      path.isEmpty,
+                      let first = model.posts.first(where: \.isBilibili) {
                 path = [first]
             }
             #endif
@@ -220,12 +225,26 @@ struct NewsFeedView: View {
                 .font(.system(size: 18, weight: .bold, design: .default))
                 .foregroundStyle(.primary)
                 .frame(width: 22, height: 22)
+        } else if source == .xueqiu {
+            Image("XueqiuMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: model.source == .xueqiu ? 28 : 22, height: model.source == .xueqiu ? 28 : 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         } else if source == .truth {
             Image("TruthMark")
                 .resizable()
                 .renderingMode(.original)
                 .scaledToFit()
                 .frame(width: model.source == .truth ? 30 : 22, height: model.source == .truth ? 30 : 22)
+                .clipShape(Circle())
+        } else if source == .laozhong {
+            Image("LaozhongMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFill()
+                .frame(width: model.source == .laozhong ? 30 : 22, height: model.source == .laozhong ? 30 : 22)
                 .clipShape(Circle())
         } else if let asset = source.iconAsset {
             Image(asset).resizable().renderingMode(.template).scaledToFit()
@@ -265,7 +284,8 @@ struct NewsFeedView: View {
                     NewsCardView(
                         post: post,
                         isFeaturedBilibili: model.source == .bilibili && post.id == model.posts.first?.id,
-                        isExpandedFlash: expandedFlashIDs.contains(post.id)
+                        isExpandedFlash: expandedFlashIDs.contains(post.id),
+                        onOpen: { openPost(post) }
                     )
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -277,7 +297,7 @@ struct NewsFeedView: View {
                                         expandedFlashIDs.insert(post.id)
                                     }
                                 }
-                            } else {
+                            } else if !post.isXueqiu {
                                 openPost(post)
                             }
                         }
@@ -1532,6 +1552,7 @@ private extension FeedSource {
         case .newYorkTimes: "newspaper.fill"
         case .x: "house.fill"
         case .truth: "t.square.fill"
+        case .xueqiu: "circle.hexagongrid.fill"
         case .rss: "dot.radiowaves.up.forward"
         case .laozhong: "person.fill"
         case .flash: "bolt.fill"
@@ -1543,6 +1564,7 @@ private extension FeedSource {
         switch self {
         case .newYorkTimes: .primary
         case .x, .zhihu, .truth: .blue
+        case .xueqiu: Color(red: 0.95, green: 0.32, blue: 0.12)
         case .weibo, .youtube: .red
         case .douyin: .primary
         case .bilibili: Color(red: 0.98, green: 0.45, blue: 0.62)
@@ -1557,16 +1579,134 @@ private struct NewsCardView: View {
     let post: Post
     var isFeaturedBilibili = false
     var isExpandedFlash = false
+    var onOpen: (() -> Void)?
     var body: some View {
         if post.isHotTopic { hotTopicCard }
         else if post.isFlash { flashCard }
         else if post.isBilibili { bilibiliCard }
         else if post.isNewYorkTimes { newYorkTimesCard }
         else if post.isYouTube { youtubeCard }
+        else if post.isXueqiu { xueqiuCard }
         else if post.isRSS { rssCard }
         else if post.sourceName == "知乎" { zhihuCard }
         else if post.sourceName == "Truth" { truthCard }
         else { socialCard }
+    }
+
+    private var xueqiuCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            xueqiuTextContent
+                .contentShape(Rectangle())
+                .onTapGesture { onOpen?() }
+                .accessibilityLabel("打开雪球帖子，\(post.authorName)")
+                .accessibilityAddTraits(.isButton)
+
+            if post.hasXueqiuFeedMedia {
+                PostMediaGrid(
+                    post: post,
+                    singleImageMaxHeight: 220,
+                    singleImageContentMode: .fill,
+                    multiImageHeight: 148,
+                    availableWidth: max(UIScreen.main.bounds.width - 64, 240)
+                )
+            }
+
+            HStack(spacing: 0) {
+                Label("分享", systemImage: "square.and.arrow.up")
+                Spacer()
+                xueqiuMetric("bubble.left", post.meta?.metrics?.replies)
+                Spacer()
+                xueqiuMetric("hand.thumbsup", post.meta?.metrics?.likes)
+                Spacer()
+                Image(systemName: "ellipsis")
+            }
+            .font(.system(size: 15.5))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+    }
+
+    private var xueqiuTextContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 9) {
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
+                Text(post.authorName)
+                    .font(.system(size: 15.5, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.18))
+                if let time = post.formattedTime {
+                    Text("修改于\(time)")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                }
+                Spacer(minLength: 0)
+            }
+
+            xueqiuRichText(post.xueqiuBodyContent)
+                .font(.system(size: 17))
+                .lineSpacing(8)
+                .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let quoteBody = post.xueqiuQuoteBody {
+                VStack(alignment: .leading, spacing: 12) {
+                    (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
+                        .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody))
+                        .font(.system(size: 15.5))
+                        .lineSpacing(6)
+                        .lineLimit(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 4) {
+                        Text("相关讨论")
+                        if let replies = post.meta?.metrics?.replies, replies > 0 {
+                            Text(replies.formattedFeedCount)
+                        }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 13)
+                .padding(.vertical, 12)
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func xueqiuMetric(_ icon: String, _ value: Int?) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+            if let value, value > 0 { Text(value.formattedFeedCount) }
+        }
+    }
+
+    private func xueqiuRichText(_ value: String) -> Text {
+        let nsValue = value as NSString
+        let matches = (try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
+            .matches(in: value, range: NSRange(location: 0, length: nsValue.length))) ?? []
+        var result = Text("")
+        var location = 0
+        for match in matches {
+            if match.range.location > location {
+                result = result + Text(nsValue.substring(with: NSRange(location: location, length: match.range.location - location)))
+            }
+            let token = nsValue.substring(with: match.range)
+            let color = token.hasPrefix("$") ? Color(red: 0.95, green: 0.28, blue: 0.10) : Color.blue
+            result = result + Text(token).foregroundColor(color)
+            location = match.range.location + match.range.length
+        }
+        if location < nsValue.length {
+            result = result + Text(nsValue.substring(from: location))
+        }
+        return result
     }
 
     private var truthCard: some View {
@@ -1594,11 +1734,6 @@ private struct NewsCardView: View {
 
                 Spacer(minLength: 6)
 
-                if let relevance = post.truthRelevanceLabel {
-                    Text(relevance)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(relevance == "高度相关" ? Color.red : Color.secondary)
-                }
             }
 
             Text(post.truthFeedContent)
@@ -1607,18 +1742,6 @@ private struct NewsCardView: View {
                 .lineLimit(post.imageURLs.isEmpty ? 3 : 2)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let impact = post.truthImpactText {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("影响")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.red)
-                    Text(impact)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
 
             PostMediaGrid(
                 post: post,
@@ -1637,8 +1760,6 @@ private struct NewsCardView: View {
 
     private var zhihuCard: some View {
         VStack(alignment: .leading, spacing: 9) {
-            zhihuHotLine
-
             Text(post.zhihuQuestionTitle)
                 .font(.system(size: 17, weight: .semibold))
                 .lineSpacing(2)
@@ -1760,22 +1881,12 @@ private struct NewsCardView: View {
                 Text(meta.replacingOccurrences(of: "第 \(post.feedRank ?? 0) 名 · ", with: ""))
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
-            if let tag = post.tagNames.first {
-                Text(tag).font(.caption2.weight(.semibold)).foregroundStyle(.pink)
-                    .padding(.horizontal, 5).padding(.vertical, 3).background(Color.pink.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
-            }
         }
         .padding(.horizontal, 14).padding(.vertical, 11).contentShape(Rectangle())
     }
 
     private var flashCard: some View {
-        let isImportant = post.tagNames.contains("重要")
-        return HStack(alignment: .top, spacing: 0) {
-            Capsule()
-                .fill(isImportant ? Color.red : Color.clear)
-                .frame(width: 3)
-                .padding(.vertical, 2)
-
+        HStack(alignment: .top, spacing: 0) {
             Text(post.formattedTime ?? "--:--")
                 .font(.system(size: 14, weight: .regular, design: .rounded).monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -1783,17 +1894,6 @@ private struct NewsCardView: View {
                 .padding(.leading, 13)
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 9) {
-                    if isImportant {
-                        Text("重要")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.red)
-                    }
-                    Text(flashCategory)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
                 Text(post.displayContent)
                     .font(.system(size: 16, weight: .regular))
                     .lineSpacing(5)
@@ -2051,7 +2151,6 @@ private struct NewsCardView: View {
             Text(post.displayContent).font(.system(size: 17, weight: .regular)).lineSpacing(2).lineLimit(14).multilineTextAlignment(.leading)
             PostMediaGrid(post: post)
             PostActionRow(post: post)
-            tags
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14).padding(.vertical, 12).contentShape(Rectangle())
@@ -2092,12 +2191,6 @@ private struct NewsCardView: View {
         .contentShape(Rectangle())
     }
 
-    @ViewBuilder private var tags: some View {
-        if !post.tagNames.isEmpty {
-            Text(post.tagNames.prefix(3).map { "#\($0)" }.joined(separator: "  "))
-                .font(.caption).foregroundStyle(.blue).lineLimit(2).multilineTextAlignment(.leading)
-        }
-    }
 }
 
 private struct ZhihuBookmarkButton: View {

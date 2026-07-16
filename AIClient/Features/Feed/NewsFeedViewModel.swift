@@ -205,6 +205,7 @@ final class NewsFeedViewModel: ObservableObject {
         case .bilibili: return post.isBilibili
         case .zhihu: return post.sourceName == "知乎"
         case .truth: return post.sourceName == "Truth"
+        case .xueqiu: return post.isXueqiu
         case .rss: return post.isRSS
         case .laozhong: return post.isRSS && post.tagNames.contains("老中")
         case .youtube: return post.isRSS && post.tagNames.contains("YouTube")
@@ -221,6 +222,7 @@ final class NewsFeedViewModel: ObservableObject {
         case .bilibili: return name == "bilibili"
         case .zhihu: return name == "zhihu"
         case .truth: return name == "truth"
+        case .xueqiu: return name == "rss"
         case .rss, .laozhong, .youtube: return name == "rss"
         case .flash: return name.contains("flash")
         }

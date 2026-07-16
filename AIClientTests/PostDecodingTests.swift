@@ -110,6 +110,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(response.post.displayContent.contains("结尾"))
     }
 
+    func testDecodesNumericEntitiesAndRemovesPrivateUseGlyphs() throws {
+        let json = #"{"post":{"id":108,"content":"回复：冠以&#34;价投&#34;的文字<br>下一行","source":"rss:16","meta":{"rss_feed_name":"雪球-但斌"}}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.displayContent, "回复：冠以\"价投\"的文字\n下一行")
+        XCTAssertFalse(post.displayContent.contains("&#34;"))
+        XCTAssertFalse(post.displayContent.contains(""))
+    }
+
     func testStripsTruncatedTrailingHTMLTag() throws {
         let json = #"{"success":true,"data":[{"id":47,"content":"正文<p><img src='image.jpg'/></p><p style='text-align: right; col...","source":"rss:47"}]}"#
         let response = try JSONDecoder().decode(PostListResponse.self, from: Data(json.utf8))
@@ -190,8 +199,8 @@ final class PostDecodingTests: XCTestCase {
 
         let playbackURL = try XCTUnwrap(post.videoURLs.first)
         let components = try XCTUnwrap(URLComponents(url: playbackURL, resolvingAgainstBaseURL: false))
-        XCTAssertEqual(components.path, "/api/v1/bilibili/stream")
-        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "bvid" })?.value, "BV1c3NY6kERj")
+        XCTAssertEqual(components.path, "/api/v1/bilibili/hls/BV1c3NY6kERj/video.mp4")
+        XCTAssertNil(components.query)
         XCTAssertEqual(post.previewURL?.path, "/api/v1/image-proxy")
     }
 

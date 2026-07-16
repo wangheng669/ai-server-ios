@@ -119,7 +119,7 @@ final class MarketStore {
         if let timestamp = dashboard?.freshness?.latestTimestamp, timestamp > 0 {
             return Date(timeIntervalSince1970: Double(timestamp) / 1000)
         }
-        let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.metrics ?? []) + (dashboard?.components ?? [])
+        let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.metrics ?? []) + (dashboard?.components ?? []) + (dashboard?.crypto ?? [])
         guard let timestamp = quotes.compactMap(\.timestamp).max() else { return nil }
         return Date(timeIntervalSince1970: Double(timestamp) / 1000)
     }
@@ -138,6 +138,7 @@ final class MarketStore {
         dashboard?.coreIndices.first(where: { $0.symbol == symbol })
             ?? dashboard?.metrics.first(where: { $0.symbol == symbol })
             ?? dashboard?.components.first(where: { $0.symbol == symbol })
+            ?? dashboard?.crypto?.first(where: { $0.symbol == symbol })
             ?? indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })?.quote
     }
 

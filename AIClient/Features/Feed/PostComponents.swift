@@ -56,6 +56,7 @@ struct RemoteImage: View {
     var height: CGFloat? = nil
     var cornerRadius: CGFloat = 0
     var contentMode: ContentMode = .fill
+    var onImageLoaded: ((UIImage) -> Void)? = nil
     @State private var image: UIImage?
     @State private var finished = false
 
@@ -82,10 +83,12 @@ struct RemoteImage: View {
         .task(id: url) {
             finished = false
             let targetHeight = height ?? UIScreen.main.bounds.height
-            image = await ImageLoader.load(
+            let loadedImage = await ImageLoader.load(
                 url,
                 targetSize: CGSize(width: UIScreen.main.bounds.width, height: targetHeight)
             )
+            image = loadedImage
+            if let loadedImage { onImageLoaded?(loadedImage) }
             finished = true
         }
     }
@@ -192,11 +195,22 @@ struct PostMediaGrid: View {
     var multiImageHeight: CGFloat = 132
     var availableWidth: CGFloat? = nil
     @State private var previewURL: URL?
+    @State private var compactImageURLs: Set<URL> = []
+
+    private var knownCompactImageURLs: Set<URL> {
+        guard post.isRSS else { return [] }
+        let knownURLs = Set((post.images ?? []).filter(\.isKnownInlineAsset).compactMap { MediaURL.image($0.url) })
+        return knownURLs.union(post.htmlInlineAssetURLs)
+    }
+
+    private var contentImageURLs: [URL] {
+        Array(post.imageURLs.filter { !knownCompactImageURLs.contains($0) && !compactImageURLs.contains($0) }.prefix(4))
+    }
 
     private var resolvedSingleImageHeight: CGFloat {
         if let singleImageHeight { return singleImageHeight }
         let availableWidth = availableWidth ?? UIScreen.main.bounds.width - 28
-        guard let image = post.images?.first,
+        guard let image = post.images?.first(where: { !post.isRSS || !$0.isKnownInlineAsset }),
               let width = image.width,
               let height = image.height,
               width > 0,
@@ -206,8 +220,18 @@ struct PostMediaGrid: View {
         return min(availableWidth * CGFloat(height) / CGFloat(width), singleImageMaxHeight ?? 560)
     }
 
-    private var usesCompactInlineImage: Bool {
-        post.isRSS && post.images?.count == 1 && post.images?.first?.isLikelyInlineEmoji == true
+    private func classifyInlineAsset(_ image: UIImage, at url: URL) {
+        guard post.isRSS, let cgImage = image.cgImage else { return }
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        guard width > 0, height > 0 else { return }
+
+        let aspectRatio = width / height
+        let isSmallIcon = max(width, height) <= 192 && (0.5...2).contains(aspectRatio)
+        let isShortBadge = height <= 96 && width <= 360 && aspectRatio > 2
+        guard isSmallIcon || isShortBadge else { return }
+
+        compactImageURLs.insert(url)
     }
 
     private func showPreview(_ url: URL) {
@@ -217,23 +241,29 @@ struct PostMediaGrid: View {
     }
 
     var body: some View {
-        Group {
-            let urls = Array(post.imageURLs.prefix(4))
+        VStack(alignment: .leading, spacing: 6) {
+            let urls = contentImageURLs
             if urls.count == 1, let url = urls.first {
-                if usesCompactInlineImage {
-                    RemoteImage(url: url, height: 44, contentMode: .fit)
-                        .frame(width: 44)
-                        .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
-                        .accessibilityLabel("表情图片")
-                } else {
-                    RemoteImage(url: url, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
-                        .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
-                        .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
-                }
+                RemoteImage(
+                    url: url,
+                    height: resolvedSingleImageHeight,
+                    cornerRadius: 8,
+                    contentMode: singleImageContentMode,
+                    onImageLoaded: { classifyInlineAsset($0, at: url) }
+                )
+                    .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
+                    .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
-                        RemoteImage(url: url, height: multiImageHeight, cornerRadius: 6)
+                        RemoteImage(
+                            url: url,
+                            height: multiImageHeight,
+                            cornerRadius: 6,
+                            contentMode: .fit,
+                            onImageLoaded: { classifyInlineAsset($0, at: url) }
+                        )
+                            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                             .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
                     }
                 }
@@ -382,10 +412,14 @@ struct ZoomableImageView: View {
     @State private var offset: CGSize = .zero
     @State private var settledOffset: CGSize = .zero
     @State private var isPresented = false
+    @State private var isClosing = false
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.opacity(isPresented ? 1 : 0).ignoresSafeArea()
+        ZStack {
+            Color.black.opacity(backdropOpacity)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { close() }
             Group {
                 if let image {
                     Image(uiImage: image)
@@ -400,23 +434,27 @@ struct ZoomableImageView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .scaleEffect(isPresented ? 1 : 0.82)
+            .scaleEffect(presentationScale)
             .opacity(isPresented ? 1 : 0)
-
-            Button { close() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(.black.opacity(0.55), in: Circle())
-            }
-            .padding(.top, 12).padding(.trailing, 16)
-            .accessibilityLabel("关闭图片")
         }
+        .presentationBackground(.clear)
+        .accessibilityAction(.escape) { close() }
         .task(id: url) { image = await ImageLoader.load(url) }
         .onAppear {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { isPresented = true }
         }
+    }
+
+    private var presentationScale: CGFloat {
+        guard isPresented else { return 0.82 }
+        guard scale == 1, offset.height > 0 else { return 1 }
+        return max(0.88, 1 - offset.height / 1_600)
+    }
+
+    private var backdropOpacity: CGFloat {
+        guard isPresented else { return 0 }
+        guard scale == 1, offset.height > 0 else { return 1 }
+        return max(0, 1 - offset.height / 360)
     }
 
     private var magnificationGesture: some Gesture {
@@ -440,13 +478,17 @@ struct ZoomableImageView: View {
             .onEnded { value in
                 if scale > 1 {
                     settledOffset = offset
-                } else if value.translation.height > 120,
-                          abs(value.translation.height) > abs(value.translation.width) {
+                } else if shouldDismiss(for: value) {
                     close()
                 } else {
-                    withAnimation(.snappy) { resetPosition() }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { resetPosition() }
                 }
             }
+    }
+
+    private func shouldDismiss(for value: DragGesture.Value) -> Bool {
+        let isVertical = abs(value.translation.height) > abs(value.translation.width)
+        return isVertical && (value.translation.height > 100 || value.predictedEndTranslation.height > 220)
     }
 
     private func toggleZoom() {
@@ -457,9 +499,11 @@ struct ZoomableImageView: View {
     private func resetPosition() { offset = .zero; settledOffset = .zero }
 
     private func close() {
-        withAnimation(.easeIn(duration: 0.18)) { isPresented = false }
+        guard !isClosing else { return }
+        isClosing = true
+        withAnimation(.easeOut(duration: 0.16)) { isPresented = false }
         Task {
-            try? await Task.sleep(for: .milliseconds(180))
+            try? await Task.sleep(for: .milliseconds(160))
             dismiss()
         }
     }

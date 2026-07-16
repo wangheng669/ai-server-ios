@@ -1,5 +1,6 @@
 DerivedData/
 .codex-derived-device/
+.codex-derived-sim/
 .codex/DerivedData-*/
 artifacts/device-derived/
 build/

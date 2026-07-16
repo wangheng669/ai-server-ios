@@ -1,3 +1,56 @@
+# Xueqiu Detail — Design QA
+
+- Source visual truth: `/Users/wangheng/Downloads/IMG_4697.PNG`
+- Implementation screenshot: `/Users/wangheng/Desktop/ai_server_ios/artifacts/implementation/xueqiu-detail/implementation.png`
+- Full-view comparison: `/Users/wangheng/Desktop/ai_server_ios/artifacts/implementation/xueqiu-detail/comparison.png`
+- Viewport: iPhone 17 Pro simulator, light appearance, live Snowball post
+
+## Findings
+
+No actionable P0, P1, or P2 findings remain. The custom title bar, verified author row, large rich-text body, conversation affordance, inset quote card, risk notice, engagement area, and fixed discussion bar reproduce the supplied Snowball detail hierarchy. Long-form scrolling was inspected through the quote and risk sections; no private-use glyphs, numeric HTML entities, clipping, or horizontal overflow remain. Engagement counts are shown only when supplied by live metadata.
+
+final result: passed
+
+---
+
+# Xueqiu Native-Style Feed — Design QA
+
+- Source visual truth: `/var/folders/7n/8nzt6jms3f18b912d97wd0jr0000gn/T/codex-clipboard-d5e2668c-2dd1-47da-b2fc-2cb3ad04dc37.png`
+- Implementation screenshot: `/Users/wangheng/Desktop/ai_server_ios/artifacts/implementation/xueqiu-tab/simulator-final-v2.jpg`
+- Full-view comparison: `/Users/wangheng/Desktop/ai_server_ios/artifacts/implementation/xueqiu-tab/comparison-v2.jpg`
+- Viewport: iPhone 17 Pro simulator, 368 × 800 optimized capture; light appearance
+- State: `观察` bottom section selected, `雪球` top source selected, live merged posts from RSS feeds 14 and 16
+
+## Comparison history
+
+- Pass 1 found one P2 density mismatch: live Snowball posts rendered forwarded and original text as one long block, unlike the selected design's distinct quote surface.
+- Pass 2 split HTML blockquotes into a restrained secondary-system-background quote region, kept the original post as the primary reading surface, and added orange-red stock-tag emphasis when a ticker exists.
+- Pass 3 adopted the user-provided Snowball-native reference: larger body typography, blue mentions, orange verification, modified-time metadata, related-discussion footer, and a four-action bottom row.
+- Pass 3 also found and fixed one P1 media issue: a Snowball hand-gesture emoji was incorrectly promoted to a full-width feed image. Known Snowball emoji asset paths are now excluded from the media grid.
+- The post-fix evidence is the v2 implementation screenshot and comparison above.
+
+## Required fidelity surfaces
+
+- Fonts and typography: native system Chinese type, medium author names, tertiary modified-time metadata, 17 pt body copy with expanded line spacing, blue mention runs, and compact action labels follow the new reference hierarchy.
+- Spacing and layout rhythm: the 53 pt source bar, flat feed rows, 16 pt horizontal margins, subtle dividers, quote insets, and persistent three-item bottom navigation match the selected direction without nested cards.
+- Colors and visual tokens: system background and labels remain adaptive; blue is used for mentions and selected navigation, orange for verification, orange-red for available stock tags, and quote blocks use the native secondary system background.
+- Image quality and assets: real RSS author avatars and server images are used. The current above-the-fold posts have no media, so no placeholder imagery is introduced.
+- Copy and content: authors, modified timestamps, Snowball body text, quoted reposts, tickers, and media are live server data. Engagement numbers remain hidden when the API does not supply them instead of inventing values from the reference.
+
+## Findings
+
+No actionable P0, P1, or P2 findings remain. The `雪球` source sits in the top horizontal source selector, while the bottom navigation remains exactly `观点 / 市场 / 事件`.
+
+Focused comparison was not needed because the navigation, typography, quote surface, separators, and interaction icons are readable at full-view scale in the combined evidence.
+
+## Follow-up polish
+
+- [P3] A future API enhancement could expose native Snowball like/comment/bookmark counts more consistently; the UI already renders them when present.
+
+final result: passed
+
+---
+
 # Zhihu Detail Option 2 — Design QA
 
 - Source visual truth: `/Users/wangheng/.codex/generated_images/019f6470-aa65-7472-8166-7074977d4fde/exec-ca355ea4-3937-4ba4-8d2e-fbfba29ca588.png`

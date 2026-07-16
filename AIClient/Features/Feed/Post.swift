@@ -1,6 +1,10 @@
 import Foundation
 
 struct PostListResponse: Decodable { let data: [Post] }
+struct RSSFeedPostsResponse: Decodable {
+    let data: Payload
+    struct Payload: Decodable { let posts: [Post] }
+}
 struct PostDetailResponse: Decodable { let post: Post }
 
 struct XCommentsResponse: Decodable {
@@ -174,6 +178,7 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var sourceName: String {
         let value = (source ?? "").lowercased()
+        if isXueqiu { return "雪球" }
         if value.hasPrefix("rss:") { return "RSS" }
         if value.contains("weibo") { return "微博" }
         if value.contains("douyin") { return "抖音" }
@@ -185,9 +190,88 @@ struct Post: Decodable, Identifiable, Hashable {
         return value.isEmpty ? "信息流" : value
     }
     var normalizedSource: String { sourceName }
+    var isXueqiu: Bool {
+        meta?.rssFeedName?.contains("雪球") == true ||
+        meta?.rssArticleLink?.localizedCaseInsensitiveContains("xueqiu.com") == true ||
+        linkURL?.host()?.localizedCaseInsensitiveContains("xueqiu.com") == true
+    }
+    var xueqiuBodyContent: String {
+        guard let raw = clean(content),
+              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else {
+            return displayContent
+        }
+        return htmlText(String(raw[..<quoteStart.lowerBound])) ?? displayContent
+    }
+    var xueqiuQuoteContent: String? {
+        guard let raw = clean(content),
+              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return nil }
+        return htmlText(String(raw[quoteStart.lowerBound...]))
+    }
+    var xueqiuQuoteAuthor: String? {
+        guard let quote = xueqiuQuoteContent,
+              let separator = quote.firstIndex(where: { $0 == ":" || $0 == "：" }) else { return nil }
+        let author = quote[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+        return author.isEmpty ? nil : author
+    }
+    var xueqiuQuoteBody: String? {
+        guard let quote = xueqiuQuoteContent else { return nil }
+        guard let separator = quote.firstIndex(where: { $0 == ":" || $0 == "：" }) else { return quote }
+        let body = quote[quote.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.isEmpty ? nil : body
+    }
+    var xueqiuStockTag: String? {
+        let text = displayContent as NSString
+        guard let match = try? NSRegularExpression(pattern: #"\$[^$\n]{2,40}\$"#)
+            .firstMatch(in: displayContent, range: NSRange(location: 0, length: text.length)) else { return nil }
+        return text.substring(with: match.range)
+    }
+    var hasXueqiuFeedMedia: Bool {
+        (images ?? []).contains { image in
+            let value = image.url.lowercased()
+            return !value.contains("/face/") &&
+                !value.contains("emoji_") &&
+                !value.contains("emoticon")
+        } || !(videos ?? []).isEmpty
+    }
     var score: Double? { finalScore ?? weight }
     var imageURLs: [URL] { (images ?? []).compactMap { MediaURL.image($0.url) } }
+    var htmlInlineAssetURLs: Set<URL> {
+        guard isRSS, let content, !content.isEmpty else { return [] }
+        let source = content as NSString
+        guard let tagRegex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive),
+              let srcRegex = try? NSRegularExpression(
+                pattern: #"\bsrc\s*=\s*["']([^"']+)["']"#,
+                options: .caseInsensitive
+              ) else { return [] }
+
+        var urls = Set<URL>()
+        let fullRange = NSRange(location: 0, length: source.length)
+        for match in tagRegex.matches(in: content, range: fullRange) {
+            let tag = source.substring(with: match.range)
+            let loweredTag = tag.lowercased()
+            guard loweredTag.contains("emoji") || loweredTag.contains("emoticon") else { continue }
+
+            let tagSource = tag as NSString
+            let tagRange = NSRange(location: 0, length: tagSource.length)
+            guard let srcMatch = srcRegex.firstMatch(in: tag, range: tagRange),
+                  srcMatch.numberOfRanges > 1 else { continue }
+            let rawURL = tagSource.substring(with: srcMatch.range(at: 1))
+                .replacingOccurrences(of: "&amp;", with: "&")
+            if let url = MediaURL.image(rawURL) { urls.insert(url) }
+        }
+        return urls
+    }
     var videoURLs: [URL] { (videos ?? []).compactMap { $0.playURL ?? $0.url }.compactMap(MediaURL.video) }
+    var bilibiliPlaybackPageURL: URL? {
+        (videos ?? [])
+            .compactMap { $0.playURL ?? $0.url }
+            .map { $0.hasPrefix("//") ? "https:\($0)" : $0 }
+            .compactMap(URL.init(string:))
+            .first { url in
+                url.absoluteString.range(of: #"BV[0-9A-Za-z]{10}"#, options: .regularExpression) != nil
+            }
+            ?? linkURL
+    }
     var previewURL: URL? {
         imageURLs.first ?? (videos ?? []).compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.compactMap(MediaURL.image).first
     }
@@ -351,18 +435,46 @@ struct Post: Decodable, Identifiable, Hashable {
     private func htmlText(_ value: String?) -> String? {
         guard let value = clean(value) else { return nil }
         guard value.contains("<") || value.contains("&lt;") || value.contains("&amp;lt;") else { return value }
-        let decoded = value
+        let decoded = decodeNumericHTMLEntities(value)
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
             .replacingOccurrences(of: "&#39;", with: "'")
             .replacingOccurrences(of: "&nbsp;", with: " ")
-        let text = decoded
+        let stripped = decoded
             .replacingOccurrences(of: "<br\\s*/?>|</p>|</div>|</blockquote>", with: "\n", options: .regularExpression)
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "<[^>]*$", with: "", options: .regularExpression)
+        let text = String(String.UnicodeScalarView(stripped.unicodeScalars.filter { scalar in
+            let value = scalar.value
+            return !(0xE000...0xF8FF).contains(value) && value != 0xFFFD
+        }))
         return clean(text)
+    }
+
+    private func decodeNumericHTMLEntities(_ value: String) -> String {
+        let pattern = #"&#(?:x([0-9A-Fa-f]+)|([0-9]+));"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return value }
+        let source = value as NSString
+        var result = value
+        for match in regex.matches(in: value, range: NSRange(location: 0, length: source.length)).reversed() {
+            let hexRange = match.range(at: 1)
+            let decimalRange = match.range(at: 2)
+            let number: UInt32?
+            if hexRange.location != NSNotFound {
+                number = UInt32(source.substring(with: hexRange), radix: 16)
+            } else if decimalRange.location != NSNotFound {
+                number = UInt32(source.substring(with: decimalRange), radix: 10)
+            } else {
+                number = nil
+            }
+            guard let number, let scalar = UnicodeScalar(number),
+                  let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: String(scalar))
+        }
+        return result
     }
 
     private func metadataLine(named name: String) -> String? {
@@ -445,6 +557,8 @@ struct PostMeta: Decodable, Hashable {
     let zhihuAnswerAuthor: ZhihuAnswerAuthor?
     let zhihuAnswerVoteupCount: Int?
     let zhihuAnswerCommentCount: Int?
+    let rssFeedName: String?
+    let rssArticleLink: String?
     enum CodingKeys: String, CodingKey {
         case metrics, lang, urls
         case photoCredit = "photo_credit"
@@ -459,6 +573,8 @@ struct PostMeta: Decodable, Hashable {
         case zhihuAnswerAuthor = "zhihu_answer_author"
         case zhihuAnswerVoteupCount = "zhihu_answer_voteup_count"
         case zhihuAnswerCommentCount = "zhihu_answer_comment_count"
+        case rssFeedName = "rss_feed_name"
+        case rssArticleLink = "rss_article_link"
     }
 }
 
@@ -489,6 +605,7 @@ struct PostImage: Decodable, Hashable {
     let url: String
     let width, height: Int?
     let altText: String?
+    let kind: String?
 
     var isLikelyInlineEmoji: Bool {
         guard let width, let height, width > 0, height > 0 else { return false }
@@ -496,9 +613,36 @@ struct PostImage: Decodable, Hashable {
         return max(width, height) <= 128 && (0.75...1.33).contains(aspectRatio)
     }
 
+    var isKnownInlineAsset: Bool {
+        let value = url.lowercased()
+        return kind == "inline_emoji"
+            || value.contains("/images/emoji/")
+            || value.contains("/face/emoji_")
+            || value.contains("/emoji/")
+            || isLikelyInlineEmoji
+    }
+
     enum CodingKeys: String, CodingKey {
-        case url, width, height
+        case url, width, height, kind
         case altText = "alt_text"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = try container.decode(String.self, forKey: .url)
+        width = Self.decodeDimension(.width, from: container)
+        height = Self.decodeDimension(.height, from: container)
+        altText = try container.decodeIfPresent(String.self, forKey: .altText)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+    }
+
+    private static func decodeDimension(
+        _ key: CodingKeys,
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) -> Int? {
+        if let value = try? container.decode(Int.self, forKey: key) { return value }
+        if let value = try? container.decode(String.self, forKey: key) { return Int(value) }
+        return nil
     }
 }
 struct PostVideo: Decodable, Hashable {
@@ -519,9 +663,10 @@ enum MediaURL {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
         if let bvid = bilibiliBVID(from: direct) {
-            var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/v1/bilibili/stream"), resolvingAgainstBaseURL: false)
-            parts?.queryItems = [.init(name: "bvid", value: bvid)]
-            return parts?.url
+            return ServerConfiguration.currentURL
+                .appending(path: "api/v1/bilibili/hls")
+                .appending(path: bvid)
+                .appending(path: "video.mp4")
         }
         return resolved(value, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
     }
@@ -556,7 +701,7 @@ enum FeedSource: String, CaseIterable, Identifiable {
     case newYorkTimes = "rss:47"
     case x, weibo
     case douyin = "douyin-hot"
-    case bilibili, zhihu, truth, rss, laozhong, youtube, flash
+    case bilibili, zhihu, xueqiu, truth, rss, laozhong, youtube, flash
 
     var id: String { rawValue }
     var title: String {
@@ -567,6 +712,7 @@ enum FeedSource: String, CaseIterable, Identifiable {
         case .douyin: "抖音"
         case .bilibili: "B站"
         case .zhihu: "知乎"
+        case .xueqiu: "雪球"
         case .truth: "Truth"
         case .rss: "RSS"
         case .laozhong: "老中"

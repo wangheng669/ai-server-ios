@@ -12,6 +12,7 @@ struct MarketDashboard: Codable {
     var coreIndices: [MarketQuote]
     var metrics: [MarketQuote]
     var components: [MarketQuote]
+    var crypto: [MarketQuote]?
     var indexSessions: [String: MarketQuote]?
     let componentsMeta: MarketComponentsMeta?
     let freshness: MarketDashboardFreshness?
@@ -23,6 +24,10 @@ struct MarketDashboard: Codable {
         replace(quote, in: &coreIndices)
         replace(quote, in: &metrics)
         replace(quote, in: &components)
+        if var cryptoQuotes = crypto {
+            replace(quote, in: &cryptoQuotes)
+            crypto = cryptoQuotes
+        }
         for key in indexSessions.map({ Array($0.keys) }) ?? [] where indexSessions?[key]?.symbol == quote.symbol {
             var quotes = [indexSessions?[key]].compactMap { $0 }
             replace(quote, in: &quotes)
@@ -34,6 +39,7 @@ struct MarketDashboard: Codable {
         coreIndices.first(where: { $0.symbol == symbol })
             ?? metrics.first(where: { $0.symbol == symbol })
             ?? components.first(where: { $0.symbol == symbol })
+            ?? crypto?.first(where: { $0.symbol == symbol })
     }
 
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {
@@ -522,7 +528,11 @@ extension MarketQuote {
     }
 
     var displayCode: String {
-        switch symbol {
+        if symbol.hasPrefix("BINANCE:"), symbol.hasSuffix("USDT") {
+            let base = symbol.dropFirst("BINANCE:".count).dropLast("USDT".count)
+            return "\(base)/USDT"
+        }
+        return switch symbol {
         case "^GSPC": "SPX"
         case "^NDX": "NDX"
         case "^DJI": "DJI"

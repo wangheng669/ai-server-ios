@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import WebKit
 
 struct PostDetailView: View {
     @State private var post: Post
@@ -8,6 +9,9 @@ struct PostDetailView: View {
     @State private var isDescriptionExpanded = false
     @State private var videoPlaybackFailed = false
     @State private var isVideoReady = false
+    @State private var bilibiliPlaybackStartedAt: Date?
+    @State private var bilibiliPlaybackRetryTask: Task<Void, Never>?
+    @State private var bilibiliPlaybackRetryCount = 0
     @State private var youtubePlaybackState: YouTubePlaybackState = .idle
     @State private var isYouTubeVideoReady = false
     @State private var youtubePlaybackLabel: String?
@@ -37,14 +41,18 @@ struct PostDetailView: View {
             else if post.isYouTube { youtubeDetail }
             else if post.sourceName == "知乎" { zhihuDetail }
             else if post.sourceName == "Truth" { truthDetail }
+            else if post.isXueqiu { xueqiuDetail }
             else { standardDetail }
         }
         .navigationTitle(post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情"))))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar((["知乎", "Truth"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
-        .navigationBarBackButtonHidden(["知乎", "Truth"].contains(post.sourceName) || post.isYouTube)
+        .toolbar((["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube)
         .toolbar(.hidden, for: .tabBar)
-        .background(InteractivePopGestureEnabler())
+        // The Bilibili web player uses horizontal drags for seeking. Disabling the
+        // navigation pop recognizer on this screen prevents a scrub from popping
+        // the detail view; the visible back button remains available.
+        .background(InteractivePopGestureEnabler(isEnabled: !post.isBilibili))
         .toolbar {
             if post.sourceName == "X" {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -89,7 +97,10 @@ struct PostDetailView: View {
                 isVideoReady = false
             }
         }
-        .onDisappear { player?.pause() }
+        .onDisappear {
+            player?.pause()
+            bilibiliPlaybackRetryTask?.cancel()
+        }
     }
 
     private var newYorkTimesDetail: some View {
@@ -181,10 +192,6 @@ struct PostDetailView: View {
                 ForEach(post.imageURLs, id: \.self) { RemoteImage(url: $0, height: 300, cornerRadius: 8) }
                 if let player { VideoPlayer(player: player).frame(height: 240).clipShape(RoundedRectangle(cornerRadius: 8)) }
 
-                if !post.tagNames.isEmpty {
-                    Text(post.tagNames.map { "#\($0)" }.joined(separator: "  "))
-                        .font(.subheadline).foregroundStyle(.blue)
-                }
                 Divider()
                 PostActionRow(post: post)
 
@@ -199,6 +206,209 @@ struct PostDetailView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 14)
         }
+    }
+
+    private var xueqiuDetail: some View {
+        VStack(spacing: 0) {
+            xueqiuDetailToolbar
+            Divider().opacity(0.55)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    xueqiuDetailAuthor
+
+                    xueqiuRichText(post.xueqiuBodyContent)
+                        .font(.system(size: 20))
+                        .lineSpacing(10)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if post.xueqiuQuoteBody != nil {
+                        HStack(spacing: 9) {
+                            Image(systemName: "bubble.left.and.bubble.right")
+                            Text("查看对话")
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .font(.system(size: 15.5))
+                        .foregroundStyle(.secondary)
+                    }
+
+                    if let quoteBody = post.xueqiuQuoteBody {
+                        VStack(alignment: .leading, spacing: 14) {
+                            (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
+                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody))
+                                .font(.system(size: 16.5))
+                                .lineSpacing(7)
+
+                            HStack(spacing: 4) {
+                                Text("相关讨论")
+                                if let replies = post.meta?.metrics?.replies, replies > 0 {
+                                    Text(replies.formattedFeedCount)
+                                }
+                            }
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
+                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
+                    }
+
+                    if post.hasXueqiuFeedMedia {
+                        PostMediaGrid(
+                            post: post,
+                            singleImageMaxHeight: 420,
+                            singleImageContentMode: .fit,
+                            multiImageHeight: 180,
+                            availableWidth: max(UIScreen.main.bounds.width - 32, 240)
+                        )
+                    }
+
+                    Text("风险提示：用户发表的所有文章仅代表个人观点，与雪球的立场无关。投资决策需建立在独立思考之上。")
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                        .lineSpacing(5)
+
+                    Divider().opacity(0.5)
+                    xueqiuDetailStats
+                    Color.clear.frame(height: 8)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+                .padding(.bottom, 24)
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .safeAreaInset(edge: .bottom, spacing: 0) { xueqiuDetailBottomBar }
+    }
+
+    private var xueqiuDetailToolbar: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 22, weight: .medium))
+                    .frame(width: 44, height: 44)
+            }
+            Spacer()
+            Text("雪球正文")
+                .font(.system(size: 19, weight: .semibold))
+            Spacer()
+            HStack(spacing: 14) {
+                Button { openOriginal() } label: {
+                    Image(systemName: "message.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Color(red: 0.10, green: 0.68, blue: 0.46), in: Circle())
+                }
+                Menu {
+                    if let link = post.linkURL {
+                        ShareLink(item: link) { Label("分享", systemImage: "square.and.arrow.up") }
+                    }
+                    Button("打开雪球原文") { openOriginal() }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 32, height: 38)
+                }
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 8)
+        .frame(height: 56)
+    }
+
+    private var xueqiuDetailAuthor: some View {
+        HStack(spacing: 11) {
+            ZStack(alignment: .bottomTrailing) {
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 46)
+                Text("V")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 19, height: 19)
+                    .background(Color.orange, in: Circle())
+                    .overlay { Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2) }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(post.authorName)
+                    .font(.system(size: 18, weight: .semibold))
+                Text(xueqiuDetailMetadata)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var xueqiuDetailMetadata: String {
+        let time = post.articlePostAt.flatMap { raw -> String? in
+            guard let date = ISO8601DateFormatter().date(from: raw) else { return nil }
+            return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour().minute())
+        } ?? post.formattedTime ?? ""
+        return time.isEmpty ? "来自雪球" : "修改于 \(time) · 来自雪球"
+    }
+
+    private var xueqiuDetailStats: some View {
+        HStack {
+            Spacer()
+            xueqiuDetailStat(icon: "hand.thumbsup", value: post.meta?.metrics?.likes)
+            Spacer()
+            xueqiuDetailStat(icon: "star", value: post.meta?.metrics?.bookmarks)
+            Spacer()
+        }
+    }
+
+    private func xueqiuDetailStat(icon: String, value: Int?) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 27, weight: .medium))
+            if let value, value > 0 {
+                Text(value.formattedFeedCount)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(minWidth: 70, minHeight: 62)
+    }
+
+    private var xueqiuDetailBottomBar: some View {
+        HStack(spacing: 18) {
+            Text("发讨论...")
+                .font(.system(size: 15.5))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            Image(systemName: "bubble.left")
+            Image(systemName: "hand.thumbsup")
+            Image(systemName: "star")
+        }
+        .font(.system(size: 23, weight: .medium))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider().opacity(0.55) }
+    }
+
+    private func xueqiuRichText(_ value: String) -> Text {
+        let nsValue = value as NSString
+        let matches = (try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
+            .matches(in: value, range: NSRange(location: 0, length: nsValue.length))) ?? []
+        var result = Text("")
+        var location = 0
+        for match in matches {
+            if match.range.location > location {
+                result = result + Text(nsValue.substring(with: NSRange(location: location, length: match.range.location - location)))
+            }
+            let token = nsValue.substring(with: match.range)
+            let color = token.hasPrefix("$") ? Color(red: 0.95, green: 0.28, blue: 0.10) : Color.blue
+            result = result + Text(token).foregroundColor(color)
+            location = match.range.location + match.range.length
+        }
+        if location < nsValue.length { result = result + Text(nsValue.substring(from: location)) }
+        return result
     }
 
     private var youtubeDetail: some View {
@@ -481,20 +691,6 @@ struct PostDetailView: View {
                         .padding(.top, 18)
                     }
 
-                    if let impact = post.truthImpactText {
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text("影响")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.red)
-                            Text(impact)
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(4)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.top, 17)
-                    }
-
                     Divider()
                         .opacity(0.55)
                         .padding(.top, 18)
@@ -584,11 +780,6 @@ struct PostDetailView: View {
             }
 
             Spacer(minLength: 6)
-            if let relevance = post.truthRelevanceLabel {
-                Text(relevance)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(relevance == "高度相关" ? Color.red : Color.secondary)
-            }
         }
     }
 
@@ -883,13 +1074,6 @@ struct PostDetailView: View {
                         }
                     }
 
-                    if !post.tagNames.isEmpty {
-                        Divider()
-                        Text(post.tagNames.prefix(4).map { "#\($0)" }.joined(separator: "  "))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
@@ -899,32 +1083,14 @@ struct PostDetailView: View {
     }
 
     @ViewBuilder private var bilibiliMedia: some View {
-        if let player, let item = player.currentItem {
-            ZStack {
-                Color.black
-                if let image = post.previewURL, !isVideoReady {
-                    RemoteImage(url: image, height: 230, cornerRadius: 0)
-                }
-                VideoPlayer(player: player)
-                    .opacity(isVideoReady ? 1 : 0.01)
-                if !isVideoReady {
-                    ProgressView()
-                        .tint(.white)
-                        .padding(12)
-                        .background(.black.opacity(0.55), in: Circle())
-                }
-            }
+        if let bvid = bilibiliBVID {
+            BilibiliEmbeddedPlayer(bvid: bvid)
             .frame(height: 230)
-            .onAppear { player.playImmediately(atRate: 1) }
-            .onReceive(item.publisher(for: \.status)) { status in
-                if status == .readyToPlay {
-                    withAnimation(.easeOut(duration: 0.15)) { isVideoReady = true }
-                }
-            }
+            .background(Color.black)
         } else if let image = post.previewURL {
             ZStack {
                 RemoteImage(url: image, height: 230, cornerRadius: 0)
-                if videoPlaybackFailed, post.linkURL != nil {
+                if post.linkURL != nil {
                     Button {
                         openOriginal()
                     } label: {
@@ -937,24 +1103,22 @@ struct PostDetailView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("在 B 站观看")
                 }
-                if videoPlaybackFailed {
-                    Text("播放源暂不可用，点击前往 B 站观看")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(.black.opacity(0.7), in: Capsule())
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .padding(.bottom, 14)
-                        .allowsHitTesting(false)
-                } else {
-                    ProgressView()
-                        .tint(.white)
-                        .padding(12)
-                        .background(.black.opacity(0.55), in: Circle())
-                }
             }
         }
+    }
+
+    private var bilibiliBVID: String? {
+        let urls = ([post.linkURL] + post.videoURLs.map(Optional.some)).compactMap { $0 }
+        let expression = try? NSRegularExpression(pattern: "BV[0-9A-Za-z]{10}", options: [.caseInsensitive])
+        for url in urls {
+            let value = url.absoluteString
+            let range = NSRange(value.startIndex..<value.endIndex, in: value)
+            if let match = expression?.firstMatch(in: value, range: range),
+               let swiftRange = Range(match.range, in: value) {
+                return String(value[swiftRange])
+            }
+        }
+        return nil
     }
 
     private var bilibiliMetadata: some View {
@@ -1207,19 +1371,16 @@ struct PostDetailView: View {
         guard !post.isSynthetic else { return }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
 
-        // The list payload already contains enough information to start Bilibili
-        // playback. Do not serialize first-frame loading behind the detail fetch.
-        if !post.isYouTube, player == nil, let video = post.videoURLs.first {
+        if !post.isYouTube, !post.isBilibili, player == nil, let video = post.videoURLs.first {
             startVideoPlayback(url: video)
         }
 
         if let detail = try? await client.fetchPost(id: post.id) { post = detail }
-        if post.isYouTube {
+        if post.isYouTube || post.isBilibili {
+            player?.pause()
             player = nil
         } else if player == nil, let video = post.videoURLs.first {
             startVideoPlayback(url: video)
-        } else if post.isBilibili {
-            videoPlaybackFailed = player == nil
         }
         guard post.isNewYorkTimes, let link = post.linkURL else { return }
         isLoadingNewYorkTimesBody = true
@@ -1268,19 +1429,129 @@ struct PostDetailView: View {
     }
 
     private func startVideoPlayback(url: URL) {
+        if post.isBilibili { bilibiliPlaybackStartedAt = Date() }
+        #if !targetEnvironment(simulator)
         let audioSession = AVAudioSession.sharedInstance()
         try? audioSession.setCategory(.playback, mode: .moviePlayback)
         try? audioSession.setActive(true)
+        #endif
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 1
         let newPlayer = AVPlayer(playerItem: item)
-        newPlayer.automaticallyWaitsToMinimizeStalling = false
+        #if targetEnvironment(simulator)
+        newPlayer.isMuted = true
+        #endif
+        newPlayer.automaticallyWaitsToMinimizeStalling = true
         player = newPlayer
         videoPlaybackFailed = false
         isVideoReady = false
-        newPlayer.playImmediately(atRate: 1)
+        newPlayer.play()
     }
 
+    private func markBilibiliVideoReady() {
+        guard !isVideoReady else { return }
+        bilibiliPlaybackRetryTask?.cancel()
+        bilibiliPlaybackRetryTask = nil
+        bilibiliPlaybackRetryCount = 0
+        if post.isBilibili, let startedAt = bilibiliPlaybackStartedAt {
+            print("[BilibiliTiming] HLS ready in \(String(format: "%.3f", Date().timeIntervalSince(startedAt)))s")
+        }
+        withAnimation(.easeOut(duration: 0.15)) { isVideoReady = true }
+    }
+
+    private func scheduleBilibiliPlaybackRetry() {
+        guard post.isBilibili,
+              bilibiliPlaybackRetryCount < 12,
+              bilibiliPlaybackRetryTask == nil,
+              let url = post.videoURLs.first else { return }
+        bilibiliPlaybackRetryCount += 1
+        bilibiliPlaybackRetryTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            bilibiliPlaybackRetryTask = nil
+            player?.pause()
+            player = nil
+            startVideoPlayback(url: url)
+        }
+    }
+
+}
+
+private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
+    let bvid: String
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.websiteDataStore = .default()
+        // Bilibili's control calls the browser Fullscreen API. WKWebView keeps
+        // that API disabled unless it is explicitly enabled, so the button
+        // otherwise receives the tap without changing presentation.
+        configuration.preferences.isElementFullscreenEnabled = true
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.backgroundColor = .black
+        webView.allowsBackForwardNavigationGestures = false
+        loadPlayer(in: webView)
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.loadedBVID != bvid else { return }
+        loadPlayer(in: webView)
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.loadHTMLString("", baseURL: nil)
+    }
+
+    private func loadPlayer(in webView: WKWebView) {
+        var components = URLComponents(string: "https://player.bilibili.com/player.html")
+        components?.queryItems = [
+            URLQueryItem(name: "bvid", value: bvid),
+            URLQueryItem(name: "page", value: "1"),
+            URLQueryItem(name: "high_quality", value: "1"),
+            URLQueryItem(name: "danmaku", value: "0"),
+            URLQueryItem(name: "autoplay", value: "1")
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.setValue("https://www.bilibili.com/video/\(bvid)", forHTTPHeaderField: "Referer")
+        webView.load(request)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var loadedBVID: String?
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            loadedBVID = URLComponents(url: webView.url ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "bvid" })?.value
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url,
+               url.host?.contains("bilibili.com") == true {
+                UIApplication.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+    }
 }
 
 private struct XCommentRow: View {
@@ -1364,6 +1635,109 @@ private struct XCommentRow: View {
 
 private enum YouTubePlaybackState: Equatable {
     case idle, loading, playing, failed
+}
+
+private final class BilibiliResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
+    nonisolated(unsafe) private static var retainedLoaders: [BilibiliResourceLoader] = []
+    private static let retainedLoadersLock = NSLock()
+    let queue = DispatchQueue(label: "com.wangheng.aiserverclient.bilibili-loader")
+    private let sourceURL: URL
+    private let headers: [String: String]
+    private let lock = NSLock()
+    private var tasks: [ObjectIdentifier: URLSessionDataTask] = [:]
+
+    init(sourceURL: URL, headers: [String: String]) {
+        self.sourceURL = sourceURL
+        self.headers = headers
+        super.init()
+        Self.retainedLoadersLock.lock()
+        Self.retainedLoaders.append(self)
+        Self.retainedLoadersLock.unlock()
+    }
+
+    func resourceLoader(
+        _ resourceLoader: AVAssetResourceLoader,
+        shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest
+    ) -> Bool {
+        let key = ObjectIdentifier(loadingRequest)
+        let start = loadingRequest.dataRequest.map {
+            $0.currentOffset > 0 ? $0.currentOffset : $0.requestedOffset
+        } ?? 0
+        fetchChunk(for: loadingRequest, key: key, start: start)
+        return true
+    }
+
+    private func fetchChunk(for loadingRequest: AVAssetResourceLoadingRequest, key: ObjectIdentifier, start: Int64) {
+        var request = URLRequest(url: sourceURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        if let dataRequest = loadingRequest.dataRequest {
+            let requestedEnd = dataRequest.requestedOffset + Int64(dataRequest.requestedLength)
+            let chunkLength = min(max(Int(requestedEnd - start), 1), 512 * 1024)
+            let end = start + Int64(chunkLength) - 1
+            request.setValue("bytes=\(start)-\(max(start, end))", forHTTPHeaderField: "Range")
+        } else {
+            request.setValue("bytes=0-1", forHTTPHeaderField: "Range")
+        }
+        let task = URLSession.shared.dataTask(with: request) { [weak self, loadingRequest] data, response, error in
+            defer { self?.removeTask(for: key) }
+            if let error {
+                print("[BilibiliTiming] loader completion error=\(error.localizedDescription)")
+                loadingRequest.finishLoading(with: error)
+                return
+            }
+            guard let data, let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                loadingRequest.finishLoading(with: URLError(.badServerResponse))
+                return
+            }
+            self?.queue.async {
+                let totalLength = Self.totalLength(from: http) ?? Int64(data.count)
+                if let info = loadingRequest.contentInformationRequest {
+                    info.contentType = "public.mpeg-4"
+                    info.isByteRangeAccessSupported = true
+                    info.contentLength = totalLength
+                }
+                loadingRequest.dataRequest?.respond(with: data)
+                guard let dataRequest = loadingRequest.dataRequest else {
+                    loadingRequest.finishLoading()
+                    return
+                }
+                let next = start + Int64(data.count)
+                let requestedEnd = dataRequest.requestedOffset + Int64(dataRequest.requestedLength)
+                if next < requestedEnd, next < totalLength, !loadingRequest.isCancelled {
+                    self?.fetchChunk(for: loadingRequest, key: key, start: next)
+                } else {
+                    loadingRequest.finishLoading()
+                }
+            }
+        }
+        lock.lock()
+        tasks[key] = task
+        lock.unlock()
+        task.resume()
+    }
+
+    func resourceLoader(
+        _ resourceLoader: AVAssetResourceLoader,
+        didCancel loadingRequest: AVAssetResourceLoadingRequest
+    ) {
+        let key = ObjectIdentifier(loadingRequest)
+        lock.lock()
+        let task = tasks.removeValue(forKey: key)
+        lock.unlock()
+        task?.cancel()
+    }
+
+    private func removeTask(for key: ObjectIdentifier) {
+        lock.lock()
+        tasks[key] = nil
+        lock.unlock()
+    }
+
+    private static func totalLength(from response: HTTPURLResponse) -> Int64? {
+        guard let value = response.value(forHTTPHeaderField: "Content-Range"),
+              let total = value.split(separator: "/").last else { return nil }
+        return Int64(total)
+    }
 }
 
 private struct NativeVideoPlayer: UIViewControllerRepresentable {

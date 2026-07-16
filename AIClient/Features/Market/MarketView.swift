@@ -77,12 +77,14 @@ private struct MarketHomeView: View {
                     .transition(.opacity)
                     .animation(.easeInOut(duration: 0.16), value: selectedMarket)
                     .simultaneousGesture(regionSwipeGesture)
-                    MarketCountryStrip(store: store, onSelectIndex: onSelectIndex)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("热门板块")
-                            .font(.system(size: 19, weight: .semibold))
-                            .padding(.horizontal, 18)
-                        MarketSectorsRow(overview: store.dashboard?.ashareOverview)
+                    if selectedMarket != .crypto {
+                        MarketCountryStrip(store: store, onSelectIndex: onSelectIndex)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("热门板块")
+                                .font(.system(size: 19, weight: .semibold))
+                                .padding(.horizontal, 18)
+                            MarketSectorsRow(overview: store.dashboard?.ashareOverview)
+                        }
                     }
                 }
                 .padding(.top, 12)
@@ -148,6 +150,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
     case china = "中国"
     case japan = "日本"
     case korea = "韩国"
+    case crypto = "加密"
 
     var id: Self { self }
 
@@ -157,6 +160,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
         case .china: ["000001.SS", "000300.SS", "000688.SS", "^HSTECH", "^HSI"]
         case .japan: ["^N225"]
         case .korea: ["^KS11"]
+        case .crypto: ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT", "BINANCE:SOLUSDT", "BINANCE:BNBUSDT", "BINANCE:XRPUSDT", "BINANCE:DOGEUSDT"]
         }
     }
 
@@ -194,9 +198,12 @@ private struct MarketTerminalHero: View {
                         HStack(alignment: .firstTextBaseline, spacing: 7) {
                             Text(quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name)
                                 .font(.system(size: 22, weight: .semibold))
+                                .lineLimit(1)
                             Text(quote?.displayCode ?? CoreDescriptor(symbol: region.primarySymbol).code)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Color.white.opacity(0.58))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
                         }
                         Text(quote.map { number($0.price, digits: 2) } ?? "—")
                             .font(.system(size: 31, weight: .semibold))
@@ -219,7 +226,17 @@ private struct MarketTerminalHero: View {
             .buttonStyle(MarketPressStyle())
             .accessibilityHint("打开代表指数详情")
 
-            HStack(spacing: 0) {
+            if region == .crypto {
+                HStack(spacing: 0) {
+                    cryptoMetric(symbol: "BINANCE:ETHUSDT")
+                    TerminalDivider()
+                    cryptoMetric(symbol: "BINANCE:SOLUSDT")
+                    TerminalDivider()
+                    cryptoMetric(symbol: "BINANCE:BNBUSDT")
+                }
+                .frame(height: 76)
+            } else {
+                HStack(spacing: 0) {
                 MarketTerminalMetric(
                     title: "VIX 恐慌指数",
                     value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
@@ -238,7 +255,8 @@ private struct MarketTerminalHero: View {
                     trend: store.quote(symbol: "^TNX")?.trend ?? []
                 )
             }
-            .frame(height: 76)
+                .frame(height: 76)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -247,7 +265,8 @@ private struct MarketTerminalHero: View {
     }
 
     private var sessionLabel: String {
-        switch quote?.marketSession {
+        if region == .crypto { return "24H 交易中" }
+        return switch quote?.marketSession {
         case "regular": "交易中"
         case "pre": "盘前"
         case "post", "after": "盘后"
@@ -255,7 +274,22 @@ private struct MarketTerminalHero: View {
         }
     }
 
-    private var sessionTint: Color { quote?.marketSession == "regular" ? Color(red: 0.08, green: 0.83, blue: 0.47) : Color.white.opacity(0.58) }
+    private var sessionTint: Color {
+        region == .crypto || quote?.marketSession == "regular"
+            ? Color(red: 0.08, green: 0.83, blue: 0.47)
+            : Color.white.opacity(0.58)
+    }
+
+    private func cryptoMetric(symbol: String) -> some View {
+        let value = store.quote(symbol: symbol)
+        return MarketTerminalMetric(
+            title: value?.name ?? CoreDescriptor(symbol: symbol).name,
+            value: value.map { number($0.price, digits: 2) } ?? "—",
+            change: value?.formattedPercent ?? "—",
+            tint: quoteTint(value),
+            trend: value?.trend ?? []
+        )
+    }
 
     private var heroDate: String {
         let date = quote?.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
@@ -306,10 +340,14 @@ private struct MarketTerminalMetric: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption2.weight(.medium)).foregroundStyle(Color.white.opacity(0.68)).lineLimit(1).minimumScaleFactor(0.85)
+            Text(title).font(.caption2.weight(.medium)).foregroundStyle(Color.white.opacity(0.68)).lineLimit(1).minimumScaleFactor(0.75)
             HStack(alignment: .lastTextBaseline, spacing: 5) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(value).font(.system(size: 17, weight: .semibold)).monospacedDigit()
+                    Text(value)
+                        .font(.system(size: 17, weight: .semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
                     Text(change)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(tint)
@@ -458,6 +496,7 @@ private struct MarketIndexTable: View {
         case .china: "A股常规交易时段 09:30–15:00（北京时间）"
         case .japan: "日股常规交易时段 09:00–15:30（东京时间）"
         case .korea: "韩股常规交易时段 09:00–15:30（首尔时间）"
+        case .crypto: "加密货币市场全年无休，行情以 USDT 计价"
         }
     }
 }
@@ -505,8 +544,8 @@ private struct MarketIndexTableRow: View {
         .accessibilityHint("打开指数详情")
     }
 
-    private var sessionLabel: String { quote.marketSession == "regular" ? "交易中" : "已收盘" }
-    private var sessionTint: Color { quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
+    private var sessionLabel: String { quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") ? "24H" : (quote.marketSession == "regular" ? "交易中" : "已收盘") }
+    private var sessionTint: Color { quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
 }
 
 private struct MarketCountryStrip: View {
@@ -1126,15 +1165,22 @@ private struct MarketIndexDetailView: View {
 }
 
 struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
+    var isEnabled = true
+
     func makeUIViewController(context: Context) -> Controller {
-        Controller()
+        let controller = Controller()
+        controller.shouldEnableSwipeBack = isEnabled
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: Controller, context: Context) {
+        uiViewController.shouldEnableSwipeBack = isEnabled
         uiViewController.enableSwipeBack()
     }
 
     final class Controller: UIViewController, UIGestureRecognizerDelegate {
+        var shouldEnableSwipeBack = true
+
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
             enableSwipeBack()
@@ -1149,11 +1195,11 @@ struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
             guard let navigationController,
                   let gesture = navigationController.interactivePopGestureRecognizer else { return }
             gesture.delegate = self
-            gesture.isEnabled = navigationController.viewControllers.count > 1
+            gesture.isEnabled = shouldEnableSwipeBack && navigationController.viewControllers.count > 1
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            (navigationController?.viewControllers.count ?? 0) > 1
+            shouldEnableSwipeBack && (navigationController?.viewControllers.count ?? 0) > 1
         }
     }
 }

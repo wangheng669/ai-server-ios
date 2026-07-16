@@ -22,8 +22,41 @@ struct APIClient {
             return try await fetchHotTopics(page: page, limit: limit, source: source).map { .hotTopic($0, source: source) }
         case .flash:
             return try await fetchFlash(page: page, limit: limit).map(Post.flash)
+        case .xueqiu:
+            return try await fetchXueqiuPosts(page: page, limit: limit)
         default:
             return try await fetchRegularPosts(page: page, limit: limit, source: source)
+        }
+    }
+
+    private func fetchXueqiuPosts(page: Int, limit: Int) async throws -> [Post] {
+        try await withThrowingTaskGroup(of: [Post].self) { group in
+            for feedID in [14, 16] {
+                group.addTask {
+                    var parts = URLComponents(
+                        url: baseURL.appending(path: "api/v1/rss/feeds/\(feedID)/posts"),
+                        resolvingAgainstBaseURL: false
+                    )
+                    parts?.queryItems = [
+                        .init(name: "page", value: String(page)),
+                        .init(name: "limit", value: String(limit)),
+                        .init(name: "sort", value: "time_desc"),
+                        .init(name: "include_zero_score", value: "true")
+                    ]
+                    guard let url = parts?.url else { throw APIError.invalidURL }
+                    let response: RSSFeedPostsResponse = try await get(url)
+                    return response.data.posts
+                }
+            }
+
+            var posts: [Post] = []
+            for try await result in group { posts += result }
+            var seen = Set<Int>()
+            return posts
+                .sorted { ($0.articlePostAt ?? "") > ($1.articlePostAt ?? "") }
+                .filter { seen.insert($0.id).inserted }
+                .prefix(limit)
+                .map { $0 }
         }
     }
 
@@ -125,12 +158,20 @@ struct APIClient {
     }
 
     func resolveYouTubePlayback(url: URL, title: String) async throws -> VideoPlaybackSource {
+        try await resolveVideoPlayback(url: url, title: title, formatID: "18")
+    }
+
+    func resolveBilibiliPlayback(url: URL, title: String) async throws -> VideoPlaybackSource {
+        try await resolveVideoPlayback(url: url, title: title, formatID: "18")
+    }
+
+    private func resolveVideoPlayback(url: URL, title: String, formatID: String) async throws -> VideoPlaybackSource {
         var request = URLRequest(url: baseURL.appending(path: "api/v1/post/video-playback/source"))
         request.httpMethod = "POST"
         request.timeoutInterval = 35
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
-            VideoPlaybackRequest(url: url.absoluteString, title: title, formatID: "18")
+            VideoPlaybackRequest(url: url.absoluteString, title: title, formatID: formatID)
         )
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
@@ -140,7 +181,7 @@ struct APIClient {
               let source = Self.playbackURL(from: payload.data.sourceURL, baseURL: baseURL) else {
             throw APIError.invalidURL
         }
-        return VideoPlaybackSource(url: source, label: payload.data.label)
+        return VideoPlaybackSource(url: source, label: payload.data.label, httpHeaders: payload.data.httpHeaders ?? [:])
     }
 
     static func playbackURL(from value: String, baseURL: URL) -> URL? {
@@ -332,10 +373,15 @@ private struct VideoPlaybackResponse: Decodable {
     struct Payload: Decodable {
         let sourceURL: String
         let label: String?
-        enum CodingKeys: String, CodingKey { case label; case sourceURL = "sourceUrl" }
+        let httpHeaders: [String: String]?
+        enum CodingKeys: String, CodingKey { case label, httpHeaders; case sourceURL = "sourceUrl" }
     }
 }
-struct VideoPlaybackSource: Equatable { let url: URL; let label: String? }
+struct VideoPlaybackSource: Equatable {
+    let url: URL
+    let label: String?
+    let httpHeaders: [String: String]
+}
 struct XBookmarkResult: Decodable, Equatable {
     let articleID: String
     let bookmarked: Bool

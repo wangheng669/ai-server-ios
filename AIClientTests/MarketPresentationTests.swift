@@ -2,6 +2,22 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testCryptoDisplayCodeUsesTradingPair() throws {
+        let data = Data(#"{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":64000}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.displayCode, "BTC/USDT")
+    }
+
+    func testDashboardDecodesCryptoQuotes() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-16T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":79591.91,"previousClose":78000,"marketSession":"always-open","changePercent":"2.04%"}],"missingSymbols":[]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+
+        XCTAssertEqual(response.data.crypto?.map(\.symbol), ["BINANCE:BTCUSDT"])
+        XCTAssertEqual(response.data.quote(symbol: "BINANCE:BTCUSDT")?.name, "比特币")
+    }
+
     func testPeriodTrendUsesSelectedRangeValues() {
         XCTAssertTrue(marketTrendIsUp(values: [100, 98, 104], fallbackIsUp: false))
         XCTAssertFalse(marketTrendIsUp(values: [100, 103, 97], fallbackIsUp: true))
