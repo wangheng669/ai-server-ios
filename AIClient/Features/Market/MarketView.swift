@@ -1426,6 +1426,10 @@ private struct MarketConstituentRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 Text(number(quote.price, digits: 2)).font(.system(size: 14, weight: .semibold)).monospacedDigit()
                 Text(quote.formattedPercent).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
+                if quote.isNightSession == true, let nightPrice = quote.sessionPrice {
+                    Text("夜 \(number(nightPrice, digits: 2)) \(quote.formattedSessionPercent ?? "")")
+                        .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(MarketStyle.purple)
+                }
             }
             Sparkline(values: quote.trend, color: quoteTint(quote), showsFill: false)
                 .frame(width: 58, height: 28)

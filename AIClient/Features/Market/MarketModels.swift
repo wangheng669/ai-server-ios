@@ -97,6 +97,10 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let dataSource: String?
     let delaySeconds: Int?
     let marketSession: String?
+    let isNightSession: Bool?
+    let sessionPrice: Double?
+    let sessionChangePercent: Double?
+    let sessionDataSource: String?
     let changePercent: String?
     let timestamp: Int64?
     var trend: [Double]
@@ -120,9 +124,14 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 
     var isUp: Bool { percentValue >= 0 }
 
+    var formattedSessionPercent: String? {
+        sessionChangePercent.map { String(format: "%@%.2f%%", $0 >= 0 ? "+" : "−", abs($0)) }
+    }
+
     enum CodingKeys: String, CodingKey {
         case symbol, name, price, openPrice, previousClose, high, low, pe, marketCap, volume
-        case dataSource, delaySeconds, marketSession, changePercent, timestamp, trend, stale
+        case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
+        case changePercent, timestamp, trend, stale
     }
 
     init(from decoder: Decoder) throws {
@@ -140,6 +149,10 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         dataSource = try values.decodeIfPresent(String.self, forKey: .dataSource)
         delaySeconds = try values.decodeIfPresent(Int.self, forKey: .delaySeconds)
         marketSession = try values.decodeIfPresent(String.self, forKey: .marketSession)
+        isNightSession = try values.decodeIfPresent(Bool.self, forKey: .isNightSession)
+        sessionPrice = try values.decodeIfPresent(Double.self, forKey: .sessionPrice)
+        sessionChangePercent = try values.decodeIfPresent(Double.self, forKey: .sessionChangePercent)
+        sessionDataSource = try values.decodeIfPresent(String.self, forKey: .sessionDataSource)
         changePercent = try values.decodeIfPresent(String.self, forKey: .changePercent)
         timestamp = try values.decodeIfPresent(Int64.self, forKey: .timestamp)
         trend = try values.decodeIfPresent([Double].self, forKey: .trend) ?? []
