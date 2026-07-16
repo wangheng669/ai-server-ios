@@ -11,7 +11,8 @@ struct MarketService {
         } else {
             let configuration = URLSessionConfiguration.default
             configuration.timeoutIntervalForRequest = 20
-            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            configuration.requestCachePolicy = .useProtocolCachePolicy
+            configuration.urlCache = .shared
             self.session = URLSession(configuration: configuration)
         }
     }
@@ -33,6 +34,13 @@ struct MarketService {
         ]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketChartResponse.self).data
+    }
+
+    func indexConstituents(symbol: String) async throws -> MarketIndexConstituents {
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/index-constituents"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [.init(name: "symbol", value: symbol)]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        return try await request(url, as: MarketIndexConstituentsResponse.self).data
     }
 
     private func request<Response: Decodable>(_ url: URL, as type: Response.Type) async throws -> Response {

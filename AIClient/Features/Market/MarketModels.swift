@@ -45,6 +45,28 @@ struct MarketComponentsMeta: Codable {
     let selectionBasis: String
 }
 
+struct MarketIndexConstituentsResponse: Decodable {
+    let success: Bool
+    let data: MarketIndexConstituents
+}
+
+struct MarketIndexConstituents: Decodable {
+    let indexSymbol: String
+    let label: String
+    let selectionBasis: String
+    let asOf: String
+    let generatedAt: String
+    let items: [MarketIndexConstituent]
+    let missingSymbols: [String]
+}
+
+struct MarketIndexConstituent: Decodable, Identifiable {
+    let rank: Int
+    let weight: Double?
+    let quote: MarketQuote
+    var id: String { quote.symbol }
+}
+
 struct MarketDashboardFreshness: Codable {
     let latestQuoteAt: String?
     let latestTimestamp: Int64?
@@ -222,15 +244,14 @@ enum MarketRange: String, CaseIterable, Identifiable {
         case .month: 64
         case .quarter: 128
         case .year: 400
-        case .fiveYears: 1_500
-        case .maximum: 2_000
+        case .fiveYears, .maximum: 1_000
         }
     }
 
     var shouldPreload: Bool {
         switch self {
-        case .week, .month, .quarter, .year: true
-        case .day, .fiveYears, .maximum: false
+        case .week, .month, .quarter, .year, .fiveYears, .maximum: true
+        case .day: false
         }
     }
 }

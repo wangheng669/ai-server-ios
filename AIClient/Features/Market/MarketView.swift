@@ -966,6 +966,7 @@ private struct MarketIndexDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .background(InteractivePopGestureEnabler())
+        .task { await store.loadIndexConstituents(symbol: symbol) }
     }
 
     private var detailHeader: some View {
@@ -1040,12 +1041,27 @@ private struct MarketIndexDetailView: View {
     private var componentStocks: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text(store.dashboard?.componentsMeta?.label ?? "主要成分股").font(.system(size: 17, weight: .semibold))
+                Text(store.indexConstituents[symbol]?.label ?? "主要成分股").font(.system(size: 17, weight: .semibold))
                 Spacer()
-                if let date = store.componentsLatestQuoteDate { Text("截至 \(date.formatted(date: .omitted, time: .shortened))").font(.system(size: 11)).foregroundStyle(.secondary) }
+                if let asOf = store.indexConstituents[symbol]?.asOf { Text("权重截至 \(asOf)").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) { ForEach(store.dashboard?.components ?? []) { MarketStockCard(quote: $0) } }.padding(.vertical, 3)
+                HStack(spacing: 8) {
+                    ForEach(store.indexConstituents[symbol]?.items ?? []) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            MarketStockCard(quote: item.quote)
+                            if let weight = item.weight {
+                                Text("第 \(item.rank) · 权重 \(number(weight, digits: 1))%")
+                                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 4)
+                            }
+                        }
+                    }
+                    if let error = store.constituentErrors[symbol] {
+                        Text(error).font(.footnote).foregroundStyle(.secondary).frame(width: 180, height: 92)
+                    } else if store.indexConstituents[symbol] == nil {
+                        ProgressView().frame(width: 120, height: 92)
+                    }
+                }.padding(.vertical, 3)
             }
         }
         .padding(.horizontal, 18)
@@ -1063,7 +1079,7 @@ private struct MarketIndexDetailView: View {
     }
 }
 
-private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
+struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> Controller {
         Controller()
     }
@@ -1171,7 +1187,7 @@ private struct MarketDetailChart: View {
             inspectedPoint = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
         }
-        .task { await store.preloadCharts(symbol: symbol) }
+        .task(priority: .utility) { await store.preloadCharts(symbol: symbol) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedRange.rawValue)行情图表，可拖动查看具体时间和价格")
     }

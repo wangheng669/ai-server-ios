@@ -8,6 +8,8 @@ final class MarketStore {
     private(set) var charts: [ChartKey: MarketChart] = [:]
     private(set) var loadingCharts: Set<ChartKey> = []
     private(set) var chartErrors: [ChartKey: String] = [:]
+    private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
+    private(set) var constituentErrors: [String: String] = [:]
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var realtimeStatus: MarketRealtimeClient.Status = .stopped
@@ -81,9 +83,13 @@ final class MarketStore {
     }
 
     func preloadCharts(symbol: String) async {
+        do { try await Task.sleep(for: .milliseconds(500)) }
+        catch { return }
         for range in MarketRange.allCases where range.shouldPreload {
             guard !Task.isCancelled else { return }
             await loadChart(symbol: symbol, range: range)
+            do { try await Task.sleep(for: .milliseconds(150)) }
+            catch { return }
         }
     }
 
@@ -93,6 +99,18 @@ final class MarketStore {
 
     func chartError(symbol: String, range: MarketRange) -> String? {
         chartErrors[ChartKey(symbol: symbol, range: range)]
+    }
+
+    func loadIndexConstituents(symbol: String) async {
+        if indexConstituents[symbol] != nil { return }
+        do {
+            indexConstituents[symbol] = try await service.indexConstituents(symbol: symbol)
+            constituentErrors[symbol] = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            constituentErrors[symbol] = error.localizedDescription
+        }
     }
 
     var latestQuoteDate: Date? {
