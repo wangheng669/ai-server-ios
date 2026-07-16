@@ -42,6 +42,9 @@ struct MarketDashboard: Codable {
         if next.trend.isEmpty {
             next.trend = marketAppendingLiveValue(next.price, to: quotes[index].trend)
         }
+        if next.nightTrend.isEmpty {
+            next.nightTrend = marketAppendingLiveValue(next.sessionPrice ?? next.price, to: quotes[index].nightTrend)
+        }
         quotes[index] = next
     }
 }
@@ -104,6 +107,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let changePercent: String?
     let timestamp: Int64?
     var trend: [Double]
+    var nightTrend: [Double]
     let stale: Bool?
 
     var percentValue: Double {
@@ -131,7 +135,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case symbol, name, price, openPrice, previousClose, high, low, pe, marketCap, volume
         case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
-        case changePercent, timestamp, trend, stale
+        case changePercent, timestamp, trend, nightTrend, stale
     }
 
     init(from decoder: Decoder) throws {
@@ -156,6 +160,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         changePercent = try values.decodeIfPresent(String.self, forKey: .changePercent)
         timestamp = try values.decodeIfPresent(Int64.self, forKey: .timestamp)
         trend = try values.decodeIfPresent([Double].self, forKey: .trend) ?? []
+        nightTrend = try values.decodeIfPresent([Double].self, forKey: .nightTrend) ?? []
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale)
     }
 }

@@ -40,7 +40,7 @@ struct MarketService {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/index-constituents"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             .init(name: "symbol", value: symbol),
-            .init(name: "contract", value: "6")
+            .init(name: "contract", value: "7")
         ]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketIndexConstituentsResponse.self).data

@@ -1431,7 +1431,11 @@ private struct MarketConstituentRow: View {
                         .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(MarketStyle.purple)
                 }
             }
-            Sparkline(values: quote.trend, color: quoteTint(quote), showsFill: false)
+            Sparkline(
+                values: quote.isNightSession == true ? quote.nightTrend : quote.trend,
+                color: quote.isNightSession == true ? MarketStyle.purple : quoteTint(quote),
+                showsFill: false
+            )
                 .frame(width: 58, height: 28)
         }
         .padding(.horizontal, 12).frame(minHeight: 66)
