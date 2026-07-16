@@ -63,6 +63,7 @@ struct MarketIndexConstituents: Decodable {
 struct MarketIndexConstituent: Decodable, Identifiable {
     let rank: Int
     let weight: Double?
+    let logoPath: String?
     let quote: MarketQuote
     var id: String { quote.symbol }
 }

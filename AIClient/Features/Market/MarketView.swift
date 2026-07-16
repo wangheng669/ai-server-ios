@@ -1045,22 +1045,19 @@ private struct MarketIndexDetailView: View {
                 Spacer()
                 if let asOf = store.indexConstituents[symbol]?.asOf { Text("指数专属 · \(asOf)").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(store.indexConstituents[symbol]?.items ?? []) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            MarketStockCard(quote: item.quote)
-                            Text(item.weight.map { "第 \(item.rank) · 权重 \(number($0, digits: 1))%" } ?? "代表成分 · 第 \(item.rank)")
-                                .font(.caption2).foregroundStyle(.secondary).padding(.leading, 4)
-                        }
-                    }
-                    if let error = store.constituentErrors[symbol] {
-                        Text(error).font(.footnote).foregroundStyle(.secondary).frame(width: 180, height: 92)
-                    } else if store.indexConstituents[symbol] == nil {
-                        ProgressView().frame(width: 120, height: 92)
-                    }
-                }.padding(.vertical, 3)
+            VStack(spacing: 0) {
+                let items = store.indexConstituents[symbol]?.items ?? []
+                ForEach(items) { item in
+                    MarketConstituentRow(item: item)
+                    if item.id != items.last?.id { Divider().padding(.leading, 62) }
+                }
+                if let error = store.constituentErrors[symbol] {
+                    Text(error).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 72)
+                } else if store.indexConstituents[symbol] == nil {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 72)
+                }
             }
+            .marketCard(cornerRadius: 11)
         }
         .padding(.horizontal, 18)
     }
@@ -1395,18 +1392,57 @@ private struct MarketSummary: View {
     }
 }
 
-private struct MarketStockCard: View {
-    let quote: MarketQuote
+private struct MarketConstituentRow: View {
+    let item: MarketIndexConstituent
+    private var quote: MarketQuote { item.quote }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Image(systemName: stockSymbol(quote.symbol)).font(.system(size: 17, weight: .semibold)).foregroundStyle(stockColor(quote.symbol))
-                .frame(width: 30, height: 30).background(stockColor(quote.symbol).opacity(0.09), in: Circle())
-            Text(quote.symbol).font(.system(size: 11.5, weight: .semibold))
-            Text(quote.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            Text(quote.formattedPercent).font(.caption.weight(.semibold)).foregroundStyle(quoteTint(quote))
-            Text(number(quote.price, digits: 2)).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            CompanyLogo(quote: quote, path: item.logoPath)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(quote.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                Text("\(quote.symbol) · 代表成分第 \(item.rank)")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(number(quote.price, digits: 2)).font(.system(size: 14, weight: .semibold)).monospacedDigit()
+                Text(quote.formattedPercent).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
+            }
         }
-        .padding(9).frame(width: 84, height: 104, alignment: .topLeading).marketCard(cornerRadius: 9)
+        .padding(.horizontal, 12).frame(minHeight: 66)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("第 \(item.rank)，\(quote.name)，\(quote.symbol)，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)")
+    }
+}
+
+private struct CompanyLogo: View {
+    let quote: MarketQuote
+    let path: String?
+
+    var body: some View {
+        AsyncImage(url: logoURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFit().padding(6)
+            } else {
+                fallback
+            }
+        }
+        .frame(width: 40, height: 40)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).stroke(MarketStyle.divider, lineWidth: 0.5) }
+    }
+
+    private var logoURL: URL? {
+        guard let path, !path.isEmpty else { return nil }
+        return URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
+    }
+
+    private var fallback: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10).fill(stockColor(quote.symbol).opacity(0.10))
+            Text(String(quote.symbol.prefix(1))).font(.system(size: 16, weight: .bold)).foregroundStyle(stockColor(quote.symbol))
+        }
     }
 }
 
