@@ -1043,17 +1043,15 @@ private struct MarketIndexDetailView: View {
             HStack {
                 Text(store.indexConstituents[symbol]?.label ?? "主要成分股").font(.system(size: 17, weight: .semibold))
                 Spacer()
-                if let asOf = store.indexConstituents[symbol]?.asOf { Text("权重截至 \(asOf)").font(.system(size: 11)).foregroundStyle(.secondary) }
+                if let asOf = store.indexConstituents[symbol]?.asOf { Text("指数专属 · \(asOf)").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(store.indexConstituents[symbol]?.items ?? []) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             MarketStockCard(quote: item.quote)
-                            if let weight = item.weight {
-                                Text("第 \(item.rank) · 权重 \(number(weight, digits: 1))%")
-                                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 4)
-                            }
+                            Text(item.weight.map { "第 \(item.rank) · 权重 \(number($0, digits: 1))%" } ?? "代表成分 · 第 \(item.rank)")
+                                .font(.caption2).foregroundStyle(.secondary).padding(.leading, 4)
                         }
                     }
                     if let error = store.constituentErrors[symbol] {

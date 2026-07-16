@@ -38,7 +38,10 @@ struct MarketService {
 
     func indexConstituents(symbol: String) async throws -> MarketIndexConstituents {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/index-constituents"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [.init(name: "symbol", value: symbol)]
+        components?.queryItems = [
+            .init(name: "symbol", value: symbol),
+            .init(name: "contract", value: "2")
+        ]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketIndexConstituentsResponse.self).data
     }
