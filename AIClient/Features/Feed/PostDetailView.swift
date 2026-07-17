@@ -5,6 +5,7 @@ import WebKit
 struct PostDetailView: View {
     @State private var post: Post
     @State private var player: AVPlayer?
+    @State private var detectedVideoAspectRatio: CGFloat?
     @State private var showsOriginal = false
     @State private var isDescriptionExpanded = false
     @State private var videoPlaybackFailed = false
@@ -260,13 +261,7 @@ struct PostDetailView: View {
                     }
 
                     if post.hasXueqiuFeedMedia {
-                        PostMediaGrid(
-                            post: post,
-                            singleImageMaxHeight: 420,
-                            singleImageContentMode: .fit,
-                            multiImageHeight: 180,
-                            availableWidth: max(UIScreen.main.bounds.width - 32, 240)
-                        )
+                        xMedia
                     }
 
                     Text("风险提示：用户发表的所有文章仅代表个人观点，与雪球的立场无关。投资决策需建立在独立思考之上。")
@@ -289,7 +284,14 @@ struct PostDetailView: View {
 
     private var xueqiuDetailToolbar: some View {
         HStack {
-            Button { dismiss() } label: {
+            Button {
+                if let player, let url = post.videoURLs.first {
+                    XVideoPlaybackSession.shared.pause(player, url: url)
+                } else {
+                    player?.pause()
+                }
+                dismiss()
+            } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 22, weight: .medium))
                     .frame(width: 44, height: 44)
@@ -963,15 +965,6 @@ struct PostDetailView: View {
                 .textSelection(.enabled)
             }
 
-            if paragraphs.count > 2 {
-                Text("一、循环双覆盖猜想是什么？")
-                    .font(.system(size: 19, weight: .bold))
-                    .padding(.leading, 14)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(Color.blue).frame(width: 3, height: 24)
-                    }
-            }
-
             ForEach(Array(paragraphs.dropFirst().enumerated()), id: \.offset) { index, paragraph in
                 if index == 1, paragraphs.count > 3 {
                     Text("“ \(paragraph)")
@@ -1362,14 +1355,15 @@ struct PostDetailView: View {
 
     private var xVideoHeight: CGFloat {
         let availableWidth = UIScreen.main.bounds.width - 30
-        guard let video = post.videos?.first,
-              let width = video.width,
-              let height = video.height,
-              width > 0,
-              height > 0 else {
-            return availableWidth * 9 / 16
+        let metadataAspectRatio: CGFloat? = post.videos?.first.flatMap { video in
+            guard let width = video.width,
+                  let height = video.height,
+                  width > 0,
+                  height > 0 else { return nil }
+            return CGFloat(width) / CGFloat(height)
         }
-        return min(availableWidth * CGFloat(height) / CGFloat(width), 620)
+        let aspectRatio = detectedVideoAspectRatio ?? metadataAspectRatio ?? (16.0 / 9.0)
+        return min(availableWidth / aspectRatio, 620)
     }
 
     private func compactCount(_ value: Int) -> String {
@@ -1410,6 +1404,7 @@ struct PostDetailView: View {
 
         if !post.isYouTube, !post.isBilibili, player == nil, let video = post.videoURLs.first {
             startVideoPlayback(url: video)
+            await detectVideoAspectRatio(url: video)
         }
 
         if let detail = try? await client.fetchPost(id: post.id) { post = detail }
@@ -1418,11 +1413,26 @@ struct PostDetailView: View {
             player = nil
         } else if player == nil, let video = post.videoURLs.first {
             startVideoPlayback(url: video)
+            await detectVideoAspectRatio(url: video)
+        } else if let video = post.videoURLs.first, detectedVideoAspectRatio == nil {
+            await detectVideoAspectRatio(url: video)
         }
         guard post.isNewYorkTimes, let link = post.linkURL else { return }
         isLoadingNewYorkTimesBody = true
         defer { isLoadingNewYorkTimesBody = false }
         newYorkTimesArticle = try? await client.fetchNewYorkTimesArticle(url: link)
+    }
+
+    @MainActor
+    private func detectVideoAspectRatio(url: URL) async {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1_200, height: 1_200)
+        guard let (image, _) = try? await generator.image(at: .zero),
+              image.width > 0,
+              image.height > 0,
+              !Task.isCancelled else { return }
+        detectedVideoAspectRatio = CGFloat(image.width) / CGFloat(image.height)
     }
 
     @MainActor
