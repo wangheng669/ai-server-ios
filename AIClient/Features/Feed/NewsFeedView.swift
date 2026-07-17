@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-enum RootTab: Hashable { case observation, market, events }
+enum RootTab: Hashable { case observation, investment, people }
 
 private enum FlashFilter: String, CaseIterable, Identifiable {
     case all, important, ai, market, policy
@@ -1508,8 +1508,8 @@ struct EditorialTabBar: View {
             Divider().opacity(0.65)
             HStack(spacing: 0) {
                 tabButton(.observation, title: "观点", icon: "newspaper", selectedIcon: "newspaper.fill")
-                tabButton(.market, title: "市场", icon: "chart.line.uptrend.xyaxis", selectedIcon: "chart.line.uptrend.xyaxis")
-                tabButton(.events, title: "事件", icon: "calendar.badge.clock", selectedIcon: "calendar.badge.clock")
+                tabButton(.investment, title: "投资", icon: "chart.pie", selectedIcon: "chart.pie.fill")
+                tabButton(.people, title: "人物", icon: "person.2", selectedIcon: "person.2.fill")
             }
             .frame(height: 54)
         }
@@ -1596,10 +1596,6 @@ private struct NewsCardView: View {
     private var xueqiuCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             xueqiuTextContent
-                .contentShape(Rectangle())
-                .onTapGesture { onOpen?() }
-                .accessibilityLabel("打开雪球帖子，\(post.authorName)")
-                .accessibilityAddTraits(.isButton)
 
             if post.hasXueqiuFeedMedia {
                 PostMediaGrid(

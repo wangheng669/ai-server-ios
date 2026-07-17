@@ -15,10 +15,13 @@ private enum MarketStyle {
 struct MarketView: View {
     @Binding private var showsDetail: Bool
     @State private var store = MarketStore()
-    @State private var watchlist = MarketWatchlistStore()
     @State private var path: [String] = {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--market-detail-preview") ? ["^NDX"] : []
+        if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
+            return [String(argument.dropFirst("--market-detail-symbol=".count))]
+        }
+        if ProcessInfo.processInfo.arguments.contains("--market-vix-detail-preview") { return ["^VIX"] }
+        return ProcessInfo.processInfo.arguments.contains("--market-detail-preview") ? ["^NDX"] : []
         #else
         []
         #endif
@@ -33,7 +36,6 @@ struct MarketView: View {
                     MarketIndexDetailView(
                         symbol: symbol,
                         store: store,
-                        watchlist: watchlist,
                         onSelectSymbol: { path.append($0) }
                     )
                 }
@@ -49,52 +51,71 @@ struct MarketView: View {
 private struct MarketHomeView: View {
     let store: MarketStore
     let onSelectIndex: (String) -> Void
-    @State private var selectedMarket = MarketRegion.unitedStates
+    @State private var selectedMarket: MarketRegion = {
+        #if DEBUG
+        guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-region=") }) else {
+            return .unitedStates
+        }
+        switch argument.dropFirst("--market-region=".count) {
+        case "china": return .china
+        case "japan": return .japan
+        case "korea": return .korea
+        case "crypto": return .crypto
+        default: return .unitedStates
+        }
+        #else
+        return .unitedStates
+        #endif
+    }()
     @State private var suppressIndexSelection = false
     @State private var selectionResetTask: Task<Void, Never>?
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ZStack {
-                    MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ZStack {
+                        MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+                            .id(selectedMarket)
+                            .transition(.opacity)
+                    }
+                    .animation(.easeInOut(duration: 0.18), value: selectedMarket)
+
+                    VStack(spacing: 14) {
+                        if let error = store.errorMessage {
+                            MarketErrorBanner(message: error) { await store.refresh() }
+                        }
+                        MarketRegionPicker(selection: $selectedMarket)
+                        MarketIndexTable(
+                            region: selectedMarket,
+                            store: store,
+                            onSelectIndex: selectIndex
+                        )
                         .id(selectedMarket)
                         .transition(.opacity)
-                }
-                .animation(.easeInOut(duration: 0.18), value: selectedMarket)
-
-                VStack(spacing: 14) {
-                    if let error = store.errorMessage {
-                        MarketErrorBanner(message: error) { await store.refresh() }
-                    }
-                    MarketRegionPicker(selection: $selectedMarket)
-                    MarketIndexTable(
-                        region: selectedMarket,
-                        store: store,
-                        onSelectIndex: selectIndex
-                    )
-                    .id(selectedMarket)
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.16), value: selectedMarket)
-                    .simultaneousGesture(regionSwipeGesture)
-                    if selectedMarket != .crypto {
-                        MarketCountryStrip(store: store, onSelectIndex: onSelectIndex)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("热门板块")
-                                .font(.system(size: 19, weight: .semibold))
-                                .padding(.horizontal, 18)
-                            MarketSectorsRow(overview: store.dashboard?.ashareOverview)
+                        .animation(.easeInOut(duration: 0.16), value: selectedMarket)
+                        .simultaneousGesture(regionSwipeGesture)
+                        if selectedMarket != .crypto {
+                            MarketWorldMap(store: store, selection: $selectedMarket)
+                                .id("market-map")
                         }
                     }
+                    .padding(.top, 12)
+                    .background(MarketStyle.canvas)
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18))
                 }
-                .padding(.top, 12)
-                .background(MarketStyle.canvas)
-                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18))
+            }
+            .background(MarketTerminalPalette.header.ignoresSafeArea())
+            .scrollIndicators(.hidden)
+            .refreshable { await store.refresh() }
+            .task {
+                #if DEBUG
+                guard ProcessInfo.processInfo.arguments.contains("--market-map-preview") else { return }
+                try? await Task.sleep(for: .milliseconds(700))
+                proxy.scrollTo("market-map", anchor: .bottom)
+                #endif
             }
         }
-        .background(MarketTerminalPalette.header.ignoresSafeArea())
-        .scrollIndicators(.hidden)
-        .refreshable { await store.refresh() }
     }
 
     private var regionSwipeGesture: some Gesture {
@@ -205,7 +226,7 @@ private struct MarketTerminalHero: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                         }
-                        Text(quote.map { number($0.price, digits: 2) } ?? "—")
+                        Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
                             .font(.system(size: 31, weight: .semibold))
                             .monospacedDigit()
                             .tracking(-0.8)
@@ -284,7 +305,7 @@ private struct MarketTerminalHero: View {
         let value = store.quote(symbol: symbol)
         return MarketTerminalMetric(
             title: value?.name ?? CoreDescriptor(symbol: symbol).name,
-            value: value.map { number($0.price, digits: 2) } ?? "—",
+            value: value.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—",
             change: value?.formattedPercent ?? "—",
             tint: quoteTint(value),
             trend: value?.trend ?? []
@@ -516,7 +537,7 @@ private struct MarketIndexTableRow: View {
             }
             .frame(width: 112, alignment: .leading)
 
-            Text(number(quote.price, digits: 2))
+            Text(number(quote.price, digits: cryptoPriceDigits(quote.price, symbol: quote.symbol)))
                 .font(.system(size: 13.5, weight: .medium)).monospacedDigit()
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1).minimumScaleFactor(0.72)
@@ -548,83 +569,185 @@ private struct MarketIndexTableRow: View {
     private var sessionTint: Color { quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
 }
 
-private struct MarketCountryStrip: View {
+private struct MarketWorldMap: View {
     let store: MarketStore
-    let onSelectIndex: (String) -> Void
+    @Binding var selection: MarketRegion
+    @Environment(\.colorScheme) private var colorScheme
 
-    private let markets: [(String, String, String?)] = [
-        ("美国", "^GSPC", "^NDX"),
-        ("中国", "000001.SS", "000300.SS"),
-        ("日本", "^N225", nil),
-        ("韩国", "^KS11", nil),
+    private let markets: [MarketMapLocation] = [
+        .init(region: .unitedStates, city: "纽约", latitude: 40.71, longitude: -74.00),
+        .init(region: .china, city: "上海", latitude: 31.23, longitude: 121.47, labelOffset: .init(width: -30, height: 30)),
+        .init(region: .japan, city: "东京", latitude: 35.68, longitude: 139.69, labelOffset: .init(width: 6, height: 22)),
+        .init(region: .korea, city: "首尔", latitude: 37.56, longitude: 126.97, labelOffset: .init(width: -8, height: -30)),
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("全球市场概览").font(.title3.weight(.semibold))
+                Text("全球市场地图").font(.title3.weight(.semibold))
                 Spacer()
                 MarketLiveStatus(store: store)
             }
             .padding(.horizontal, 18)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(markets, id: \.0) { item in
-                        MarketCountrySummaryCard(
-                            country: item.0,
-                            primary: store.quote(symbol: item.1),
-                            secondary: item.2.flatMap { store.quote(symbol: $0) },
-                            onSelectIndex: onSelectIndex
-                        )
+            VStack(spacing: 0) {
+                GeometryReader { proxy in
+                    ZStack {
+                        mapBackground
+
+                        ForEach(markets) { market in
+                            Button { select(market.region) } label: {
+                                MarketMapNode(
+                                    country: market.region.rawValue,
+                                    quote: store.quote(symbol: market.region.primarySymbol),
+                                    isSelected: selection == market.region
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(mapAccessibilityLabel(for: market))
+                            .accessibilityHint("切换到\(market.region.rawValue)市场")
+                            .position(market.position(in: proxy.size))
+                            .offset(market.labelOffset)
+                        }
                     }
                 }
-                .padding(.horizontal, 14)
+                .frame(height: 176)
+
+                Rectangle().fill(MarketStyle.divider).frame(height: 0.5)
+
+                HStack(spacing: 0) {
+                    ForEach(markets) { market in
+                        Button { select(market.region) } label: {
+                            MarketSessionColumn(
+                                city: market.city,
+                                quote: store.quote(symbol: market.region.primarySymbol),
+                                isSelected: selection == market.region
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: 58)
             }
+            .padding(.horizontal, 14)
         }
+    }
+
+    @ViewBuilder private var mapBackground: some View {
+        if colorScheme == .dark {
+            Image("MarketWorldMap")
+                .resizable()
+                .scaledToFill()
+                .colorInvert()
+                .saturation(0)
+                .contrast(1.05)
+                .brightness(0.02)
+                .opacity(0.95)
+                .accessibilityHidden(true)
+        } else {
+            Image("MarketWorldMap")
+                .resizable()
+                .scaledToFill()
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func select(_ region: MarketRegion) {
+        withAnimation(.easeOut(duration: 0.18)) { selection = region }
+    }
+
+    private func mapAccessibilityLabel(for market: MarketMapLocation) -> String {
+        let quote = store.quote(symbol: market.region.primarySymbol)
+        return "\(market.region.rawValue)，\(quote?.formattedPercent ?? "等待行情")"
     }
 }
 
-private struct MarketCountrySummaryCard: View {
+private struct MarketMapLocation: Identifiable {
+    let region: MarketRegion
+    let city: String
+    let latitude: Double
+    let longitude: Double
+    var labelOffset = CGSize.zero
+    var id: MarketRegion { region }
+
+    func position(in size: CGSize) -> CGPoint {
+        CGPoint(
+            x: size.width * CGFloat((longitude + 180) / 360),
+            y: size.height * CGFloat((83 - latitude) / 155)
+        )
+    }
+}
+
+private struct MarketMapNode: View {
     let country: String
-    let primary: MarketQuote?
-    let secondary: MarketQuote?
-    let onSelectIndex: (String) -> Void
+    let quote: MarketQuote?
+    let isSelected: Bool
 
     var body: some View {
-        Button { if let primary { onSelectIndex(primary.symbol) } } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    Text(country).font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    Text(primary?.marketSession == "regular" ? "交易中" : "休市")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(primary?.marketSession == "regular" ? MarketStyle.accent : .secondary)
+        HStack(alignment: .top, spacing: 5) {
+            Circle()
+                .fill(isSelected ? Color(uiColor: .systemBackground) : nodeTint)
+                .frame(width: 7, height: 7)
+                .overlay {
+                    if isSelected {
+                        Circle().stroke(MarketStyle.accent, lineWidth: 3)
+                    }
                 }
-                quoteLine(primary)
-                if let secondary { quoteLine(secondary) }
-                else { Text("市场广度暂不可用").font(.caption2).foregroundStyle(.secondary) }
+                .padding(.top, 3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(country)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(quote?.formattedPercent ?? "—")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(quoteTint(quote))
             }
-            .padding(10)
-            .frame(width: 154, height: 105, alignment: .topLeading)
-            .background(MarketStyle.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).stroke(MarketStyle.divider, lineWidth: 0.5) }
         }
-        .buttonStyle(MarketPressStyle())
-        .disabled(primary == nil)
+        .padding(5)
+        .contentShape(Rectangle())
     }
 
-    private func quoteLine(_ quote: MarketQuote?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(quote?.name ?? "等待行情").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            HStack(alignment: .lastTextBaseline, spacing: 5) {
-                Text(quote.map { number($0.price, digits: 2) } ?? "—")
-                    .font(.system(size: 12.5, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
-                Text(quote?.formattedPercent ?? "—")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(quoteTint(quote)).lineLimit(1)
+    private var nodeTint: Color {
+        isSelected ? MarketStyle.accent : quoteTint(quote)
+    }
+}
+
+private struct MarketSessionColumn: View {
+    let city: String
+    let quote: MarketQuote?
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(city)
+                .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? MarketStyle.accent : .primary)
+            HStack(spacing: 4) {
+                Circle().fill(sessionTint).frame(width: 5, height: 5)
+                Text(sessionLabel).font(.caption2.weight(.medium))
             }
+            .foregroundStyle(sessionTint)
+            Capsule()
+                .fill(isSelected ? MarketStyle.accent : Color.clear)
+                .frame(width: 28, height: 2)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var sessionLabel: String {
+        switch quote?.marketSession {
+        case "regular": "交易中"
+        case "pre": "盘前"
+        case "post", "after": "盘后"
+        default: "已收盘"
         }
     }
+
+    private var sessionTint: Color { quote?.marketSession == "regular" ? MarketStyle.loss : .secondary }
 }
 
 private struct MarketLiveStatus: View {
@@ -948,42 +1071,9 @@ private struct MarketBreadthComposition: View {
     private func ratio(_ value: Int) -> Double { total > 0 ? Double(value) / Double(total) : 0 }
 }
 
-private struct MarketSectorsRow: View {
-    let overview: MarketAShareOverview?
-    private var sectors: [MarketSector] { overview?.hotSectors ?? [] }
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(sectors) { sector in
-                    VStack(alignment: .leading, spacing: 7) {
-                        Label(sector.name, systemImage: sectorSymbol(sector.name)).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
-                        Text(sector.changePercent).font(.system(size: 11, weight: .semibold)).foregroundStyle(sector.percentValue >= 0 ? MarketStyle.gain : MarketStyle.loss)
-                        Text(sourceLabel).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .padding(9).frame(width: 98, height: 76, alignment: .topLeading).marketCard(cornerRadius: 9)
-                }
-                if sectors.isEmpty {
-                    Text("板块数据加载中").font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 18).frame(height: 76)
-                }
-            }
-            .padding(.horizontal, 18).padding(.bottom, 4)
-        }
-    }
-
-    private var sourceLabel: String {
-        if overview?.stale == true { return "缓存数据 · 可能延迟" }
-        if let date = marketISODate(overview?.fetchedAt ?? overview?.generatedAt) {
-            return "截至 \(date.formatted(date: .omitted, time: .shortened))"
-        }
-        return overview?.cached == true ? "缓存行情" : "板块涨幅"
-    }
-}
-
 private struct MarketIndexDetailView: View {
     let symbol: String
     let store: MarketStore
-    let watchlist: MarketWatchlistStore
     let onSelectSymbol: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedRange = MarketRange.day
@@ -1045,7 +1135,7 @@ private struct MarketIndexDetailView: View {
             }
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(quote.map { number($0.price, digits: 2) } ?? "—").font(.system(size: 33, weight: .bold)).monospacedDigit().tracking(-0.8).foregroundStyle(quoteTint(quote))
+                    Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—").font(.system(size: 33, weight: .bold)).monospacedDigit().tracking(-0.8).foregroundStyle(quoteTint(quote))
                     Text(quote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情数据")
                         .font(.system(size: 16, weight: .semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
                     HStack(spacing: 7) {
@@ -1082,13 +1172,6 @@ private struct MarketIndexDetailView: View {
                     }
                 }
                 Spacer()
-                Button { watchlist.toggle(symbol) } label: {
-                    Text(watchlist.contains(symbol) ? "✓ 已自选" : "+ 自选").font(.system(size: 12.5, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                }
-                .foregroundStyle(.primary)
-                .frame(minHeight: 44)
-                .accessibilityLabel(watchlist.contains(symbol) ? "移出自选" : "加入自选")
             }
         }
         .padding(.horizontal, 18)
@@ -1148,9 +1231,9 @@ private struct MarketIndexDetailView: View {
     }
 
     private var sessionText: String {
-        switch quote?.marketSession { case "regular": "交易中"; case "pre": "盘前"; case "post", "after": "盘后"; default: "已收盘" }
+        switch quote?.marketSession { case "regular": "交易中"; case "always-open": "24小时交易"; case "pre": "盘前"; case "post", "after": "盘后"; default: "已收盘" }
     }
-    private var sessionColor: Color { quote?.marketSession == "regular" ? MarketStyle.loss : .secondary }
+    private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
 
     private var showsIndexSession: Bool {
         guard quote?.marketSession != "regular", let session = indexSessionQuote, let timestamp = session.timestamp else { return false }
@@ -1211,7 +1294,15 @@ private struct MarketDetailChart: View {
     @State private var inspectedPoint: MarketChartPoint?
 
     private var chart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
-    private var points: [MarketChartPoint] { marketPointsForRange(chart?.points ?? [], range: selectedRange) }
+    private var points: [MarketChartPoint] {
+        let quote = store.quote(symbol: symbol)
+        return marketDisplayPoints(
+            chart?.points ?? [],
+            range: selectedRange,
+            fallbackValues: quote?.trend ?? [],
+            fallbackTimestamp: quote?.timestamp
+        )
+    }
     private var values: [Double] {
         let bounds = points.flatMap { [$0.low, $0.high].compactMap { $0 } }
         return bounds.isEmpty ? points.compactMap(\.displayValue) : bounds
@@ -1250,6 +1341,7 @@ private struct MarketDetailChart: View {
                         values: points.compactMap(\.displayValue),
                         color: quoteTint(store.quote(symbol: symbol))
                     )
+                        .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
                     ChartInspectionOverlay(points: points, selected: $inspectedPoint)
                 }
@@ -1270,7 +1362,7 @@ private struct MarketDetailChart: View {
             .font(.caption2).foregroundStyle(.secondary).padding(.leading, 48).padding(.trailing, 5)
             VolumeBars(points: points).frame(height: 25).padding(.leading, 48)
                 .overlay(alignment: .topTrailing) {
-                    Text(selectedRange.apiInterval == "1m" ? "分钟K · 成交量" : "日K · 成交量")
+                    Text(selectedRange.apiInterval == "1m" ? "分时走势 · 成交量" : "日线走势 · 成交量")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
         }
@@ -1338,39 +1430,30 @@ private struct ChartGrid: View {
 
     private func axisLabel(_ index: Int) -> String {
         guard let min = values.min(), let max = values.max(), max > min else { return "—" }
-        return number(max - (max - min) * Double(index) / 4, digits: 0)
+        return number(max - (max - min) * Double(index) / 4, digits: marketAxisDigits(values: values))
     }
 }
 
 private struct MarketLineChart: View {
     let values: [Double]
     let color: Color
-    @State private var previous: [Double]
-    @State private var current: [Double]
-    @State private var progress: CGFloat = 1
-
-    init(values: [Double], color: Color) {
-        self.values = values
-        self.color = color
-        _previous = State(initialValue: values)
-        _current = State(initialValue: values)
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var progress: CGFloat = 0
 
     var body: some View {
-        AnimatedLineCanvas(previous: previous, current: current, color: color, progress: progress)
-            .onChange(of: values) { _, newValues in
-                guard newValues != current else { return }
-                previous = current
-                current = newValues
-                progress = 0
-                withAnimation(MarketStyle.chartTransition) { progress = 1 }
+        AnimatedLineCanvas(values: values, color: color, progress: progress)
+            .onAppear {
+                if reduceMotion {
+                    progress = 1
+                } else {
+                    withAnimation(.easeOut(duration: 0.45)) { progress = 1 }
+                }
             }
     }
 }
 
 private struct AnimatedLineCanvas: View, Animatable {
-    let previous: [Double]
-    let current: [Double]
+    let values: [Double]
     let color: Color
     var progress: CGFloat
 
@@ -1381,15 +1464,16 @@ private struct AnimatedLineCanvas: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            let sampleCount = min(max(max(previous.count, current.count), 2), 120)
-            let from = normalizedSamples(marketAnimationStartValues(previous: previous, current: current), count: sampleCount)
-            let to = normalizedSamples(current, count: sampleCount)
-            guard from.count == sampleCount, to.count == sampleCount else { return }
+            let sampleCount = min(max(values.count, 2), 120)
+            let samples = normalizedSamples(values, count: sampleCount)
+            guard samples.count == sampleCount else { return }
 
-            let points = zip(from, to).enumerated().map { index, pair in
+            let reveal = min(max(progress, 0), 1)
+            context.clip(to: Path(CGRect(x: 0, y: 0, width: size.width * reveal, height: size.height)))
+            let points = samples.enumerated().map { index, sample in
                 CGPoint(
                     x: size.width * CGFloat(index) / CGFloat(sampleCount - 1),
-                    y: size.height * (pair.0 + (pair.1 - pair.0) * progress)
+                    y: size.height * sample
                 )
             }
             guard let first = points.first, let last = points.last else { return }
@@ -1511,8 +1595,8 @@ private struct MarketConstituentRow: View {
                 }
             }
             Sparkline(
-                values: quote.isNightSession == true ? quote.nightTrend : quote.trend,
-                color: quote.isNightSession == true ? MarketStyle.purple : quoteTint(quote),
+                values: quote.trend,
+                color: quoteTint(quote),
                 showsFill: false
             )
                 .frame(width: 58, height: 28)
@@ -1520,8 +1604,15 @@ private struct MarketConstituentRow: View {
         .padding(.horizontal, 12).frame(minHeight: 66)
         .accessibilityElement(children: .combine)
         .overlay(alignment: .bottomLeading) {
-            Text("市值 \(quote.marketCap.map(compactNumber) ?? "—")")
-                .font(.caption2).foregroundStyle(.secondary).padding(.leading, 64).padding(.bottom, 5)
+            HStack(spacing: 10) {
+                Text("占比 \(item.weight.map { "\(number($0, digits: 2))%" } ?? "—")")
+                Text("市值 \(quote.marketCap.map(compactNumber) ?? "—")")
+            }
+            .font(.caption2)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .padding(.leading, 64)
+            .padding(.bottom, 5)
         }
         .padding(.bottom, 12)
         .accessibilityLabel("\(quote.name)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)，点按查看详情")
@@ -1649,6 +1740,13 @@ private func compactNumber(_ value: Double) -> String { value.formatted(.number.
 private func marketTimestamp(_ timestamp: Int64) -> String {
     marketShortTimestamp(timestamp)
 }
+
+private func cryptoPriceDigits(_ price: Double, symbol: String = "BINANCE:") -> Int {
+    guard symbol.hasPrefix("BINANCE:") else { return 2 }
+    if price < 1 { return 5 }
+    if price < 100 { return 3 }
+    return 2
+}
 private func chartTime(_ timestamp: Int64, range: MarketRange) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "zh_CN")
@@ -1659,7 +1757,6 @@ private func chartTime(_ timestamp: Int64, range: MarketRange) -> String {
     }
     return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
 }
-private func sectorSymbol(_ name: String) -> String { if name.contains("石油") || name.contains("能源") { return "drop.fill" }; if name.contains("医疗") { return "cross.case.fill" }; if name.contains("家具") { return "house.fill" }; return "chart.line.uptrend.xyaxis" }
 private func stockSymbol(_ symbol: String) -> String { switch symbol { case "AAPL": "apple.logo"; case "MSFT": "square.grid.2x2.fill"; case "META": "infinity"; case "AMZN": "a.circle.fill"; default: "eye.fill" } }
 private func stockColor(_ symbol: String) -> Color { switch symbol { case "AAPL": .primary; case "AMZN": .orange; case "NVDA": .green; default: .blue } }
 

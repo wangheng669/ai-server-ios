@@ -129,6 +129,15 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(post.tagNames.isEmpty)
     }
 
+    @MainActor
+    func testFlashChannelAcceptsRealtimeFlashPosts() throws {
+        let data = #"{"id":101,"source":"flash","content":"实时快讯"}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+        let model = NewsFeedViewModel(source: .flash) { _, _, _ in [] }
+
+        XCTAssertTrue(model.matchesCurrentSource(post))
+    }
+
     func testXImageUsesServerProxy() throws {
         let url = try XCTUnwrap(MediaURL.image("https://pbs.twimg.com/media/demo.jpg"))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))

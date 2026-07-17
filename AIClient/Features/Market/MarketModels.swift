@@ -12,7 +12,7 @@ struct MarketDashboard: Codable {
     var coreIndices: [MarketQuote]
     var metrics: [MarketQuote]
     var components: [MarketQuote]
-    var crypto: [MarketQuote]?
+    var crypto: [MarketQuote]
     var indexSessions: [String: MarketQuote]?
     let componentsMeta: MarketComponentsMeta?
     let freshness: MarketDashboardFreshness?
@@ -20,14 +20,33 @@ struct MarketDashboard: Codable {
     let ashareOverview: MarketAShareOverview?
     let sentiment: MarketSentiment?
 
+    enum CodingKeys: String, CodingKey {
+        case dataContract, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
+        case indexSessions, componentsMeta, freshness, missingSymbols, ashareOverview, sentiment
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        dataContract = try values.decode(String.self, forKey: .dataContract)
+        generatedAt = try values.decode(String.self, forKey: .generatedAt)
+        refreshIntervalMs = try values.decode(Int.self, forKey: .refreshIntervalMs)
+        coreIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .coreIndices) ?? []
+        metrics = try values.decodeIfPresent([MarketQuote].self, forKey: .metrics) ?? []
+        components = try values.decodeIfPresent([MarketQuote].self, forKey: .components) ?? []
+        crypto = try values.decodeIfPresent([MarketQuote].self, forKey: .crypto) ?? []
+        indexSessions = try values.decodeIfPresent([String: MarketQuote].self, forKey: .indexSessions)
+        componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
+        freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
+        missingSymbols = try values.decodeIfPresent([String].self, forKey: .missingSymbols) ?? []
+        ashareOverview = try values.decodeIfPresent(MarketAShareOverview.self, forKey: .ashareOverview)
+        sentiment = try values.decodeIfPresent(MarketSentiment.self, forKey: .sentiment)
+    }
+
     mutating func replace(_ quote: MarketQuote) {
         replace(quote, in: &coreIndices)
         replace(quote, in: &metrics)
         replace(quote, in: &components)
-        if var cryptoQuotes = crypto {
-            replace(quote, in: &cryptoQuotes)
-            crypto = cryptoQuotes
-        }
+        replace(quote, in: &crypto)
         for key in indexSessions.map({ Array($0.keys) }) ?? [] where indexSessions?[key]?.symbol == quote.symbol {
             var quotes = [indexSessions?[key]].compactMap { $0 }
             replace(quote, in: &quotes)
@@ -39,7 +58,7 @@ struct MarketDashboard: Codable {
         coreIndices.first(where: { $0.symbol == symbol })
             ?? metrics.first(where: { $0.symbol == symbol })
             ?? components.first(where: { $0.symbol == symbol })
-            ?? crypto?.first(where: { $0.symbol == symbol })
+            ?? crypto.first(where: { $0.symbol == symbol })
     }
 
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {
@@ -419,15 +438,46 @@ func marketPointsForRange(_ points: [MarketChartPoint], range: MarketRange) -> [
         sessions[sessions.count - 1].append(point)
     }
     if range == .day {
-        return sessions.enumerated().max { lhs, rhs in
-            lhs.element.count == rhs.element.count ? lhs.offset < rhs.offset : lhs.element.count < rhs.element.count
-        }?.element ?? []
+        return sessions.last ?? []
     }
     return sessions.suffix(5).flatMap { $0 }
 }
 
-func marketAnimationStartValues(previous: [Double], current: [Double]) -> [Double] {
-    previous.isEmpty ? current : previous
+func marketDisplayPoints(
+    _ points: [MarketChartPoint],
+    range: MarketRange,
+    fallbackValues: [Double],
+    fallbackTimestamp: Int64?
+) -> [MarketChartPoint] {
+    let selected = marketPointsForRange(points, range: range)
+    guard range == .day else { return selected }
+    guard fallbackValues.count > 1,
+          fallbackValues.allSatisfy(\.isFinite),
+          let fallbackTimestamp,
+          fallbackTimestamp > 0 else { return [] }
+
+    let minuteMs: Int64 = 60_000
+    let end = fallbackTimestamp - fallbackTimestamp % minuteMs
+    let start = end - Int64(fallbackValues.count - 1) * minuteMs
+    return fallbackValues.enumerated().map { index, value in
+        MarketChartPoint(
+            timestamp: start + Int64(index) * minuteMs,
+            value: value,
+            open: value,
+            high: value,
+            low: value,
+            close: value,
+            volume: nil
+        )
+    }
+}
+
+func marketAxisDigits(values: [Double]) -> Int {
+    guard let low = values.min(), let high = values.max(), high > low else { return 2 }
+    let step = (high - low) / 4
+    if step >= 10 { return 0 }
+    if step >= 1 { return 1 }
+    return 2
 }
 
 func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [MarketCandleSample] {
@@ -519,6 +569,7 @@ func marketAppendingLiveValue(_ value: Double, to values: [Double], limit: Int =
 
 extension MarketQuote {
     var freshnessLabel: String {
+        if marketSession == "always-open" { return "24小时交易" }
         if marketSession == "closed" {
             return timestamp.map { "截至 \(marketShortTimestamp($0))" } ?? "已收盘"
         }

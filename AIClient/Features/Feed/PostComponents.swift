@@ -37,15 +37,18 @@ struct AvatarView: View {
     let url: URL?
     let name: String
     let size: CGFloat
+    var assetName: String? = nil
     @State private var image: UIImage?
 
     var body: some View {
         Group {
-            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            if let assetName { Image(assetName).resizable().scaledToFill() }
+            else if let image { Image(uiImage: image).resizable().scaledToFill() }
             else { Circle().fill(Color.blue.opacity(0.11)).overlay { Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue) } }
         }
         .frame(width: size, height: size).clipShape(Circle())
         .task(id: url) {
+            guard assetName == nil else { return }
             image = await ImageLoader.load(url, targetSize: CGSize(width: size, height: size))
         }
     }

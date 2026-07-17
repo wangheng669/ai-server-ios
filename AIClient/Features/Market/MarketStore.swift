@@ -138,7 +138,7 @@ final class MarketStore {
         dashboard?.coreIndices.first(where: { $0.symbol == symbol })
             ?? dashboard?.metrics.first(where: { $0.symbol == symbol })
             ?? dashboard?.components.first(where: { $0.symbol == symbol })
-            ?? dashboard?.crypto?.first(where: { $0.symbol == symbol })
+            ?? dashboard?.crypto.first(where: { $0.symbol == symbol })
             ?? indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })?.quote
     }
 
@@ -166,26 +166,6 @@ final class MarketStore {
     }
 }
 
-@MainActor
-@Observable
-final class MarketWatchlistStore {
-    private static let defaultsKey = "market.watchlist.symbols.v1"
-    private(set) var symbols: Set<String>
-    private let defaults: UserDefaults
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        symbols = Set(defaults.stringArray(forKey: Self.defaultsKey) ?? [])
-    }
-
-    func contains(_ symbol: String) -> Bool { symbols.contains(symbol) }
-
-    func toggle(_ symbol: String) {
-        if symbols.contains(symbol) { symbols.remove(symbol) }
-        else { symbols.insert(symbol) }
-        defaults.set(symbols.sorted(), forKey: Self.defaultsKey)
-    }
-}
 struct ChartKey: Hashable {
     let symbol: String
     let range: MarketRange

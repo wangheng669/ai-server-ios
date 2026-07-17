@@ -46,6 +46,13 @@ struct MarketService {
         return try await request(url, as: MarketIndexConstituentsResponse.self).data
     }
 
+    func famousHoldings(managerKey: String? = nil) async throws -> FamousHoldings {
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/famous-holdings"), resolvingAgainstBaseURL: false)
+        if let managerKey { components?.queryItems = [.init(name: "manager", value: managerKey)] }
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        return try await request(url, as: FamousHoldingsResponse.self).data
+    }
+
     private func request<Response: Decodable>(_ url: URL, as type: Response.Type) async throws -> Response {
         let data: Data
         let response: URLResponse

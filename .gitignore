@@ -1,4 +1,8 @@
 DerivedData/
+DerivedDataSim/
+.derived-data/
+.derived-data-device/
+.codex-remote-ai-server/
 .codex-derived-device/
 .codex-derived-sim/
 .codex/DerivedData-*/

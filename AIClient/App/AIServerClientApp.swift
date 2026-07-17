@@ -12,39 +12,37 @@ struct AIServerClientApp: App {
 private struct EditorialRootView: View {
     @State private var selectedTab: RootTab = {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--market-preview") ? .market : .observation
+        if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--person-detail-preview") {
+            return .people
+        }
+        if ProcessInfo.processInfo.arguments.contains("--market-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--holdings-preview") { return .investment }
+        return .observation
         #else
         .observation
         #endif
     }()
-    @Environment(\.openURL) private var openURL
     @State private var marketShowsDetail = false
     @State private var feedShowsDetail = false
+    @State private var peopleShowsDetail = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
             NewsFeedView(showsDetail: $feedShowsDetail)
                 .tag(RootTab.observation)
 
-            MarketView(showsDetail: $marketShowsDetail)
-                .tag(RootTab.market)
+            InvestmentView(showsDetail: $marketShowsDetail)
+                .tag(RootTab.investment)
+
+            PeopleView(showsDetail: $peopleShowsDetail)
+                .tag(RootTab.people)
         }
         .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !marketShowsDetail && !feedShowsDetail {
-                EditorialTabBar(selected: selectedTab) { tab in
-                    if tab == .events {
-                        open("events")
-                    } else {
-                        selectedTab = tab
-                    }
-                }
+            if !marketShowsDetail && !feedShowsDetail && !peopleShowsDetail {
+                EditorialTabBar(selected: selectedTab) { selectedTab = $0 }
             }
         }
-    }
-
-    private func open(_ path: String) {
-        guard let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return }
-        openURL(url)
     }
 }
