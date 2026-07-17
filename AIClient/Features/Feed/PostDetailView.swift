@@ -98,7 +98,11 @@ struct PostDetailView: View {
             }
         }
         .onDisappear {
-            player?.pause()
+            if let player, let url = post.videoURLs.first {
+                XVideoPlaybackSession.shared.pause(player, url: url)
+            } else {
+                player?.pause()
+            }
             bilibiliPlaybackRetryTask?.cancel()
         }
     }
@@ -1173,7 +1177,7 @@ struct PostDetailView: View {
                             .font(.system(size: 15, weight: .medium))
                     }
 
-                    PostMediaGrid(post: post, singleImageHeight: detailImageHeight)
+                    xMedia
 
                     HStack(spacing: 4) {
                         Text(xTimestamp)
@@ -1335,6 +1339,39 @@ struct PostDetailView: View {
         return min(availableWidth * CGFloat(height) / CGFloat(width), 620)
     }
 
+    @ViewBuilder private var xMedia: some View {
+        if !post.videoURLs.isEmpty {
+            Group {
+                if let player {
+                    VideoPlayer(player: player)
+                } else if post.previewURL != nil {
+                    PostMediaGrid(post: post, singleImageHeight: xVideoHeight)
+                } else {
+                    ZStack {
+                        Color.black
+                        ProgressView().tint(.white)
+                    }
+                }
+            }
+            .frame(height: xVideoHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            PostMediaGrid(post: post, singleImageHeight: detailImageHeight)
+        }
+    }
+
+    private var xVideoHeight: CGFloat {
+        let availableWidth = UIScreen.main.bounds.width - 30
+        guard let video = post.videos?.first,
+              let width = video.width,
+              let height = video.height,
+              width > 0,
+              height > 0 else {
+            return availableWidth * 9 / 16
+        }
+        return min(availableWidth * CGFloat(height) / CGFloat(width), 620)
+    }
+
     private func compactCount(_ value: Int) -> String {
         if value >= 10_000 { return String(format: "%.1f万", Double(value) / 10_000).replacingOccurrences(of: ".0万", with: "万") }
         return value.formatted()
@@ -1445,7 +1482,11 @@ struct PostDetailView: View {
         player = newPlayer
         videoPlaybackFailed = false
         isVideoReady = false
-        newPlayer.play()
+        if post.sourceName == "X" {
+            XVideoPlaybackSession.shared.play(newPlayer, url: url)
+        } else {
+            newPlayer.play()
+        }
     }
 
     private func markBilibiliVideoReady() {

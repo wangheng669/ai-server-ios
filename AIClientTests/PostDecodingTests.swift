@@ -211,6 +211,16 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.videoURLs.first?.absoluteString, "https://cdn.example.com/video.mp4")
     }
 
+    func testDecodesXVideoWithoutRequiringImageOrPreview() throws {
+        let json = #"{"post":{"id":2423252,"source":"x","images":[],"videos":[{"url":"https://video.twimg.com/demo.mp4","width":1920,"height":1080}]}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.videoURLs.count, 1)
+        XCTAssertNil(post.previewURL)
+        XCTAssertEqual(post.videos?.first?.width, 1920)
+        XCTAssertEqual(post.videos?.first?.height, 1080)
+    }
+
     func testExtractsCompleteNewYorkTimesArticleBody() throws {
         let html = """
         <section class="article-body">

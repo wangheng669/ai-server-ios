@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import ImageIO
+import AVKit
 
 struct PostAuthorHeader: View {
     let post: Post
@@ -282,6 +283,198 @@ struct PostMediaGrid: View {
     private var playButton: some View {
         Image(systemName: "play.circle.fill").font(.system(size: 48)).symbolRenderingMode(.palette)
             .foregroundStyle(.white, .black.opacity(0.45)).shadow(radius: 4)
+    }
+}
+
+struct XFeedMediaView: View {
+    let post: Post
+
+    var body: some View {
+        if let videoURL = post.videoURLs.first {
+            XInlineVideoView(url: videoURL)
+                .frame(height: videoHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } else {
+            PostMediaGrid(
+                post: post,
+                singleImageMaxHeight: 420,
+                availableWidth: availableWidth
+            )
+        }
+    }
+
+    private var availableWidth: CGFloat {
+        max(UIScreen.main.bounds.width - 78, 240)
+    }
+
+    private var videoHeight: CGFloat {
+        guard let video = post.videos?.first,
+              let width = video.width,
+              let height = video.height,
+              width > 0,
+              height > 0 else {
+            return availableWidth * 9 / 16
+        }
+        return min(availableWidth * CGFloat(height) / CGFloat(width), 440)
+    }
+}
+
+@MainActor
+final class XVideoPlaybackSession {
+    static let shared = XVideoPlaybackSession()
+
+    private weak var activePlayer: AVPlayer?
+    private var activeURL: URL?
+    private var positions: [URL: CMTime] = [:]
+
+    func play(_ player: AVPlayer, url: URL) {
+        if let activePlayer, activePlayer !== player {
+            savePosition(of: activePlayer, url: activeURL)
+            activePlayer.pause()
+        }
+        activePlayer = player
+        activeURL = url
+        if let position = positions[url], position.isNumeric, position.seconds > 0.25 {
+            player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        player.play()
+    }
+
+    func pause(_ player: AVPlayer, url: URL) {
+        savePosition(of: player, url: url)
+        player.pause()
+        if activePlayer === player {
+            activePlayer = nil
+            activeURL = nil
+        }
+    }
+
+    private func savePosition(of player: AVPlayer, url: URL?) {
+        guard let url else { return }
+        let position = player.currentTime()
+        guard position.isNumeric, position.seconds.isFinite, position.seconds > 0 else { return }
+        positions[url] = position
+    }
+}
+
+private struct XInlineVideoView: View {
+    private static let thumbnailCache = NSCache<NSURL, UIImage>()
+
+    @State private var player: AVPlayer
+    @State private var thumbnail: UIImage?
+    @State private var hasStartedPlayback = false
+    @State private var thumbnailFailed = false
+    @AppStorage("x.video.isMuted") private var isMuted = false
+    private let url: URL
+
+    init(url: URL) {
+        self.url = url
+        let player = AVPlayer(url: url)
+        player.isMuted = UserDefaults.standard.bool(forKey: "x.video.isMuted")
+        _player = State(initialValue: player)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+            } else if !hasStartedPlayback, !thumbnailFailed {
+                ProgressView().tint(.white)
+            }
+
+            VideoPlayer(player: player)
+                .opacity(hasStartedPlayback ? 1 : 0.001)
+
+            if !hasStartedPlayback {
+                Button {
+                    activateAudioSession()
+                    player.isMuted = isMuted
+                    hasStartedPlayback = true
+                    XVideoPlaybackSession.shared.play(player, url: url)
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 40)
+                        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("播放视频")
+            }
+
+            if hasStartedPlayback {
+                Button {
+                    isMuted.toggle()
+                    player.isMuted = isMuted
+                } label: {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 30)
+                        .background(.black.opacity(0.62), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(8)
+                .accessibilityLabel(isMuted ? "打开声音" : "静音")
+            }
+
+            if thumbnailFailed, !hasStartedPlayback {
+                Button {
+                    thumbnailFailed = false
+                    Task { await loadThumbnail(ignoringCache: true) }
+                } label: {
+                    Label("重试封面", systemImage: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.62), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 10)
+            }
+        }
+        .clipped()
+        .task(id: url) { await loadThumbnail() }
+        .onDisappear { XVideoPlaybackSession.shared.pause(player, url: url) }
+    }
+
+    private func activateAudioSession() {
+        #if !targetEnvironment(simulator)
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setActive(true)
+        #endif
+    }
+
+    @MainActor
+    private func loadThumbnail(ignoringCache: Bool = false) async {
+        guard thumbnail == nil else { return }
+        if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: url as NSURL) {
+            thumbnail = cached
+            return
+        }
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1_200, height: 1_200)
+        do {
+            let (image, _) = try await generator.image(at: .zero)
+            guard !Task.isCancelled else { return }
+            let result = UIImage(cgImage: image)
+            Self.thumbnailCache.setObject(result, forKey: url as NSURL)
+            thumbnail = result
+            thumbnailFailed = false
+        } catch {
+            guard !Task.isCancelled else { return }
+            thumbnailFailed = true
+        }
     }
 }
 

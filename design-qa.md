@@ -51,6 +51,46 @@ final result: passed
 
 ---
 
+# X Timeline List — Original Style Design QA
+
+- Source visual truth: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/codex-clipboard-4fe1dbaa-22ce-47b1-9ce0-df163f622d57.png`
+- Simulator implementation: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/screenshot_optimized_9abfef6d-5772-4a62-9ea7-8da5fa0d94a5.jpg`
+- Viewport: iPhone 17 Pro simulator, 368 × 800 capture
+- State: X selected, Annie post loaded from the Debug preview fixture, dark appearance
+
+## Findings
+
+No actionable P0, P1, or P2 findings remain in the visible list structure.
+
+- Information hierarchy: the X-specific card restores the original avatar/content column, bold author, verified badge, handle/time metadata, full long-form body, media slot, and six-part engagement row.
+- Typography: the body uses 17-point system text with a six-point line spacing. Numbered items are separated into readable paragraphs, and ticker symbols use the system blue accent.
+- Layout: the body, media, and engagement row share the same leading edge and available width, matching the source timeline's content rail.
+- Media behavior: X video posts render an inline, muted native player using the source dimensions. Image-only posts continue through the existing media grid.
+- Theme: the source is light and the simulator capture is dark. The implementation intentionally uses adaptive system colors rather than forcing the source's white background.
+
+## Interaction Verification
+
+- Selecting the card still opens the existing post detail route.
+- Inline video starts muted on appearance and pauses when the row leaves the screen.
+- Reply, repost, like, view, bookmark, and share affordances remain visible in the original order.
+- Other feed sources keep their existing card implementations.
+
+## Verification
+
+- All 59 unit tests passed.
+- Simulator Debug build succeeded and launched with the X feed preview fixture.
+- Reference and implementation were inspected together at the same content state.
+- `git diff --check` passed.
+
+## Follow-up Polish
+
+- [P3] The supplied source includes the tail of a preceding post and a thread connector. The standalone feed card does not invent a connector when no parent post is present.
+- [P3] The source's exact X brand mark is omitted because the project does not contain an official X logo asset; no substitute glyph was introduced.
+
+final result: passed
+
+---
+
 # Integrated Dark Market Map — Design QA
 
 - Source visual truth: `/Users/wangheng/.codex/generated_images/019f6b14-fded-7783-9aef-96c331169ea1/exec-49b85efe-e1ef-4ed3-8a00-e5d38a2b9152.png`

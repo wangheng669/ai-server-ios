@@ -58,6 +58,62 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testXRequestsLargerPageAndKeepsPagingAfterPartialResult() async throws {
+        var requests: [(page: Int, limit: Int)] = []
+        let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
+        let second = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"x"}"#.utf8))
+        let model = NewsFeedViewModel(source: .x) { page, limit, _ in
+            requests.append((page, limit))
+            return page == 1 ? [first] : [second]
+        }
+
+        await model.refresh()
+        await model.loadMoreIfNeeded(current: first)
+
+        XCTAssertEqual(requests.map(\.page), [1, 2])
+        XCTAssertEqual(requests.map(\.limit), [10, 10])
+        XCTAssertEqual(model.posts.map(\.id), [1, 2])
+    }
+
+    @MainActor
+    func testPaginationRetriesOnceAfterTransientFailure() async throws {
+        var secondPageAttempts = 0
+        let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
+        let second = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"x"}"#.utf8))
+        let model = NewsFeedViewModel(source: .x) { page, _, _ in
+            guard page > 1 else { return [first] }
+            secondPageAttempts += 1
+            if secondPageAttempts == 1 { throw URLError(.timedOut) }
+            return [second]
+        }
+
+        await model.refresh()
+        await model.loadMoreIfNeeded(current: first)
+
+        XCTAssertEqual(secondPageAttempts, 2)
+        XCTAssertEqual(model.posts.map(\.id), [1, 2])
+        XCTAssertNil(model.errorMessage)
+    }
+
+    @MainActor
+    func testRealtimePostWaitsUntilFeedAcceptsIt() async throws {
+        let existing = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
+        let incoming = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"x"}"#.utf8))
+        let model = NewsFeedViewModel(source: .x) { _, _, _ in [existing] }
+        await model.refresh()
+
+        model.receiveRealtimePost(incoming)
+
+        XCTAssertEqual(model.posts.map(\.id), [1])
+        XCTAssertEqual(model.pendingRealtimePosts.map(\.id), [2])
+
+        model.acceptPendingRealtimePosts()
+
+        XCTAssertEqual(model.posts.map(\.id), [2, 1])
+        XCTAssertTrue(model.pendingRealtimePosts.isEmpty)
+    }
+
+    @MainActor
     func testCacheWarmingMakesFirstSourceSelectionImmediate() async {
         var requestedSources: [FeedSource] = []
         let model = NewsFeedViewModel(source: .x) { _, _, source in

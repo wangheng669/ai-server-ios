@@ -141,6 +141,21 @@ struct Post: Decodable, Identifiable, Hashable {
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
+    var needsXTranslation: Bool {
+        guard sourceName == "X", !hasTranslation, xTweetID != nil else { return false }
+        guard let language = meta?.lang?.lowercased() else { return false }
+        return !language.hasPrefix("zh")
+    }
+
+    func replacingTranslation(with translation: String) -> Post {
+        Post(
+            id: id, title: title, text: text, summary: summary, content: content,
+            contentZH: translation, source: source, formattedTime: formattedTime,
+            weightReason: weightReason, finalScore: finalScore, weight: weight,
+            postLink: postLink, articlePostAt: articlePostAt, user: user,
+            postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
+        )
+    }
     var truthFeedContent: String {
         guard let translated = htmlText(contentZH) else { return "翻译处理中" }
         let markers = ["https://", "http://", "https：//", "http：//"]
@@ -647,8 +662,9 @@ struct PostImage: Decodable, Hashable {
 }
 struct PostVideo: Decodable, Hashable {
     let url, playURL, coverURL, previewImageURL, preview: String?
+    let width, height: Int?
     enum CodingKeys: String, CodingKey {
-        case url, preview
+        case url, preview, width, height
         case playURL = "play_url"
         case coverURL = "cover_url"
         case previewImageURL = "preview_image_url"

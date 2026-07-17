@@ -35,6 +35,7 @@ struct NewsFeedView: View {
     @State private var path: [Post] = []
     @State private var isShowingLaunchCover = true
     @State private var isFeedChromeHidden = false
+    @State private var isFeedAtTop = true
     @State private var hasLoadedFeedOnce = false
     @State private var flashFilter: FlashFilter = .all
     @State private var expandedFlashIDs: Set<Int> = []
@@ -88,6 +89,14 @@ struct NewsFeedView: View {
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty
             if isEmpty { preparedWebViews.removeAll() }
+        }
+        .onChange(of: model.pendingRealtimePosts.count) { _, count in
+            guard count > 0, isFeedAtTop else { return }
+            withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
+        }
+        .onChange(of: isFeedAtTop) { _, isAtTop in
+            guard isAtTop, !model.pendingRealtimePosts.isEmpty else { return }
+            withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
         .onDisappear {
             showsDetail = false
@@ -270,89 +279,129 @@ struct NewsFeedView: View {
     }
 
     private var feedList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                Color.clear.frame(height: 53)
-                if model.source == .flash {
-                    flashFeedHeader
-                }
-                if model.source == .truth {
-                    truthFeedSummary
-                    Divider().opacity(0.45)
-                }
-                ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
-                    NewsCardView(
-                        post: post,
-                        isFeaturedBilibili: model.source == .bilibili && post.id == model.posts.first?.id,
-                        isExpandedFlash: expandedFlashIDs.contains(post.id),
-                        onOpen: { openPost(post) }
-                    )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if post.isFlash {
-                                withAnimation(.easeInOut(duration: 0.22)) {
-                                    if expandedFlashIDs.contains(post.id) {
-                                        expandedFlashIDs.remove(post.id)
-                                    } else {
-                                        expandedFlashIDs.insert(post.id)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    Color.clear.frame(height: 53).id("feed-top")
+                    if model.source == .flash {
+                        flashFeedHeader
+                    }
+                    if model.source == .truth {
+                        truthFeedSummary
+                        Divider().opacity(0.45)
+                    }
+                    ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
+                        let displayPost = model.postForDisplay(post)
+                        NewsCardView(
+                            post: displayPost,
+                            isFeaturedBilibili: model.source == .bilibili && post.id == model.posts.first?.id,
+                            isExpandedFlash: expandedFlashIDs.contains(post.id),
+                            onOpen: { openPost(displayPost) }
+                        )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if post.isFlash {
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        if expandedFlashIDs.contains(post.id) {
+                                            expandedFlashIDs.remove(post.id)
+                                        } else {
+                                            expandedFlashIDs.insert(post.id)
+                                        }
                                     }
+                                } else if !post.isXueqiu {
+                                    openPost(displayPost)
                                 }
-                            } else if !post.isXueqiu {
-                                openPost(post)
                             }
-                        }
-                        .overlay {
-                            if openingWebPostID == post.id {
-                                HStack(spacing: 8) {
-                                    if let source = FeedSource(rawValue: post.source ?? "") {
-                                        Image(source == .weibo ? "WeiboMark" : "TikTokMark")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 18, height: 18)
+                            .overlay {
+                                if openingWebPostID == post.id {
+                                    HStack(spacing: 8) {
+                                        if let source = FeedSource(rawValue: post.source ?? "") {
+                                            Image(source == .weibo ? "WeiboMark" : "TikTokMark")
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 18, height: 18)
+                                        }
+                                        ProgressView().controlSize(.small)
+                                        Text("正在准备页面")
+                                            .font(.system(size: 13, weight: .medium))
                                     }
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Text("正在准备页面")
-                                        .font(.system(size: 13, weight: .medium))
-                                }
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 10)
                                     .background(.regularMaterial, in: Capsule())
                                     .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
                                     .allowsHitTesting(false)
+                                }
                             }
+                            .task { await model.translateXPostIfNeeded(post) }
+                            .task { await model.loadMoreIfNeeded(current: post) }
+                        if model.source == .flash, index == 2, visiblePosts.count > 3 {
+                            flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
+                        } else {
+                            Divider().opacity(model.source == .flash ? 0.42 : 0.6)
+                                .padding(.leading, model.source == .flash ? 84 : 0)
                         }
-                        .task { await model.loadMoreIfNeeded(current: post) }
-                    if model.source == .flash, index == 2, visiblePosts.count > 3 {
-                        flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
-                    } else {
-                        Divider().opacity(model.source == .flash ? 0.42 : 0.6)
-                            .padding(.leading, model.source == .flash ? 84 : 0)
                     }
-                }
-                if model.isLoadingMore { ProgressView().padding(20) }
-                if model.errorMessage != nil {
-                    Button("加载失败，点按重试") {
-                        if let last = model.posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                    if model.isLoadingMore { ProgressView().padding(20) }
+                    if model.errorMessage != nil {
+                        Button("加载失败，点按重试") {
+                            if let last = model.posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                        }
+                            .font(.footnote).padding(16)
                     }
-                        .font(.footnote).padding(16)
+                    Color.clear.frame(height: 55)
                 }
-                Color.clear.frame(height: 55)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
+            .modifier(FeedChromeScrollModifier(isHidden: $isFeedChromeHidden, isAtTop: $isFeedAtTop))
+            .refreshable { await model.refresh() }
+            .simultaneousGesture(channelSwipeGesture)
+            .allowsHitTesting(openingWebPostID == nil)
+            .overlay(alignment: .top) {
+                if model.source == .x, !model.pendingRealtimePosts.isEmpty {
+                    xNewPostsPill {
+                        withAnimation(.snappy(duration: 0.35)) {
+                            model.acceptPendingRealtimePosts()
+                            proxy.scrollTo("feed-top", anchor: .top)
+                        }
+                    }
+                    .padding(.top, isFeedChromeHidden ? 12 : 61)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
+            .alert("页面加载失败", isPresented: Binding(
+                get: { webOpenError != nil },
+                set: { if !$0 { webOpenError = nil } }
+            )) {
+                Button("知道了", role: .cancel) { webOpenError = nil }
+            } message: {
+                Text(webOpenError ?? "请稍后重试")
+            }
         }
-        .modifier(FeedChromeScrollModifier(isHidden: $isFeedChromeHidden))
-        .refreshable { await model.refresh() }
-        .simultaneousGesture(channelSwipeGesture)
-        .allowsHitTesting(openingWebPostID == nil)
-        .alert("页面加载失败", isPresented: Binding(
-            get: { webOpenError != nil },
-            set: { if !$0 { webOpenError = nil } }
-        )) {
-            Button("知道了", role: .cancel) { webOpenError = nil }
-        } message: {
-            Text(webOpenError ?? "请稍后重试")
+    }
+
+    private func xNewPostsPill(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                HStack(spacing: -8) {
+                    ForEach(Array(model.pendingRealtimePosts.prefix(3)), id: \.id) { post in
+                        AvatarView(url: post.avatarURL, name: post.authorName, size: 28)
+                            .overlay(Circle().stroke(Color.blue, lineWidth: 2))
+                    }
+                }
+                Text(model.pendingRealtimePosts.count == 1 ? "1 条新帖" : "\(model.pendingRealtimePosts.count) 条新帖")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(Color.blue, in: Capsule())
+            .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(model.pendingRealtimePosts.count) 条新帖子，点按回到顶部")
     }
 
     private func openPost(_ post: Post) {
@@ -1407,6 +1456,7 @@ private func isWeiboLoginURL(_ url: URL?) -> Bool {
 
 private struct FeedChromeScrollModifier: ViewModifier {
     @Binding var isHidden: Bool
+    @Binding var isAtTop: Bool
     @State private var isScrollActive = false
     @State private var direction: FeedScrollDirection?
     @State private var directionalTravel: CGFloat = 0
@@ -1423,6 +1473,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     geometry.contentOffset.y + geometry.contentInsets.top
                 } action: { oldOffset, newOffset in
+                    isAtTop = newOffset <= 8
                     handleOffsetChange(from: oldOffset, to: newOffset)
                 }
         } else {
@@ -1473,6 +1524,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
 
         switch nextDirection {
         case .towardOlder where directionalTravel >= 28:
+            isAtTop = false
             setHidden(true)
             directionalTravel = 0
         case .towardNewer where directionalTravel >= 10:
@@ -1590,7 +1642,59 @@ private struct NewsCardView: View {
         else if post.isRSS { rssCard }
         else if post.sourceName == "知乎" { zhihuCard }
         else if post.sourceName == "Truth" { truthCard }
+        else if post.sourceName == "X" { xCard }
         else { socialCard }
+    }
+
+    private var xCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            AvatarView(url: post.avatarURL, name: post.authorName, size: 44)
+
+            VStack(alignment: .leading, spacing: 9) {
+                socialHeader
+
+                xRichText(xTimelineContent)
+                    .font(.system(size: 17, weight: .regular))
+                    .lineSpacing(6)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                XFeedMediaView(post: post)
+
+                FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+    }
+
+    private var xTimelineContent: String {
+        post.displayContent.replacingOccurrences(
+            of: #"\s+(?=[1-9]\.\s)"#,
+            with: "\n\n",
+            options: .regularExpression
+        )
+    }
+
+    private func xRichText(_ value: String) -> Text {
+        let source = value as NSString
+        let matches = (try? NSRegularExpression(pattern: #"\$[A-Za-z][A-Za-z0-9.]{0,9}"#)
+            .matches(in: value, range: NSRange(location: 0, length: source.length))) ?? []
+        var result = Text("")
+        var location = 0
+        for match in matches {
+            if match.range.location > location {
+                result = result + Text(source.substring(with: NSRange(location: location, length: match.range.location - location)))
+            }
+            result = result + Text(source.substring(with: match.range)).foregroundColor(.blue)
+            location = match.range.location + match.range.length
+        }
+        if location < source.length { result = result + Text(source.substring(from: location)) }
+        return result
     }
 
     private var xueqiuCard: some View {
@@ -1948,7 +2052,7 @@ private struct NewsCardView: View {
 
                 FeedEngagementRow(
                     post: post,
-                    showsOnlyLikeAndBookmark: post.sourceName == "X"
+                    showsOnlyLikeAndBookmark: false
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
