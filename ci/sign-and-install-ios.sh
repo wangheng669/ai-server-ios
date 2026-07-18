@@ -75,6 +75,23 @@ if ! security find-identity -v -p codesigning | grep -Fq "$signing_identity"; th
   exit 1
 fi
 
+if find "$APP_PATH" -type d -name '*.appex' -print -quit | grep -q .; then
+  echo "App extensions require their own provisioning profiles and are not supported by this installer yet." >&2
+  exit 1
+fi
+
+while IFS= read -r -d '' nested_code; do
+  codesign \
+    --force \
+    --sign "$signing_identity" \
+    --timestamp=none \
+    "$nested_code"
+done < <(
+  find "$APP_PATH" -depth \
+    \( -type f -name '*.dylib' -o -type d -name '*.framework' \) \
+    -print0
+)
+
 codesign \
   --force \
   --sign "$signing_identity" \
