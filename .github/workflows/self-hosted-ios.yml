@@ -1,0 +1,36 @@
+name: Self-hosted iOS CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: self-hosted-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test on local Mac
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out latest commit
+        uses: actions/checkout@v4
+
+      - name: Build and run tests
+        env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project AIServerClient.xcodeproj \
+            -scheme AIServerClient \
+            -destination 'platform=iOS Simulator,name=iPhone 16e' \
+            -derivedDataPath "$RUNNER_TEMP/AIServerClient-DerivedData" \
+            CODE_SIGNING_ALLOWED=NO
