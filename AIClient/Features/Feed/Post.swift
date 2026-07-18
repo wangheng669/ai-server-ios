@@ -14,16 +14,32 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
     let id: Int
     let name: String
     let icon: String?
+    let avatar: String?
+    let updatedAt: String?
     let isEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name, icon
+        case avatar = "avatar_url"
+        case updatedAt = "updated_at"
         case isEnabled = "is_enabled"
     }
 
     var iconURL: URL? {
         guard let icon, !icon.isEmpty else { return nil }
-        return URL(string: icon, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
+        guard let resolved = URL(string: icon, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
+        guard icon.hasPrefix("/img/rss-feed-icons/"), let updatedAt, !updatedAt.isEmpty,
+              var parts = URLComponents(url: resolved, resolvingAgainstBaseURL: false) else { return resolved }
+        parts.queryItems = (parts.queryItems ?? []) + [.init(name: "v", value: updatedAt)]
+        return parts.url
+    }
+
+    var preferredAvatarURL: URL? {
+        if let avatar, !avatar.isEmpty,
+           let url = URL(string: avatar, relativeTo: ServerConfiguration.currentURL)?.absoluteURL {
+            return url
+        }
+        return iconURL
     }
 }
 struct PostDetailResponse: Decodable { let post: Post }
