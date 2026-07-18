@@ -2,6 +2,14 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testRSSFeedPrefersHighResolutionAvatarAndVersionsStaticIcon() throws {
+        let data = #"{"data":{"feeds":[{"id":64,"name":"Example","icon":"/img/rss-feed-icons/rss-feed-64.jpg","avatar_url":"https://cdn.example.com/avatar-180.jpg","updated_at":"2026-07-18T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
+        let feed = try JSONDecoder().decode(RSSFeedsResponse.self, from: data).data.feeds[0]
+
+        XCTAssertEqual(feed.preferredAvatarURL?.absoluteString, "https://cdn.example.com/avatar-180.jpg")
+        XCTAssertTrue(feed.iconURL?.absoluteString.contains("v=2026-07-18T10:00:00Z") == true)
+    }
+
     func testWikipediaCandidateExtractionFindsNamedEntitiesWithoutDuplicates() {
         let candidates = WikipediaEntityCandidateExtractor.candidates(
             in: ["英伟达、微软和 OpenAI 正在推动投资。OpenAI 随后发布了更新。"]
