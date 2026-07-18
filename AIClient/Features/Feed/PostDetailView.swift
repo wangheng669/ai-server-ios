@@ -20,6 +20,9 @@ struct PostDetailView: View {
     @State private var youtubePlayerReloadID = UUID()
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = false
+    @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
+    @State private var selectedWikipediaEntity: WikipediaSelection?
+    @State private var presentedWikipediaEntity: WikipediaEntity?
     @State private var isTruthBookmarked: Bool
     @State private var xComments: [XComment] = []
     @State private var isLoadingXComments = false
@@ -50,6 +53,9 @@ struct PostDetailView: View {
         .toolbar((["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube)
         .toolbar(.hidden, for: .tabBar)
+        .fullScreenCover(item: $presentedWikipediaEntity) { entity in
+            WikipediaReaderView(entity: entity)
+        }
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
         // navigation pop recognizer on this screen prevents a scrub from popping
         // the detail view; the visible back button remains available.
@@ -148,13 +154,32 @@ struct PostDetailView: View {
                     .padding(.vertical, 30)
                 } else if let article = newYorkTimesArticle {
                     LazyVStack(alignment: .leading, spacing: 22) {
-                        ForEach(Array(article.blocks.enumerated()), id: \.offset) { _, block in
+                        ForEach(Array(article.blocks.enumerated()), id: \.offset) { index, block in
                             switch block {
                             case .paragraph(let text):
-                                Text(text)
-                                    .font(.system(size: 18, weight: .regular, design: .serif))
-                                    .lineSpacing(8)
-                                    .textSelection(.enabled)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    WikipediaLinkedParagraph(
+                                        text: text,
+                                        entities: wikipediaEntitiesByParagraph[index] ?? []
+                                    ) { entity in
+                                        withAnimation(.easeOut(duration: 0.18)) {
+                                            selectedWikipediaEntity = WikipediaSelection(
+                                                paragraphIndex: index,
+                                                entity: entity
+                                            )
+                                        }
+                                    }
+                                    if let selection = selectedWikipediaEntity,
+                                       selection.paragraphIndex == index {
+                                        WikipediaEntityCard(entity: selection.entity) {
+                                            presentedWikipediaEntity = selection.entity
+                                        } close: {
+                                            withAnimation(.easeOut(duration: 0.15)) {
+                                                selectedWikipediaEntity = nil
+                                            }
+                                        }
+                                    }
+                                }
                             case .image(let url, let caption, let credit):
                                 NewYorkTimesArticleImage(
                                     url: url,
@@ -1420,7 +1445,22 @@ struct PostDetailView: View {
         guard post.isNewYorkTimes, let link = post.linkURL else { return }
         isLoadingNewYorkTimesBody = true
         defer { isLoadingNewYorkTimesBody = false }
-        newYorkTimesArticle = try? await client.fetchNewYorkTimesArticle(url: link)
+        guard let article = try? await client.fetchNewYorkTimesArticle(url: link) else { return }
+        newYorkTimesArticle = article
+        let paragraphs = article.blocks.compactMap { block -> String? in
+            guard case .paragraph(let text) = block else { return nil }
+            return text
+        }
+        let paragraphEntities = await WikipediaEntityResolver.shared.resolve(paragraphs: paragraphs)
+        guard !Task.isCancelled else { return }
+        var blockEntities: [Int: [WikipediaEntity]] = [:]
+        var paragraphIndex = 0
+        for (blockIndex, block) in article.blocks.enumerated() {
+            guard case .paragraph = block else { continue }
+            blockEntities[blockIndex] = paragraphEntities[paragraphIndex]
+            paragraphIndex += 1
+        }
+        wikipediaEntitiesByParagraph = blockEntities
     }
 
     @MainActor

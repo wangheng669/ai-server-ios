@@ -2,6 +2,17 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testWikipediaCandidateExtractionFindsNamedEntitiesWithoutDuplicates() {
+        let candidates = WikipediaEntityCandidateExtractor.candidates(
+            in: ["英伟达、微软和 OpenAI 正在推动投资。OpenAI 随后发布了更新。"]
+        )
+
+        XCTAssertTrue(candidates.contains("英伟达"))
+        XCTAssertTrue(candidates.contains("微软"))
+        XCTAssertTrue(candidates.contains("OpenAI"))
+        XCTAssertEqual(candidates.filter { $0 == "OpenAI" }.count, 1)
+    }
+
     func testSmallSquareRSSImageIsTreatedAsInlineEmoji() throws {
         let data = #"{"url":"https://example.com/emoji.png","width":64,"height":64}"#.data(using: .utf8)!
         let image = try JSONDecoder().decode(PostImage.self, from: data)
