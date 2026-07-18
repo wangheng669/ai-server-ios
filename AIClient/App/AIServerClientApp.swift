@@ -55,10 +55,8 @@ private struct EditorialRootView: View {
             if !marketShowsDetail && !feedShowsDetail && !peopleShowsDetail &&
                 !(selectedTab == .observation && feedHidesTabBar) {
                 EditorialTabBar(selected: selectedTab) { selectedTab = $0 }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.2), value: feedHidesTabBar)
         .overlay(alignment: .topTrailing) {
             if let deploymentPreview {
                 DeploymentStatusTip(
