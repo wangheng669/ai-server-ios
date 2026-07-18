@@ -35,9 +35,17 @@ enum WikipediaEntityCandidateExtractor {
         "亚马逊", "特斯拉", "脸书", "人工智能"
     ]
 
-    static func candidates(in paragraphs: [String], limit: Int = 24) -> [String] {
+    static func candidates(in paragraphs: [String], limit: Int = 96) -> [String] {
         var results: [String] = []
         var seen = Set<String>()
+
+        // Reserve space for high-signal entities across the whole article before
+        // early paragraphs can consume the candidate budget.
+        for paragraph in paragraphs {
+            for entity in commonChineseEntities where paragraph.contains(entity) {
+                append(entity, to: &results, seen: &seen, limit: limit)
+            }
+        }
 
         for paragraph in paragraphs {
             let tagger = NLTagger(tagSchemes: [.nameType])
@@ -71,10 +79,6 @@ enum WikipediaEntityCandidateExtractor {
         // a conservative fallback and let Wikipedia validate every candidate.
         if results.count < limit {
             for paragraph in paragraphs {
-                for entity in commonChineseEntities where paragraph.contains(entity) {
-                    append(entity, to: &results, seen: &seen, limit: limit)
-                }
-
                 let tokenizer = NLTokenizer(unit: .word)
                 tokenizer.string = paragraph
                 tokenizer.enumerateTokens(in: paragraph.startIndex..<paragraph.endIndex) { range, _ in
@@ -131,7 +135,13 @@ actor WikipediaEntityResolver {
         }
 
         if !uncached.isEmpty {
-            let fetched = (try? await fetch(titles: uncached, language: "zh")) ?? [:]
+            var fetched: [String: WikipediaEntity] = [:]
+            for start in stride(from: 0, to: uncached.count, by: 40) {
+                let end = min(start + 40, uncached.count)
+                let batch = Array(uncached[start..<end])
+                let batchResult = (try? await fetch(titles: batch, language: "zh")) ?? [:]
+                fetched.merge(batchResult) { _, latest in latest }
+            }
             for candidate in uncached {
                 let key = cacheKey(candidate, language: "zh")
                 if let entity = fetched[candidate] {

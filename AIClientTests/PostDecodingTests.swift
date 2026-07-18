@@ -13,6 +13,18 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(candidates.filter { $0 == "OpenAI" }.count, 1)
     }
 
+    func testWikipediaCandidateExtractionCoversEntitiesLateInLongArticles() {
+        let earlyParagraphs = (0..<30).map { "第\($0)段介绍人工智能产业的发展趋势和相关背景。" }
+        let candidates = WikipediaEntityCandidateExtractor.candidates(
+            in: earlyParagraphs + ["文章最后讨论美国、欧洲、英伟达与微软。"]
+        )
+
+        XCTAssertTrue(candidates.contains("美国"))
+        XCTAssertTrue(candidates.contains("欧洲"))
+        XCTAssertTrue(candidates.contains("英伟达"))
+        XCTAssertTrue(candidates.contains("微软"))
+    }
+
     func testSmallSquareRSSImageIsTreatedAsInlineEmoji() throws {
         let data = #"{"url":"https://example.com/emoji.png","width":64,"height":64}"#.data(using: .utf8)!
         let image = try JSONDecoder().decode(PostImage.self, from: data)
