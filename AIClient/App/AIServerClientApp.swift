@@ -29,11 +29,6 @@ private struct EditorialRootView: View {
     @State private var peopleShowsDetail = false
     @State private var feedHidesTabBar = false
 
-    private var hidesPrimaryTabBar: Bool {
-        marketShowsDetail || feedShowsDetail || peopleShowsDetail ||
-            (selectedTab == .observation && feedHidesTabBar)
-    }
-
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
         guard ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview") ||
@@ -49,16 +44,18 @@ private struct EditorialRootView: View {
             NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
                 .tag(RootTab.observation)
                 .tabItem { Label("观点", systemImage: "newspaper.fill") }
+                .toolbar(feedHidesTabBar || feedShowsDetail ? .hidden : .visible, for: .tabBar)
 
             InvestmentView(showsDetail: $marketShowsDetail)
                 .tag(RootTab.investment)
                 .tabItem { Label("投资", systemImage: "chart.line.uptrend.xyaxis") }
+                .toolbar(marketShowsDetail ? .hidden : .visible, for: .tabBar)
 
             PeopleView(showsDetail: $peopleShowsDetail)
                 .tag(RootTab.people)
                 .tabItem { Label("人物", systemImage: "person.2.fill") }
+                .toolbar(peopleShowsDetail ? .hidden : .visible, for: .tabBar)
         }
-        .toolbar(hidesPrimaryTabBar ? .hidden : .visible, for: .tabBar)
         .tint(.blue)
         .overlay(alignment: .topTrailing) {
             if let deploymentPreview {
