@@ -29,6 +29,12 @@ private enum FlashFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private struct RSSSourceOption: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let avatarURL: URL?
+}
+
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @StateObject private var model = NewsFeedViewModel()
@@ -40,6 +46,7 @@ struct NewsFeedView: View {
     @StateObject private var scrollPositionStore = FeedScrollPositionStore()
     @State private var hasLoadedFeedOnce = false
     @State private var flashFilter: FlashFilter = .all
+    @State private var selectedRSSSourceID: String?
     @State private var expandedFlashIDs: Set<Int> = []
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
@@ -303,6 +310,10 @@ struct NewsFeedView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     Color.clear.frame(height: 53).id("feed-top")
+                    if source == .rss {
+                        rssSourceFilterBar(posts: posts)
+                        Divider().opacity(0.55)
+                    }
                     if source == .flash {
                         flashFeedHeader
                     }
@@ -463,8 +474,92 @@ struct NewsFeedView: View {
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
+        if source == .rss, let selectedRSSSourceID {
+            return posts.filter { rssSourceID(for: $0) == selectedRSSSourceID }
+        }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
+    }
+
+    private func rssSourceFilterBar(posts: [Post]) -> some View {
+        let options = rssSourceOptions(posts: posts)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 10) {
+                rssSourceButton(id: nil, name: "全部", avatarURL: nil)
+                ForEach(options) { option in
+                    rssSourceButton(id: option.id, name: option.name, avatarURL: option.avatarURL)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .onChange(of: options) { _, options in
+            guard let selectedRSSSourceID,
+                  !options.contains(where: { $0.id == selectedRSSSourceID }) else { return }
+            self.selectedRSSSourceID = nil
+        }
+    }
+
+    private func rssSourceButton(id: String?, name: String, avatarURL: URL?) -> some View {
+        let isSelected = selectedRSSSourceID == id
+        return Button {
+            withAnimation(.snappy(duration: 0.22)) { selectedRSSSourceID = id }
+        } label: {
+            VStack(spacing: 5) {
+                ZStack {
+                    if let id {
+                        AvatarView(url: avatarURL, name: name, size: 34)
+                            .id(id)
+                    } else {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.10))
+                            .frame(width: 34, height: 34)
+                            .overlay {
+                                Image(systemName: "square.grid.2x2.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(isSelected ? Color.blue : Color.secondary)
+                            }
+                    }
+                }
+                .overlay {
+                    Circle()
+                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                        .padding(-2.5)
+                }
+
+                Text(name)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                    .frame(width: 52)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("筛选来源：\(name)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func rssSourceOptions(posts: [Post]) -> [RSSSourceOption] {
+        var seen = Set<String>()
+        return posts.compactMap { post in
+            let id = rssSourceID(for: post)
+            guard seen.insert(id).inserted else { return nil }
+            return RSSSourceOption(id: id, name: rssSourceName(for: post), avatarURL: post.avatarURL)
+        }
+    }
+
+    private func rssSourceID(for post: Post) -> String {
+        let name = rssSourceName(for: post)
+        return name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private func rssSourceName(for post: Post) -> String {
+        let feedName = post.meta?.rssFeedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let feedName, !feedName.isEmpty { return feedName }
+        let author = post.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return author.isEmpty || author == "RSS" ? "未命名来源" : author
     }
 
     private var flashFeedHeader: some View {
