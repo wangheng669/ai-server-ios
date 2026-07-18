@@ -1682,7 +1682,10 @@ struct EditorialTabBar: View {
             tabButton(.people, title: "人物", icon: "person.2", selectedIcon: "person.2.fill")
         }
         .padding(6)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(
+            Color(uiColor: .systemBackground),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
