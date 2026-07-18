@@ -47,7 +47,6 @@ struct FamousHoldingDetailView: View {
                 LazyVStack(spacing: 0) {
                     if store.loadingManagerKeys.contains(manager.key) && store.managerDetails[manager.key] == nil {
                         ProgressView("正在读取完整持仓")
-                            .tint(.white)
                             .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
                         ForEach(Array(changes.enumerated()), id: \.element.id) { index, change in
@@ -63,8 +62,7 @@ struct FamousHoldingDetailView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .background(Color.black.ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        .background(HoldingsPalette.canvas.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadDetail(managerKey: manager.key) }
     }
@@ -75,7 +73,7 @@ struct FamousHoldingDetailView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 17, weight: .semibold))
                     .frame(width: 40, height: 40)
-                    .background(Color.white.opacity(0.07), in: Circle())
+                    .background(Color.secondary.opacity(0.10), in: Circle())
             }
             Spacer()
             Text("持仓详情")
@@ -88,7 +86,7 @@ struct FamousHoldingDetailView: View {
             .font(.system(size: 16, weight: .semibold))
             .frame(width: 76, height: 40)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
     }
@@ -115,9 +113,9 @@ struct FamousHoldingDetailView: View {
 
     private var summaryCard: some View {
         HStack(spacing: 0) {
-            detailMetric("总市值（USD）", compactUSD(resolvedManager.totalValueUsd), .white)
+            detailMetric("总市值（USD）", compactUSD(resolvedManager.totalValueUsd), .primary)
             Divider().frame(height: 42).overlay(HoldingsPalette.divider)
-            detailMetric("持仓数量", String(resolvedManager.positionsCount), .white)
+            detailMetric("持仓数量", String(resolvedManager.positionsCount), .primary)
             Divider().frame(height: 42).overlay(HoldingsPalette.divider)
             detailMetric("较上期变化", signedPercent(totalChange), totalChange >= 0 ? HoldingsPalette.green : HoldingsPalette.orange)
         }
@@ -141,13 +139,13 @@ struct FamousHoldingDetailView: View {
                 controlButton("list.bullet", selected: !compactRows) { compactRows = false }
                 controlButton("list.dash", selected: compactRows) { compactRows = true }
             }
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             Spacer()
             Label("市值排序", systemImage: "chevron.down")
                 .font(.system(size: 13, weight: .medium))
                 .padding(.horizontal, 13)
                 .frame(height: 38)
-                .background(Color.white.opacity(0.06), in: Capsule())
+                .background(Color.secondary.opacity(0.10), in: Capsule())
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 8)
@@ -156,7 +154,7 @@ struct FamousHoldingDetailView: View {
     private func controlButton(_ icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).frame(width: 54, height: 38)
-                .background(selected ? Color.white.opacity(0.07) : .clear)
+                .background(selected ? Color.secondary.opacity(0.10) : .clear)
         }
         .buttonStyle(.plain)
     }
