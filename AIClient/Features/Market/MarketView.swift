@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 private enum MarketStyle {
-    static let canvas = Color(uiColor: .systemGroupedBackground)
-    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let canvas = Color(uiColor: .systemBackground)
+    static let surface = Color(uiColor: .systemBackground)
     static let divider = Color(uiColor: .separator).opacity(0.55)
     static let gain = Color(red: 0.96, green: 0.18, blue: 0.22)
     static let loss = Color(red: 0.06, green: 0.65, blue: 0.32)
@@ -81,7 +81,7 @@ private struct MarketHomeView: View {
                     }
                     .animation(.easeInOut(duration: 0.18), value: selectedMarket)
 
-                    VStack(spacing: 14) {
+                    VStack(spacing: 0) {
                         if let error = store.errorMessage {
                             MarketErrorBanner(message: error) { await store.refresh() }
                         }
@@ -100,9 +100,9 @@ private struct MarketHomeView: View {
                                 .id("market-map")
                         }
                     }
-                    .padding(.top, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 92)
                     .background(MarketStyle.canvas)
-                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18))
                 }
             }
             .background(MarketTerminalPalette.header.ignoresSafeArea())
@@ -227,7 +227,7 @@ private struct MarketTerminalHero: View {
                                 .minimumScaleFactor(0.72)
                         }
                         Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                            .font(.system(size: 31, weight: .semibold))
+                            .font(.system(size: 36, weight: .semibold))
                             .monospacedDigit()
                             .tracking(-0.8)
                             .lineLimit(1)
@@ -281,7 +281,7 @@ private struct MarketTerminalHero: View {
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
-        .padding(.bottom, 22)
+        .padding(.bottom, 18)
         .background(MarketTerminalPalette.header)
     }
 
@@ -452,9 +452,8 @@ private struct MarketRegionPicker: View {
                 .accessibilityAddTraits(selection == region ? .isSelected : [])
             }
         }
-        .background(MarketStyle.surface, in: RoundedRectangle(cornerRadius: 10))
-        .overlay { RoundedRectangle(cornerRadius: 10).stroke(MarketStyle.divider, lineWidth: 0.5) }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
+        .overlay(alignment: .bottom) { Divider().opacity(0.5).padding(.horizontal, 18) }
     }
 }
 
@@ -497,28 +496,9 @@ private struct MarketIndexTable: View {
                 }
             }
 
-            Text(sessionFootnote)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .frame(height: 30)
-                .background(Color.black.opacity(0.015))
         }
-        .background(MarketStyle.surface, in: RoundedRectangle(cornerRadius: 11))
-        .overlay { RoundedRectangle(cornerRadius: 11).stroke(MarketStyle.divider, lineWidth: 0.5) }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .animation(.easeOut(duration: 0.16), value: region)
-    }
-
-    private var sessionFootnote: String {
-        switch region {
-        case .unitedStates: "美股常规交易时段 09:30–16:00（纽约时间）"
-        case .china: "A股常规交易时段 09:30–15:00（北京时间）"
-        case .japan: "日股常规交易时段 09:00–15:30（东京时间）"
-        case .korea: "韩股常规交易时段 09:00–15:30（首尔时间）"
-        case .crypto: "加密货币市场全年无休，行情以 USDT 计价"
-        }
     }
 }
 
@@ -598,7 +578,7 @@ private struct MarketWorldMap: View {
                         ForEach(markets) { market in
                             Button { select(market.region) } label: {
                                 MarketMapNode(
-                                    country: market.region.rawValue,
+                                    country: market.city,
                                     quote: store.quote(symbol: market.region.primarySymbol),
                                     isSelected: selection == market.region
                                 )
@@ -613,22 +593,7 @@ private struct MarketWorldMap: View {
                 }
                 .frame(height: 176)
 
-                Rectangle().fill(MarketStyle.divider).frame(height: 0.5)
-
-                HStack(spacing: 0) {
-                    ForEach(markets) { market in
-                        Button { select(market.region) } label: {
-                            MarketSessionColumn(
-                                city: market.city,
-                                quote: store.quote(symbol: market.region.primarySymbol),
-                                isSelected: selection == market.region
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-                .frame(height: 58)
+                MarketSessionSchedule(region: selection)
             }
             .padding(.horizontal, 14)
         }
@@ -660,6 +625,163 @@ private struct MarketWorldMap: View {
     private func mapAccessibilityLabel(for market: MarketMapLocation) -> String {
         let quote = store.quote(symbol: market.region.primarySymbol)
         return "\(market.region.rawValue)，\(quote?.formattedPercent ?? "等待行情")"
+    }
+}
+
+private struct MarketSessionSchedule: View {
+    let region: MarketRegion
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(alignment: .leading, spacing: 10) {
+                Divider().opacity(0.55)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(region.cityName) · 北京时间")
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Text(currentStatus(at: context.date))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(MarketStyle.accent)
+                }
+
+                HStack(spacing: 0) {
+                    ForEach(Array(periods(at: context.date).enumerated()), id: \.offset) { index, period in
+                        VStack(spacing: 4) {
+                            Text(period.title)
+                                .font(.caption.weight(activePeriod(at: context.date) == index ? .semibold : .medium))
+                            Text(period.time)
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(activePeriod(at: context.date) == index ? MarketStyle.accent : .secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .background(activePeriod(at: context.date) == index ? MarketStyle.accent.opacity(0.08) : .clear)
+                        .overlay(alignment: .top) {
+                            Rectangle()
+                                .fill(activePeriod(at: context.date) == index ? MarketStyle.accent : MarketStyle.divider)
+                                .frame(height: activePeriod(at: context.date) == index ? 2 : 0.5)
+                        }
+                    }
+                }
+
+                if region == .unitedStates {
+                    Text(newYorkIsDaylightSaving(at: context.date) ? "当前为夏令时；冬令时各时段自动顺延 1 小时" : "当前为冬令时；App 已自动完成北京时间换算")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(region.sessionNote)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 14)
+    }
+
+    private func periods(at date: Date) -> [SessionPeriod] {
+        switch region {
+        case .unitedStates:
+            let summer = newYorkIsDaylightSaving(at: date)
+            return summer
+                ? [.init("夜盘", "08:00–16:00"), .init("盘前", "16:00–21:30"), .init("常规", "21:30–次日04:00"), .init("盘后", "04:00–08:00")]
+                : [.init("夜盘", "09:00–17:00"), .init("盘前", "17:00–22:30"), .init("常规", "22:30–次日05:00"), .init("盘后", "05:00–09:00")]
+        case .china:
+            return [.init("上午盘", "09:30–11:30"), .init("午间休市", "11:30–13:00"), .init("下午盘", "13:00–15:00")]
+        case .japan:
+            return [.init("上午盘", "08:00–10:30"), .init("午间休市", "10:30–11:30"), .init("下午盘", "11:30–14:30")]
+        case .korea:
+            return [.init("常规交易", "08:00–14:30")]
+        case .crypto:
+            return [.init("全天交易", "00:00–24:00")]
+        }
+    }
+
+    private func activePeriod(at date: Date) -> Int? {
+        guard isTradingWeekday(date) || region == .crypto else { return nil }
+        let minute = beijingMinute(date)
+        switch region {
+        case .unitedStates:
+            let shift = newYorkIsDaylightSaving(at: date) ? 0 : 60
+            if ((480 + shift)..<(960 + shift)).contains(minute) { return 0 }
+            if ((960 + shift)..<(1290 + shift)).contains(minute) { return 1 }
+            if minute >= 1290 + shift || minute < 240 + shift { return 2 }
+            if ((240 + shift)..<(480 + shift)).contains(minute) { return 3 }
+        case .china:
+            if (570..<690).contains(minute) { return 0 }
+            if (690..<780).contains(minute) { return 1 }
+            if (780..<900).contains(minute) { return 2 }
+        case .japan:
+            if (480..<630).contains(minute) { return 0 }
+            if (630..<690).contains(minute) { return 1 }
+            if (690..<870).contains(minute) { return 2 }
+        case .korea:
+            if (480..<870).contains(minute) { return 0 }
+        case .crypto:
+            return 0
+        }
+        return nil
+    }
+
+    private func currentStatus(at date: Date) -> String {
+        guard let index = activePeriod(at: date) else { return region == .crypto ? "24H 交易中" : "当前已收盘" }
+        return "当前：\(periods(at: date)[index].title)"
+    }
+
+    private func beijingMinute(_ date: Date) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
+
+    private func isTradingWeekday(_ date: Date) -> Bool {
+        var calendar = Calendar(identifier: .gregorian)
+        let identifier: String
+        switch region {
+        case .unitedStates: identifier = "America/New_York"
+        case .china, .crypto: identifier = "Asia/Shanghai"
+        case .japan: identifier = "Asia/Tokyo"
+        case .korea: identifier = "Asia/Seoul"
+        }
+        calendar.timeZone = TimeZone(identifier: identifier)!
+        return !calendar.isDateInWeekend(date)
+    }
+
+    private func newYorkIsDaylightSaving(at date: Date) -> Bool {
+        TimeZone(identifier: "America/New_York")?.isDaylightSavingTime(for: date) == true
+    }
+}
+
+private struct SessionPeriod {
+    let title: String
+    let time: String
+
+    init(_ title: String, _ time: String) {
+        self.title = title
+        self.time = time
+    }
+}
+
+private extension MarketRegion {
+    var cityName: String {
+        switch self {
+        case .unitedStates: "纽约"
+        case .china: "上海"
+        case .japan: "东京"
+        case .korea: "首尔"
+        case .crypto: "加密市场"
+        }
+    }
+
+    var sessionNote: String {
+        switch self {
+        case .china: "午间休市 11:30–13:00；法定节假日休市"
+        case .japan: "以上时间已由东京时间换算为北京时间"
+        case .korea: "以上时间已由首尔时间换算为北京时间"
+        case .crypto: "全年无休，行情以 USDT 计价"
+        case .unitedStates: ""
+        }
     }
 }
 
