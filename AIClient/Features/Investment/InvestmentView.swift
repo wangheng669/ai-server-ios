@@ -67,7 +67,7 @@ private struct InvestmentHeader: View {
                 } label: {
                     Text(section.rawValue)
                         .font(.system(size: 15, weight: selection == section ? .semibold : .regular))
-                        .foregroundStyle(selection == section ? .white : .white.opacity(0.58))
+                        .foregroundStyle(selection == section ? Color.white : Color.primary.opacity(0.62))
                         .frame(maxWidth: .infinity, minHeight: 38)
                         .background {
                             if selection == section {
@@ -83,7 +83,7 @@ private struct InvestmentHeader: View {
         .padding(3)
         .frame(width: 184, height: 44)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(uiColor: .separator).opacity(0.45)))
         .frame(maxWidth: .infinity)
         .padding(.vertical, floatsOverContent ? 0 : 7)
     }

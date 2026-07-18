@@ -1,5 +1,6 @@
 import Charts
 import SwiftUI
+import UIKit
 
 enum HoldingsPalette {
     static let blue = Color(red: 0.16, green: 0.39, blue: 0.96)
@@ -8,8 +9,9 @@ enum HoldingsPalette {
     static let red = Color(red: 0.94, green: 0.12, blue: 0.28)
     static let purple = Color(red: 0.52, green: 0.31, blue: 0.94)
     static let teal = Color(red: 0.08, green: 0.65, blue: 0.66)
-    static let divider = Color.white.opacity(0.12)
-    static let card = Color(red: 0.025, green: 0.035, blue: 0.05)
+    static let divider = Color(uiColor: .separator).opacity(0.55)
+    static let card = Color(uiColor: .secondarySystemGroupedBackground)
+    static let canvas = Color(uiColor: .systemGroupedBackground)
 }
 
 private struct HoldingSector: Identifiable {
@@ -36,13 +38,13 @@ struct FamousHoldingsView: View {
                     let manager = managers[selectedIndex]
                     overview(store.managerDetails[manager.key] ?? manager)
                 } else if store.isLoading {
-                    ProgressView("正在读取公开持仓披露").tint(.white).foregroundStyle(.secondary)
+                    ProgressView("正在读取公开持仓披露").foregroundStyle(.secondary)
                 } else {
                     unavailableView
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(red: 0.01, green: 0.018, blue: 0.03).ignoresSafeArea())
+            .background(HoldingsPalette.canvas.ignoresSafeArea())
             .task {
                 await store.load()
                 #if DEBUG
@@ -59,7 +61,6 @@ struct FamousHoldingsView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onChange(of: path) { _, value in showsDetail = !value.isEmpty }
         .onAppear { showsDetail = !path.isEmpty }
         .onDisappear { showsDetail = false }
@@ -117,7 +118,7 @@ struct FamousHoldingsView: View {
                         }
                 }
                 LinearGradient(colors: [.black.opacity(0.96), .black.opacity(0.44), .clear], startPoint: .leading, endPoint: .trailing)
-                LinearGradient(colors: [.clear, Color(red: 0.01, green: 0.018, blue: 0.03).opacity(0.94)], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [.clear, HoldingsPalette.canvas.opacity(0.94)], startPoint: .top, endPoint: .bottom)
 
                 VStack(alignment: .leading, spacing: 7) {
                     Text("当前")
@@ -252,7 +253,7 @@ struct FamousHoldingsView: View {
             Text(title).font(.system(size: 12)).frame(width: 50, alignment: .leading)
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.10))
+                    Capsule().fill(Color.secondary.opacity(0.14))
                     Capsule().fill(color).frame(width: proxy.size.width * share)
                 }
             }
@@ -440,7 +441,7 @@ struct FamousHoldingsView: View {
                 }
                 .frame(height: 19)
                 .padding(.leading, 12)
-                .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.07)).padding(.leading, 12) }
+                .overlay(alignment: .bottom) { Divider().overlay(HoldingsPalette.divider).padding(.leading, 12) }
             }
             Button { path.append(manager.key) } label: {
                 HStack {
