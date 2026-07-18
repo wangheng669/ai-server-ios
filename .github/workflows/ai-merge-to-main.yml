@@ -53,19 +53,39 @@ jobs:
             echo "has_conflicts=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve merge conflicts with Codex
+      - name: Resolve merge conflicts with local Codex
         if: steps.merge.outputs.has_conflicts == 'true' && steps.merge.outputs.already_merged == 'false'
-        uses: openai/codex-action@v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          sandbox: workspace-write
-          model: gpt-5.6-sol
-          effort: high
-          prompt: |
+        env:
+          HOME: /Users/wangheng
+        run: |
+          set -euo pipefail
+          codex_bin="$(find "$HOME/.nvm/versions/node" -path '*/bin/codex' -type f 2>/dev/null | sort -V | tail -1)"
+          if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
+            echo "Local Codex CLI is not installed for $USER." >&2
+            exit 1
+          fi
+          auth_file="$HOME/.codex/auth.json"
+          if [[ ! -f "$auth_file" ]]; then
+            echo "Local Codex login was not found for $USER." >&2
+            exit 1
+          fi
+          automation_home="$RUNNER_TEMP/codex-ai-merge-home"
+          install -d -m 700 "$automation_home"
+          install -m 600 "$auth_file" "$automation_home/auth.json"
+          CODEX_HOME="$automation_home" "$codex_bin" login status
+
+          CODEX_HOME="$automation_home" "$codex_bin" exec \
+            --ephemeral \
+            --ignore-user-config \
+            --model gpt-5.6-sol \
+            --config 'model_reasoning_effort="high"' \
+            --sandbox workspace-write \
+            --cd "$GITHUB_WORKSPACE" \
+            - <<'PROMPT'
             Resolve the Git merge conflicts currently present in this repository.
 
-            Goal: preserve the intended behavior from both the latest origin/main and
-            the task commit ${{ github.sha }} from branch ${{ github.ref_name }}.
+            Goal: preserve the intended behavior from both the latest origin/main
+            and the task branch being merged.
 
             Requirements:
             - Read AGENTS.md and follow its safety and verification rules.
@@ -76,6 +96,7 @@ jobs:
             - Leave the working tree with no unmerged paths.
             - If the two intentions are genuinely incompatible, leave that conflict unresolved
               and explain why instead of guessing. The workflow will stop safely.
+          PROMPT
 
       - name: Verify conflict resolution and create merge commit
         if: steps.merge.outputs.already_merged == 'false'

@@ -37,4 +37,4 @@
 - 禁止开发任务直接推送 `main`；只有中央 AI 合并流程可以在测试通过后更新 `main`。
 - `main` 推送会自动安装到真机；已经同步且没有新提交时，可通过手动入口重新安装。
 - 中央 AI 不得通过整段选择 ours/theirs、删除任一功能或跳过测试来规避冲突。
-- GitHub 仓库必须配置 `OPENAI_API_KEY` Actions Secret，冲突时才能启动 Codex；密钥缺失时工作流会安全失败且不更新 `main`。
+- Mac mini 的 `office-builder` Runner 必须与已登录 Codex 的本地用户运行；本地 Codex 未登录时工作流会安全失败且不更新 `main`。
