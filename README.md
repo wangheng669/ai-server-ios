@@ -22,3 +22,14 @@
 项目最低支持 iOS 17。
 
 客户端仅接受 HTTPS 服务器地址，并使用系统默认的 App Transport Security 策略。
+
+## 两台 Mac 协作
+
+仓库使用 GitHub `main` 作为 Mac mini 与 MacBook Air 之间的稳定代码源。每项开发任务使用独立的 `codex/<任务名>` 分支，完成后再整合到 `main`。
+
+- 开始新任务时：工作区干净的情况下运行 `./ci/safe-sync.sh main`。
+- 提交并同步：提交并推送当前任务分支。
+- 安装到真机：将完成的任务合并并推送到 `main`，随后 Mac mini 自动构建，MacBook Air 自动签名并安装。
+- 临时测试分支：在 GitHub Actions 手动运行 `Build on Mac mini and install on iPhone`，并填写分支名或提交 SHA。
+
+详细的 Codex 自动协作约定见 `AGENTS.md`。安全同步脚本检测到未提交改动时会直接停止，不会覆盖正在开发的代码。

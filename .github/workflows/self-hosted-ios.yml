@@ -5,9 +5,16 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Branch, tag, or commit SHA to build and install
+        required: false
+        type: string
+
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Install {0}', inputs.git_ref || github.ref_name) || github.event.head_commit.message }}
 
 concurrency:
-  group: ios-device-${{ github.ref }}
+  group: ios-device-${{ inputs.git_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -26,6 +33,8 @@ jobs:
     steps:
       - name: Check out latest commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Run tests
         env:
@@ -78,6 +87,8 @@ jobs:
     steps:
       - name: Check out installation script
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Download device app
         uses: actions/download-artifact@v8
