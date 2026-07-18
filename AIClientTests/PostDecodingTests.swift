@@ -8,6 +8,8 @@ final class PostDecodingTests: XCTestCase {
         )
 
         XCTAssertTrue(candidates.contains("OpenAI"))
+        XCTAssertTrue(candidates.contains("英伟达"))
+        XCTAssertTrue(candidates.contains("微软"))
         XCTAssertEqual(candidates.filter { $0 == "OpenAI" }.count, 1)
     }
 
