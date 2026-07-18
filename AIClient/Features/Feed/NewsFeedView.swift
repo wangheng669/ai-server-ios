@@ -1690,34 +1690,52 @@ struct EditorialTabBar: View {
     let onSelect: (RootTab) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Divider().opacity(0.65)
-            HStack(spacing: 0) {
-                tabButton(.observation, title: "观点", icon: "newspaper", selectedIcon: "newspaper.fill")
-                tabButton(.investment, title: "投资", icon: "chart.pie", selectedIcon: "chart.pie.fill")
-                tabButton(.people, title: "人物", icon: "person.2", selectedIcon: "person.2.fill")
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 54)
+        HStack(spacing: 6) {
+            tabButton(.observation, title: "观点", icon: "newspaper", selectedIcon: "newspaper.fill")
+            tabButton(.investment, title: "投资", icon: "chart.line.uptrend.xyaxis", selectedIcon: "chart.line.uptrend.xyaxis")
+            tabButton(.people, title: "人物", icon: "person.2", selectedIcon: "person.2.fill")
         }
-        .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
+        .padding(6)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.10), radius: 14, y: 5)
+        .padding(.horizontal, 14)
+        .padding(.top, 7)
+        .padding(.bottom, 5)
+        .background {
+            LinearGradient(
+                colors: [.clear, Color(uiColor: .systemBackground).opacity(0.96)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        }
     }
 
     private func tabButton(_ tab: RootTab, title: String, icon: String, selectedIcon: String) -> some View {
         let isSelected = selected == tab
         return Button { onSelect(tab) } label: {
-            VStack(spacing: 3) {
+            HStack(spacing: 7) {
                 Image(systemName: isSelected ? selectedIcon : icon)
-                    .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
-                    .frame(height: 21)
+                    .font(.system(size: 16, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
                 Text(title)
-                    .font(.system(size: 10.5, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
             }
-            .foregroundStyle(isSelected ? Color.blue : Color.secondary)
-            .frame(maxWidth: .infinity, minHeight: 50)
-            .contentShape(Rectangle())
+            .foregroundStyle(isSelected ? Color.white : Color.secondary)
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .background {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
+        .animation(.snappy(duration: 0.28), value: selected)
+        .accessibilityLabel(title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
