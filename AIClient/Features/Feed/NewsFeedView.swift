@@ -37,6 +37,7 @@ private struct RSSSourceOption: Identifiable, Equatable {
 
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
+    @Binding private var hidesTabBar: Bool
     @StateObject private var model = NewsFeedViewModel()
     @State private var path: [Post] = []
     @State private var isShowingLaunchCover = true
@@ -58,8 +59,12 @@ struct NewsFeedView: View {
     private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
     private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
 
-    init(showsDetail: Binding<Bool> = .constant(false)) {
+    init(
+        showsDetail: Binding<Bool> = .constant(false),
+        hidesTabBar: Binding<Bool> = .constant(false)
+    ) {
         _showsDetail = showsDetail
+        _hidesTabBar = hidesTabBar
         WeiboSessionCookieStore.importFromEnvironmentIfPresent()
     }
 
@@ -107,8 +112,12 @@ struct NewsFeedView: View {
             guard isAtTop, !model.pendingRealtimePosts.isEmpty else { return }
             withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
+        .onChange(of: isFeedChromeHidden, initial: true) { _, isHidden in
+            hidesTabBar = isHidden
+        }
         .onDisappear {
             showsDetail = false
+            hidesTabBar = false
         }
         .overlay {
             if isShowingLaunchCover {

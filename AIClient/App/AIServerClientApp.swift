@@ -27,6 +27,7 @@ private struct EditorialRootView: View {
     @State private var marketShowsDetail = false
     @State private var feedShowsDetail = false
     @State private var peopleShowsDetail = false
+    @State private var feedHidesTabBar = false
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -40,7 +41,7 @@ private struct EditorialRootView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NewsFeedView(showsDetail: $feedShowsDetail)
+            NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
                 .tag(RootTab.observation)
 
             InvestmentView(showsDetail: $marketShowsDetail)
@@ -51,10 +52,13 @@ private struct EditorialRootView: View {
         }
         .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !marketShowsDetail && !feedShowsDetail && !peopleShowsDetail {
+            if !marketShowsDetail && !feedShowsDetail && !peopleShowsDetail &&
+                !(selectedTab == .observation && feedHidesTabBar) {
                 EditorialTabBar(selected: selectedTab) { selectedTab = $0 }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .animation(.easeOut(duration: 0.2), value: feedHidesTabBar)
         .overlay(alignment: .topTrailing) {
             if let deploymentPreview {
                 DeploymentStatusTip(
