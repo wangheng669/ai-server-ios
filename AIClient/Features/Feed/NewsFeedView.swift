@@ -36,6 +36,8 @@ struct NewsFeedView: View {
     @State private var isShowingLaunchCover = true
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
+    @State private var sourceChromeStates: [FeedSource: Bool] = [:]
+    @StateObject private var scrollPositionStore = FeedScrollPositionStore()
     @State private var hasLoadedFeedOnce = false
     @State private var flashFilter: FlashFilter = .all
     @State private var expandedFlashIDs: Set<Int> = []
@@ -193,7 +195,9 @@ struct NewsFeedView: View {
 
     private func sourceButton(_ source: FeedSource) -> some View {
         let isSelected = model.source == source
-        return Button { selectSource(source) } label: {
+        return Button {
+            withAnimation(.snappy(duration: 0.32)) { selectSource(source) }
+        } label: {
             VStack(spacing: 4) {
                 if isSelected && source == .zhihu {
                     Text("知乎")
@@ -266,40 +270,56 @@ struct NewsFeedView: View {
     }
 
     private var content: some View {
-        ZStack {
-            feedList
-                .opacity(model.posts.isEmpty ? 0 : 1)
-                .allowsHitTesting(!model.posts.isEmpty)
+        TabView(selection: Binding(
+            get: { model.source },
+            set: { selectSource($0) }
+        )) {
+            ForEach(FeedSource.allCases) { source in
+                sourcePage(source)
+                    .tag(source)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
-            if model.posts.isEmpty {
-                feedStatus
+    private func sourcePage(_ source: FeedSource) -> some View {
+        let posts = model.posts(for: source)
+        return ZStack {
+            feedList(for: source, posts: posts)
+                .opacity(posts.isEmpty ? 0 : 1)
+                .allowsHitTesting(!posts.isEmpty)
+
+            if posts.isEmpty {
+                feedStatus(for: source)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var feedList: some View {
-        ScrollViewReader { proxy in
+    private func feedList(for source: FeedSource, posts: [Post]) -> some View {
+        let visiblePosts = visiblePosts(for: source, posts: posts)
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
                     Color.clear.frame(height: 53).id("feed-top")
-                    if model.source == .flash {
+                    if source == .flash {
                         flashFeedHeader
                     }
-                    if model.source == .truth {
-                        truthFeedSummary
+                    if source == .truth {
+                        truthFeedSummary(postCount: posts.count)
                         Divider().opacity(0.45)
                     }
                     ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
                         let displayPost = model.postForDisplay(post)
                         NewsCardView(
                             post: displayPost,
-                            isFeaturedBilibili: model.source == .bilibili && post.id == model.posts.first?.id,
+                            isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
                             isExpandedFlash: expandedFlashIDs.contains(post.id),
                             onOpen: { openPost(displayPost) }
                         )
                             .contentShape(Rectangle())
-                            .onTapGesture {
+                            .modifier(ConditionalTapGestureModifier(isEnabled: !post.isXueqiu) {
                                 if post.isFlash {
                                     withAnimation(.easeInOut(duration: 0.22)) {
                                         if expandedFlashIDs.contains(post.id) {
@@ -308,10 +328,10 @@ struct NewsFeedView: View {
                                             expandedFlashIDs.insert(post.id)
                                         }
                                     }
-                                } else if !post.isXueqiu {
+                                } else {
                                     openPost(displayPost)
                                 }
-                            }
+                            })
                             .overlay {
                                 if openingWebPostID == post.id {
                                     HStack(spacing: 8) {
@@ -332,13 +352,19 @@ struct NewsFeedView: View {
                                     .allowsHitTesting(false)
                                 }
                             }
-                            .task { await model.translateXPostIfNeeded(post) }
-                            .task { await model.loadMoreIfNeeded(current: post) }
-                        if model.source == .flash, index == 2, visiblePosts.count > 3 {
+                            .task {
+                                guard source == model.source else { return }
+                                await model.translateXPostIfNeeded(post)
+                            }
+                            .task {
+                                guard source == model.source else { return }
+                                await model.loadMoreIfNeeded(current: post)
+                            }
+                        if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
                         } else {
-                            Divider().opacity(model.source == .flash ? 0.42 : 0.6)
-                                .padding(.leading, model.source == .flash ? 84 : 0)
+                            Divider().opacity(source == .flash ? 0.42 : 0.6)
+                                .padding(.leading, source == .flash ? 84 : 0)
                         }
                     }
                     if model.isLoadingMore { ProgressView().padding(20) }
@@ -350,14 +376,21 @@ struct NewsFeedView: View {
                     }
                     Color.clear.frame(height: 55)
                 }
+                .background(SourceScrollOffsetPreserver(source: source, store: scrollPositionStore))
                 .frame(maxWidth: .infinity)
             }
-            .modifier(FeedChromeScrollModifier(isHidden: $isFeedChromeHidden, isAtTop: $isFeedAtTop))
-            .refreshable { await model.refresh() }
-            .simultaneousGesture(channelSwipeGesture)
+            .modifier(FeedChromeScrollModifier(
+                isActive: source == model.source,
+                isHidden: $isFeedChromeHidden,
+                isAtTop: $isFeedAtTop
+            ))
+            .refreshable {
+                guard source == model.source else { return }
+                await model.refresh()
+            }
             .allowsHitTesting(openingWebPostID == nil)
             .overlay(alignment: .top) {
-                if model.source == .x, !model.pendingRealtimePosts.isEmpty {
+                if source == .x, model.source == .x, !model.pendingRealtimePosts.isEmpty {
                     xNewPostsPill {
                         withAnimation(.snappy(duration: 0.35)) {
                             model.acceptPendingRealtimePosts()
@@ -433,9 +466,9 @@ struct NewsFeedView: View {
         }
     }
 
-    private var visiblePosts: [Post] {
-        guard model.source == .flash else { return model.posts }
-        return model.posts.filter { flashFilter.matches($0) }
+    private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
+        guard source == .flash else { return posts }
+        return posts.filter { flashFilter.matches($0) }
     }
 
     private var flashFeedHeader: some View {
@@ -495,12 +528,12 @@ struct NewsFeedView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var truthFeedSummary: some View {
+    private func truthFeedSummary(postCount: Int) -> some View {
         HStack {
             HStack(spacing: 4) {
                 Text("今日动态")
                     .font(.system(size: 15, weight: .semibold))
-                Text("· \(model.posts.count)")
+                Text("· \(postCount)")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.red)
             }
@@ -518,11 +551,11 @@ struct NewsFeedView: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private var feedStatus: some View {
+    @ViewBuilder private func feedStatus(for source: FeedSource) -> some View {
         VStack {
-            if model.isLoading {
+            if source == model.source, model.isLoading {
                 ProgressView("正在加载").font(.footnote)
-            } else if let error = model.errorMessage {
+            } else if source == model.source, let error = model.errorMessage {
                 ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
                     description: { Text(error) }
                     actions: { Button("重新加载") { Task { await model.refresh() } } }
@@ -534,28 +567,11 @@ struct NewsFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var channelSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onEnded { value in
-                let horizontal = value.predictedEndTranslation.width
-                let vertical = value.predictedEndTranslation.height
-                guard abs(horizontal) >= 64, abs(horizontal) > abs(vertical) * 1.35 else { return }
-                selectAdjacentSource(offset: horizontal < 0 ? 1 : -1)
-            }
-    }
-
     private func selectSource(_ source: FeedSource) {
         guard source != model.source else { return }
-        isFeedChromeHidden = false
+        sourceChromeStates[model.source] = isFeedChromeHidden
+        isFeedChromeHidden = sourceChromeStates[source] ?? false
         model.select(source)
-    }
-
-    private func selectAdjacentSource(offset: Int) {
-        let sources = FeedSource.allCases
-        guard let current = sources.firstIndex(of: model.source) else { return }
-        let next = current + offset
-        guard sources.indices.contains(next) else { return }
-        selectSource(sources[next])
     }
 
     private func open(_ path: String) {
@@ -1454,7 +1470,108 @@ private func isWeiboLoginURL(_ url: URL?) -> Bool {
     return isWeiboHost(host) && url.path.lowercased().contains("login")
 }
 
+private final class FeedScrollPositionStore: ObservableObject {
+    private var offsets: [FeedSource: CGPoint] = [:]
+
+    func offset(for source: FeedSource) -> CGPoint? { offsets[source] }
+    func save(_ offset: CGPoint, for source: FeedSource) { offsets[source] = offset }
+}
+
+private struct SourceScrollOffsetPreserver: UIViewRepresentable {
+    let source: FeedSource
+    let store: FeedScrollPositionStore
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        view.isHidden = true
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        if let scrollView = view.enclosingScrollView {
+            context.coordinator.update(scrollView: scrollView, source: source, store: store)
+        } else {
+            DispatchQueue.main.async {
+                guard let scrollView = view.enclosingScrollView else { return }
+                context.coordinator.update(scrollView: scrollView, source: source, store: store)
+            }
+        }
+    }
+
+    final class Coordinator {
+        private weak var scrollView: UIScrollView?
+        private var offsetObservation: NSKeyValueObservation?
+        private var activeSource: FeedSource?
+        private var isRestoring = false
+
+        func update(scrollView: UIScrollView, source: FeedSource, store: FeedScrollPositionStore) {
+            if self.scrollView !== scrollView {
+                self.scrollView = scrollView
+                activeSource = source
+                offsetObservation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
+                    guard let self, !self.isRestoring, let activeSource = self.activeSource else { return }
+                    store.save(scrollView.contentOffset, for: activeSource)
+                }
+                if let target = store.offset(for: source) {
+                    restore(target, in: scrollView)
+                }
+                return
+            }
+            guard let activeSource, activeSource != source else { return }
+
+            store.save(scrollView.contentOffset, for: activeSource)
+            self.activeSource = source
+            let top = CGPoint(
+                x: -scrollView.adjustedContentInset.left,
+                y: -scrollView.adjustedContentInset.top
+            )
+            let target = store.offset(for: source) ?? top
+            restore(target, in: scrollView)
+        }
+
+        private func restore(_ target: CGPoint, in scrollView: UIScrollView) {
+            isRestoring = true
+            DispatchQueue.main.async {
+                scrollView.layoutIfNeeded()
+                scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
+                DispatchQueue.main.async {
+                    scrollView.layoutIfNeeded()
+                    scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
+                    self.isRestoring = false
+                }
+            }
+        }
+
+        private func clamped(_ offset: CGPoint, in scrollView: UIScrollView) -> CGPoint {
+            let inset = scrollView.adjustedContentInset
+            let minX = -inset.left
+            let minY = -inset.top
+            let maxX = max(minX, scrollView.contentSize.width - scrollView.bounds.width + inset.right)
+            let maxY = max(minY, scrollView.contentSize.height - scrollView.bounds.height + inset.bottom)
+            return CGPoint(
+                x: min(max(offset.x, minX), maxX),
+                y: min(max(offset.y, minY), maxY)
+            )
+        }
+    }
+}
+
+private extension UIView {
+    var enclosingScrollView: UIScrollView? {
+        var view = superview
+        while let current = view {
+            if let scrollView = current as? UIScrollView { return scrollView }
+            view = current.superview
+        }
+        return nil
+    }
+}
+
 private struct FeedChromeScrollModifier: ViewModifier {
+    let isActive: Bool
     @Binding var isHidden: Bool
     @Binding var isAtTop: Bool
     @State private var isScrollActive = false
@@ -1467,12 +1584,14 @@ private struct FeedChromeScrollModifier: ViewModifier {
         if #available(iOS 18.0, *) {
             content
                 .onScrollPhaseChange { _, phase in
+                    guard isActive else { return }
                     isScrollActive = phase.isScrolling
                     if !phase.isScrolling { resetDirectionTracking() }
                 }
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     geometry.contentOffset.y + geometry.contentInsets.top
                 } action: { oldOffset, newOffset in
+                    guard isActive else { return }
                     isAtTop = newOffset <= 8
                     handleOffsetChange(from: oldOffset, to: newOffset)
                 }
@@ -1484,6 +1603,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
     private var fallbackGesture: some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
+                guard isActive else { return }
                 guard abs(value.translation.height) > abs(value.translation.width) else { return }
                 let translation = value.translation.height
                 defer { lastGestureTranslation = translation }
@@ -1551,6 +1671,20 @@ private enum FeedScrollDirection {
     case towardNewer
 }
 
+private struct ConditionalTapGestureModifier: ViewModifier {
+    let isEnabled: Bool
+    let action: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.onTapGesture(perform: action)
+        } else {
+            content
+        }
+    }
+}
+
 struct EditorialTabBar: View {
     let selected: RootTab
     let onSelect: (RootTab) -> Void
@@ -1563,6 +1697,7 @@ struct EditorialTabBar: View {
                 tabButton(.investment, title: "投资", icon: "chart.pie", selectedIcon: "chart.pie.fill")
                 tabButton(.people, title: "人物", icon: "person.2", selectedIcon: "person.2.fill")
             }
+            .frame(maxWidth: .infinity)
             .frame(height: 54)
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
@@ -1648,16 +1783,25 @@ private struct NewsCardView: View {
 
     private var xCard: some View {
         HStack(alignment: .top, spacing: 10) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 44)
+            AvatarView(
+                url: post.avatarURL,
+                name: post.authorName,
+                size: 44,
+                cornerRadius: xAvatarCornerRadius
+            )
 
-            VStack(alignment: .leading, spacing: 9) {
-                socialHeader
+            VStack(alignment: .leading, spacing: 10) {
+                xAuthorHeader
 
-                xRichText(xTimelineContent)
-                    .font(.system(size: 17, weight: .regular))
-                    .lineSpacing(6)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(xTimelineParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                        xRichText(paragraph)
+                            .font(.system(size: 17, weight: .regular))
+                            .lineSpacing(3)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
 
                 XFeedMediaView(post: post)
 
@@ -1666,35 +1810,117 @@ private struct NewsCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 8)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
     }
 
-    private var xTimelineContent: String {
-        post.displayContent.replacingOccurrences(
+    private var xAuthorHeader: some View {
+        HStack(spacing: 4) {
+            Text(post.authorName)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .layoutPriority(3)
+
+            if post.user?.verified == true {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(xVerificationColor)
+                    .accessibilityLabel("已认证")
+            }
+
+            if let handle = post.authorHandle {
+                Text(handle)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            if let time = post.formattedTime {
+                Text("· \(time)").lineLimit(1)
+            }
+        }
+        .font(.system(size: 15))
+        .foregroundStyle(.secondary)
+    }
+
+    private var xTimelineParagraphs: [String] {
+        var normalized = post.displayContent
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: #"https://\s+"#, with: "https://", options: .regularExpression)
+            .replacingOccurrences(of: #"http://\s+"#, with: "http://", options: .regularExpression)
+            .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        normalized = normalizedXTickerSpacing(normalized)
+        normalized = normalized.replacingOccurrences(
             of: #"\s+(?=[1-9]\.\s)"#,
             with: "\n\n",
             options: .regularExpression
         )
+
+        let explicitParagraphs = normalized
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if explicitParagraphs.count > 1 { return explicitParagraphs }
+
+        guard post.hasTranslation else { return [normalized] }
+        let sentences = normalized
+            .replacingOccurrences(of: #"(?<=[。！？])\s*"#, with: "\n", options: .regularExpression)
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return sentences.count > 1 ? sentences : [normalized]
     }
 
     private func xRichText(_ value: String) -> Text {
+        var attributed = AttributedString(value)
         let source = value as NSString
-        let matches = (try? NSRegularExpression(pattern: #"\$[A-Za-z][A-Za-z0-9.]{0,9}"#)
+        let pattern = #"\$[A-Za-z][A-Za-z0-9.]{0,9}|https?://[^\s]+"#
+        let matches = (try? NSRegularExpression(pattern: pattern)
             .matches(in: value, range: NSRange(location: 0, length: source.length))) ?? []
-        var result = Text("")
-        var location = 0
+
         for match in matches {
-            if match.range.location > location {
-                result = result + Text(source.substring(with: NSRange(location: location, length: match.range.location - location)))
+            guard let stringRange = Range(match.range, in: value),
+                  let lower = AttributedString.Index(stringRange.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(stringRange.upperBound, within: attributed) else { continue }
+            let range = lower..<upper
+            attributed[range].foregroundColor = .blue
+            let token = String(value[stringRange])
+            if token.hasPrefix("http"), let url = URL(string: token) {
+                attributed[range].link = url
             }
-            result = result + Text(source.substring(with: match.range)).foregroundColor(.blue)
-            location = match.range.location + match.range.length
         }
-        if location < source.length { result = result + Text(source.substring(from: location)) }
+        return Text(attributed)
+    }
+
+    private func normalizedXTickerSpacing(_ value: String) -> String {
+        let pattern = #"\$\s+([A-Za-z][A-Za-z0-9.]{0,9})"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return value }
+        let source = value as NSString
+        var result = value
+        for match in regex.matches(in: value, range: NSRange(location: 0, length: source.length)).reversed() {
+            guard match.numberOfRanges > 1,
+                  let range = Range(match.range, in: result) else { continue }
+            let ticker = source.substring(with: match.range(at: 1))
+            result.replaceSubrange(range, with: "$\(ticker)")
+        }
         return result
+    }
+
+    private var xVerificationColor: Color {
+        let type = post.user?.verifiedType?.lowercased() ?? ""
+        return type.contains("business") || type.contains("government") ? .yellow : .blue
+    }
+
+    private var xAvatarCornerRadius: CGFloat {
+        let type = post.user?.verifiedType?.lowercased() ?? ""
+        let usesOrganizationShape = type.contains("business")
+            || type.contains("government")
+            || type.contains("organization")
+        return usesOrganizationShape ? 10 : 22
     }
 
     private var xueqiuCard: some View {
@@ -1779,6 +2005,16 @@ private struct NewsCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .overlay {
+            Button { onOpen?() } label: {
+                Color.clear
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("打开雪球文章详情")
+        }
+        .zIndex(1)
     }
 
     private func xueqiuMetric(_ icon: String, _ value: Int?) -> some View {

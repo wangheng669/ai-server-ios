@@ -607,11 +607,44 @@ struct PostMetrics: Decodable, Hashable {
 
 struct PostUser: Decodable, Hashable {
     let userName, userScreenName, avatarURL, userDesc: String?
+    let verified: Bool?
+    let verifiedType: String?
+
+    init(
+        userName: String?,
+        userScreenName: String?,
+        avatarURL: String?,
+        userDesc: String?,
+        verified: Bool? = nil,
+        verifiedType: String? = nil
+    ) {
+        self.userName = userName
+        self.userScreenName = userScreenName
+        self.avatarURL = avatarURL
+        self.userDesc = userDesc
+        self.verified = verified
+        self.verifiedType = verifiedType
+    }
+
     enum CodingKeys: String, CodingKey {
         case userName = "user_name"
         case userScreenName = "user_screen_name"
         case avatarURL = "avatar_url"
         case userDesc = "user_desc"
+        case verified
+        case isVerified = "is_verified"
+        case verifiedType = "verified_type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        userName = try container.decodeIfPresent(String.self, forKey: .userName)
+        userScreenName = try container.decodeIfPresent(String.self, forKey: .userScreenName)
+        avatarURL = try container.decodeIfPresent(String.self, forKey: .avatarURL)
+        userDesc = try container.decodeIfPresent(String.self, forKey: .userDesc)
+        verified = try container.decodeIfPresent(Bool.self, forKey: .verified)
+            ?? container.decodeIfPresent(Bool.self, forKey: .isVerified)
+        verifiedType = try container.decodeIfPresent(String.self, forKey: .verifiedType)
     }
 }
 

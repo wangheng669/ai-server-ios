@@ -90,7 +90,7 @@ enum ServerAddressValidator {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
+              scheme == "https",
               components.host != nil else {
             return nil
         }

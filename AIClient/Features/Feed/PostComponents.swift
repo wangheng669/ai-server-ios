@@ -39,15 +39,23 @@ struct AvatarView: View {
     let name: String
     let size: CGFloat
     var assetName: String? = nil
+    var cornerRadius: CGFloat? = nil
     @State private var image: UIImage?
+
+    private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
 
     var body: some View {
         Group {
             if let assetName { Image(assetName).resizable().scaledToFill() }
             else if let image { Image(uiImage: image).resizable().scaledToFill() }
-            else { Circle().fill(Color.blue.opacity(0.11)).overlay { Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue) } }
+            else {
+                RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
+                    .fill(Color.blue.opacity(0.11))
+                    .overlay { Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue) }
+            }
         }
-        .frame(width: size, height: size).clipShape(Circle())
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
         .task(id: url) {
             guard assetName == nil else { return }
             image = await ImageLoader.load(url, targetSize: CGSize(width: size, height: size))
@@ -198,6 +206,7 @@ struct PostMediaGrid: View {
     var singleImageContentMode: ContentMode = .fit
     var multiImageHeight: CGFloat = 132
     var availableWidth: CGFloat? = nil
+    var cornerRadius: CGFloat = 8
     @State private var previewURL: URL?
     @State private var compactImageURLs: Set<URL> = []
 
@@ -247,42 +256,53 @@ struct PostMediaGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
-            if urls.count == 1, let url = urls.first {
-                RemoteImage(
-                    url: url,
-                    height: resolvedSingleImageHeight,
-                    cornerRadius: 8,
-                    contentMode: singleImageContentMode,
-                    onImageLoaded: { classifyInlineAsset($0, at: url) }
-                )
-                    .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
-                    .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+            if let videoURL = post.videoURLs.first {
+                XInlineVideoView(url: videoURL)
+                    .frame(height: resolvedSingleImageHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            } else if urls.count == 1, let url = urls.first {
+                Button { showPreview(url) } label: {
+                    RemoteImage(
+                        url: url,
+                        height: resolvedSingleImageHeight,
+                        cornerRadius: cornerRadius,
+                        contentMode: singleImageContentMode,
+                        onImageLoaded: { classifyInlineAsset($0, at: url) }
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("查看图片")
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
-                        RemoteImage(
-                            url: url,
-                            height: multiImageHeight,
-                            cornerRadius: 6,
-                            contentMode: .fit,
-                            onImageLoaded: { classifyInlineAsset($0, at: url) }
-                        )
+                        Button { showPreview(url) } label: {
+                            RemoteImage(
+                                url: url,
+                                height: multiImageHeight,
+                                cornerRadius: 6,
+                                contentMode: .fit,
+                                onImageLoaded: { classifyInlineAsset($0, at: url) }
+                            )
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                            .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看图片")
                     }
                 }
             } else if let preview = post.previewURL {
-                RemoteImage(url: preview, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
-                    .overlay { playButton }
-                    .highPriorityGesture(TapGesture().onEnded { showPreview(preview) })
+                Button { showPreview(preview) } label: {
+                    RemoteImage(
+                        url: preview,
+                        height: resolvedSingleImageHeight,
+                        cornerRadius: cornerRadius,
+                        contentMode: singleImageContentMode
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("查看图片")
             }
         }
         .fullScreenCover(item: $previewURL) { url in ZoomableImageView(url: url) }
-    }
-
-    private var playButton: some View {
-        Image(systemName: "play.circle.fill").font(.system(size: 48)).symbolRenderingMode(.palette)
-            .foregroundStyle(.white, .black.opacity(0.45)).shadow(radius: 4)
     }
 }
 
@@ -298,7 +318,8 @@ struct XFeedMediaView: View {
             PostMediaGrid(
                 post: post,
                 singleImageMaxHeight: 420,
-                availableWidth: availableWidth
+                availableWidth: availableWidth,
+                cornerRadius: 12
             )
         }
     }
@@ -501,24 +522,36 @@ struct FeedEngagementRow: View {
                     bookmarkButton
                 }
             } else {
-                HStack {
-                    metric("bubble", post.meta?.metrics?.replies)
+                HStack(spacing: 0) {
+                    metric("bubble", post.meta?.metrics?.replies, label: "回复")
                     Spacer()
-                    metric("arrow.2.squarepath", post.meta?.metrics?.retweets)
+                    metric("arrow.2.squarepath", post.meta?.metrics?.retweets, label: "转发")
                     Spacer()
-                    metric("heart", post.meta?.metrics?.likes)
+                    metric("heart", post.meta?.metrics?.likes, label: "喜欢")
                     Spacer()
-                    metric("chart.bar", post.meta?.metrics?.views)
+                    metric("chart.bar", post.meta?.metrics?.views, label: "浏览")
                     Spacer()
-                    Image(systemName: "bookmark")
+                    bookmarkButton
                     Spacer()
-                    Image(systemName: "square.and.arrow.up")
+                    if let link = post.linkURL {
+                        ShareLink(item: link) {
+                            Image(systemName: "square.and.arrow.up")
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("分享")
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                            .frame(width: 44, height: 44)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
         }
         .font(.system(size: 16, weight: .regular))
         .foregroundStyle(.secondary)
-        .frame(height: 24)
+        .frame(height: 44)
         .contentShape(Rectangle())
         .sensoryFeedback(.success, trigger: isBookmarked)
         .alert("书签保存失败", isPresented: bookmarkErrorBinding) {
@@ -537,7 +570,7 @@ struct FeedEngagementRow: View {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                 }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -569,11 +602,15 @@ struct FeedEngagementRow: View {
         }
     }
 
-    private func metric(_ symbol: String, _ value: Int?) -> some View {
+    private func metric(_ symbol: String, _ value: Int?, label: String? = nil) -> some View {
         HStack(spacing: 5) {
             Image(systemName: symbol)
             if let value, value > 0 { Text(compactCount(value)).font(.system(size: 13)) }
         }
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label ?? "互动数据")
+        .accessibilityValue(value.map(compactCount) ?? "0")
     }
 
     private func compactCount(_ value: Int) -> String {

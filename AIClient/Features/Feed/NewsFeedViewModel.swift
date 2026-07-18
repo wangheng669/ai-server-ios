@@ -16,7 +16,7 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private struct Snapshot { var posts: [Post]; var page: Int; var canLoadMore: Bool }
-    private var cache: [FeedSource: Snapshot] = [:]
+    @Published private var cache: [FeedSource: Snapshot] = [:]
     private var page = 1
     private let defaultPageSize = 5
     private var realtimeClient: RealtimeFeedClient?
@@ -58,6 +58,10 @@ final class NewsFeedViewModel: ObservableObject {
     func postForDisplay(_ post: Post) -> Post {
         guard let translation = xTranslations[post.id] else { return post }
         return post.replacingTranslation(with: translation)
+    }
+
+    func posts(for source: FeedSource) -> [Post] {
+        source == self.source ? posts : cache[source]?.posts ?? []
     }
 
     func translateXPostIfNeeded(_ post: Post) async {
@@ -128,8 +132,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func loadInitial() async {
-        // Keep cached posts visible, but always revalidate the selected source so
-        // returning to a channel never leaves an old snapshot on screen indefinitely.
+        // Returning to a cached channel must preserve the exact feed snapshot.
+        // Pull-to-refresh remains available when the user wants fresh content.
+        guard posts.isEmpty || isSwitchingSource else { return }
         await refresh()
     }
 

@@ -129,6 +129,29 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testReturningToCachedSourceKeepsExactSnapshotWithoutRefetching() async throws {
+        var xRequests = 0
+        let xPost = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
+        let zhihuPost = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"zhihu"}"#.utf8))
+        let model = NewsFeedViewModel(source: .x) { _, _, source in
+            if source == .x {
+                xRequests += 1
+                return [xPost]
+            }
+            return [zhihuPost]
+        }
+
+        await model.refresh()
+        model.select(.zhihu)
+        await model.loadInitial()
+        model.select(.x)
+        await model.loadInitial()
+
+        XCTAssertEqual(xRequests, 1)
+        XCTAssertEqual(model.posts.map(\.id), [xPost.id])
+    }
+
+    @MainActor
     func testSwitchingSourceStartsNewestLoadBeforeCancelledLoadFinishes() async throws {
         let firstRequestStarted = expectation(description: "first request started")
         let model = NewsFeedViewModel(source: .x) { _, _, source in

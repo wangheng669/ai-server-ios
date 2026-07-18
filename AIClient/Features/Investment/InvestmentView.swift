@@ -24,22 +24,28 @@ struct InvestmentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !marketShowsDetail && !holdingsShowsDetail {
-                InvestmentHeader(selection: $section)
-            }
-            Group {
-                switch section {
-                case .market:
+        Group {
+            switch section {
+            case .market:
+                VStack(spacing: 0) {
+                    if !marketShowsDetail {
+                        InvestmentHeader(selection: $section, floatsOverContent: false)
+                    }
                     MarketView(showsDetail: $marketShowsDetail)
-                case .holdings:
+                }
+            case .holdings:
+                ZStack(alignment: .top) {
                     FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
+                    if !holdingsShowsDetail {
+                        InvestmentHeader(selection: $section, floatsOverContent: true)
+                            .padding(.top, 10)
+                    }
                 }
             }
         }
         .background(Color(uiColor: .systemBackground))
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
-        .onChange(of: holdingsShowsDetail) { _, value in showsDetail = value }
+        .onChange(of: holdingsShowsDetail) { _, _ in showsDetail = false }
         .onChange(of: section) { _, _ in
             marketShowsDetail = false
             holdingsShowsDetail = false
@@ -51,34 +57,34 @@ struct InvestmentView: View {
 
 private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
+    let floatsOverContent: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("投资")
-                .font(.system(size: 34, weight: .bold))
-                .padding(.horizontal, 18)
-
-            HStack(spacing: 34) {
-                ForEach(InvestmentSection.allCases) { section in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.18)) { selection = section }
-                    } label: {
-                        VStack(spacing: 8) {
-                            Text(section.rawValue)
-                                .font(.system(size: 16, weight: selection == section ? .semibold : .regular))
-                                .foregroundStyle(selection == section ? Color.blue : Color.secondary)
-                            Capsule()
-                                .fill(selection == section ? Color.blue : Color.clear)
-                                .frame(width: 38, height: 3)
+        HStack(spacing: 0) {
+            ForEach(InvestmentSection.allCases) { section in
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { selection = section }
+                } label: {
+                    Text(section.rawValue)
+                        .font(.system(size: 15, weight: selection == section ? .semibold : .regular))
+                        .foregroundStyle(selection == section ? .white : .white.opacity(0.58))
+                        .frame(maxWidth: .infinity, minHeight: 38)
+                        .background {
+                            if selection == section {
+                                RoundedRectangle(cornerRadius: 17)
+                                    .fill(HoldingsPalette.purple)
+                            }
                         }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == section ? .isSelected : [])
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == section ? .isSelected : [])
             }
-            .padding(.horizontal, 20)
         }
-        .padding(.top, 8)
-        .background(Color(uiColor: .systemBackground))
+        .padding(3)
+        .frame(width: 184, height: 44)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.12)))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, floatsOverContent ? 0 : 7)
     }
 }
