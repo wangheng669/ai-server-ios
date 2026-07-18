@@ -72,7 +72,7 @@ private struct InvestmentHeader: View {
                         .background {
                             if selection == section {
                                 RoundedRectangle(cornerRadius: 17)
-                                    .fill(HoldingsPalette.purple)
+                                    .fill(Color.accentColor)
                             }
                         }
                 }

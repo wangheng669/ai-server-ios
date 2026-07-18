@@ -28,6 +28,16 @@ private struct EditorialRootView: View {
     @State private var feedShowsDetail = false
     @State private var peopleShowsDetail = false
 
+    private var deploymentPreview: DeploymentStatusSnapshot? {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview") else { return nil }
+        return DeploymentStatusSnapshot(phase: .running(progress: 0.75), commit: "b0d5411")
+        #else
+        return nil
+        #endif
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             NewsFeedView(showsDetail: $feedShowsDetail)
@@ -43,6 +53,16 @@ private struct EditorialRootView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !marketShowsDetail && !feedShowsDetail && !peopleShowsDetail {
                 EditorialTabBar(selected: selectedTab) { selectedTab = $0 }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if let deploymentPreview {
+                DeploymentStatusTip(
+                    snapshot: deploymentPreview,
+                    initiallyExpanded: !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
+                )
+                    .padding(.top, 6)
+                    .padding(.trailing, 12)
             }
         }
     }

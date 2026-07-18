@@ -9,7 +9,7 @@ private enum MarketStyle {
     static let loss = Color(red: 0.06, green: 0.65, blue: 0.32)
     static let accent = Color(red: 0.07, green: 0.49, blue: 0.98)
     static let chartTransition = Animation.smooth(duration: 0.6)
-    static let purple = Color(red: 0.50, green: 0.30, blue: 0.94)
+    static let purple = accent
 }
 
 struct MarketView: View {
@@ -161,9 +161,9 @@ private struct MarketHomeView: View {
 }
 
 private enum MarketTerminalPalette {
-    static let header = Color(red: 0.035, green: 0.045, blue: 0.060)
-    static let headerSurface = Color.white.opacity(0.055)
-    static let headerDivider = Color.white.opacity(0.15)
+    static let header = Color(uiColor: .systemBackground)
+    static let headerSurface = Color(uiColor: .secondarySystemBackground)
+    static let headerDivider = Color(uiColor: .separator).opacity(0.55)
 }
 
 private enum MarketRegion: String, CaseIterable, Identifiable {
@@ -210,7 +210,7 @@ private struct MarketTerminalHero: View {
                     MarketLiveStatus(store: store)
                 }
                 .font(.caption.weight(.medium))
-                .foregroundStyle(Color.white.opacity(0.62))
+                .foregroundStyle(Color.secondary)
             }
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
@@ -222,7 +222,7 @@ private struct MarketTerminalHero: View {
                                 .lineLimit(1)
                             Text(quote?.displayCode ?? CoreDescriptor(symbol: region.primarySymbol).code)
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(Color.white.opacity(0.58))
+                                .foregroundStyle(Color.secondary)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                         }
@@ -242,7 +242,7 @@ private struct MarketTerminalHero: View {
                     TerminalLeadChart(quote: quote)
                         .frame(maxWidth: .infinity, minHeight: 128)
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             }
             .buttonStyle(MarketPressStyle())
             .accessibilityHint("打开代表指数详情")
@@ -298,7 +298,7 @@ private struct MarketTerminalHero: View {
     private var sessionTint: Color {
         region == .crypto || quote?.marketSession == "regular"
             ? Color(red: 0.08, green: 0.83, blue: 0.47)
-            : Color.white.opacity(0.58)
+            : Color.secondary
     }
 
     private func cryptoMetric(symbol: String) -> some View {
@@ -326,7 +326,7 @@ private struct TerminalLeadChart: View {
             ZStack {
                 VStack(spacing: 0) {
                     ForEach(0..<3, id: \.self) { index in
-                        Rectangle().fill(Color.white.opacity(index == 1 ? 0.13 : 0.07)).frame(height: 0.5)
+                        Rectangle().fill(Color.secondary.opacity(index == 1 ? 0.20 : 0.11)).frame(height: 0.5)
                         if index < 2 { Spacer() }
                     }
                 }
@@ -341,7 +341,7 @@ private struct TerminalLeadChart: View {
                 Text("最新")
             }
             .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.58))
+            .foregroundStyle(Color.secondary)
         }
     }
 }
@@ -361,7 +361,7 @@ private struct MarketTerminalMetric: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption2.weight(.medium)).foregroundStyle(Color.white.opacity(0.68)).lineLimit(1).minimumScaleFactor(0.75)
+            Text(title).font(.caption2.weight(.medium)).foregroundStyle(Color.secondary).lineLimit(1).minimumScaleFactor(0.75)
             HStack(alignment: .lastTextBaseline, spacing: 5) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(value)
@@ -380,7 +380,7 @@ private struct MarketTerminalMetric: View {
                 Sparkline(values: trend, color: tint, showsFill: false).frame(width: 34, height: 24)
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -394,11 +394,11 @@ private struct MarketTerminalSentiment: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("市场情绪")
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(Color.white.opacity(0.68))
+                    .foregroundStyle(Color.secondary)
                 HStack(alignment: .lastTextBaseline, spacing: 2) {
                     Text(sentiment.map { String(Int($0.score.rounded())) } ?? "—")
                         .font(.system(size: 17, weight: .semibold)).monospacedDigit()
-                    Text("/100").font(.caption2).foregroundStyle(Color.white.opacity(0.62))
+                    Text("/100").font(.caption2).foregroundStyle(Color.secondary)
                 }
                 Text(sentimentChange)
                     .font(.caption2.weight(.semibold))
@@ -407,7 +407,7 @@ private struct MarketTerminalSentiment: View {
                     .minimumScaleFactor(0.72)
             }
             ZStack {
-                Circle().stroke(Color.white.opacity(0.18), lineWidth: 5)
+                Circle().stroke(Color.secondary.opacity(0.20), lineWidth: 5)
                 Circle()
                     .trim(from: 0, to: CGFloat(min(max(sentiment?.score ?? 0, 0), 100) / 100))
                     .stroke(Color(red: 0.05, green: 0.80, blue: 0.66), style: StrokeStyle(lineWidth: 5, lineCap: .round))
@@ -415,7 +415,7 @@ private struct MarketTerminalSentiment: View {
             }
             .frame(width: 32, height: 32)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -426,7 +426,7 @@ private struct MarketTerminalSentiment: View {
     }
 
     private var sentimentTint: Color {
-        guard let score = sentiment?.score, let previous = sentiment?.previousClose else { return Color.white.opacity(0.55) }
+        guard let score = sentiment?.score, let previous = sentiment?.previousClose else { return Color.secondary }
         return score >= previous ? MarketStyle.gain : MarketStyle.loss
     }
 }
