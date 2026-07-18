@@ -306,10 +306,6 @@ struct NewsFeedView: View {
                     if source == .flash {
                         flashFeedHeader
                     }
-                    if source == .truth {
-                        truthFeedSummary(postCount: posts.count)
-                        Divider().opacity(0.45)
-                    }
                     ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
                         let displayPost = model.postForDisplay(post)
                         NewsCardView(
@@ -525,29 +521,6 @@ struct NewsFeedView: View {
         .padding(.leading, 84)
         .padding(.trailing, 16)
         .frame(height: 38)
-        .accessibilityElement(children: .combine)
-    }
-
-    private func truthFeedSummary(postCount: Int) -> some View {
-        HStack {
-            HStack(spacing: 4) {
-                Text("今日动态")
-                    .font(.system(size: 15, weight: .semibold))
-                Text("· \(postCount)")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.red)
-            }
-            Spacer()
-            HStack(spacing: 3) {
-                Text("最新发布")
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            .font(.system(size: 13))
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
         .accessibilityElement(children: .combine)
     }
 
