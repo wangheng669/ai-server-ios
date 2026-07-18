@@ -29,12 +29,6 @@ private enum FlashFilter: String, CaseIterable, Identifiable {
     }
 }
 
-private struct RSSSourceOption: Identifiable, Equatable {
-    let id: String
-    let name: String
-    let avatarURL: URL?
-}
-
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @Binding private var hidesTabBar: Bool
@@ -47,7 +41,6 @@ struct NewsFeedView: View {
     @StateObject private var scrollPositionStore = FeedScrollPositionStore()
     @State private var hasLoadedFeedOnce = false
     @State private var flashFilter: FlashFilter = .all
-    @State private var selectedRSSSourceID: String?
     @State private var expandedFlashIDs: Set<Int> = []
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
@@ -315,6 +308,9 @@ struct NewsFeedView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: source) {
+            if source == .rss { await model.loadRSSFeedsIfNeeded() }
+        }
     }
 
     private func feedList(for source: FeedSource, posts: [Post]) -> some View {
@@ -324,8 +320,18 @@ struct NewsFeedView: View {
                 LazyVStack(spacing: 0) {
                     Color.clear.frame(height: 53).id("feed-top")
                     if source == .rss {
-                        rssSourceFilterBar(posts: posts)
+                        rssSourceFilterBar
                         Divider().opacity(0.55)
+                        if model.isLoadingRSSSelection {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("正在加载该来源")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 22)
+                        }
                     }
                     if source == .flash {
                         flashFeedHeader
@@ -487,37 +493,31 @@ struct NewsFeedView: View {
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
-        if source == .rss, let selectedRSSSourceID {
-            return posts.filter { rssSourceID(for: $0) == selectedRSSSourceID }
+        if source == .rss, model.selectedRSSFeedID != nil {
+            return model.selectedRSSPosts
         }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
     }
 
-    private func rssSourceFilterBar(posts: [Post]) -> some View {
-        let options = rssSourceOptions(posts: posts)
-        return ScrollView(.horizontal, showsIndicators: false) {
+    private var rssSourceFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 10) {
                 rssSourceButton(id: nil, name: "全部", avatarURL: nil)
-                ForEach(options) { option in
-                    rssSourceButton(id: option.id, name: option.name, avatarURL: option.avatarURL)
+                ForEach(model.rssFeeds) { feed in
+                    rssSourceButton(id: feed.id, name: feed.name, avatarURL: feed.iconURL)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
         }
         .background(Color(uiColor: .systemBackground))
-        .onChange(of: options) { _, options in
-            guard let selectedRSSSourceID,
-                  !options.contains(where: { $0.id == selectedRSSSourceID }) else { return }
-            self.selectedRSSSourceID = nil
-        }
     }
 
-    private func rssSourceButton(id: String?, name: String, avatarURL: URL?) -> some View {
-        let isSelected = selectedRSSSourceID == id
+    private func rssSourceButton(id: Int?, name: String, avatarURL: URL?) -> some View {
+        let isSelected = model.selectedRSSFeedID == id
         return Button {
-            withAnimation(.snappy(duration: 0.22)) { selectedRSSSourceID = id }
+            Task { await model.selectRSSFeed(id) }
         } label: {
             VStack(spacing: 5) {
                 ZStack {
@@ -552,27 +552,6 @@ struct NewsFeedView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("筛选来源：\(name)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private func rssSourceOptions(posts: [Post]) -> [RSSSourceOption] {
-        var seen = Set<String>()
-        return posts.compactMap { post in
-            let id = rssSourceID(for: post)
-            guard seen.insert(id).inserted else { return nil }
-            return RSSSourceOption(id: id, name: rssSourceName(for: post), avatarURL: post.avatarURL)
-        }
-    }
-
-    private func rssSourceID(for post: Post) -> String {
-        let name = rssSourceName(for: post)
-        return name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-    }
-
-    private func rssSourceName(for post: Post) -> String {
-        let feedName = post.meta?.rssFeedName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let feedName, !feedName.isEmpty { return feedName }
-        let author = post.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return author.isEmpty || author == "RSS" ? "未命名来源" : author
     }
 
     private var flashFeedHeader: some View {

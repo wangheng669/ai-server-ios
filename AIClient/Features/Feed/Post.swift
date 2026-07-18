@@ -5,6 +5,27 @@ struct RSSFeedPostsResponse: Decodable {
     let data: Payload
     struct Payload: Decodable { let posts: [Post] }
 }
+struct RSSFeedsResponse: Decodable {
+    let data: Payload
+    struct Payload: Decodable { let feeds: [RSSFeedSource] }
+}
+
+struct RSSFeedSource: Decodable, Identifiable, Equatable {
+    let id: Int
+    let name: String
+    let icon: String?
+    let isEnabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, icon
+        case isEnabled = "is_enabled"
+    }
+
+    var iconURL: URL? {
+        guard let icon, !icon.isEmpty else { return nil }
+        return URL(string: icon, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
+    }
+}
 struct PostDetailResponse: Decodable { let post: Post }
 
 struct XCommentsResponse: Decodable {
