@@ -19,7 +19,7 @@ final class PersonDetailStore {
     func load(person: SpecialPerson) async {
         async let ownPostsLoad: Void = loadOwnPosts(for: person)
         async let discussionsLoad: Void = loadDiscussions(for: person)
-        await (ownPostsLoad, discussionsLoad)
+        _ = await (ownPostsLoad, discussionsLoad)
     }
 
     private func loadOwnPosts(for person: SpecialPerson) async {

@@ -1635,7 +1635,7 @@ private struct XCommentRow: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
-                if let translation {
+                if translation != nil {
                     HStack(spacing: 5) {
                         Image(systemName: "character.bubble")
                         Text(showsOriginal ? "查看译文" : "X 自动翻译")
