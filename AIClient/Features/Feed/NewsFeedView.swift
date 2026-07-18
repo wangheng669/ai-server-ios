@@ -106,7 +106,11 @@ struct NewsFeedView: View {
             withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
         .onChange(of: isFeedChromeHidden, initial: true) { _, isHidden in
-            hidesTabBar = isHidden
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                hidesTabBar = isHidden
+            }
         }
         .onDisappear {
             showsDetail = false
