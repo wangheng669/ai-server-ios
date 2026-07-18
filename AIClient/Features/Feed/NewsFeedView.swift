@@ -1671,64 +1671,6 @@ private struct ConditionalTapGestureModifier: ViewModifier {
     }
 }
 
-struct EditorialTabBar: View {
-    let selected: RootTab
-    let onSelect: (RootTab) -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            tabButton(.observation, title: "观点", icon: "newspaper", selectedIcon: "newspaper.fill")
-            tabButton(.investment, title: "投资", icon: "chart.line.uptrend.xyaxis", selectedIcon: "chart.line.uptrend.xyaxis")
-            tabButton(.people, title: "人物", icon: "person.2", selectedIcon: "person.2.fill")
-        }
-        .padding(6)
-        .background(
-            Color(uiColor: .systemBackground),
-            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.10), radius: 14, y: 5)
-        .padding(.horizontal, 14)
-        .padding(.top, 7)
-        .padding(.bottom, 5)
-        .background {
-            LinearGradient(
-                colors: [.clear, Color(uiColor: .systemBackground).opacity(0.96)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea(edges: .bottom)
-        }
-    }
-
-    private func tabButton(_ tab: RootTab, title: String, icon: String, selectedIcon: String) -> some View {
-        let isSelected = selected == tab
-        return Button { onSelect(tab) } label: {
-            HStack(spacing: 7) {
-                Image(systemName: isSelected ? selectedIcon : icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .symbolRenderingMode(.monochrome)
-                Text(title)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.secondary)
-            .frame(maxWidth: .infinity, minHeight: 42)
-            .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : Color.clear)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .animation(.snappy(duration: 0.28), value: selected)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
 private extension FeedSource {
     var iconAsset: String? {
         switch self {

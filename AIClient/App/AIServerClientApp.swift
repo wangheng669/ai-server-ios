@@ -48,24 +48,18 @@ private struct EditorialRootView: View {
         TabView(selection: $selectedTab) {
             NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
                 .tag(RootTab.observation)
+                .tabItem { Label("观点", systemImage: "newspaper.fill") }
 
             InvestmentView(showsDetail: $marketShowsDetail)
                 .tag(RootTab.investment)
+                .tabItem { Label("投资", systemImage: "chart.line.uptrend.xyaxis") }
 
             PeopleView(showsDetail: $peopleShowsDetail)
                 .tag(RootTab.people)
+                .tabItem { Label("人物", systemImage: "person.2.fill") }
         }
-        .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Color.clear.frame(height: hidesPrimaryTabBar ? 0 : 66)
-        }
-        .overlay(alignment: .bottom) {
-            EditorialTabBar(selected: selectedTab) { selectedTab = $0 }
-                .offset(y: hidesPrimaryTabBar ? 140 : 0)
-                .allowsHitTesting(!hidesPrimaryTabBar)
-                .accessibilityHidden(hidesPrimaryTabBar)
-                .animation(.easeOut(duration: 0.2), value: hidesPrimaryTabBar)
-        }
+        .toolbar(hidesPrimaryTabBar ? .hidden : .visible, for: .tabBar)
+        .tint(.blue)
         .overlay(alignment: .topTrailing) {
             if let deploymentPreview {
                 DeploymentStatusTip(
