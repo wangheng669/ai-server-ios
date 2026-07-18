@@ -3,6 +3,7 @@ import SwiftUI
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
     case holdings = "持仓"
+    case retail = "散户"
 
     var id: Self { self }
 }
@@ -17,7 +18,13 @@ struct InvestmentView: View {
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
         #if DEBUG
-        _section = State(initialValue: ProcessInfo.processInfo.arguments.contains("--holdings-preview") ? .holdings : .market)
+        if ProcessInfo.processInfo.arguments.contains("--retail-preview") {
+            _section = State(initialValue: .retail)
+        } else if ProcessInfo.processInfo.arguments.contains("--holdings-preview") {
+            _section = State(initialValue: .holdings)
+        } else {
+            _section = State(initialValue: .market)
+        }
         #else
         _section = State(initialValue: .market)
         #endif
@@ -28,14 +35,17 @@ struct InvestmentView: View {
             if !marketShowsDetail && !holdingsShowsDetail {
                 InvestmentHeader(selection: $section)
             }
-            Group {
-                switch section {
-                case .market:
-                    MarketView(showsDetail: $marketShowsDetail)
-                case .holdings:
-                    FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
-                }
+            TabView(selection: $section) {
+                MarketView(showsDetail: $marketShowsDetail)
+                    .tag(InvestmentSection.market)
+
+                FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
+                    .tag(InvestmentSection.holdings)
+
+                RetailInvestorView()
+                    .tag(InvestmentSection.retail)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(Color(uiColor: .systemBackground))
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
@@ -53,32 +63,27 @@ private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("投资")
-                .font(.system(size: 34, weight: .bold))
-                .padding(.horizontal, 18)
-
-            HStack(spacing: 34) {
-                ForEach(InvestmentSection.allCases) { section in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.18)) { selection = section }
-                    } label: {
-                        VStack(spacing: 8) {
-                            Text(section.rawValue)
-                                .font(.system(size: 16, weight: selection == section ? .semibold : .regular))
-                                .foregroundStyle(selection == section ? Color.blue : Color.secondary)
-                            Capsule()
-                                .fill(selection == section ? Color.blue : Color.clear)
-                                .frame(width: 38, height: 3)
-                        }
+        HStack(spacing: 34) {
+            ForEach(InvestmentSection.allCases) { section in
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { selection = section }
+                } label: {
+                    VStack(spacing: 8) {
+                        Text(section.rawValue)
+                            .font(.system(size: 16, weight: selection == section ? .semibold : .regular))
+                            .foregroundStyle(selection == section ? Color.blue : Color.secondary)
+                        Capsule()
+                            .fill(selection == section ? Color.blue : Color.clear)
+                            .frame(width: 38, height: 3)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == section ? .isSelected : [])
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == section ? .isSelected : [])
             }
-            .padding(.horizontal, 20)
         }
-        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 6)
         .background(Color(uiColor: .systemBackground))
     }
 }

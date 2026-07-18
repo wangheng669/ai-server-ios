@@ -42,6 +42,8 @@ struct NewsFeedView: View {
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
     @State private var preparedWebViews: [Int: WKWebView] = [:]
+    @StateObject private var feedScrollPositions = FeedScrollPositionStore()
+    @State private var savedFeedChromeVisibility: [FeedSource: Bool] = [:]
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -333,13 +335,20 @@ struct NewsFeedView: View {
                                 }
                             }
                             .task { await model.translateXPostIfNeeded(post) }
-                            .task { await model.loadMoreIfNeeded(current: post) }
                         if model.source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
                         } else {
                             Divider().opacity(model.source == .flash ? 0.42 : 0.6)
                                 .padding(.leading, model.source == .flash ? 84 : 0)
                         }
+                    }
+                    if model.canLoadMore, model.errorMessage == nil {
+                        Color.clear
+                            .frame(height: 1)
+                            .accessibilityHidden(true)
+                            .task(id: paginationTriggerID) {
+                                await model.loadMore()
+                            }
                     }
                     if model.isLoadingMore { ProgressView().padding(20) }
                     if model.errorMessage != nil {
@@ -350,7 +359,15 @@ struct NewsFeedView: View {
                     }
                     Color.clear.frame(height: 55)
                 }
+                .background(FeedScrollViewBridge(store: feedScrollPositions))
                 .frame(maxWidth: .infinity)
+            }
+            .onChange(of: model.source) { _, source in
+                feedScrollPositions.restore(source)
+            }
+            .onChange(of: model.isSwitchingSource) { _, isSwitching in
+                guard !isSwitching else { return }
+                feedScrollPositions.restore(model.source)
             }
             .modifier(FeedChromeScrollModifier(isHidden: $isFeedChromeHidden, isAtTop: $isFeedAtTop))
             .refreshable { await model.refresh() }
@@ -544,9 +561,23 @@ struct NewsFeedView: View {
             }
     }
 
+    /// Switching sources briefly blocks pagination while page one is refreshed.
+    /// Include that lifecycle in the task identity so the bottom sentinel retries
+    /// after the switch finishes instead of staying permanently consumed.
+    private var paginationTriggerID: String {
+        [
+            model.source.rawValue,
+            String(model.posts.last?.id ?? 0),
+            model.isSwitchingSource ? "switching" : "ready",
+            model.isLoading ? "loading" : "idle"
+        ].joined(separator: ":")
+    }
+
     private func selectSource(_ source: FeedSource) {
         guard source != model.source else { return }
-        isFeedChromeHidden = false
+        feedScrollPositions.save(model.source)
+        savedFeedChromeVisibility[model.source] = isFeedChromeHidden
+        isFeedChromeHidden = savedFeedChromeVisibility[source] ?? false
         model.select(source)
     }
 
@@ -1454,6 +1485,69 @@ private func isWeiboLoginURL(_ url: URL?) -> Bool {
     return isWeiboHost(host) && url.path.lowercased().contains("login")
 }
 
+@MainActor
+private final class FeedScrollPositionStore: ObservableObject {
+    weak var scrollView: UIScrollView?
+    private var offsets: [FeedSource: CGPoint] = [:]
+
+    func attach(_ scrollView: UIScrollView) {
+        self.scrollView = scrollView
+    }
+
+    func save(_ source: FeedSource) {
+        guard let scrollView else { return }
+        offsets[source] = scrollView.contentOffset
+    }
+
+    func restore(_ source: FeedSource) {
+        let target = offsets[source] ?? .zero
+        // SwiftUI replaces the lazy stack's contents after `source` changes. The
+        // first layout pass can still report the previous channel's content size,
+        // which makes UIScrollView clamp a valid saved offset. Re-apply after the
+        // following layout passes so the final position uses the new content size.
+        for delay in [0.0, 0.04, 0.12] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let scrollView = self?.scrollView else { return }
+                scrollView.layoutIfNeeded()
+                let minimumY = -scrollView.adjustedContentInset.top
+                let maximumY = max(
+                    minimumY,
+                    scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+                )
+                let y = min(max(target.y, minimumY), maximumY)
+                scrollView.setContentOffset(CGPoint(x: target.x, y: y), animated: false)
+            }
+        }
+    }
+}
+
+private struct FeedScrollViewBridge: UIViewRepresentable {
+    let store: FeedScrollPositionStore
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        attachScrollView(from: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        attachScrollView(from: uiView)
+    }
+
+    private func attachScrollView(from view: UIView) {
+        DispatchQueue.main.async {
+            var ancestor = view.superview
+            while let current = ancestor {
+                if let scrollView = current as? UIScrollView {
+                    store.attach(scrollView)
+                    return
+                }
+                ancestor = current.superview
+            }
+        }
+    }
+}
+
 private struct FeedChromeScrollModifier: ViewModifier {
     @Binding var isHidden: Bool
     @Binding var isAtTop: Bool
@@ -1659,7 +1753,7 @@ private struct NewsCardView: View {
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
 
-                XFeedMediaView(post: post)
+                XFeedMediaView(post: post, horizontalInset: 32)
 
                 FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
             }
@@ -1700,15 +1794,21 @@ private struct NewsCardView: View {
     private var xueqiuCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             xueqiuTextContent
+                .contentShape(Rectangle())
+                .gesture(
+                    SpatialTapGesture()
+                        .onEnded { _ in
+                            XVideoPlaybackSession.shared.pauseActive()
+                            onOpen?()
+                        }
+                )
+                .accessibilityAddTraits(.isButton)
+            .zIndex(2)
+            .accessibilityHint("打开详情")
 
             if post.hasXueqiuFeedMedia {
-                PostMediaGrid(
-                    post: post,
-                    singleImageMaxHeight: 220,
-                    singleImageContentMode: .fill,
-                    multiImageHeight: 148,
-                    availableWidth: max(UIScreen.main.bounds.width - 64, 240)
-                )
+                XFeedMediaView(post: post)
+                    .zIndex(1)
             }
 
             HStack(spacing: 0) {

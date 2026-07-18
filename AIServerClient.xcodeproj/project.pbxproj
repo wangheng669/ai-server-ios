@@ -17,6 +17,7 @@
 		30DCD0C5835091D25C86B8A3 /* PeopleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3E8C146E7D023F0970E445 /* PeopleService.swift */; };
 		3AC230E32369C12C743332AD /* InvestmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5FF3634D4DF69CCE8DB1B32 /* InvestmentView.swift */; };
 		46344011320819650C0EEC08 /* PeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1304CD1593E840EFAF32E208 /* PeopleStore.swift */; };
+		617480D9D30D6A38B04EA755 /* RetailInvestorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C78B11625D59970AF947C /* RetailInvestorView.swift */; };
 		681EF7E93F4BE35044B2149C /* MarketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0964D64008AE6D9891C78345 /* MarketService.swift */; };
 		70916F86F3EB28B10FB8EB3C /* PostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F7ED7E08363D8510FC627D /* PostDetailView.swift */; };
 		776DA836074F7FFF481B3A5B /* FeedAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */; };
@@ -60,6 +61,7 @@
 		2E3E8C146E7D023F0970E445 /* PeopleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleService.swift; sourceTree = "<group>"; };
 		33DF2FE619F731E7105C5F23 /* MarketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketView.swift; sourceTree = "<group>"; };
 		3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddressValidatorTests.swift; sourceTree = "<group>"; };
+		3D5C78B11625D59970AF947C /* RetailInvestorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetailInvestorView.swift; sourceTree = "<group>"; };
 		40244177985ED17E7717147A /* FamousHoldingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsStore.swift; sourceTree = "<group>"; };
 		47F7ED7E08363D8510FC627D /* PostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDetailView.swift; sourceTree = "<group>"; };
 		4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServerClientApp.swift; sourceTree = "<group>"; };
@@ -207,6 +209,7 @@
 				40244177985ED17E7717147A /* FamousHoldingsStore.swift */,
 				DEBD6D31DCEDA25975180F41 /* FamousHoldingsView.swift */,
 				C5FF3634D4DF69CCE8DB1B32 /* InvestmentView.swift */,
+				3D5C78B11625D59970AF947C /* RetailInvestorView.swift */,
 			);
 			path = Investment;
 			sourceTree = "<group>";
@@ -276,7 +279,6 @@
 				};
 			};
 			buildConfigurationList = 1CB8E601656193E6689EF54E /* Build configuration list for PBXProject "AIServerClient" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -286,6 +288,7 @@
 			mainGroup = 31B803F3D04737705590B4F6;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 772B58C95655CED4643BB6A2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -345,6 +348,7 @@
 				18F1A1D11FD420E25AA227ED /* PostComponents.swift in Sources */,
 				70916F86F3EB28B10FB8EB3C /* PostDetailView.swift in Sources */,
 				10D34066B133EC9CD153A5B9 /* RealtimeFeedClient.swift in Sources */,
+				617480D9D30D6A38B04EA755 /* RetailInvestorView.swift in Sources */,
 				EC73C344C05CAB07C8B39CFB /* ServerConfiguration.swift in Sources */,
 				8F922EC1F4F62D3B56B74D1D /* ServerSetupView.swift in Sources */,
 			);

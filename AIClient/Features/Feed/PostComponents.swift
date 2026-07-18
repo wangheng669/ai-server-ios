@@ -248,33 +248,45 @@ struct PostMediaGrid: View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
             if urls.count == 1, let url = urls.first {
-                RemoteImage(
-                    url: url,
-                    height: resolvedSingleImageHeight,
-                    cornerRadius: 8,
-                    contentMode: singleImageContentMode,
-                    onImageLoaded: { classifyInlineAsset($0, at: url) }
-                )
-                    .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
-                    .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+                Button { showPreview(url) } label: {
+                    RemoteImage(
+                        url: url,
+                        height: resolvedSingleImageHeight,
+                        cornerRadius: 8,
+                        contentMode: singleImageContentMode,
+                        onImageLoaded: { classifyInlineAsset($0, at: url) }
+                    )
+                        .overlay(alignment: .center) { if !(post.videos ?? []).isEmpty { playButton } }
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("查看图片")
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
-                        RemoteImage(
-                            url: url,
-                            height: multiImageHeight,
-                            cornerRadius: 6,
-                            contentMode: .fit,
-                            onImageLoaded: { classifyInlineAsset($0, at: url) }
-                        )
-                            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                            .highPriorityGesture(TapGesture().onEnded { showPreview(url) })
+                        Button { showPreview(url) } label: {
+                            RemoteImage(
+                                url: url,
+                                height: multiImageHeight,
+                                cornerRadius: 6,
+                                contentMode: .fit,
+                                onImageLoaded: { classifyInlineAsset($0, at: url) }
+                            )
+                                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看图片")
                     }
                 }
             } else if let preview = post.previewURL {
-                RemoteImage(url: preview, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
-                    .overlay { playButton }
-                    .highPriorityGesture(TapGesture().onEnded { showPreview(preview) })
+                Button { showPreview(preview) } label: {
+                    RemoteImage(url: preview, height: resolvedSingleImageHeight, cornerRadius: 8, contentMode: singleImageContentMode)
+                        .overlay { playButton }
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("查看图片")
             }
         }
         .fullScreenCover(item: $previewURL) { url in ZoomableImageView(url: url) }
@@ -288,12 +300,43 @@ struct PostMediaGrid: View {
 
 struct XFeedMediaView: View {
     let post: Post
+    var horizontalInset: CGFloat = 78
+    @State private var showsFullscreenPlayer = false
+    @State private var inlinePlayer: AVPlayer?
+    @State private var detectedVideoAspectRatio: CGFloat?
 
     var body: some View {
         if let videoURL = post.videoURLs.first {
-            XInlineVideoView(url: videoURL)
-                .frame(height: videoHeight)
+            Color.black
+                .aspectRatio(videoAspectRatio, contentMode: .fit)
+                .overlay {
+                    XInlineVideoView(
+                        url: videoURL,
+                        onPlayerAvailable: { inlinePlayer = $0 },
+                        onAspectRatioDetected: { detectedVideoAspectRatio = $0 }
+                    )
+                }
+                .overlay(alignment: .topLeading) {
+                    Button {
+                        guard inlinePlayer != nil else { return }
+                        showsFullscreenPlayer = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 34)
+                            .background(.black.opacity(0.68), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                    .accessibilityLabel("全屏播放")
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .fullScreenCover(isPresented: $showsFullscreenPlayer) {
+                    if let inlinePlayer {
+                        FullscreenInlineVideoView(player: inlinePlayer)
+                    }
+                }
         } else {
             PostMediaGrid(
                 post: post,
@@ -304,18 +347,21 @@ struct XFeedMediaView: View {
     }
 
     private var availableWidth: CGFloat {
-        max(UIScreen.main.bounds.width - 78, 240)
+        max(UIScreen.main.bounds.width - horizontalInset, 240)
     }
 
-    private var videoHeight: CGFloat {
+    private var videoAspectRatio: CGFloat {
+        if let detectedVideoAspectRatio, detectedVideoAspectRatio > 0 {
+            return detectedVideoAspectRatio
+        }
         guard let video = post.videos?.first,
               let width = video.width,
               let height = video.height,
               width > 0,
               height > 0 else {
-            return availableWidth * 9 / 16
+            return 16.0 / 9.0
         }
-        return min(availableWidth * CGFloat(height) / CGFloat(width), 440)
+        return CGFloat(width) / CGFloat(height)
     }
 }
 
@@ -328,16 +374,23 @@ final class XVideoPlaybackSession {
     private var positions: [URL: CMTime] = [:]
 
     func play(_ player: AVPlayer, url: URL) {
-        if let activePlayer, activePlayer !== player {
+        claimPlayback(player, url: url)
+        if let position = positions[url], position.isNumeric, position.seconds > 0.25 {
+            player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        player.play()
+    }
+
+    /// Called from AVPlayer's real playback state as well as our custom button.
+    /// This catches playback started from the native VideoPlayer controls.
+    func claimPlayback(_ player: AVPlayer, url: URL) {
+        guard activePlayer !== player else { return }
+        if let activePlayer {
             savePosition(of: activePlayer, url: activeURL)
             activePlayer.pause()
         }
         activePlayer = player
         activeURL = url
-        if let position = positions[url], position.isNumeric, position.seconds > 0.25 {
-            player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
-        }
-        player.play()
     }
 
     func pause(_ player: AVPlayer, url: URL) {
@@ -347,6 +400,14 @@ final class XVideoPlaybackSession {
             activePlayer = nil
             activeURL = nil
         }
+    }
+
+    func pauseActive() {
+        guard let activePlayer else { return }
+        savePosition(of: activePlayer, url: activeURL)
+        activePlayer.pause()
+        self.activePlayer = nil
+        activeURL = nil
     }
 
     private func savePosition(of player: AVPlayer, url: URL?) {
@@ -363,12 +424,21 @@ private struct XInlineVideoView: View {
     @State private var player: AVPlayer
     @State private var thumbnail: UIImage?
     @State private var hasStartedPlayback = false
+    @State private var isPlaying = false
     @State private var thumbnailFailed = false
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let url: URL
+    private let onPlayerAvailable: (AVPlayer) -> Void
+    private let onAspectRatioDetected: (CGFloat) -> Void
 
-    init(url: URL) {
+    init(
+        url: URL,
+        onPlayerAvailable: @escaping (AVPlayer) -> Void,
+        onAspectRatioDetected: @escaping (CGFloat) -> Void
+    ) {
         self.url = url
+        self.onPlayerAvailable = onPlayerAvailable
+        self.onAspectRatioDetected = onAspectRatioDetected
         let player = AVPlayer(url: url)
         player.isMuted = UserDefaults.standard.bool(forKey: "x.video.isMuted")
         _player = State(initialValue: player)
@@ -394,6 +464,7 @@ private struct XInlineVideoView: View {
                     activateAudioSession()
                     player.isMuted = isMuted
                     hasStartedPlayback = true
+                    isPlaying = true
                     XVideoPlaybackSession.shared.play(player, url: url)
                 } label: {
                     Image(systemName: "play.fill")
@@ -404,23 +475,6 @@ private struct XInlineVideoView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("播放视频")
-            }
-
-            if hasStartedPlayback {
-                Button {
-                    isMuted.toggle()
-                    player.isMuted = isMuted
-                } label: {
-                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 30)
-                        .background(.black.opacity(0.62), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(8)
-                .accessibilityLabel(isMuted ? "打开声音" : "静音")
             }
 
             if thumbnailFailed, !hasStartedPlayback {
@@ -440,8 +494,58 @@ private struct XInlineVideoView: View {
                 .padding(.bottom, 10)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if hasStartedPlayback {
+                Button {
+                    isMuted.toggle()
+                    player.isMuted = isMuted
+                } label: {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 30)
+                        .background(.black.opacity(0.62), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+                .accessibilityLabel(isMuted ? "打开声音" : "静音")
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if hasStartedPlayback {
+                Button {
+                    if isPlaying {
+                        player.pause()
+                        isPlaying = false
+                    } else {
+                        activateAudioSession()
+                        XVideoPlaybackSession.shared.play(player, url: url)
+                        isPlaying = true
+                    }
+                } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 32)
+                        .background(.black.opacity(0.62), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+                .accessibilityLabel(isPlaying ? "暂停视频" : "继续播放")
+            }
+        }
         .clipped()
         .task(id: url) { await loadThumbnail() }
+        .onAppear { onPlayerAvailable(player) }
+        .onReceive(player.publisher(for: \.timeControlStatus)) { status in
+            if status == .playing {
+                hasStartedPlayback = true
+                isPlaying = true
+                XVideoPlaybackSession.shared.claimPlayback(player, url: url)
+            } else if status == .paused {
+                isPlaying = false
+            }
+        }
         .onDisappear { XVideoPlaybackSession.shared.pause(player, url: url) }
     }
 
@@ -458,6 +562,7 @@ private struct XInlineVideoView: View {
         guard thumbnail == nil else { return }
         if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: url as NSURL) {
             thumbnail = cached
+            reportAspectRatio(of: cached)
             return
         }
         let asset = AVURLAsset(url: url)
@@ -470,11 +575,43 @@ private struct XInlineVideoView: View {
             let result = UIImage(cgImage: image)
             Self.thumbnailCache.setObject(result, forKey: url as NSURL)
             thumbnail = result
+            reportAspectRatio(of: result)
             thumbnailFailed = false
         } catch {
             guard !Task.isCancelled else { return }
             thumbnailFailed = true
         }
+    }
+
+    private func reportAspectRatio(of image: UIImage) {
+        guard image.size.width > 0, image.size.height > 0 else { return }
+        onAspectRatioDetected(image.size.width / image.size.height)
+    }
+}
+
+private struct FullscreenInlineVideoView: View {
+    let player: AVPlayer
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(.black.opacity(0.62), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(16)
+            .accessibilityLabel("退出全屏")
+        }
+        .onAppear { player.play() }
+        .onDisappear { player.pause() }
     }
 }
 

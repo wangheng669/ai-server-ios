@@ -17,7 +17,8 @@ private struct EditorialRootView: View {
             return .people
         }
         if ProcessInfo.processInfo.arguments.contains("--market-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--holdings-preview") { return .investment }
+            ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--retail-preview") { return .investment }
         return .observation
         #else
         .observation

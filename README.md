@@ -1,7 +1,7 @@
 # AI Server iOS Client
 
 一个使用 SwiftUI 构建的 AI Server 原生 iOS 客户端。首个版本提供多来源新闻流，默认连接
-默认服务器通过 FRP 映射到 `http://47.100.175.141:3001`，无需自有域名。
+默认服务器使用 HTTPS 域名 `https://api.wanghengai.xin`。
 
 ## 当前功能
 
@@ -21,5 +21,4 @@
 
 项目最低支持 iOS 17。
 
-当前服务端使用 HTTP。项目已为开发阶段启用 HTTP 访问；正式发布前应为服务端配置 HTTPS，
-并收紧 App Transport Security 设置。
+当前服务端使用 HTTPS。

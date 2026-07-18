@@ -128,8 +128,10 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func loadInitial() async {
-        // Keep cached posts visible, but always revalidate the selected source so
-        // returning to a channel never leaves an old snapshot on screen indefinitely.
+        // Returning to a cached channel must keep the same post collection so its
+        // exact scroll offset still refers to the article the user was reading.
+        // Realtime updates and pull-to-refresh remain available for revalidation.
+        guard posts.isEmpty || isSwitchingSource else { return }
         await refresh()
     }
 
@@ -218,9 +220,9 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    func loadMoreIfNeeded(current post: Post) async {
+    func loadMore() async {
         guard !isSwitchingSource,
-              post.id == posts.last?.id,
+              !posts.isEmpty,
               canLoadMore,
               !isLoadingMore,
               !isLoading else { return }
@@ -238,6 +240,11 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
+    }
+
+    func loadMoreIfNeeded(current post: Post) async {
+        guard post.id == posts.last?.id else { return }
+        await loadMore()
     }
 
     private func fetchPage(_ page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
