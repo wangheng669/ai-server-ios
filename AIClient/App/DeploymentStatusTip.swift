@@ -64,12 +64,21 @@ struct DeploymentStatusSnapshot: Equatable {
         switch phase {
         case let .running(progress): "\(runningStageTitle) · \(Int(progress * 100))%"
         case .succeeded: "新版本已安装到此 iPhone"
-        case .failed: "未能安装到此 iPhone"
+        case .failed:
+            switch stage {
+            case "merge-failed": "代码合并或合并验证未完成"
+            case "build-failed": "App 构建未完成"
+            case "install-failed": "未能安装到此 iPhone"
+            default: "自动更新未完成"
+            }
         }
     }
 
     private var runningStageTitle: String {
         switch stage {
+        case "merging": "正在合并代码"
+        case "merge-testing": "正在验证合并"
+        case "publishing": "正在发布更新"
         case "testing": "正在运行测试"
         case "building": "正在构建 App"
         case "waiting-for-installer": "正在等待安装设备"
