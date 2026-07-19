@@ -257,7 +257,7 @@ struct PostMediaGrid: View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
             if let videoURL = post.videoURLs.first {
-                XInlineVideoView(url: videoURL)
+                XInlineVideoView(url: videoURL, thumbnailURL: post.previewURL)
                     .frame(height: resolvedSingleImageHeight)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else if urls.count == 1, let url = urls.first {
@@ -311,7 +311,7 @@ struct XFeedMediaView: View {
 
     var body: some View {
         if let videoURL = post.videoURLs.first {
-            XInlineVideoView(url: videoURL)
+            XInlineVideoView(url: videoURL, thumbnailURL: post.previewURL)
                 .frame(height: videoHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         } else {
@@ -381,18 +381,17 @@ final class XVideoPlaybackSession {
 private struct XInlineVideoView: View {
     private static let thumbnailCache = NSCache<NSURL, UIImage>()
 
-    @State private var player: AVPlayer
+    @State private var player: AVPlayer?
     @State private var thumbnail: UIImage?
     @State private var hasStartedPlayback = false
     @State private var thumbnailFailed = false
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let url: URL
+    private let thumbnailURL: URL?
 
-    init(url: URL) {
+    init(url: URL, thumbnailURL: URL? = nil) {
         self.url = url
-        let player = AVPlayer(url: url)
-        player.isMuted = UserDefaults.standard.bool(forKey: "x.video.isMuted")
-        _player = State(initialValue: player)
+        self.thumbnailURL = thumbnailURL
     }
 
     var body: some View {
@@ -413,7 +412,9 @@ private struct XInlineVideoView: View {
             if !hasStartedPlayback {
                 Button {
                     activateAudioSession()
+                    let player = AVPlayer(url: url)
                     player.isMuted = isMuted
+                    self.player = player
                     hasStartedPlayback = true
                     XVideoPlaybackSession.shared.play(player, url: url)
                 } label: {
@@ -430,7 +431,7 @@ private struct XInlineVideoView: View {
             if hasStartedPlayback {
                 Button {
                     isMuted.toggle()
-                    player.isMuted = isMuted
+                    player?.isMuted = isMuted
                 } label: {
                     Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 13, weight: .semibold))
@@ -463,7 +464,10 @@ private struct XInlineVideoView: View {
         }
         .clipped()
         .task(id: url) { await loadThumbnail() }
-        .onDisappear { XVideoPlaybackSession.shared.pause(player, url: url) }
+        .onDisappear {
+            guard let player else { return }
+            XVideoPlaybackSession.shared.pause(player, url: url)
+        }
     }
 
     private func activateAudioSession() {
@@ -481,6 +485,17 @@ private struct XInlineVideoView: View {
             thumbnail = cached
             return
         }
+        if let thumbnailURL,
+           let remoteThumbnail = await ImageLoader.load(
+               thumbnailURL,
+               targetSize: CGSize(width: 1_200, height: 1_200)
+           ) {
+            guard !Task.isCancelled else { return }
+            thumbnail = remoteThumbnail
+            thumbnailFailed = false
+            return
+        }
+        guard !Task.isCancelled else { return }
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
