@@ -133,13 +133,7 @@ struct FamousHoldingsView: View {
             )
 
             VStack(alignment: .leading, spacing: 7) {
-                Text("当前")
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(HoldingsPalette.purple.opacity(0.90), in: RoundedRectangle(cornerRadius: 4))
                 Text(manager.displayName).font(.system(size: 29, weight: .bold))
-                Text(englishName(manager.key)).font(.system(size: 16, weight: .medium))
                 Text(manager.institutionName)
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.72))
@@ -169,17 +163,6 @@ struct FamousHoldingsView: View {
             pageProgress
                 .frame(maxWidth: .infinity, alignment: .bottom)
                 .padding(.bottom, 12)
-
-            ShareLink(item: "\(manager.displayName) · \(quarterLabel(manager.reportDate)) 公开持仓") {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.90))
-                    .frame(width: 38, height: 38)
-                    .background(.black.opacity(0.14), in: Circle())
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .padding(.top, 62)
-            .padding(.trailing, 12)
         }
         .frame(height: 260)
         .clipped()
@@ -724,20 +707,6 @@ func actionColor(_ action: FamousHoldingAction) -> Color {
     case .increased: HoldingsPalette.green
     case .decreased: HoldingsPalette.orange
     case .exited: HoldingsPalette.red
-    }
-}
-
-private func englishName(_ key: String) -> String {
-    switch key {
-    case "ark": "Cathie Wood"
-    case "berkshire": "Warren Buffett"
-    case "duanyongping": "Duan Yongping"
-    case "lilu": "Li Lu"
-    case "danbin": "Dan Bin"
-    case "bridgewater": "Ray Dalio"
-    case "soros": "George Soros"
-    case "sunmasayoshi": "Masayoshi Son"
-    default: ""
     }
 }
 
