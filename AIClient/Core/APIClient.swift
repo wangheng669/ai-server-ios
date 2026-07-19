@@ -257,7 +257,10 @@ struct APIClient {
 
     static func articlePreviewURL(for articleURL: URL, baseURL: URL) -> URL? {
         var parts = URLComponents(url: baseURL.appending(path: "api/v1/post/preview"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = [.init(name: "url", value: articleURL.absoluteString)]
+        parts?.queryItems = [
+            .init(name: "url", value: articleURL.absoluteString),
+            .init(name: "prefer_remote", value: "1"),
+        ]
         return parts?.url
     }
 
@@ -317,6 +320,23 @@ struct NewYorkTimesArticle: Equatable {
         }
         if !current.isEmpty { paragraphs.append(.paragraph(current)) }
         return NewYorkTimesArticle(blocks: paragraphs)
+    }
+
+    static func isSameImageAsset(_ lhs: URL, _ rhs: URL?) -> Bool {
+        guard let rhs, let lhsKey = imageAssetKey(lhs), let rhsKey = imageAssetKey(rhs) else { return lhs == rhs }
+        return lhsKey == rhsKey
+    }
+
+    private static func imageAssetKey(_ url: URL) -> String? {
+        let original = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "url" })?
+            .value
+            .flatMap(URL.init(string:)) ?? url
+        let components = original.path.split(separator: "/")
+        guard let imagesIndex = components.firstIndex(of: "images"), imagesIndex + 1 < components.endIndex else { return nil }
+        let assetPath = components[(imagesIndex + 1)..<components.endIndex].dropLast().map(String.init)
+        return ([original.host ?? ""] + assetPath).joined(separator: "/")
     }
 }
 

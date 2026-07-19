@@ -243,6 +243,14 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(components.path, "/api/v1/post/preview")
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, article.absoluteString)
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "prefer_remote" })?.value, "1")
+    }
+
+    func testNewYorkTimesHeroVariantsAreRecognizedAsTheSameImage() throws {
+        let hero = try XCTUnwrap(URL(string: "https://api.example/api/v1/image-proxy?url=https%3A%2F%2Fstatic01.nyt.com%2Fimages%2F2026%2F07%2F01%2Fhero%2Fhero-articleLarge.jpg"))
+        let inline = try XCTUnwrap(URL(string: "https://static01.nyt.com/images/2026/07/01/hero/hero-master1050.jpg"))
+
+        XCTAssertTrue(NewYorkTimesArticle.isSameImageAsset(inline, hero))
     }
 
     func testBuildsWebSocketURLFromServerURL() throws {
