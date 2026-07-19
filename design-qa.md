@@ -1,46 +1,41 @@
-# 知名投资人透明主视觉 Design QA
+# 知名投资人截图还原 Design QA
 
-- Source visual truth: `artifacts/implementation/investor-transparent-hero/selected-option-2.png`
-- Implementation screenshots: `artifacts/implementation/investor-transparent-hero/light.png`, `artifacts/implementation/investor-transparent-hero/dark.png`
-- Full comparison: `artifacts/implementation/investor-transparent-hero/comparison-light.png`
-- Eight-investor light contact sheet: `artifacts/audit/investor-portraits-light-fixed/contact-sheet.jpg`
-- Eight-investor dark contact sheet: `artifacts/audit/investor-portraits-dark-fixed/contact-sheet.jpg`
-- Viewport: iPhone 17 Pro simulator, 368 × 800 capture
-- State: ARK 2026 Q1 overview, light and dark appearances
+- Source visual truth: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/codex-clipboard-99801b5f-7dcc-4c99-9e76-b82be095653c.png`
+- Implementation screenshot: `artifacts/implementation/investor-screenshot-recreation/final-light.png`
+- Full-view comparison: `artifacts/implementation/investor-screenshot-recreation/final-comparison.png`
+- Viewport: iPhone 17 Pro simulator, 368 × 800 points / 942 × 2048 pixels
+- State: ARK / Cathie Wood, 2026 Q1, light appearance, overview at top scroll position
 
 **Findings**
 
 - No actionable P0/P1/P2 findings remain.
-- The implementation intentionally retains the existing compact app header and denser data cards instead of copying the concept image's enlarged decorative chrome.
+- The supplied source portrait depicts a different Cathie Wood photo. The implementation intentionally uses the existing production transparent portrait asset so the person remains authentic and the live investor carousel continues working.
 
 **Required fidelity surfaces**
 
-- Fonts and typography: native San Francisco hierarchy is readable; name, institution, metrics, section titles, and secondary notes do not clip.
-- Spacing and layout rhythm: restored immersive hero occupies the original page position; no avatar strip or duplicate profile card remains; the filing summary begins immediately below the hero.
-- Colors and tokens: the hero uses semantic light/dark gradients, a theme-aware violet halo, and a localized left text veil; cards continue using Apple grouped system colors.
-- Image quality: the server transparent WebP is rendered as a large editorial cutout with no circle crop, rectangular photo boundary, visible white fringe, or dark baked background.
-- Copy and content: the top switch reads `市场 / 知名投资人`; `查看完整持仓` remains a quiet title-row action.
+- Fonts and typography: native San Francisco weights reproduce the reference hierarchy; the Chinese display name, English name, institution, metric labels, values, section titles, badges, and notes remain readable without clipping.
+- Spacing and layout rhythm: the header overlays the immersive hero, summary card follows the hero edge, the donut/actions and biggest-change sections use separate rounded cards, and all primary content fits the intended narrow viewport without horizontal overflow.
+- Colors and visual tokens: the light grouped canvas, white cards, indigo selection, violet accents, blue/green/orange/pink action palette, soft shadows, and semantic secondary labels match the source direction.
+- Image quality and asset fidelity: production transparent investor portraits and live company logos are used; no placeholder portrait, emoji, handmade SVG, or code-drawn company mark replaces a visible asset.
+- Copy and content: the visible names, institution, follower count, report date, filing date, position count, total value, action counts/percentages, company rows, actions, and weight changes match the supplied reference state.
 
 **Interactions tested**
 
-- Switched from `知名投资人` to `市场` successfully.
-- Verified the investor page exposes swipe-based previous/next accessibility actions.
-- Verified Share and `查看完整持仓` remain accessible controls.
+- Launched directly into the investor screen with the debug preview state.
+- Switched from `知名投资人` to `市场` and back successfully.
+- Confirmed `查看更多`, root tabs, investor swipe accessibility actions, and the vertical scroll remain exposed as interactive controls.
+- Runtime UI snapshot showed no clipped or off-screen primary control.
 
 **Comparison history**
 
-- Pass 1: main portrait sat too close to the center and was dimmed by the left veil.
-- Fix: moved the transparent cutout right, increased its scale, and limited the text veil to the left portion of the hero.
-- Pass 2: light and dark captures show clear text, a readable portrait, and stable semantic surfaces.
+- Pass 1: the old compact segmented control, small portrait card, missing donut chart, and combined insights card were major mismatches.
+- Fix: rebuilt the header, immersive hero, four-metric summary, donut/action distribution, independent biggest-change card, and reference-like styling.
+- Pass 2: the simulator safe-area placed the header and hero lower than the source and hid more of the final card behind the tab bar.
+- Fix: extended the holdings hero into the top safe area and retained explicit status/header spacing, moving the whole content rhythm upward while keeping controls clear.
+- Final visual evidence: `artifacts/implementation/investor-screenshot-recreation/final-comparison.png`.
 
 **Follow-up polish**
 
-- No residual per-investor focal adjustment is needed after the eight-person review.
-
-**Eight-investor verification**
-
-- Reviewed ARK, Berkshire, Duan Yongping, Li Lu, Dan Bin, Bridgewater, Soros, and Masayoshi Son in sequence in both appearances.
-- Fixed a reused-image defect: when the live API omitted `portraitUrl`, the image task previously kept the first manager's portrait. It now refreshes by `manager.key` and clears stale state before loading.
-- All eight final portraits keep the face clear of the left text block, retain the head and shoulders, and preserve a consistent eye line. No per-person focal override is currently necessary.
+- A source-matching Cathie Wood cutout could make the portrait pose exact if that licensed image is supplied later.
 
 final result: passed

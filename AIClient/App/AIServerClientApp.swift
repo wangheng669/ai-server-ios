@@ -42,7 +42,10 @@ private struct EditorialRootView: View {
     }
 
     private var deploymentStatus: DeploymentStatusSnapshot? {
-        deploymentPreview ?? deploymentStore.snapshot
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") { return nil }
+        #endif
+        return deploymentPreview ?? deploymentStore.snapshot
     }
 
     var body: some View {
