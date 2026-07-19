@@ -309,6 +309,8 @@ final class NewsFeedViewModel: ObservableObject {
             guard task(name, updates: source) else { return }
             guard pendingRealtimePosts.isEmpty else { return }
             Task { await refresh() }
+        case .deploymentStatus:
+            break
         }
     }
 

@@ -38,6 +38,12 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
+      - name: Report build started
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.08 testing
+
       - name: Run tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -49,6 +55,12 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 16e' \
             -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestData" \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Report tests completed
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.35 building
 
       - name: Build unsigned device app
         env:
@@ -76,6 +88,19 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Report build completed
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.58 waiting-for-installer
+
+      - name: Report build failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh failed 0 build-failed
+
   install:
     name: Sign and install on home iPhone
     needs: build
@@ -92,11 +117,23 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
+      - name: Report installer started
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.68 downloading
+
       - name: Download device app
         uses: actions/download-artifact@v8
         with:
           name: ios-device-app
           path: ${{ runner.temp }}/ios-device-app
+
+      - name: Report signing started
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.82 signing
 
       - name: Extract, sign, and install
         env:
@@ -106,4 +143,18 @@ jobs:
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/sign-and-install-ios.sh
+
+      - name: Report installation completed
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh succeeded 1 installed
+
+      - name: Report installation failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh failed 0 install-failed

@@ -100,6 +100,9 @@ codesign \
   "$APP_PATH"
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+  ./ci/report-ios-deployment.sh running 0.92 installing || true
+fi
 xcrun devicectl device install app --device "$DEVICE_UDID" "$APP_PATH"
 
 echo "Installed $BUNDLE_ID on $DEVICE_UDID using a profile valid until $selected_expiration."

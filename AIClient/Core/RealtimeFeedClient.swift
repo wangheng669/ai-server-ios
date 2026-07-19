@@ -5,6 +5,7 @@ final class RealtimeFeedClient {
     enum Event {
         case post(Post)
         case taskCompleted(String)
+        case deploymentStatus(DeploymentStatusSnapshot)
     }
 
     private let baseURL: URL
@@ -44,6 +45,7 @@ final class RealtimeFeedClient {
 
             do {
                 try await task.send(.string(#"{"type":"request-task-snapshot"}"#))
+                try await task.send(.string(#"{"type":"request-deployment-snapshot"}"#))
                 retryAttempt = 0
                 while isActive, !Task.isCancelled {
                     let message = try await task.receive()
@@ -85,6 +87,10 @@ final class RealtimeFeedClient {
                   header.skipped != true,
                   let name = header.name {
             onEvent?(.taskCompleted(name))
+        } else if header.type == "deployment-status",
+                  let message = try? JSONDecoder().decode(DeploymentStatusMessage.self, from: data),
+                  let snapshot = DeploymentStatusSnapshot(message: message) {
+            onEvent?(.deploymentStatus(snapshot))
         }
     }
 

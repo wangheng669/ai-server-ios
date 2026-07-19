@@ -10,6 +10,8 @@ struct AIServerClientApp: App {
 }
 
 private struct EditorialRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var deploymentStore = DeploymentStatusStore()
     @State private var selectedTab: RootTab = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
@@ -39,6 +41,10 @@ private struct EditorialRootView: View {
         #endif
     }
 
+    private var deploymentStatus: DeploymentStatusSnapshot? {
+        deploymentPreview ?? deploymentStore.snapshot
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
@@ -58,13 +64,24 @@ private struct EditorialRootView: View {
         }
         .tint(.blue)
         .overlay(alignment: .topTrailing) {
-            if let deploymentPreview {
+            if let deploymentStatus {
                 DeploymentStatusTip(
-                    snapshot: deploymentPreview,
-                    initiallyExpanded: !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
+                    snapshot: deploymentStatus,
+                    initiallyExpanded: deploymentPreview != nil
+                        ? !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
+                        : true
                 )
+                    .id(deploymentStatus.identity)
                     .padding(.top, 6)
                     .padding(.trailing, 12)
+            }
+        }
+        .task { deploymentStore.start() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                deploymentStore.start()
+            } else {
+                deploymentStore.stop()
             }
         }
     }
