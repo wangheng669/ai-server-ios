@@ -42,4 +42,20 @@ final class DeploymentStatusTests: XCTestCase {
         let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
         XCTAssertFalse(snapshot.isVisible(at: snapshot.updatedAt.addingTimeInterval(700)))
     }
+
+    func testCompletedSnapshotHasStablePerDeploymentIdentity() throws {
+        let message = DeploymentStatusMessage(
+            type: "deployment-status",
+            phase: "succeeded",
+            stage: "installed",
+            progress: 1,
+            commit: "1234567890",
+            runId: "42",
+            updatedAt: "2026-07-19T08:00:00Z"
+        )
+
+        let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
+
+        XCTAssertEqual(snapshot.completionIdentity, "1234567-installed")
+    }
 }
