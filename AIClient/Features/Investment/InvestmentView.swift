@@ -44,7 +44,12 @@ struct InvestmentView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
-        .task { await holdingsStore.load() }
+        .task {
+            await holdingsStore.load()
+            if let managers = holdingsStore.holdings?.managers {
+                await InvestorPortraitLoader.preload(managers)
+            }
+        }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
         .onChange(of: holdingsShowsDetail) { _, _ in showsDetail = false }
         .onChange(of: section) { _, _ in

@@ -641,23 +641,42 @@ private struct InvestorPortraitImage: View {
             if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else {
-                Text(String(manager.displayName.prefix(1)))
-                    .font(.system(size: 90, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.2))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(avatarTint(manager.key))
+                Color.clear
             }
         }
         .task(id: manager.key) {
             image = nil
-            image = await ImageLoader.load(
-                resolvedPortraitURL,
-                targetSize: CGSize(width: UIScreen.main.bounds.width, height: 275)
-            )
+            let loaded = await InvestorPortraitLoader.load(manager)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.16)) { image = loaded }
+        }
+    }
+}
+
+enum InvestorPortraitLoader {
+    @MainActor
+    static func load(_ manager: FamousHoldingsManager) async -> UIImage? {
+        await ImageLoader.load(url(for: manager), targetSize: targetSize)
+    }
+
+    @MainActor
+    static func preload(_ managers: [FamousHoldingsManager]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for manager in managers {
+                let portraitURL = url(for: manager)
+                let size = targetSize
+                group.addTask {
+                    _ = await ImageLoader.load(portraitURL, targetSize: size)
+                }
+            }
         }
     }
 
-    private var resolvedPortraitURL: URL? {
+    private static var targetSize: CGSize {
+        CGSize(width: UIScreen.main.bounds.width, height: 275)
+    }
+
+    private static func url(for manager: FamousHoldingsManager) -> URL? {
         let value = manager.portraitUrl.flatMap { $0.isEmpty ? nil : $0 }
             ?? "/img/sec13f/\(manager.key).webp"
         return URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
@@ -705,19 +724,6 @@ func actionColor(_ action: FamousHoldingAction) -> Color {
     case .increased: HoldingsPalette.green
     case .decreased: HoldingsPalette.orange
     case .exited: HoldingsPalette.red
-    }
-}
-
-private func avatarTint(_ key: String) -> Color {
-    switch key {
-    case "ark": .purple
-    case "berkshire": .blue
-    case "duanyongping": .teal
-    case "lilu": .indigo
-    case "danbin": .orange
-    case "bridgewater": .cyan
-    case "soros": .red
-    default: .gray
     }
 }
 
