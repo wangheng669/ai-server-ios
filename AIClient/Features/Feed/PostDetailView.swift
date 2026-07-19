@@ -1445,7 +1445,14 @@ struct PostDetailView: View {
         guard post.isNewYorkTimes, let link = post.linkURL else { return }
         isLoadingNewYorkTimesBody = true
         defer { isLoadingNewYorkTimesBody = false }
-        guard let article = try? await client.fetchNewYorkTimesArticle(url: link) else { return }
+        let storedArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
+        let article: NewYorkTimesArticle?
+        if let storedArticle {
+            article = storedArticle
+        } else {
+            article = try? await client.fetchNewYorkTimesArticle(url: link)
+        }
+        guard let article else { return }
         newYorkTimesArticle = article
         let paragraphs = article.blocks.compactMap { block -> String? in
             guard case .paragraph(let text) = block else { return nil }

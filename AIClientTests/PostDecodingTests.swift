@@ -289,4 +289,22 @@ final class PostDecodingTests: XCTestCase {
             ])
         )
     }
+
+    func testNewYorkTimesInlineImageUsesServerProxy() throws {
+        let html = #"<div class="article-paragraph"><img src="https://static01.nyt.com/images/example.jpg"></div>"#
+        let article = try XCTUnwrap(NewYorkTimesArticleParser.extract(from: html))
+        guard case .image(let url, _, _) = try XCTUnwrap(article.blocks.first) else {
+            return XCTFail("Expected an image block")
+        }
+
+        XCTAssertTrue(url.path.hasSuffix("/api/v1/image-proxy"))
+    }
+
+    func testBuildsReadableNewYorkTimesParagraphsFromStoredText() throws {
+        let sentence = "这是一段已经保存到服务器的纽约时报正文。"
+        let article = try XCTUnwrap(NewYorkTimesArticle.storedText(Array(repeating: sentence, count: 12).joined(separator: " ")))
+
+        XCTAssertGreaterThan(article.blocks.count, 1)
+        XCTAssertTrue(article.blocks.allSatisfy { if case .paragraph = $0 { return true }; return false })
+    }
 }
