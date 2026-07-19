@@ -308,6 +308,9 @@ struct NewsFeedView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: source) {
+            if source == .rss { await model.loadRSSFeedsIfNeeded() }
+        }
     }
 
     private func feedList(for source: FeedSource, posts: [Post]) -> some View {
@@ -316,6 +319,20 @@ struct NewsFeedView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     Color.clear.frame(height: 53).id("feed-top")
+                    if source == .rss {
+                        rssSourceFilterBar
+                        Divider().opacity(0.55)
+                        if model.isLoadingRSSSelection {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("正在加载该来源")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 22)
+                        }
+                    }
                     if source == .flash {
                         flashFeedHeader
                     }
@@ -476,8 +493,65 @@ struct NewsFeedView: View {
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
+        if source == .rss, model.selectedRSSFeedID != nil {
+            return model.selectedRSSPosts
+        }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
+    }
+
+    private var rssSourceFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 10) {
+                rssSourceButton(id: nil, name: "全部", avatarURL: nil)
+                ForEach(model.rssFeeds) { feed in
+                    rssSourceButton(id: feed.id, name: feed.name, avatarURL: feed.preferredAvatarURL)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private func rssSourceButton(id: Int?, name: String, avatarURL: URL?) -> some View {
+        let isSelected = model.selectedRSSFeedID == id
+        return Button {
+            Task { await model.selectRSSFeed(id) }
+        } label: {
+            VStack(spacing: 5) {
+                ZStack {
+                    if let id {
+                        AvatarView(url: avatarURL, name: name, size: 34, rejectsUpscaledImages: true)
+                            .id(id)
+                    } else {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.10))
+                            .frame(width: 34, height: 34)
+                            .overlay {
+                                Image(systemName: "square.grid.2x2.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(isSelected ? Color.blue : Color.secondary)
+                            }
+                    }
+                }
+                .overlay {
+                    Circle()
+                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                        .padding(-2.5)
+                }
+
+                Text(name)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                    .frame(width: 52)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("筛选来源：\(name)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var flashFeedHeader: some View {

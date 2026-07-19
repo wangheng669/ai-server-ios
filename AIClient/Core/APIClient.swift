@@ -29,6 +29,38 @@ struct APIClient {
         }
     }
 
+    func fetchRSSFeeds() async throws -> [RSSFeedSource] {
+        let pageSize = 20
+        var feeds: [RSSFeedSource] = []
+        for page in 1...10 {
+            var parts = URLComponents(url: baseURL.appending(path: "api/v1/rss/feeds"), resolvingAgainstBaseURL: false)
+            parts?.queryItems = [.init(name: "page", value: String(page))]
+            guard let url = parts?.url else { throw APIError.invalidURL }
+            let response: RSSFeedsResponse = try await get(url)
+            feeds += response.data.feeds.filter(\.isEnabled)
+            if response.data.feeds.count < pageSize { break }
+        }
+        var seen = Set<Int>()
+        return feeds.filter { seen.insert($0.id).inserted }
+    }
+
+    func fetchRSSFeedPosts(feedID: Int, page: Int = 1, limit: Int = 20) async throws -> [Post] {
+        var parts = URLComponents(
+            url: baseURL.appending(path: "api/v1/rss/feeds/\(feedID)/posts"),
+            resolvingAgainstBaseURL: false
+        )
+        parts?.queryItems = [
+            .init(name: "page", value: String(page)),
+            .init(name: "limit", value: String(limit)),
+            .init(name: "sort", value: "time_desc"),
+            .init(name: "include_zero_score", value: "false"),
+            .init(name: "final_score", value: String(Post.minimumFeedScore))
+        ]
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: RSSFeedPostsResponse = try await get(url)
+        return response.data.posts
+    }
+
     private func fetchXueqiuPosts(page: Int, limit: Int) async throws -> [Post] {
         try await withThrowingTaskGroup(of: [Post].self) { group in
             for feedID in [14, 16] {

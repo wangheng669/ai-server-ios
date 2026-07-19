@@ -10,6 +10,10 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isSwitchingSource = false
     @Published private(set) var pendingRealtimePosts: [Post] = []
     @Published private(set) var xTranslations: [Int: String] = [:]
+    @Published private(set) var rssFeeds: [RSSFeedSource] = []
+    @Published private(set) var selectedRSSFeedID: Int?
+    @Published private(set) var selectedRSSPosts: [Post] = []
+    @Published private(set) var isLoadingRSSSelection = false
     @Published var errorMessage: String?
     @Published var source: FeedSource {
         didSet { UserDefaults.standard.set(source.rawValue, forKey: "feed.source") }
@@ -23,6 +27,8 @@ final class NewsFeedViewModel: ObservableObject {
     private var activeRefreshID: UUID?
     private let fetchPosts: (Int, Int, FeedSource) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
+    private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
+    private let fetchRSSFeedPosts: (Int) async throws -> [Post]
     private var loadingXTranslationIDs: Set<Int> = []
 
     init(
@@ -44,6 +50,8 @@ final class NewsFeedViewModel: ObservableObject {
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
         }
+        self.fetchRSSFeeds = { try await client.fetchRSSFeeds() }
+        self.fetchRSSFeedPosts = { feedID in try await client.fetchRSSFeedPosts(feedID: feedID) }
         if usesXFeedPreview {
             self.fetchPosts = { _, _, _ in Self.xFeedPreviewPosts }
         } else if let fetchPosts {
@@ -52,6 +60,38 @@ final class NewsFeedViewModel: ObservableObject {
             self.fetchPosts = { page, limit, source in
                 try await client.fetchPosts(page: page, limit: limit, source: source)
             }
+        }
+    }
+
+    func loadRSSFeedsIfNeeded() async {
+        guard rssFeeds.isEmpty else { return }
+        do {
+            rssFeeds = try await fetchRSSFeeds()
+        } catch is CancellationError {
+            return
+        } catch {
+            // The normal RSS feed remains usable if the source directory is unavailable.
+        }
+    }
+
+    func selectRSSFeed(_ feedID: Int?) async {
+        selectedRSSFeedID = feedID
+        selectedRSSPosts = []
+        guard let feedID else {
+            isLoadingRSSSelection = false
+            return
+        }
+        isLoadingRSSSelection = true
+        defer { if selectedRSSFeedID == feedID { isLoadingRSSSelection = false } }
+        do {
+            let result = try await fetchRSSFeedPosts(feedID)
+            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
+            selectedRSSPosts = result
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedRSSFeedID == feedID else { return }
+            errorMessage = error.localizedDescription
         }
     }
 
