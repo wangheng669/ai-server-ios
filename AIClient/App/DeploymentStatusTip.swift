@@ -37,6 +37,10 @@ struct DeploymentStatusSnapshot: Equatable {
         "\(commit)-\(updatedAt.timeIntervalSince1970)-\(stage ?? "")-\(title)"
     }
 
+    var completionIdentity: String {
+        "\(commit)-\(stage ?? "installed")"
+    }
+
     func isVisible(at date: Date = Date()) -> Bool {
         let age = date.timeIntervalSince(updatedAt)
         guard age >= -60 else { return false }
@@ -127,12 +131,19 @@ final class DeploymentStatusStore: ObservableObject {
 
     private let baseURL: URL
     private let session: URLSession
+    private let defaults: UserDefaults
     private var realtimeClient: RealtimeFeedClient?
     private var snapshotTask: Task<Void, Never>?
+    private static let acknowledgedCompletionKey = "iosDeploymentAcknowledgedCompletion"
 
-    init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession = .shared) {
+    init(
+        baseURL: URL = ServerConfiguration.currentURL,
+        session: URLSession = .shared,
+        defaults: UserDefaults = .standard,
+    ) {
         self.baseURL = baseURL
         self.session = session
+        self.defaults = defaults
     }
 
     func start() {
@@ -173,7 +184,18 @@ final class DeploymentStatusStore: ObservableObject {
     }
 
     private func apply(_ value: DeploymentStatusSnapshot) {
-        snapshot = value.isVisible() ? value : nil
+        guard value.isVisible() else {
+            snapshot = nil
+            return
+        }
+        if case .succeeded = value.phase {
+            if defaults.string(forKey: Self.acknowledgedCompletionKey) == value.completionIdentity {
+                snapshot = nil
+                return
+            }
+            defaults.set(value.completionIdentity, forKey: Self.acknowledgedCompletionKey)
+        }
+        snapshot = value
     }
 }
 
