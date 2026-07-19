@@ -19,7 +19,7 @@ struct PostDetailView: View {
     @State private var youtubePlaybackURL: URL?
     @State private var youtubePlayerReloadID = UUID()
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
-    @State private var isLoadingNewYorkTimesBody = false
+    @State private var isLoadingNewYorkTimesBody = true
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
     @State private var selectedWikipediaEntity: WikipediaSelection?
     @State private var presentedWikipediaEntity: WikipediaEntity?
@@ -114,8 +114,18 @@ struct PostDetailView: View {
         }
     }
 
+    @ViewBuilder
     private var newYorkTimesDetail: some View {
-        ScrollView {
+        if isLoadingNewYorkTimesBody {
+            VStack(spacing: 12) {
+                ProgressView()
+                Text("正在加载完整文章…")
+                    .font(.system(size: 16, design: .serif))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text(post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle)
                     .font(.system(size: 30, weight: .bold, design: .serif))
@@ -181,12 +191,14 @@ struct PostDetailView: View {
                                     }
                                 }
                             case .image(let url, let caption, let credit):
-                                NewYorkTimesArticleImage(
-                                    url: url,
-                                    caption: caption,
-                                    credit: credit,
-                                    height: 230
-                                )
+                                if !NewYorkTimesArticle.isSameImageAsset(url, post.imageURLs.first) {
+                                    NewYorkTimesArticleImage(
+                                        url: url,
+                                        caption: caption,
+                                        credit: credit,
+                                        height: 230
+                                    )
+                                }
                             }
                         }
                     }
@@ -200,6 +212,7 @@ struct PostDetailView: View {
             .padding(.horizontal, 18)
             .padding(.top, 14)
             .padding(.bottom, 30)
+            }
         }
     }
 
