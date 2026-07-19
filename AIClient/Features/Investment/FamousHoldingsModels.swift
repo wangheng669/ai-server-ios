@@ -1,11 +1,11 @@
 import Foundation
 
-struct FamousHoldingsResponse: Decodable {
+struct FamousHoldingsResponse: Codable {
     let success: Bool
     let data: FamousHoldings
 }
 
-struct FamousHoldings: Decodable {
+struct FamousHoldings: Codable {
     let generatedAt: String
     let reportDate: String
     let periodLabel: String
@@ -14,18 +14,19 @@ struct FamousHoldings: Decodable {
     let managers: [FamousHoldingsManager]
 }
 
-struct FamousHoldingsSummary: Decodable {
+struct FamousHoldingsSummary: Codable {
     let new: Int
     let increased: Int
     let decreased: Int
     let exited: Int
 }
 
-struct FamousHoldingsManager: Decodable, Identifiable {
+struct FamousHoldingsManager: Codable, Identifiable {
     let key: String
     let cik: String
     let displayName: String
     let institutionName: String
+    let portraitUrl: String?
     let reportDate: String
     let filingDate: String
     let positionsCount: Int
@@ -37,7 +38,7 @@ struct FamousHoldingsManager: Decodable, Identifiable {
     var id: String { key }
 }
 
-struct FamousHoldingChange: Decodable, Identifiable {
+struct FamousHoldingChange: Codable, Identifiable {
     let symbol: String?
     let name: String
     let companyLogo: String?
@@ -50,7 +51,7 @@ struct FamousHoldingChange: Decodable, Identifiable {
     var id: String { "\(symbol ?? name)-\(action.rawValue)" }
 }
 
-enum FamousHoldingAction: String, Decodable {
+enum FamousHoldingAction: String, Codable {
     case new
     case increased
     case decreased

@@ -11,18 +11,23 @@ final class FamousHoldingsStore {
     private(set) var loadingManagerKeys: Set<String> = []
 
     private let service: MarketService
+    private var hasLoadedFromNetwork = false
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
+        holdings = FamousHoldingsCache.load()
     }
 
     func load(force: Bool = false) async {
-        if !force, holdings != nil { return }
+        if !force, hasLoadedFromNetwork { return }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            holdings = try await service.famousHoldings()
+            let value = try await service.famousHoldings()
+            holdings = value
+            hasLoadedFromNetwork = true
+            FamousHoldingsCache.save(value)
             errorMessage = nil
         } catch is CancellationError {
             return
@@ -43,5 +48,26 @@ final class FamousHoldingsStore {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private enum FamousHoldingsCache {
+    private static let payloadKey = "market.famous-holdings.cache.v1"
+    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v1"
+    private static let maxAge: TimeInterval = 7 * 24 * 60 * 60
+
+    static func load() -> FamousHoldings? {
+        let defaults = UserDefaults.standard
+        let savedAt = defaults.double(forKey: savedAtKey)
+        guard savedAt > 0, Date().timeIntervalSince1970 - savedAt <= maxAge,
+              let data = defaults.data(forKey: payloadKey) else { return nil }
+        return try? JSONDecoder().decode(FamousHoldings.self, from: data)
+    }
+
+    static func save(_ holdings: FamousHoldings) {
+        guard let data = try? JSONEncoder().encode(holdings) else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(data, forKey: payloadKey)
+        defaults.set(Date().timeIntervalSince1970, forKey: savedAtKey)
     }
 }

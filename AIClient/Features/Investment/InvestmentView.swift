@@ -2,7 +2,7 @@ import SwiftUI
 
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
-    case holdings = "持仓"
+    case holdings = "知名投资人"
 
     var id: Self { self }
 }
@@ -44,6 +44,7 @@ struct InvestmentView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
+        .task { await holdingsStore.load() }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
         .onChange(of: holdingsShowsDetail) { _, _ in showsDetail = false }
         .onChange(of: section) { _, _ in
@@ -81,7 +82,7 @@ private struct InvestmentHeader: View {
             }
         }
         .padding(3)
-        .frame(width: 184, height: 44)
+        .frame(width: 236, height: 44)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(uiColor: .separator).opacity(0.45)))
         .frame(maxWidth: .infinity)
