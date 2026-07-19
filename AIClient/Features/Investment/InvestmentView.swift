@@ -38,10 +38,8 @@ struct InvestmentView: View {
                     FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
                     if !holdingsShowsDetail {
                         InvestmentHeader(selection: $section, floatsOverContent: true)
-                            .padding(.top, 46)
                     }
                 }
-                .ignoresSafeArea(edges: .top)
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -52,13 +50,17 @@ struct InvestmentView: View {
             }
         }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
-        .onChange(of: holdingsShowsDetail) { _, _ in showsDetail = false }
-        .onChange(of: section) { _, _ in
+        .onChange(of: holdingsShowsDetail) { _, value in
+            showsDetail = value
+        }
+        .onChange(of: section) { _, value in
             marketShowsDetail = false
             holdingsShowsDetail = false
             showsDetail = false
         }
-        .onDisappear { showsDetail = false }
+        .onDisappear {
+            showsDetail = false
+        }
     }
 }
 
@@ -67,18 +69,18 @@ private struct InvestmentHeader: View {
     let floatsOverContent: Bool
 
     var body: some View {
-        HStack(spacing: 26) {
+        HStack(spacing: 17) {
             ForEach(InvestmentSection.allCases) { section in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) { selection = section }
                 } label: {
                     VStack(spacing: 8) {
                         Text(section.rawValue)
-                            .font(.system(size: 16, weight: selection == section ? .bold : .medium))
+                            .font(.system(size: 14, weight: selection == section ? .bold : .medium))
                             .foregroundStyle(selection == section ? HoldingsPalette.indigo : Color.secondary)
                         Capsule()
                             .fill(selection == section ? HoldingsPalette.indigo : .clear)
-                            .frame(width: 24, height: 2)
+                            .frame(width: 16, height: 2)
                     }
                 }
                 .buttonStyle(.plain)
@@ -87,6 +89,7 @@ private struct InvestmentHeader: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 22)
-        .padding(.vertical, floatsOverContent ? 0 : 8)
+        .padding(.top, 6)
+        .padding(.bottom, floatsOverContent ? 0 : 10)
     }
 }

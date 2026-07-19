@@ -243,17 +243,22 @@ struct APIClient {
     }
 
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
-        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw APIError.invalidResponse
-        }
-        guard let html = String(data: data, encoding: .utf8),
-              let article = NewYorkTimesArticleParser.extract(from: html) else {
-            throw APIError.decoding(NYTimesArticleError.bodyMissing)
-        }
-        return article
+        guard let previewURL = Self.articlePreviewURL(for: url, baseURL: baseURL) else { throw APIError.invalidURL }
+        let response: ArticlePreviewResponse = try await get(previewURL)
+        if let article = NewYorkTimesArticleParser.extract(from: response.data.content) { return article }
+        let paragraphs = response.data.textContent
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map(NewYorkTimesArticleBlock.paragraph)
+        guard !paragraphs.isEmpty else { throw APIError.decoding(NYTimesArticleError.bodyMissing) }
+        return NewYorkTimesArticle(blocks: paragraphs)
+    }
+
+    static func articlePreviewURL(for articleURL: URL, baseURL: URL) -> URL? {
+        var parts = URLComponents(url: baseURL.appending(path: "api/v1/post/preview"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [.init(name: "url", value: articleURL.absoluteString)]
+        return parts?.url
     }
 
     private func get<Response: Decodable>(_ url: URL) async throws -> Response {
@@ -288,6 +293,31 @@ struct APIClient {
 
 struct NewYorkTimesArticle: Equatable {
     let blocks: [NewYorkTimesArticleBlock]
+
+    static func storedText(_ text: String) -> NewYorkTimesArticle? {
+        let normalized = text.replacingOccurrences(
+            of: #"(?<=[。！？])\s+"#,
+            with: "\n",
+            options: .regularExpression
+        )
+        let sentences = normalized
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !sentences.isEmpty else { return nil }
+        var paragraphs: [NewYorkTimesArticleBlock] = []
+        var current = ""
+        for sentence in sentences {
+            current = current.isEmpty ? sentence : current + " " + sentence
+            if current.count >= 180 {
+                paragraphs.append(.paragraph(current))
+                current = ""
+            }
+        }
+        if !current.isEmpty { paragraphs.append(.paragraph(current)) }
+        return NewYorkTimesArticle(blocks: paragraphs)
+    }
 }
 
 enum NewYorkTimesArticleBlock: Equatable {
@@ -342,7 +372,7 @@ enum NewYorkTimesArticleParser {
         for attributeName in ["data-src", "src"] {
             if let value = attribute(named: attributeName, in: fragment),
                let decoded = decodeHTML(value),
-               let url = URL(string: decoded) {
+               let url = MediaURL.image(decoded) {
                 return url
             }
         }
@@ -388,6 +418,14 @@ enum NewYorkTimesArticleParser {
 }
 
 private enum NYTimesArticleError: Error { case bodyMissing }
+
+private struct ArticlePreviewResponse: Decodable {
+    let data: Payload
+    struct Payload: Decodable {
+        let content: String
+        let textContent: String
+    }
+}
 
 private struct HealthResponse: Decodable { let status: String }
 private struct XBookmarkRequest: Encodable {
