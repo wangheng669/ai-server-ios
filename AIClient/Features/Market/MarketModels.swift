@@ -127,6 +127,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let pe: Double?
     let marketCap: Double?
     let volume: Double?
+    let turnover: Double?
     let dataSource: String?
     let delaySeconds: Int?
     let marketSession: String?
@@ -163,7 +164,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case symbol, name, price, openPrice, previousClose, high, low, pe, marketCap, volume
+        case symbol, name, price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
         case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, trend, nightTrend, stale
     }
@@ -179,6 +180,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         pe: Double?,
         marketCap: Double?,
         volume: Double?,
+        turnover: Double?,
         dataSource: String?,
         delaySeconds: Int?,
         marketSession: String?,
@@ -202,6 +204,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.pe = pe
         self.marketCap = marketCap
         self.volume = volume
+        self.turnover = turnover
         self.dataSource = dataSource
         self.delaySeconds = delaySeconds
         self.marketSession = marketSession
@@ -228,6 +231,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         pe = try values.decodeIfPresent(Double.self, forKey: .pe)
         marketCap = try values.decodeIfPresent(Double.self, forKey: .marketCap)
         volume = try values.decodeIfPresent(Double.self, forKey: .volume)
+        turnover = try values.decodeIfPresent(Double.self, forKey: .turnover)
         dataSource = try values.decodeIfPresent(String.self, forKey: .dataSource)
         delaySeconds = try values.decodeIfPresent(Int.self, forKey: .delaySeconds)
         marketSession = try values.decodeIfPresent(String.self, forKey: .marketSession)
@@ -254,6 +258,7 @@ struct MarketQuoteUpdate: Decodable {
     let pe: Double?
     let marketCap: Double?
     let volume: Double?
+    let turnover: Double?
     let dataSource: String?
     let delaySeconds: Int?
     let marketSession: String?
@@ -283,6 +288,7 @@ struct MarketQuoteUpdate: Decodable {
             pe: pe ?? current?.pe,
             marketCap: marketCap ?? current?.marketCap,
             volume: volume ?? current?.volume,
+            turnover: turnover ?? current?.turnover,
             dataSource: dataSource ?? current?.dataSource,
             delaySeconds: delaySeconds ?? current?.delaySeconds,
             marketSession: marketSession ?? current?.marketSession,
