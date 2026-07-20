@@ -280,6 +280,28 @@ private struct MarketTerminalHero: View {
                 .frame(height: 76)
             } else if region == .china {
                 ChinaMarketMetrics(store: store)
+            } else if region == .japan {
+                RegionalMarketMetrics(
+                    store: store,
+                    exchangeTitle: "美元兑日元",
+                    exchangeSymbol: "USDJPY",
+                    exchangeDigits: 2,
+                    yieldTitle: "日本 10Y 国债",
+                    yieldSymbol: "JP10Y",
+                    turnoverTitle: "东证成交额",
+                    turnoverSymbol: "^TOPX"
+                )
+            } else if region == .korea {
+                RegionalMarketMetrics(
+                    store: store,
+                    exchangeTitle: "美元兑韩元",
+                    exchangeSymbol: "USDKRW",
+                    exchangeDigits: 1,
+                    yieldTitle: "韩国 10Y 国债",
+                    yieldSymbol: "KR10Y",
+                    turnoverTitle: "KOSPI 成交额",
+                    turnoverSymbol: "^KS11"
+                )
             } else {
                 HStack(spacing: 0) {
                 MarketTerminalMetric(
@@ -340,6 +362,55 @@ private struct MarketTerminalHero: View {
     private var heroDate: String {
         let date = quote?.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
         return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits))
+    }
+}
+
+private struct RegionalMarketMetrics: View {
+    let store: MarketStore
+    let exchangeTitle: String
+    let exchangeSymbol: String
+    let exchangeDigits: Int
+    let yieldTitle: String
+    let yieldSymbol: String
+    let turnoverTitle: String
+    let turnoverSymbol: String
+
+    private var exchangeQuote: MarketQuote? { store.quote(symbol: exchangeSymbol) }
+    private var yieldQuote: MarketQuote? { store.quote(symbol: yieldSymbol) }
+    private var turnoverQuote: MarketQuote? { store.quote(symbol: turnoverSymbol) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            MarketTerminalMetric(
+                title: exchangeTitle,
+                value: exchangeQuote.map { number($0.price, digits: exchangeDigits) } ?? "—",
+                change: exchangeQuote?.formattedPercent ?? exchangeSymbol,
+                tint: quoteTint(exchangeQuote),
+                trend: exchangeQuote?.trend ?? []
+            )
+            TerminalDivider()
+            MarketTerminalMetric(
+                title: yieldTitle,
+                value: yieldQuote.map { String(format: "%.2f%%", $0.price) } ?? "—",
+                change: yieldQuote?.formattedPercent ?? "等待行情",
+                tint: quoteTint(yieldQuote),
+                trend: yieldQuote?.trend ?? []
+            )
+            TerminalDivider()
+            MarketTerminalMetric(
+                title: turnoverTitle,
+                value: turnoverQuote.flatMap(\.turnover).map(regionalTurnoverText) ?? "—",
+                change: turnoverQuote.flatMap(\.turnover) == nil ? "等待行情" : "当日累计",
+                tint: .secondary,
+                trend: []
+            )
+        }
+    }
+
+    private func regionalTurnoverText(_ value: Double) -> String {
+        if value >= 1_000_000_000_000 { return String(format: "%.2f万亿", value / 1_000_000_000_000) }
+        if value >= 100_000_000 { return String(format: "%.0f亿", value / 100_000_000) }
+        return compactNumber(value)
     }
 }
 
