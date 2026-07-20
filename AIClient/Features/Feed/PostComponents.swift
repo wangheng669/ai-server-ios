@@ -493,10 +493,10 @@ private struct XInlineVideoView: View {
             thumbnail = cached
             return
         }
-        if let thumbnailURL,
+        if let thumbnailURL = thumbnailURL ?? MediaURL.videoThumbnail(for: url),
            let remoteThumbnail = await ImageLoader.load(
                thumbnailURL,
-               targetSize: CGSize(width: 1_200, height: 1_200)
+               targetSize: CGSize(width: 720, height: 720)
            ) {
             guard !Task.isCancelled else { return }
             thumbnail = remoteThumbnail

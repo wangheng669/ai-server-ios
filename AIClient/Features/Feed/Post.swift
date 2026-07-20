@@ -757,6 +757,27 @@ enum MediaURL {
         return resolved(value, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
     }
 
+    static func videoThumbnail(for videoURL: URL) -> URL? {
+        let originalURL: URL
+        if videoURL.path.hasSuffix("/media-proxy"),
+           let proxiedURL = URLComponents(url: videoURL, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "url" })?
+            .value,
+           let resolvedURL = URL(string: proxiedURL) {
+            originalURL = resolvedURL
+        } else {
+            originalURL = videoURL
+        }
+
+        var components = URLComponents(
+            url: ServerConfiguration.currentURL.appending(path: "api/v1/video-thumbnail"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [.init(name: "url", value: originalURL.absoluteString)]
+        return components?.url
+    }
+
     private static func bilibiliBVID(from url: URL) -> String? {
         guard let host = url.host?.lowercased(), host == "bilibili.com" || host.hasSuffix(".bilibili.com") else { return nil }
         return url.pathComponents.first { $0.range(of: #"^BV[0-9A-Za-z]{10}$"#, options: .regularExpression) != nil }
