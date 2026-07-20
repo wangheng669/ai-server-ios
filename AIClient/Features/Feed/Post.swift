@@ -132,8 +132,14 @@ struct FlashItem: Decodable {
     let id, time, text, source, linkURL, avatarURL: String?
     let isImportant: Bool?
     let finalScore: Double?
+    let similarityGroupId: Int64?
+    let similarityScore: Double?
+    let similarCount: Int?
+    let platformCount: Int?
+    let platforms: [String]?
     enum CodingKeys: String, CodingKey {
         case id, time, text, source, isImportant, finalScore
+        case similarityGroupId, similarityScore, similarCount, platformCount, platforms
         case linkURL = "linkUrl"
         case avatarURL = "avatarUrl"
     }
@@ -568,13 +574,20 @@ struct Post: Decodable, Identifiable, Hashable {
     static func flash(_ item: FlashItem) -> Post {
         let isImportant = item.finalScore.map { $0 >= importantFlashScore } ?? (item.isImportant == true)
         return Post(
-            id: syntheticID("flash:\(item.id ?? ""):\(item.text ?? "")"),
+            id: syntheticID("flash:\(item.similarityGroupId.map(String.init) ?? item.id ?? ""):\(item.text ?? "")"),
             title: nil, text: item.text, summary: nil, content: item.text, contentZH: nil,
             source: "flash", formattedTime: item.time, weightReason: nil, finalScore: item.finalScore, weight: nil,
             postLink: item.linkURL, articlePostAt: nil,
             user: .init(userName: nil, userScreenName: flashSourceName(item.source), avatarURL: item.avatarURL, userDesc: nil),
             postTags: isImportant ? [.init(id: 0, name: "重要")] : [],
-            images: [], videos: [], feedRank: nil, meta: nil
+            images: [], videos: [], feedRank: nil,
+            meta: .flash(
+                similarityGroupId: item.similarityGroupId,
+                similarityScore: item.similarityScore,
+                similarCount: item.similarCount,
+                platformCount: item.platformCount,
+                platforms: item.platforms
+            )
         )
     }
 
@@ -611,6 +624,11 @@ struct PostMeta: Decodable, Hashable {
     let zhihuAnswerCommentCount: Int?
     let rssFeedName: String?
     let rssArticleLink: String?
+    let flashSimilarityGroupId: Int64?
+    let flashSimilarityScore: Double?
+    let flashSimilarCount: Int?
+    let flashPlatformCount: Int?
+    let flashPlatforms: [String]?
     enum CodingKeys: String, CodingKey {
         case metrics, lang, urls
         case photoCredit = "photo_credit"
@@ -627,6 +645,29 @@ struct PostMeta: Decodable, Hashable {
         case zhihuAnswerCommentCount = "zhihu_answer_comment_count"
         case rssFeedName = "rss_feed_name"
         case rssArticleLink = "rss_article_link"
+        case flashSimilarityGroupId, flashSimilarityScore, flashSimilarCount, flashPlatformCount, flashPlatforms
+    }
+
+    static func flash(
+        similarityGroupId: Int64?,
+        similarityScore: Double?,
+        similarCount: Int?,
+        platformCount: Int?,
+        platforms: [String]?
+    ) -> PostMeta {
+        PostMeta(
+            metrics: nil, lang: nil, urls: nil, photoCredit: nil,
+            zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
+            zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
+            zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
+            zhihuAnswerVoteupCount: nil, zhihuAnswerCommentCount: nil,
+            rssFeedName: nil, rssArticleLink: nil,
+            flashSimilarityGroupId: similarityGroupId,
+            flashSimilarityScore: similarityScore,
+            flashSimilarCount: similarCount,
+            flashPlatformCount: platformCount,
+            flashPlatforms: platforms
+        )
     }
 }
 
