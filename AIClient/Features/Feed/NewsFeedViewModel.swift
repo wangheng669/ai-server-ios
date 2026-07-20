@@ -210,6 +210,7 @@ final class NewsFeedViewModel: ObservableObject {
     private func pageSize(for source: FeedSource) -> Int {
         switch source {
         case .weibo, .douyin, .truth: 20
+        case .flash: 20
         case .x: 10
         default: defaultPageSize
         }
@@ -263,9 +264,9 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    func loadMoreIfNeeded(current post: Post) async {
+    func loadMoreIfNeeded(current post: Post, thresholdPostID: Int? = nil) async {
         guard !isSwitchingSource,
-              post.id == posts.last?.id,
+              post.id == (thresholdPostID ?? posts.last?.id),
               canLoadMore,
               !isLoadingMore,
               !isLoading else { return }
