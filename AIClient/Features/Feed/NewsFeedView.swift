@@ -1049,7 +1049,10 @@ private struct EmbeddedWebView: UIViewRepresentable {
         }
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
+        // Weibo's photo viewer uses horizontal swipes to move between images.
+        // WKWebView's history gesture competes with that gesture and can navigate
+        // back to the hot-search list while the user is browsing photos.
+        webView.allowsBackForwardNavigationGestures = !Self.isWeiboURL(url)
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         context.coordinator.observe(webView)
         model.webView = webView
