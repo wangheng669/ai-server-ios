@@ -13,9 +13,10 @@ on:
       install_target:
         description: Mac that can currently reach the iPhone
         required: false
-        default: home
+        default: auto
         type: choice
         options:
+          - auto
           - home
           - office
 
@@ -116,7 +117,7 @@ jobs:
       - self-hosted
       - macOS
       - ARM64
-      - ${{ inputs.install_target == 'office' && 'office-builder' || 'home-installer' }}
+      - ${{ (inputs.install_target == 'office' || (inputs.install_target != 'home' && vars.IOS_INSTALL_TARGET == 'office')) && 'office-builder' || 'home-installer' }}
     timeout-minutes: 10
 
     steps:
