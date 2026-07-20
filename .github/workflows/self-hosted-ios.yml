@@ -10,6 +10,14 @@ on:
         description: Branch, tag, or commit SHA to build and install
         required: false
         type: string
+      install_target:
+        description: Mac that can currently reach the iPhone
+        required: false
+        default: home
+        type: choice
+        options:
+          - home
+          - office
 
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('Install {0}', inputs.git_ref || github.ref_name) || github.event.head_commit.message }}
 
@@ -77,13 +85,13 @@ jobs:
           retention-days: 3
 
   install:
-    name: Sign and install on home iPhone
+    name: Sign and install on selected iPhone host
     needs: build
     runs-on:
       - self-hosted
       - macOS
       - ARM64
-      - home-installer
+      - ${{ inputs.install_target == 'office' && 'office-builder' || 'home-installer' }}
     timeout-minutes: 10
 
     steps:
