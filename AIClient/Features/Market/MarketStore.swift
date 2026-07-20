@@ -135,11 +135,15 @@ final class MarketStore {
     }
 
     func quote(symbol: String) -> MarketQuote? {
-        dashboard?.coreIndices.first(where: { $0.symbol == symbol })
-            ?? dashboard?.metrics.first(where: { $0.symbol == symbol })
-            ?? dashboard?.components.first(where: { $0.symbol == symbol })
-            ?? dashboard?.crypto.first(where: { $0.symbol == symbol })
-            ?? indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })?.quote
+        if let quote = dashboard?.coreIndices.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.metrics.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.components.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.crypto.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.indexSessions?.values.first(where: { $0.symbol == symbol }) { return quote }
+        return indexConstituents.values.lazy
+            .flatMap(\.items)
+            .first(where: { $0.quote.symbol == symbol })?
+            .quote
     }
 
     func constituent(symbol: String) -> MarketIndexConstituent? {
