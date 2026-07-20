@@ -10,6 +10,8 @@ struct AIServerClientApp: App {
 }
 
 private struct EditorialRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var deploymentStore = DeploymentStatusStore()
     @State private var selectedTab: RootTab = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
@@ -39,33 +41,94 @@ private struct EditorialRootView: View {
         #endif
     }
 
-    var body: some View {
-        TabView(selection: $selectedTab) {
-            NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
-                .tag(RootTab.observation)
-                .tabItem { Label("观点", systemImage: "newspaper.fill") }
-                .toolbar(feedHidesTabBar || feedShowsDetail ? .hidden : .visible, for: .tabBar)
+    private var deploymentStatus: DeploymentStatusSnapshot? {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") { return nil }
+        #endif
+        return deploymentPreview ?? deploymentStore.snapshot
+    }
 
-            InvestmentView(showsDetail: $marketShowsDetail)
-                .tag(RootTab.investment)
-                .tabItem { Label("投资", systemImage: "chart.line.uptrend.xyaxis") }
-                .toolbar(marketShowsDetail ? .hidden : .visible, for: .tabBar)
-
-            PeopleView(showsDetail: $peopleShowsDetail)
-                .tag(RootTab.people)
-                .tabItem { Label("人物", systemImage: "person.2.fill") }
-                .toolbar(peopleShowsDetail ? .hidden : .visible, for: .tabBar)
+    private var hidesRootTabBar: Bool {
+        switch selectedTab {
+        case .observation: feedHidesTabBar || feedShowsDetail
+        case .investment: marketShowsDetail
+        case .people: peopleShowsDetail
         }
-        .tint(.blue)
+    }
+
+    var body: some View {
+        Group {
+            switch selectedTab {
+            case .observation:
+                NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
+            case .investment:
+                InvestmentView(showsDetail: $marketShowsDetail)
+            case .people:
+                PeopleView(showsDetail: $peopleShowsDetail)
+            }
+        }
+        .background(Color.white.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !hidesRootTabBar {
+                RootNavigationBar(selection: $selectedTab)
+                    .padding(.horizontal, 22)
+                    .offset(y: 8)
+            }
+        }
         .overlay(alignment: .topTrailing) {
-            if let deploymentPreview {
+            if let deploymentStatus {
                 DeploymentStatusTip(
-                    snapshot: deploymentPreview,
-                    initiallyExpanded: !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
+                    snapshot: deploymentStatus,
+                    initiallyExpanded: deploymentPreview != nil
+                        ? !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
+                        : true
                 )
+                    .id(deploymentStatus.identity)
                     .padding(.top, 6)
                     .padding(.trailing, 12)
             }
         }
+        .task { deploymentStore.start() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                deploymentStore.start()
+            } else {
+                deploymentStore.stop()
+            }
+        }
+    }
+}
+
+private struct RootNavigationBar: View {
+    @Binding var selection: RootTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            item(.observation, title: "观点", icon: "list.bullet.rectangle")
+            item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
+            item(.people, title: "人物", icon: "person")
+        }
+        .frame(height: 50)
+        .background(Color(uiColor: .systemBackground).opacity(0.98), in: Capsule())
+        .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
+        .overlay(Capsule().stroke(Color.black.opacity(0.025)))
+    }
+
+    private func item(_ tab: RootTab, title: String, icon: String) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.16)) { selection = tab }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: selection == tab ? .semibold : .regular))
+                Text(title)
+                    .font(.system(size: 11, weight: selection == tab ? .semibold : .regular))
+            }
+            .foregroundStyle(selection == tab ? HoldingsPalette.purple : Color.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selection == tab ? .isSelected : [])
     }
 }

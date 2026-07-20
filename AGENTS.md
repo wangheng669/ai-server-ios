@@ -2,6 +2,14 @@
 
 本仓库以 GitHub 的 `main` 分支作为两台 Mac 之间唯一的稳定代码源。开发任务通过 `codex/<简短任务名>` 分支提交，由 Mac mini 上的中央 AI 合并流程串行整合到 `main`。Mac mini 负责构建，MacBook Air 负责签名并安装到真机。
 
+## AI Server 服务器
+
+- 通过 `ssh mac-x` 连接 AI Server 所在服务器。
+- AI Server 主项目的绝对路径是 `/home/wanngheng/home/ai_server`，GitHub 仓库为 `wangheng669/ai_server`。
+- 涉及后端接口、服务器静态资源或部署时，先进入该主项目并检查其 `AGENTS.md`、工作区状态和现有部署约定。
+- 不要把 `/home/wanngheng/actions-runner/ai_server`（Actions Runner）、其 `_work` 目录或 `~/.codex/worktrees` 下的副本当作日常修改入口。
+- 未经用户明确要求，不直接修改、部署或重启服务器服务；可先进行只读检查。
+
 ## 开始任务
 
 1. 先运行 `git status --short`。
@@ -37,4 +45,4 @@
 - 禁止开发任务直接推送 `main`；只有中央 AI 合并流程可以在测试通过后更新 `main`。
 - `main` 推送会自动安装到真机；已经同步且没有新提交时，可通过手动入口重新安装。
 - 中央 AI 不得通过整段选择 ours/theirs、删除任一功能或跳过测试来规避冲突。
-- GitHub 仓库必须配置 `OPENAI_API_KEY` Actions Secret，冲突时才能启动 Codex；密钥缺失时工作流会安全失败且不更新 `main`。
+- Mac mini 的 `office-builder` Runner 必须与已登录 Codex 的本地用户运行；本地 Codex 未登录时工作流会安全失败且不更新 `main`。

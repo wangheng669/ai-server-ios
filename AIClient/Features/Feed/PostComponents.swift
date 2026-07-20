@@ -40,6 +40,7 @@ struct AvatarView: View {
     let size: CGFloat
     var assetName: String? = nil
     var cornerRadius: CGFloat? = nil
+    var rejectsUpscaledImages = false
     @State private var image: UIImage?
 
     private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
@@ -58,7 +59,14 @@ struct AvatarView: View {
         .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
         .task(id: url) {
             guard assetName == nil else { return }
-            image = await ImageLoader.load(url, targetSize: CGSize(width: size, height: size))
+            let loaded = await ImageLoader.load(url, targetSize: CGSize(width: size, height: size))
+            if rejectsUpscaledImages,
+               let cgImage = loaded?.cgImage,
+               min(cgImage.width, cgImage.height) < Int(size * UIScreen.main.scale * 0.9) {
+                image = nil
+            } else {
+                image = loaded
+            }
         }
     }
 }

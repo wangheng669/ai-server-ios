@@ -29,6 +29,12 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
 
+      - name: Report merge started
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.02 merging
+
       - name: Merge task into latest main
         id: merge
         env:
@@ -54,19 +60,39 @@ jobs:
             echo "has_conflicts=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve merge conflicts with Codex
+      - name: Resolve merge conflicts with local Codex
         if: steps.merge.outputs.has_conflicts == 'true' && steps.merge.outputs.already_merged == 'false'
-        uses: openai/codex-action@v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          sandbox: workspace-write
-          model: gpt-5.6-sol
-          effort: high
-          prompt: |
+        env:
+          HOME: /Users/wangheng
+        run: |
+          set -euo pipefail
+          codex_bin="$(find "$HOME/.nvm/versions/node" -path '*/bin/codex' -type f 2>/dev/null | sort -V | tail -1)"
+          if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
+            echo "Local Codex CLI is not installed for $USER." >&2
+            exit 1
+          fi
+          auth_file="$HOME/.codex/auth.json"
+          if [[ ! -f "$auth_file" ]]; then
+            echo "Local Codex login was not found for $USER." >&2
+            exit 1
+          fi
+          automation_home="$RUNNER_TEMP/codex-ai-merge-home"
+          install -d -m 700 "$automation_home"
+          install -m 600 "$auth_file" "$automation_home/auth.json"
+          CODEX_HOME="$automation_home" "$codex_bin" login status
+
+          CODEX_HOME="$automation_home" "$codex_bin" exec \
+            --ephemeral \
+            --ignore-user-config \
+            --model gpt-5.6-sol \
+            --config 'model_reasoning_effort="high"' \
+            --sandbox workspace-write \
+            --cd "$GITHUB_WORKSPACE" \
+            - <<'PROMPT'
             Resolve the Git merge conflicts currently present in this repository.
 
-            Goal: preserve the intended behavior from both the latest origin/main and
-            the task commit ${{ github.sha }} from branch ${{ github.ref_name }}.
+            Goal: preserve the intended behavior from both the latest origin/main
+            and the task branch being merged.
 
             Requirements:
             - Read AGENTS.md and follow its safety and verification rules.
@@ -77,6 +103,7 @@ jobs:
             - Leave the working tree with no unmerged paths.
             - If the two intentions are genuinely incompatible, leave that conflict unresolved
               and explain why instead of guessing. The workflow will stop safely.
+          PROMPT
 
       - name: Verify conflict resolution and create merge commit
         if: steps.merge.outputs.already_merged == 'false'
@@ -97,7 +124,9 @@ jobs:
         if: steps.merge.outputs.already_merged == 'false'
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: |
+          ./ci/report-ios-deployment.sh running 0.04 merge-testing || true
           set -o pipefail
           xcodebuild test \
             -project AIServerClient.xcodeproj \
@@ -105,6 +134,13 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 16e' \
             -derivedDataPath "$RUNNER_TEMP/AIServerClient-AIMergeTests" \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Report merge verification completed
+        if: steps.merge.outputs.already_merged == 'false'
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.06 publishing
 
       - name: Publish merged main
         if: steps.merge.outputs.already_merged == 'false'
@@ -127,3 +163,10 @@ jobs:
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/self-hosted-ios.yml/dispatches" \
             --data '{"ref":"main","inputs":{"git_ref":"main"}}'
+
+      - name: Report merge failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh failed 0 merge-failed

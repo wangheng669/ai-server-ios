@@ -497,7 +497,7 @@ struct NewsFeedView: View {
             HStack(alignment: .top, spacing: 10) {
                 rssSourceButton(id: nil, name: "全部", avatarURL: nil)
                 ForEach(model.rssFeeds) { feed in
-                    rssSourceButton(id: feed.id, name: feed.name, avatarURL: feed.iconURL)
+                    rssSourceButton(id: feed.id, name: feed.name, avatarURL: feed.preferredAvatarURL)
                 }
             }
             .padding(.horizontal, 14)
@@ -514,7 +514,7 @@ struct NewsFeedView: View {
             VStack(spacing: 5) {
                 ZStack {
                     if let id {
-                        AvatarView(url: avatarURL, name: name, size: 34)
+                        AvatarView(url: avatarURL, name: name, size: 34, rejectsUpscaledImages: true)
                             .id(id)
                     } else {
                         Circle()

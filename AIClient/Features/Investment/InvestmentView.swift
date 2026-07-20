@@ -2,7 +2,7 @@ import SwiftUI
 
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
-    case holdings = "持仓"
+    case holdings = "知名投资人"
 
     var id: Self { self }
 }
@@ -38,20 +38,29 @@ struct InvestmentView: View {
                     FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
                     if !holdingsShowsDetail {
                         InvestmentHeader(selection: $section, floatsOverContent: true)
-                            .padding(.top, 10)
                     }
                 }
             }
         }
         .background(Color(uiColor: .systemBackground))
+        .task {
+            await holdingsStore.load()
+            if let managers = holdingsStore.holdings?.managers {
+                await InvestorPortraitLoader.preload(managers)
+            }
+        }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
-        .onChange(of: holdingsShowsDetail) { _, _ in showsDetail = false }
-        .onChange(of: section) { _, _ in
+        .onChange(of: holdingsShowsDetail) { _, value in
+            showsDetail = value
+        }
+        .onChange(of: section) { _, value in
             marketShowsDetail = false
             holdingsShowsDetail = false
             showsDetail = false
         }
-        .onDisappear { showsDetail = false }
+        .onDisappear {
+            showsDetail = false
+        }
     }
 }
 
@@ -60,31 +69,27 @@ private struct InvestmentHeader: View {
     let floatsOverContent: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 17) {
             ForEach(InvestmentSection.allCases) { section in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) { selection = section }
                 } label: {
-                    Text(section.rawValue)
-                        .font(.system(size: 15, weight: selection == section ? .semibold : .regular))
-                        .foregroundStyle(selection == section ? Color.white : Color.primary.opacity(0.62))
-                        .frame(maxWidth: .infinity, minHeight: 38)
-                        .background {
-                            if selection == section {
-                                RoundedRectangle(cornerRadius: 17)
-                                    .fill(Color.accentColor)
-                            }
-                        }
+                    VStack(spacing: 8) {
+                        Text(section.rawValue)
+                            .font(.system(size: 14, weight: selection == section ? .bold : .medium))
+                            .foregroundStyle(selection == section ? HoldingsPalette.indigo : Color.secondary)
+                        Capsule()
+                            .fill(selection == section ? HoldingsPalette.indigo : .clear)
+                            .frame(width: 16, height: 2)
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == section ? .isSelected : [])
             }
         }
-        .padding(3)
-        .frame(width: 184, height: 44)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(uiColor: .separator).opacity(0.45)))
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, floatsOverContent ? 0 : 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 22)
+        .padding(.top, 6)
+        .padding(.bottom, floatsOverContent ? 0 : 10)
     }
 }

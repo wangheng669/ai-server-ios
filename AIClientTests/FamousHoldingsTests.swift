@@ -3,10 +3,59 @@ import XCTest
 
 final class FamousHoldingsTests: XCTestCase {
     func testDecodesFamousHoldingsContract() throws {
-        let data = Data(#"{"success":true,"data":{"generatedAt":"2026-07-16T00:00:00Z","reportDate":"2026-03-31","periodLabel":"2026 Q1","disclaimer":"公开披露数据，非实时交易","summary":{"new":1,"increased":2,"decreased":3,"exited":4},"managers":[{"key":"ark","cik":"0001697748","displayName":"凯茜·伍德","institutionName":"ARK Investment Management","reportDate":"2026-03-31","filingDate":"2026-05-12","positionsCount":182,"totalValueUsd":12859485476,"summary":{"new":1,"increased":2,"decreased":3,"exited":4},"changesCount":1,"changes":[{"symbol":"TSLA","name":"Tesla Inc","companyLogo":"/img/company-logos/tsla.png","action":"decreased","previousWeightPct":9.1,"weightPct":7.4,"weightChangePct":-1.7,"valueUsd":1000}]}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"generatedAt":"2026-07-16T00:00:00Z","reportDate":"2026-03-31","periodLabel":"2026 Q1","disclaimer":"公开披露数据，非实时交易","summary":{"new":1,"increased":2,"decreased":3,"exited":4},"managers":[{"key":"ark","cik":"0001697748","displayName":"凯茜·伍德","institutionName":"ARK Investment Management","portraitUrl":"/img/sec13f/ark.webp","reportDate":"2026-03-31","filingDate":"2026-05-12","positionsCount":182,"totalValueUsd":12859485476,"summary":{"new":1,"increased":2,"decreased":3,"exited":4},"changesCount":1,"changes":[{"symbol":"TSLA","name":"Tesla Inc","companyLogo":"/img/company-logos/tsla.png","action":"decreased","previousWeightPct":9.1,"weightPct":7.4,"weightChangePct":-1.7,"valueUsd":1000}]}]}}"#.utf8)
         let response = try JSONDecoder().decode(FamousHoldingsResponse.self, from: data)
         XCTAssertEqual(response.data.periodLabel, "2026 Q1")
         XCTAssertEqual(response.data.managers.first?.changes.first?.action, .decreased)
         XCTAssertEqual(response.data.managers.first?.changes.first?.weightPct, 7.4)
+        XCTAssertEqual(response.data.managers.first?.portraitUrl, "/img/sec13f/ark.webp")
+    }
+}
+
+final class DeploymentStatusTests: XCTestCase {
+    func testCreatesVisibleRunningSnapshot() throws {
+        let message = DeploymentStatusMessage(
+            type: "deployment-status",
+            phase: "running",
+            stage: "signing",
+            progress: 0.82,
+            commit: "1234567890",
+            runId: "42",
+            updatedAt: "2026-07-19T08:00:00Z"
+        )
+        let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
+        XCTAssertEqual(snapshot.commit, "1234567")
+        XCTAssertEqual(snapshot.progress, 0.82, accuracy: 0.001)
+        XCTAssertTrue(snapshot.isVisible(at: snapshot.updatedAt.addingTimeInterval(300)))
+    }
+
+    func testHidesStaleCompletedSnapshot() throws {
+        let message = DeploymentStatusMessage(
+            type: "deployment-status",
+            phase: "succeeded",
+            stage: "installed",
+            progress: 1,
+            commit: "1234567",
+            runId: nil,
+            updatedAt: "2026-07-19T08:00:00Z"
+        )
+        let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
+        XCTAssertFalse(snapshot.isVisible(at: snapshot.updatedAt.addingTimeInterval(700)))
+    }
+
+    func testCompletedSnapshotHasStablePerDeploymentIdentity() throws {
+        let message = DeploymentStatusMessage(
+            type: "deployment-status",
+            phase: "succeeded",
+            stage: "installed",
+            progress: 1,
+            commit: "1234567890",
+            runId: "42",
+            updatedAt: "2026-07-19T08:00:00Z"
+        )
+
+        let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
+
+        XCTAssertEqual(snapshot.completionIdentity, "1234567-installed")
     }
 }

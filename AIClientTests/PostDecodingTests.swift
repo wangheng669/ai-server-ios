@@ -2,6 +2,14 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testRSSFeedPrefersHighResolutionAvatarAndVersionsStaticIcon() throws {
+        let data = #"{"data":{"feeds":[{"id":64,"name":"Example","icon":"/img/rss-feed-icons/rss-feed-64.jpg","avatar_url":"https://cdn.example.com/avatar-180.jpg","updated_at":"2026-07-18T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
+        let feed = try JSONDecoder().decode(RSSFeedsResponse.self, from: data).data.feeds[0]
+
+        XCTAssertEqual(feed.preferredAvatarURL?.absoluteString, "https://cdn.example.com/avatar-180.jpg")
+        XCTAssertTrue(feed.iconURL?.absoluteString.contains("v=2026-07-18T10:00:00Z") == true)
+    }
+
     func testWikipediaCandidateExtractionFindsNamedEntitiesWithoutDuplicates() {
         let candidates = WikipediaEntityCandidateExtractor.candidates(
             in: ["英伟达、微软和 OpenAI 正在推动投资。OpenAI 随后发布了更新。"]
@@ -280,5 +288,23 @@ final class PostDecodingTests: XCTestCase {
                 .paragraph("图片后正文。")
             ])
         )
+    }
+
+    func testNewYorkTimesInlineImageUsesServerProxy() throws {
+        let html = #"<div class="article-paragraph"><img src="https://static01.nyt.com/images/example.jpg"></div>"#
+        let article = try XCTUnwrap(NewYorkTimesArticleParser.extract(from: html))
+        guard case .image(let url, _, _) = try XCTUnwrap(article.blocks.first) else {
+            return XCTFail("Expected an image block")
+        }
+
+        XCTAssertTrue(url.path.hasSuffix("/api/v1/image-proxy"))
+    }
+
+    func testBuildsReadableNewYorkTimesParagraphsFromStoredText() throws {
+        let sentence = "这是一段已经保存到服务器的纽约时报正文。"
+        let article = try XCTUnwrap(NewYorkTimesArticle.storedText(Array(repeating: sentence, count: 12).joined(separator: " ")))
+
+        XCTAssertGreaterThan(article.blocks.count, 1)
+        XCTAssertTrue(article.blocks.allSatisfy { if case .paragraph = $0 { return true }; return false })
     }
 }
