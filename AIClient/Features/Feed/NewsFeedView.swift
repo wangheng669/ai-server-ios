@@ -1807,13 +1807,22 @@ private struct NewsCardView: View {
             VStack(alignment: .leading, spacing: 10) {
                 xAuthorHeader
 
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(Array(xTimelineParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                        xRichText(paragraph)
-                            .font(.system(size: 17, weight: .regular))
-                            .lineSpacing(3)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 5) {
+                    xRichText(xTimelineContent)
+                        .font(.system(size: 17, weight: .regular))
+                        .lineSpacing(3)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(isLongXPost ? 8 : nil)
+                        .fixedSize(horizontal: false, vertical: !isLongXPost)
+
+                    if isLongXPost {
+                        Button(action: { onOpen?() }) {
+                            Text("显示更多")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看完整帖子")
                     }
                 }
 
@@ -1887,6 +1896,16 @@ private struct NewsCardView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return sentences.count > 1 ? sentences : [normalized]
+    }
+
+    /// Keep ordinary posts complete in the timeline, while giving translated long-form
+    /// posts the same compact handoff to detail that X uses for "Show more".
+    private var xTimelineContent: String {
+        xTimelineParagraphs.joined(separator: "\n\n")
+    }
+
+    private var isLongXPost: Bool {
+        xTimelineContent.count > 180
     }
 
     private func xRichText(_ value: String) -> Text {
