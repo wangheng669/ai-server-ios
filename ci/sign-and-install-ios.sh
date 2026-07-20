@@ -8,6 +8,13 @@ set -euo pipefail
 : "${TEAM_ID:?TEAM_ID is required}"
 : "${DEVICE_UDID:?DEVICE_UDID is required}"
 
+# Self-hosted runners do not always inherit the interactive login session's
+# unlocked keychain state. The office installer uses an empty local keychain
+# password, so unlock it explicitly before accessing the signing private key.
+# On hosts with a different keychain password this is a harmless no-op.
+security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" \
+  "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true
+
 if ! xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1; then
   echo "The configured iPhone is not connected or available: $DEVICE_UDID" >&2
   exit 1
