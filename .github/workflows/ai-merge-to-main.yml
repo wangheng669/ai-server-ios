@@ -27,6 +27,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
 
       - name: Merge task into latest main
         id: merge
