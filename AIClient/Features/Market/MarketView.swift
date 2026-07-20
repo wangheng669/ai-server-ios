@@ -190,6 +190,14 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
         }
     }
 
+    var allSymbols: [String] {
+        guard self == .china else { return symbols }
+        return [
+            "000001.SS", "000016.SS", "000300.SS", "399006.SZ", "000688.SS",
+            "000905.SS", "000852.SS", "932000.SS", "THS:883418", "^HSTECH", "^HSI"
+        ]
+    }
+
     var primarySymbol: String { symbols[0] }
 }
 
@@ -270,6 +278,8 @@ private struct MarketTerminalHero: View {
                     cryptoMetric(symbol: "BINANCE:BNBUSDT")
                 }
                 .frame(height: 76)
+            } else if region == .china {
+                ChinaMarketMetrics(store: store)
             } else {
                 HStack(spacing: 0) {
                 MarketTerminalMetric(
@@ -330,6 +340,71 @@ private struct MarketTerminalHero: View {
     private var heroDate: String {
         let date = quote?.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
         return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits))
+    }
+}
+
+private struct ChinaMarketMetrics: View {
+    let store: MarketStore
+
+    private var exchangeRate: MarketQuote? { store.quote(symbol: "USDCNY") }
+    private var breadth: MarketBreadth? { store.dashboard?.ashareOverview?.breadth }
+    private var totalTurnover: Double? {
+        let values = [store.quote(symbol: "000001.SS")?.turnover, store.quote(symbol: "399001.SZ")?.turnover].compactMap { $0 }
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            MarketTerminalMetric(
+                title: "人民币汇率",
+                value: exchangeRate.map { number($0.price, digits: 4) } ?? "—",
+                change: exchangeRate?.formattedPercent ?? "USD/CNY",
+                tint: quoteTint(exchangeRate),
+                trend: exchangeRate?.trend ?? []
+            )
+            TerminalDivider()
+            MarketTerminalMetric(
+                title: "两市成交额",
+                value: totalTurnover.map(turnoverText) ?? "—",
+                change: totalTurnover == nil ? "等待行情" : "沪深合计",
+                tint: .secondary,
+                trend: []
+            )
+            TerminalDivider()
+            MarketBreadthMetric(breadth: breadth)
+        }
+    }
+
+    private func turnoverText(_ value: Double) -> String {
+        if value >= 100_000_000_000 { return String(format: "%.2f万亿", value / 1_000_000_000_000) }
+        return String(format: "%.0f亿", value / 100_000_000)
+    }
+}
+
+private struct MarketBreadthMetric: View {
+    let breadth: MarketBreadth?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("市场宽度").font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+            Text(breadth.map { "\($0.up) / \($0.down)" } ?? "—")
+                .font(.system(size: 15, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.72)
+            HStack(spacing: 3) {
+                Text("上涨").foregroundStyle(MarketStyle.gain)
+                Text("/").foregroundStyle(.secondary)
+                Text("下跌").foregroundStyle(MarketStyle.loss)
+            }
+            .font(.system(size: 9.5, weight: .medium))
+            MarketBreadthComposition(
+                up: breadth?.up ?? 0,
+                down: breadth?.down ?? 0,
+                flat: breadth?.flat ?? 0,
+                total: breadth.map { max($0.total, $0.up + $0.down + $0.flat) } ?? 0
+            )
+            .frame(height: 5)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
 
@@ -478,10 +553,16 @@ private struct MarketIndexTable: View {
     let store: MarketStore
     let onSelectIndex: (String) -> Void
 
-    private var quotes: [MarketQuote] { region.symbols.compactMap { store.quote(symbol: $0) } }
+    @State private var chinaScope: ChinaIndexScope = .core
+
+    private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
+    private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
 
     var body: some View {
         VStack(spacing: 0) {
+            if region == .china {
+                ChinaIndexScopePicker(selection: $chinaScope)
+            }
             HStack(spacing: 8) {
                 Text("名称 / 代码").frame(width: 112, alignment: .leading)
                 Text("最新价").frame(maxWidth: .infinity, alignment: .trailing)
@@ -520,6 +601,36 @@ private struct MarketIndexTable: View {
         }
         .padding(.horizontal, 18)
         .animation(.easeOut(duration: 0.16), value: region)
+    }
+}
+
+private enum ChinaIndexScope: String, CaseIterable, Identifiable {
+    case core = "核心"
+    case all = "全部 A 股指数"
+    var id: Self { self }
+}
+
+private struct ChinaIndexScopePicker: View {
+    @Binding var selection: ChinaIndexScope
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(ChinaIndexScope.allCases) { scope in
+                Button { withAnimation(.easeOut(duration: 0.16)) { selection = scope } } label: {
+                    Text(scope.rawValue)
+                        .font(.caption.weight(selection == scope ? .semibold : .medium))
+                        .foregroundStyle(selection == scope ? MarketStyle.accent : Color.secondary)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(selection == scope ? MarketStyle.accent.opacity(0.09) : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == scope ? .isSelected : [])
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
     }
 }
 
@@ -1879,7 +1990,7 @@ private struct CoreRegion: Identifiable {
 
 private struct CoreDescriptor {
     let symbol: String
-    var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "000001.SS": "上证指数"; case "000300.SS": "沪深300"; case "000688.SS": "科创50"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; default: symbol } }
+    var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "000001.SS": "上证指数"; case "000016.SS": "上证50"; case "000300.SS": "沪深300"; case "399006.SZ": "创业板指"; case "000688.SS": "科创50"; case "000905.SS": "中证500"; case "000852.SS": "中证1000"; case "932000.SS": "中证2000"; case "THS:883418": "微盘股"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; default: symbol } }
     var code: String { switch symbol { case "^GSPC": "SPX"; case "^NDX": "NDX"; case "^DJI": "DJI"; case "000001.SS": "000001.SH"; case "000300.SS": "000300.SH"; case "000688.SS": "000688.SH"; case "^HSTECH": "HSTECH"; case "^HSI": "HSI"; case "^N225": "N225"; case "^KS11": "KOSPI"; case "^STOXX50E": "SX5E"; case "^GDAXI": "DAX"; case "^FTSE": "FTSE"; case "^FCHI": "CAC40"; default: symbol } }
     var icon: String { switch symbol { case "^NDX": "n.circle.fill"; case "^DJI": "building.columns.fill"; case "000001.SS", "000300.SS": "building.2.fill"; case "000688.SS": "cpu.fill"; case "^HSTECH": "asterisk"; case "^HSI": "h.circle.fill"; case "^N225": "yensign.circle.fill"; case "^KS11": "k.circle.fill"; case "^STOXX50E": "globe.europe.africa.fill"; case "^GDAXI": "shield.fill"; case "^FTSE": "sterlingsign.circle.fill"; case "^FCHI": "f.circle.fill"; default: "star.fill" } }
 }
