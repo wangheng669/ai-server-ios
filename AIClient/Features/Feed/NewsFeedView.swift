@@ -508,7 +508,12 @@ struct NewsFeedView: View {
             HStack(alignment: .top, spacing: 10) {
                 rssSourceButton(id: nil, name: "全部", avatarURL: nil)
                 ForEach(model.rssFeeds) { feed in
-                    rssSourceButton(id: feed.id, name: feed.name, avatarURL: feed.preferredAvatarURL)
+                    rssSourceButton(
+                        id: feed.id,
+                        name: feed.name,
+                        avatarURL: feed.preferredAvatarURL,
+                        rejectsUpscaledImages: !feed.hasManagedAvatar
+                    )
                 }
             }
             .padding(.horizontal, 14)
@@ -517,7 +522,12 @@ struct NewsFeedView: View {
         .background(Color(uiColor: .systemBackground))
     }
 
-    private func rssSourceButton(id: Int?, name: String, avatarURL: URL?) -> some View {
+    private func rssSourceButton(
+        id: Int?,
+        name: String,
+        avatarURL: URL?,
+        rejectsUpscaledImages: Bool = false
+    ) -> some View {
         let isSelected = model.selectedRSSFeedID == id
         return Button {
             Task { await model.selectRSSFeed(id) }
@@ -525,7 +535,12 @@ struct NewsFeedView: View {
             VStack(spacing: 5) {
                 ZStack {
                     if let id {
-                        AvatarView(url: avatarURL, name: name, size: 34, rejectsUpscaledImages: true)
+                        AvatarView(
+                            url: avatarURL,
+                            name: name,
+                            size: 34,
+                            rejectsUpscaledImages: rejectsUpscaledImages
+                        )
                             .id(id)
                     } else {
                         Circle()

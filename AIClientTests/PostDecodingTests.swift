@@ -10,6 +10,14 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(feed.iconURL?.absoluteString.contains("v=2026-07-18T10:00:00Z") == true)
     }
 
+    func testRSSFeedRecognizesServerManagedAvatar() throws {
+        let data = #"{"data":{"feeds":[{"id":78,"name":"人民日报微博","icon":"/img/rss-feed-icons/rss-feed-78.jpg","avatar_url":"/api/v1/rss/feeds/78/avatar?v=abc123","updated_at":"2026-07-20T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
+        let feed = try JSONDecoder().decode(RSSFeedsResponse.self, from: data).data.feeds[0]
+
+        XCTAssertTrue(feed.hasManagedAvatar)
+        XCTAssertEqual(feed.preferredAvatarURL?.path, "/api/v1/rss/feeds/78/avatar")
+    }
+
     func testWikipediaCandidateExtractionFindsNamedEntitiesWithoutDuplicates() {
         let candidates = WikipediaEntityCandidateExtractor.candidates(
             in: ["英伟达、微软和 OpenAI 正在推动投资。OpenAI 随后发布了更新。"]
