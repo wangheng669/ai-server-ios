@@ -175,7 +175,7 @@ final class FeedAdapterTests: XCTestCase {
     func testSwitchingToUncachedSourceClearsPreviousChannelPosts() async throws {
         let youtubePost = try JSONDecoder().decode(
             Post.self,
-            from: Data(#"{"id":1,"source":"rss","post_link":"https://www.youtube.com/watch?v=abc","postTags":["YouTube"]}"#.utf8)
+            from: Data(#"{"id":1,"source":"rss","post_link":"https://www.youtube.com/watch?v=abc"}"#.utf8)
         )
         let model = NewsFeedViewModel(source: .youtube) { _, _, _ in [youtubePost] }
 
