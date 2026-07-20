@@ -19,6 +19,13 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.crypto.first?.freshnessLabel, "24小时交易")
     }
 
+    func testDelayedOpenMarketQuoteExplainsSourceDelay() throws {
+        let data = Data(#"{"symbol":"^NDX","name":"纳斯达克100","price":23000,"marketSession":"regular","delaySeconds":900}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.freshnessLabel, "延迟15分钟")
+    }
+
     func testPeriodTrendUsesSelectedRangeValues() {
         XCTAssertTrue(marketTrendIsUp(values: [100, 98, 104], fallbackIsUp: false))
         XCTAssertFalse(marketTrendIsUp(values: [100, 103, 97], fallbackIsUp: true))
