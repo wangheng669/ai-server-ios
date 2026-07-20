@@ -31,6 +31,18 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, "http://example.com:3001/api/v1/post/video-playback/stream?formatId=18")
     }
 
+    func testVideoThumbnailUsesOriginalMediaURL() throws {
+        let baseURL = ServerConfiguration.defaultURL
+        let original = "https://video.twimg.com/ext_tw_video/1/pu/vid/avc1/720x720/example.mp4?tag=12"
+        let proxied = try XCTUnwrap(MediaURL.video(original))
+        let thumbnail = try XCTUnwrap(MediaURL.videoThumbnail(for: proxied))
+        let components = try XCTUnwrap(URLComponents(url: thumbnail, resolvingAgainstBaseURL: false))
+
+        XCTAssertEqual(components.path, "/api/v1/video-thumbnail")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, original)
+        XCTAssertEqual(thumbnail.host, baseURL.host)
+    }
+
     @MainActor
     func testHotTopicChannelsRequestLargerFirstPage() async {
         var requestedLimit = 0
