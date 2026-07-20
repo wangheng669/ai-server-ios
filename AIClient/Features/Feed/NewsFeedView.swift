@@ -182,14 +182,6 @@ struct NewsFeedView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(FeedSource.allCases) { source in sourceButton(source).id(source.id) }
-                        Button { open("daily") } label: {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 19, weight: .semibold))
-                                .foregroundStyle(.purple)
-                                .frame(width: 42, height: 50)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("日报")
                     }
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
