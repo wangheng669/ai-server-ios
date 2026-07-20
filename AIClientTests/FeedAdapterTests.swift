@@ -58,6 +58,19 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testFlashRequestsEnoughPostsForClientSideFilters() async {
+        var requestedLimit = 0
+        let model = NewsFeedViewModel(source: .flash) { _, limit, _ in
+            requestedLimit = limit
+            return []
+        }
+
+        await model.refresh()
+
+        XCTAssertEqual(requestedLimit, 20)
+    }
+
+    @MainActor
     func testXRequestsLargerPageAndKeepsPagingAfterPartialResult() async throws {
         var requests: [(page: Int, limit: Int)] = []
         let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
@@ -93,6 +106,24 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(secondPageAttempts, 2)
         XCTAssertEqual(model.posts.map(\.id), [1, 2])
         XCTAssertNil(model.errorMessage)
+    }
+
+    @MainActor
+    func testFilteredFeedLoadsMoreFromVisibleTail() async throws {
+        var requestedPages: [Int] = []
+        let visibleTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"flash"}"#.utf8))
+        let hiddenRawTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"flash"}"#.utf8))
+        let nextMatch = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3,"source":"flash"}"#.utf8))
+        let model = NewsFeedViewModel(source: .flash) { page, _, _ in
+            requestedPages.append(page)
+            return page == 1 ? [visibleTail, hiddenRawTail] : [nextMatch]
+        }
+
+        await model.refresh()
+        await model.loadMoreIfNeeded(current: visibleTail, thresholdPostID: visibleTail.id)
+
+        XCTAssertEqual(requestedPages, [1, 2])
+        XCTAssertEqual(model.posts.map(\.id), [visibleTail.id, hiddenRawTail.id, nextMatch.id])
     }
 
     @MainActor

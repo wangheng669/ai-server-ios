@@ -327,6 +327,14 @@ struct NewsFeedView: View {
                     }
                     if source == .flash {
                         flashFeedHeader
+                        if visiblePosts.isEmpty, !posts.isEmpty {
+                            ContentUnavailableView(
+                                "暂无\(flashFilter.title)快讯",
+                                systemImage: "line.3.horizontal.decrease.circle"
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 36)
+                        }
                     }
                     ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
                         let displayPost = model.postForDisplay(post)
@@ -374,9 +382,12 @@ struct NewsFeedView: View {
                                 guard source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
-                            .task {
+                            .task(id: source == .flash ? posts.last?.id : post.id) {
                                 guard source == model.source else { return }
-                                await model.loadMoreIfNeeded(current: post)
+                                await model.loadMoreIfNeeded(
+                                    current: post,
+                                    thresholdPostID: source == .flash ? visiblePosts.last?.id : nil
+                                )
                             }
                         if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
