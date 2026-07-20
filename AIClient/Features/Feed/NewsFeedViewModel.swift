@@ -156,6 +156,9 @@ final class NewsFeedViewModel: ObservableObject {
             canLoadMore = saved.canLoadMore
             isSwitchingSource = false
         } else {
+            // Do not render the previous channel while this channel's first page is loading.
+            // Keeping it here makes the loading state source-safe for every feed type.
+            posts = []
             page = 1
             canLoadMore = true
             isSwitchingSource = true

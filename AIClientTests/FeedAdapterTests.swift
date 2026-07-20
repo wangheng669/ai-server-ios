@@ -172,6 +172,22 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingToUncachedSourceClearsPreviousChannelPosts() async throws {
+        let youtubePost = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss","post_link":"https://www.youtube.com/watch?v=abc","postTags":["YouTube"]}"#.utf8)
+        )
+        let model = NewsFeedViewModel(source: .youtube) { _, _, _ in [youtubePost] }
+
+        await model.refresh()
+        model.select(.flash)
+
+        XCTAssertEqual(model.source, .flash)
+        XCTAssertTrue(model.posts.isEmpty)
+        XCTAssertTrue(model.isSwitchingSource)
+    }
+
+    @MainActor
     func testReturningToCachedSourceKeepsExactSnapshotWithoutRefetching() async throws {
         var xRequests = 0
         let xPost = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
@@ -249,6 +265,17 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(post.score, 6.9)
         XCTAssertTrue(post.tagNames.isEmpty)
+    }
+
+    func testFlashMapsMergedPlatformMetadata() throws {
+        let json = #"{"success":true,"data":{"items":[{"id":"f3","time":"18:02","text":"同一消息","source":"flash:cls","similarityGroupId":123,"similarityScore":0.96,"similarCount":4,"platformCount":3,"platforms":["cls","jin10","sina"]}],"hasMore":false}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(FlashResponse.self, from: json)
+        let post = Post.flash(try XCTUnwrap(response.data.items.first))
+
+        XCTAssertEqual(post.meta?.flashSimilarityGroupId, 123)
+        XCTAssertEqual(post.meta?.flashSimilarCount, 4)
+        XCTAssertEqual(post.meta?.flashPlatformCount, 3)
+        XCTAssertEqual(post.meta?.flashPlatforms ?? [], ["cls", "jin10", "sina"])
     }
 
     @MainActor
