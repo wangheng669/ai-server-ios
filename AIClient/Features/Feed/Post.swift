@@ -41,6 +41,14 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
         }
         return iconURL
     }
+
+    var hasManagedAvatar: Bool {
+        guard let avatar, !avatar.isEmpty,
+              let url = URL(string: avatar, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else {
+            return false
+        }
+        return url.path.hasSuffix("/avatar")
+    }
 }
 struct PostDetailResponse: Decodable { let post: Post }
 
