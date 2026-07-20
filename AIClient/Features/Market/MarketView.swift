@@ -194,6 +194,13 @@ private struct MarketTerminalHero: View {
     let onSelectIndex: (String) -> Void
 
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
+    private var overnightQuote: MarketQuote? {
+        guard region == .unitedStates, quote?.marketSession != "regular",
+              let session = store.dashboard?.indexSessions?[region.primarySymbol],
+              session.marketSession == "regular" else { return nil }
+        return session
+    }
+    private var displayedQuote: MarketQuote? { overnightQuote ?? quote }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -220,26 +227,28 @@ private struct MarketTerminalHero: View {
                             Text(quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name)
                                 .font(.system(size: 22, weight: .semibold))
                                 .lineLimit(1)
-                            Text(quote?.displayCode ?? CoreDescriptor(symbol: region.primarySymbol).code)
+                            Text(overnightQuote.map { "\(CoreDescriptor(symbol: region.primarySymbol).code) · \($0.displayCode) 夜盘" }
+                                ?? quote?.displayCode
+                                ?? CoreDescriptor(symbol: region.primarySymbol).code)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Color.secondary)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                         }
-                        Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                        Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
                             .font(.system(size: 36, weight: .semibold))
                             .monospacedDigit()
                             .tracking(-0.8)
                             .lineLimit(1)
                             .minimumScaleFactor(0.78)
-                        Text(quote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情")
+                        Text(displayedQuote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情")
                             .font(.system(size: 16, weight: .semibold))
                             .monospacedDigit()
-                            .foregroundStyle(quoteTint(quote))
+                            .foregroundStyle(quoteTint(displayedQuote))
                     }
                     .frame(width: 142, alignment: .leading)
 
-                    TerminalLeadChart(quote: quote)
+                    TerminalLeadChart(quote: displayedQuote, isOvernight: overnightQuote != nil)
                         .frame(maxWidth: .infinity, minHeight: 128)
                 }
                 .foregroundStyle(.primary)
@@ -287,6 +296,7 @@ private struct MarketTerminalHero: View {
 
     private var sessionLabel: String {
         if region == .crypto { return "24H 交易中" }
+        if overnightQuote != nil { return "夜盘" }
         return switch quote?.marketSession {
         case "regular": "交易中"
         case "pre": "盘前"
@@ -296,7 +306,7 @@ private struct MarketTerminalHero: View {
     }
 
     private var sessionTint: Color {
-        region == .crypto || quote?.marketSession == "regular"
+        region == .crypto || quote?.marketSession == "regular" || overnightQuote != nil
             ? Color(red: 0.08, green: 0.83, blue: 0.47)
             : Color.secondary
     }
@@ -320,6 +330,7 @@ private struct MarketTerminalHero: View {
 
 private struct TerminalLeadChart: View {
     let quote: MarketQuote?
+    let isOvernight: Bool
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 7) {
@@ -334,9 +345,9 @@ private struct TerminalLeadChart: View {
                     .padding(.vertical, 5)
             }
             HStack {
-                Text("开盘")
+                Text(isOvernight ? "夜盘开盘" : "开盘")
                 Spacer()
-                Text("盘中")
+                Text(isOvernight ? "夜盘中" : "盘中")
                 Spacer()
                 Text("最新")
             }
@@ -489,7 +500,12 @@ private struct MarketIndexTable: View {
             } else {
                 ForEach(Array(quotes.enumerated()), id: \.element.symbol) { index, quote in
                     Button { onSelectIndex(quote.symbol) } label: {
-                        MarketIndexTableRow(quote: quote)
+                        MarketIndexTableRow(
+                            quote: quote,
+                            overnightQuote: region == .unitedStates && quote.marketSession != "regular"
+                                ? store.dashboard?.indexSessions?[quote.symbol]
+                                : nil
+                        )
                     }
                     .buttonStyle(MarketPressStyle())
                     if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
@@ -504,6 +520,8 @@ private struct MarketIndexTable: View {
 
 private struct MarketIndexTableRow: View {
     let quote: MarketQuote
+    let overnightQuote: MarketQuote?
+    private var displayedQuote: MarketQuote { overnightQuote ?? quote }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -517,25 +535,25 @@ private struct MarketIndexTableRow: View {
             }
             .frame(width: 112, alignment: .leading)
 
-            Text(number(quote.price, digits: cryptoPriceDigits(quote.price, symbol: quote.symbol)))
+            Text(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))
                 .font(.system(size: 13.5, weight: .medium)).monospacedDigit()
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1).minimumScaleFactor(0.72)
 
             VStack(alignment: .trailing, spacing: 3) {
-                Text(quote.formattedPercent)
+                Text(displayedQuote.formattedPercent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
-                Text(signed(quote.changeValue, digits: 2))
+                Text(signed(displayedQuote.changeValue, digits: 2))
                     .font(.caption2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
             .font(.footnote.weight(.semibold)).monospacedDigit()
-            .foregroundStyle(quoteTint(quote))
+            .foregroundStyle(quoteTint(displayedQuote))
             .frame(width: 64, alignment: .trailing)
 
-            Sparkline(values: quote.trend, color: quoteTint(quote))
+            Sparkline(values: displayedQuote.trend, color: quoteTint(displayedQuote))
                 .frame(width: 60, height: 32)
         }
         .padding(.horizontal, 12)
@@ -545,8 +563,8 @@ private struct MarketIndexTableRow: View {
         .accessibilityHint("打开指数详情")
     }
 
-    private var sessionLabel: String { quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") ? "24H" : (quote.marketSession == "regular" ? "交易中" : "已收盘") }
-    private var sessionTint: Color { quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
+    private var sessionLabel: String { overnightQuote != nil ? "夜盘" : (quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") ? "24H" : (quote.marketSession == "regular" ? "交易中" : "已收盘")) }
+    private var sessionTint: Color { overnightQuote != nil || quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
 }
 
 private struct MarketWorldMap: View {
