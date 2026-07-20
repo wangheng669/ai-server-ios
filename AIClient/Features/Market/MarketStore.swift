@@ -103,8 +103,8 @@ final class MarketStore {
         chartErrors[ChartKey(symbol: symbol, range: range)]
     }
 
-    func loadIndexConstituents(symbol: String) async {
-        if indexConstituents[symbol] != nil { return }
+    func loadIndexConstituents(symbol: String, force: Bool = false) async {
+        if !force, indexConstituents[symbol] != nil { return }
         do {
             indexConstituents[symbol] = try await service.indexConstituents(symbol: symbol)
             constituentErrors[symbol] = nil

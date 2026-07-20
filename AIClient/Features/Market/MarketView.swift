@@ -1227,7 +1227,7 @@ private struct MarketIndexDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .background(InteractivePopGestureEnabler())
         .task {
-            if isIndex { await store.loadIndexConstituents(symbol: symbol) }
+            if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
         }
     }
 
