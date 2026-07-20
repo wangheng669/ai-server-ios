@@ -26,6 +26,7 @@ struct MarketView: View {
         []
         #endif
     }()
+    @Environment(\.scenePhase) private var scenePhase
 
     init(showsDetail: Binding<Bool> = .constant(false)) { _showsDetail = showsDetail }
 
@@ -42,6 +43,10 @@ struct MarketView: View {
                 .toolbar(.hidden, for: .navigationBar)
         }
         .task { await store.runUpdates() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await store.resumeUpdates() }
+        }
         .onChange(of: path) { _, path in showsDetail = !path.isEmpty }
         .onAppear { showsDetail = !path.isEmpty }
         .onDisappear { showsDetail = false }
@@ -898,10 +903,18 @@ private struct MarketLiveStatus: View {
             Circle().fill(statusColor).frame(width: 7, height: 7)
             if store.isLoading && store.dashboard == nil {
                 Text("加载中")
-            } else if store.hasOpenMarket && store.realtimeStatus == .connected {
-                Text("实时连接")
+            } else if let age = store.cachedSnapshotAge {
+                Text(cacheLabel(age: age))
+            } else if store.hasOpenMarket && store.realtimeIsFresh {
+                if let delay = store.maximumOpenMarketDelayMinutes {
+                    Text("实时连接 · 部分延迟\(delay)分钟")
+                } else {
+                    Text("实时连接")
+                }
             } else if store.realtimeStatus == .connecting || store.realtimeStatus == .reconnecting {
                 Text("连接重试中")
+            } else if store.realtimeStatus == .connected {
+                Text("等待实时行情")
             } else if let date = store.latestQuoteDate {
                 Text("截至 \(date.formatted(date: .omitted, time: .shortened))")
             } else {
@@ -914,16 +927,23 @@ private struct MarketLiveStatus: View {
     }
 
     private var statusColor: Color {
-        if store.errorMessage != nil || store.realtimeStatus == .reconnecting { return .orange }
-        if store.hasOpenMarket && store.realtimeStatus == .connected { return MarketStyle.loss }
+        if store.errorMessage != nil || store.realtimeStatus == .reconnecting || (store.cachedSnapshotAge ?? 0) >= 300 { return .orange }
+        if store.hasOpenMarket && store.realtimeIsFresh { return MarketStyle.loss }
         return .secondary
     }
 
     private var accessibilityStatus: String {
         if let error = store.errorMessage { return "行情更新异常：\(error)" }
-        if store.hasOpenMarket && store.realtimeStatus == .connected { return "行情实时连接正常" }
+        if let age = store.cachedSnapshotAge { return "当前显示\(cacheLabel(age: age))" }
+        if store.hasOpenMarket && store.realtimeIsFresh { return "行情实时连接正常" }
         if let date = store.latestQuoteDate { return "行情截至 \(date.formatted(date: .abbreviated, time: .shortened))" }
         return "行情等待更新"
+    }
+
+    private func cacheLabel(age: TimeInterval) -> String {
+        if age >= 86_400 { return "历史缓存 · 超过1天" }
+        if age >= 300 { return "缓存数据 · \(max(5, Int(age / 60)))分钟前" }
+        return "缓存数据"
     }
 }
 
@@ -1246,6 +1266,11 @@ private struct MarketIndexDetailView: View {
         .background(InteractivePopGestureEnabler())
         .task {
             if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+        }
+        .refreshable {
+            await store.refresh(force: false)
+            if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+            await store.loadChart(symbol: symbol, range: selectedRange, force: true)
         }
     }
 
