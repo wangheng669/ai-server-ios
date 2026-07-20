@@ -7,6 +7,7 @@ struct MarketDashboardResponse: Decodable {
 
 struct MarketDashboard: Codable {
     let dataContract: String
+    let definitionVersion: String?
     let generatedAt: String
     let refreshIntervalMs: Int
     var coreIndices: [MarketQuote]
@@ -17,17 +18,22 @@ struct MarketDashboard: Codable {
     let componentsMeta: MarketComponentsMeta?
     let freshness: MarketDashboardFreshness?
     let missingSymbols: [String]
+    let expectedSymbols: [String]
+    let symbolHealth: [MarketSymbolHealth]
+    let regions: [MarketRegionDefinition]
     let ashareOverview: MarketAShareOverview?
     let sentiment: MarketSentiment?
 
     enum CodingKeys: String, CodingKey {
-        case dataContract, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
-        case indexSessions, componentsMeta, freshness, missingSymbols, ashareOverview, sentiment
+        case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
+        case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
+        case ashareOverview, sentiment
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dataContract = try values.decode(String.self, forKey: .dataContract)
+        definitionVersion = try values.decodeIfPresent(String.self, forKey: .definitionVersion)
         generatedAt = try values.decode(String.self, forKey: .generatedAt)
         refreshIntervalMs = try values.decode(Int.self, forKey: .refreshIntervalMs)
         coreIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .coreIndices) ?? []
@@ -38,6 +44,9 @@ struct MarketDashboard: Codable {
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
         freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
         missingSymbols = try values.decodeIfPresent([String].self, forKey: .missingSymbols) ?? []
+        expectedSymbols = try values.decodeIfPresent([String].self, forKey: .expectedSymbols) ?? []
+        symbolHealth = try values.decodeIfPresent([MarketSymbolHealth].self, forKey: .symbolHealth) ?? []
+        regions = try values.decodeIfPresent([MarketRegionDefinition].self, forKey: .regions) ?? []
         ashareOverview = try values.decodeIfPresent(MarketAShareOverview.self, forKey: .ashareOverview)
         sentiment = try values.decodeIfPresent(MarketSentiment.self, forKey: .sentiment)
     }
@@ -72,6 +81,25 @@ struct MarketDashboard: Codable {
         }
         quotes[index] = next
     }
+}
+
+struct MarketSymbolHealth: Codable, Hashable {
+    enum Status: String, Codable {
+        case live, delayed, stale, missing
+    }
+
+    let symbol: String
+    let status: Status
+    let asOf: String?
+    let timestamp: Int64?
+    let source: String?
+    let delaySeconds: Int?
+    let reason: String?
+}
+
+struct MarketRegionDefinition: Codable, Hashable {
+    let id: String
+    let metricSymbols: [String]
 }
 
 struct MarketComponentsMeta: Codable {

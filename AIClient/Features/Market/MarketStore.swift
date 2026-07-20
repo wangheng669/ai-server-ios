@@ -71,7 +71,7 @@ final class MarketStore {
             lastSnapshotRefreshAt = Date()
             isShowingCachedSnapshot = false
             cacheSavedAt = nil
-            errorMessage = value.missingSymbols.isEmpty ? nil : "部分行情暂未返回"
+            errorMessage = marketHealthMessage(for: value)
             MarketSnapshotCache.save(value, at: Date())
         } catch is CancellationError {
             return
@@ -243,6 +243,19 @@ final class MarketStore {
         chart.points = marketMergingRealtimePrice(quote.price, timestamp: timestamp, into: chart.points)
         charts[key] = chart
     }
+}
+
+private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {
+    let missing = dashboard.symbolHealth.filter { $0.status == .missing }
+    let stale = dashboard.symbolHealth.filter { $0.status == .stale }
+    if !missing.isEmpty {
+        return "\(missing.count) 项行情暂未返回"
+    }
+    if !stale.isEmpty {
+        return "\(stale.count) 项行情更新延迟"
+    }
+    // Compatibility with servers that predate per-symbol health metadata.
+    return dashboard.missingSymbols.isEmpty ? nil : "\(dashboard.missingSymbols.count) 项行情暂未返回"
 }
 
 struct ChartKey: Hashable {

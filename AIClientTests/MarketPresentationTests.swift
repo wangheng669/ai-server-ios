@@ -19,6 +19,17 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.crypto.first?.freshnessLabel, "24小时交易")
     }
 
+    func testDashboardDecodesPerSymbolHealthAndRegions() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","definitionVersion":"2026-07-21.1","generatedAt":"2026-07-21T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":["JP10Y"],"expectedSymbols":["JP10Y","KR10Y"],"symbolHealth":[{"symbol":"JP10Y","status":"missing","reason":"quote_unavailable"},{"symbol":"KR10Y","status":"delayed","delaySeconds":15}],"regions":[{"id":"jp","metricSymbols":["USDJPY","JP10Y","^TOPX"]}]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+
+        XCTAssertEqual(response.data.definitionVersion, "2026-07-21.1")
+        XCTAssertEqual(response.data.symbolHealth.first?.status, .missing)
+        XCTAssertEqual(response.data.symbolHealth.last?.delaySeconds, 15)
+        XCTAssertEqual(response.data.regions.first?.metricSymbols, ["USDJPY", "JP10Y", "^TOPX"])
+    }
+
     func testDelayedOpenMarketQuoteExplainsSourceDelay() throws {
         let data = Data(#"{"symbol":"^NDX","name":"纳斯达克100","price":23000,"marketSession":"regular","delaySeconds":900}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
