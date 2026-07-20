@@ -547,45 +547,33 @@ struct NewsFeedView: View {
     }
 
     private var flashFeedHeader: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 9) {
-                Text("快讯")
-                    .font(.system(size: 24, weight: .bold))
-                Circle()
-                    .fill(.red)
-                    .frame(width: 6, height: 6)
-                Text("实时更新")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(FlashFilter.allCases) { filter in
-                        Button {
-                            withAnimation(.easeOut(duration: 0.18)) { flashFilter = filter }
-                        } label: {
-                            Text(filter.title)
-                                .font(.system(size: 14, weight: flashFilter == filter ? .semibold : .regular))
-                                .foregroundStyle(flashFilter == filter ? Color.white : Color.primary)
-                                .padding(.horizontal, 18)
-                                .frame(height: 36)
-                                .background(
-                                    flashFilter == filter ? Color.blue : Color(uiColor: .secondarySystemBackground),
-                                    in: Capsule()
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(flashFilter == filter ? .isSelected : [])
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(FlashFilter.allCases) { filter in
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) { flashFilter = filter }
+                    } label: {
+                        Text(filter.title)
+                            .font(.system(size: 14, weight: flashFilter == filter ? .semibold : .medium))
+                            .foregroundStyle(flashFilter == filter ? Color.white : Color.secondary)
+                            .padding(.horizontal, 17)
+                            .frame(height: 34)
+                            .background(
+                                flashFilter == filter ? Color.accentColor : Color(uiColor: .secondarySystemBackground),
+                                in: Capsule()
+                            )
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(flashFilter == filter ? .isSelected : [])
                 }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
+        .padding(.vertical, 10)
         .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.45)
+        }
     }
 
     private func flashUnreadDivider(count: Int) -> some View {
@@ -2237,17 +2225,52 @@ private struct NewsCardView: View {
     }
 
     private var flashCard: some View {
-        HStack(alignment: .top, spacing: 0) {
+        HStack(alignment: .top, spacing: 10) {
             Text(post.formattedTime ?? "--:--")
-                .font(.system(size: 14, weight: .regular, design: .rounded).monospacedDigit())
+                .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 66, alignment: .leading)
-                .padding(.leading, 13)
+                .frame(width: 42, alignment: .trailing)
+                .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(isImportantFlash ? Color.orange : Color.accentColor)
+                    .frame(width: 7, height: 7)
+                    .overlay {
+                        Circle()
+                            .stroke((isImportantFlash ? Color.orange : Color.accentColor).opacity(0.18), lineWidth: 5)
+                    }
+                    .padding(.top, 7)
+
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.16))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                    .padding(.top, 7)
+            }
+            .frame(width: 10)
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 7) {
+                    Text(flashCategory)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(isImportantFlash ? Color.orange : Color.accentColor)
+                        .padding(.horizontal, 8)
+                        .frame(height: 22)
+                        .background(
+                            (isImportantFlash ? Color.orange : Color.accentColor).opacity(0.10),
+                            in: Capsule()
+                        )
+
+                    Text(post.authorName)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+
                 Text(post.displayContent)
-                    .font(.system(size: 16, weight: .regular))
-                    .lineSpacing(5)
+                    .font(.system(size: 16, weight: isImportantFlash ? .medium : .regular))
+                    .lineSpacing(4)
                     .lineLimit(isExpandedFlash ? nil : 4)
                     .multilineTextAlignment(.leading)
 
@@ -2260,18 +2283,19 @@ private struct NewsCardView: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.blue)
                 }
-
-                Text("来源：\(post.authorName)")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.leading, 16)
+        .padding(.leading, 12)
         .padding(.trailing, 16)
-        .padding(.vertical, 14)
+        .padding(.top, 15)
+        .padding(.bottom, 16)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+
+    private var isImportantFlash: Bool {
+        post.tagNames.contains("重要")
     }
 
     private var flashCategory: String {
