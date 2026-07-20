@@ -2296,6 +2296,13 @@ private struct NewsCardView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
+
+                    if let aggregationLabel = flashAggregationLabel {
+                        Label(aggregationLabel, systemImage: "square.stack.3d.up.fill")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Text(post.displayContent)
@@ -2326,6 +2333,17 @@ private struct NewsCardView: View {
 
     private var isImportantFlash: Bool {
         post.tagNames.contains("重要")
+    }
+
+    private var flashAggregationLabel: String? {
+        let platformCount = post.meta?.flashPlatformCount ?? 1
+        let similarCount = post.meta?.flashSimilarCount ?? 1
+        guard platformCount > 1 || similarCount > 1 else { return nil }
+
+        var parts: [String] = []
+        if platformCount > 1 { parts.append("\(platformCount) 个平台发布") }
+        if similarCount > 1 { parts.append("合并 \(similarCount) 条") }
+        return parts.joined(separator: " · ")
     }
 
     private var flashCategory: String {
