@@ -123,6 +123,31 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
   ./ci/report-ios-deployment.sh running 0.92 installing || true
 fi
-xcrun devicectl device install app --device "$DEVICE_UDID" "$APP_PATH"
+install_log=$(mktemp "$RUNNER_TEMP/device-install.XXXXXX")
+installation_description="profile valid until $selected_expiration"
+if ! xcrun devicectl device install app --device "$DEVICE_UDID" "$APP_PATH" 2>&1 | tee "$install_log"; then
+  if ! grep -Fq "identity used to sign the executable is no longer valid" "$install_log"; then
+    exit 1
+  fi
 
-echo "Installed $BUNDLE_ID on $DEVICE_UDID using a profile valid until $selected_expiration."
+  echo "The device rejected the cached signing identity; refreshing signing assets with Xcode."
+  refreshed_derived_data="$RUNNER_TEMP/AIServerClient-RefreshedSigning"
+  xcodebuild build \
+    -project AIServerClient.xcodeproj \
+    -scheme AIServerClient \
+    -configuration Debug \
+    -destination "id=$DEVICE_UDID" \
+    -derivedDataPath "$refreshed_derived_data" \
+    -allowProvisioningUpdates \
+    -allowProvisioningDeviceRegistration \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
+    CODE_SIGN_STYLE=Automatic
+
+  refreshed_app="$refreshed_derived_data/Build/Products/Debug-iphoneos/AIServerClient.app"
+  test -d "$refreshed_app"
+  codesign --verify --deep --strict --verbose=2 "$refreshed_app"
+  xcrun devicectl device install app --device "$DEVICE_UDID" "$refreshed_app"
+  installation_description="Xcode-refreshed automatic signing"
+fi
+
+echo "Installed $BUNDLE_ID on $DEVICE_UDID using $installation_description."
