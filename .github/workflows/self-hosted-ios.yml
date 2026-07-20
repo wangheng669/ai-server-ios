@@ -61,7 +61,9 @@ jobs:
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
         run: |
-          if xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1; then
+          if xcrun devicectl list devices \
+            --filter "UDID = '$DEVICE_UDID' AND State = 'available'" \
+            --hide-headers 2>/dev/null | grep -Fq "$DEVICE_UDID"; then
             echo "label=office-builder" >> "$GITHUB_OUTPUT"
             echo "iPhone is reachable from Mac mini; selecting office installer."
           else
