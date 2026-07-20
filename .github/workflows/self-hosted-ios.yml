@@ -34,6 +34,8 @@ permissions:
 jobs:
   build:
     name: Build on office Mac mini
+    outputs:
+      installer_label: ${{ steps.choose-installer.outputs.label }}
     runs-on:
       - self-hosted
       - macOS
@@ -53,6 +55,19 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh running 0.08 testing
 
+      - name: Choose iPhone installer
+        id: choose-installer
+        env:
+          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+        run: |
+          if xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1; then
+            echo "label=office-builder" >> "$GITHUB_OUTPUT"
+            echo "iPhone is reachable from Mac mini; selecting office installer."
+          else
+            echo "label=home-installer" >> "$GITHUB_OUTPUT"
+            echo "iPhone is not reachable from Mac mini; selecting home installer."
+          fi
       - name: Run tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -117,7 +132,7 @@ jobs:
       - self-hosted
       - macOS
       - ARM64
-      - ${{ (inputs.install_target == 'office' || (inputs.install_target != 'home' && vars.IOS_INSTALL_TARGET == 'office')) && 'office-builder' || 'home-installer' }}
+      - ${{ inputs.install_target == 'office' && 'office-builder' || inputs.install_target == 'home' && 'home-installer' || needs.build.outputs.installer_label }}
     timeout-minutes: 10
 
     steps:
