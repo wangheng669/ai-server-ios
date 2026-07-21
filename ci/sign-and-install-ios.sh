@@ -145,7 +145,29 @@ if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
 fi
 install_log=$(mktemp "$RUNNER_TEMP/device-install.XXXXXX")
 installation_description="profile valid until $selected_expiration"
-if ! xcrun devicectl device install app --device "$DEVICE_UDID" "$APP_PATH" 2>&1 | tee "$install_log"; then
+
+install_app_with_connectivity_retry() {
+  local candidate_app=$1
+  local max_attempts=${IOS_INSTALL_ATTEMPTS:-6}
+  local retry_seconds=${IOS_INSTALL_RETRY_SECONDS:-5}
+  : > "$install_log"
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if xcrun devicectl device install app --device "$DEVICE_UDID" "$candidate_app" 2>&1 | tee -a "$install_log"; then
+      return 0
+    fi
+    if ! grep -Eq "CoreDeviceError error 4016|not able to fulfill the requested usage assertion" "$install_log"; then
+      return 1
+    fi
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      echo "Trusted iPhone connection dropped during install; retrying ($attempt/$max_attempts)..."
+      sleep "$retry_seconds"
+    fi
+  done
+  return 1
+}
+
+if ! install_app_with_connectivity_retry "$APP_PATH"; then
   if ! grep -Fq "identity used to sign the executable is no longer valid" "$install_log"; then
     exit 1
   fi
@@ -166,7 +188,7 @@ if ! xcrun devicectl device install app --device "$DEVICE_UDID" "$APP_PATH" 2>&1
   refreshed_app="$refreshed_derived_data/Build/Products/Debug-iphoneos/AIServerClient.app"
   test -d "$refreshed_app"
   codesign --verify --deep --strict --verbose=2 "$refreshed_app"
-  xcrun devicectl device install app --device "$DEVICE_UDID" "$refreshed_app"
+  install_app_with_connectivity_retry "$refreshed_app"
   installation_description="Xcode-refreshed automatic signing"
 fi
 
