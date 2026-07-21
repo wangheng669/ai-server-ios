@@ -37,6 +37,27 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.freshnessLabel, "延迟15分钟")
     }
 
+    func testHealthSummaryNamesMissingSymbols() {
+        let issues = [
+            MarketSymbolHealth(symbol: "932000.SS", status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: "quote_unavailable"),
+            MarketSymbolHealth(symbol: "THS:883418", status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: "quote_unavailable"),
+            MarketSymbolHealth(symbol: "^TOPX", status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: "quote_unavailable")
+        ]
+
+        XCTAssertEqual(marketHealthSummary(issues), "部分行情暂缺：中证2000、微盘股、东证指数")
+    }
+
+    func testHealthSummaryKeepsNamesWhenThereAreMoreThanThreeIssues() {
+        let issues = [
+            MarketSymbolHealth(symbol: "932000.SS", status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: nil),
+            MarketSymbolHealth(symbol: "THS:883418", status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: nil),
+            MarketSymbolHealth(symbol: "^TOPX", status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: nil),
+            MarketSymbolHealth(symbol: "JP10Y", status: .stale, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: nil)
+        ]
+
+        XCTAssertEqual(marketHealthSummary(issues), "部分行情缺失或延迟：中证2000、微盘股、东证指数等 4 项")
+    }
+
     func testPeriodTrendUsesSelectedRangeValues() {
         XCTAssertTrue(marketTrendIsUp(values: [100, 98, 104], fallbackIsUp: false))
         XCTAssertFalse(marketTrendIsUp(values: [100, 103, 97], fallbackIsUp: true))
