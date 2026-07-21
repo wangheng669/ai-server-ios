@@ -65,6 +65,7 @@ private struct MarketHomeView: View {
         case "china": return .china
         case "japan": return .japan
         case "korea": return .korea
+        case "europe": return .europe
         case "crypto": return .crypto
         default: return .unitedStates
         }
@@ -116,7 +117,7 @@ private struct MarketHomeView: View {
             }
             .background(MarketTerminalPalette.header.ignoresSafeArea())
             .scrollIndicators(.hidden)
-            .safeAreaPadding(.bottom, 64)
+            .safeAreaPadding(.bottom, 112)
             .refreshable { await store.refresh() }
             .onChange(of: selectedMarket) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -192,6 +193,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
     case china = "中国"
     case japan = "日本"
     case korea = "韩国"
+    case europe = "欧洲"
     case crypto = "加密"
 
     var id: Self { self }
@@ -202,6 +204,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
         case .china: ["000001.SS", "000300.SS", "000688.SS", "^HSTECH", "^HSI"]
         case .japan: ["^N225"]
         case .korea: ["^KS11"]
+        case .europe: ["^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]
         case .crypto: ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT", "BINANCE:SOLUSDT", "BINANCE:BNBUSDT", "BINANCE:XRPUSDT", "BINANCE:DOGEUSDT"]
         }
     }
@@ -222,6 +225,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
         case .china: Set(allSymbols.filter { $0 != "THS:883418" } + ["USDCNY", "399001.SZ"])
         case .japan: Set(symbols + ["USDJPY", "JP10Y", "^TOPX"])
         case .korea: Set(symbols + ["USDKRW", "KR10Y"])
+        case .europe: Set(symbols)
         case .crypto: Set(symbols)
         }
     }
@@ -287,6 +291,8 @@ private struct MarketTerminalHero: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(quoteTint(displayedQuote))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.68)
                         }
                         .frame(width: 142, alignment: .leading)
 
@@ -300,6 +306,7 @@ private struct MarketTerminalHero: View {
             .accessibilityLabel(heroAccessibilityLabel)
             .accessibilityHint("打开代表指数详情")
 
+            Group {
             if region == .crypto {
                 HStack(spacing: 0) {
                     cryptoMetric(symbol: "BINANCE:ETHUSDT")
@@ -333,28 +340,31 @@ private struct MarketTerminalHero: View {
                     companionTitle: "KOSPI 指数",
                     companionSymbol: "^KS11"
                 )
-            } else {
+            } else if region == .unitedStates {
                 HStack(spacing: 0) {
-                MarketTerminalMetric(
-                    title: "VIX 恐慌指数",
-                    value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
-                    change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
-                    tint: quoteTint(store.quote(symbol: "^VIX")),
-                    trend: store.quote(symbol: "^VIX")?.trend ?? []
-                )
-                TerminalDivider()
-                MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
-                TerminalDivider()
-                MarketTerminalMetric(
-                    title: "美国 10Y 国债收益率",
-                    value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
-                    change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
-                    tint: quoteTint(store.quote(symbol: "^TNX")),
-                    trend: store.quote(symbol: "^TNX")?.trend ?? []
-                )
+                    MarketTerminalMetric(
+                        title: "VIX 恐慌指数",
+                        value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
+                        change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
+                        tint: quoteTint(store.quote(symbol: "^VIX")),
+                        trend: store.quote(symbol: "^VIX")?.trend ?? []
+                    )
+                    TerminalDivider()
+                    MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
+                    TerminalDivider()
+                    MarketTerminalMetric(
+                        title: "美国 10Y 国债收益率",
+                        value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
+                        change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
+                        tint: quoteTint(store.quote(symbol: "^TNX")),
+                        trend: store.quote(symbol: "^TNX")?.trend ?? []
+                    )
+                }
+            } else {
+                EuropeMarketMetrics(store: store)
             }
-                .frame(height: 76)
             }
+            .frame(height: 76)
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -399,6 +409,31 @@ private struct MarketTerminalHero: View {
         let name = quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name
         guard let displayedQuote else { return "\(name)，等待行情" }
         return "\(name)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
+    }
+}
+
+private struct EuropeMarketMetrics: View {
+    let store: MarketStore
+
+    var body: some View {
+        HStack(spacing: 0) {
+            metric("欧洲50", "^STOXX50E")
+            TerminalDivider()
+            metric("德国 DAX", "^GDAXI")
+            TerminalDivider()
+            metric("英国 FTSE", "^FTSE")
+        }
+    }
+
+    private func metric(_ title: String, _ symbol: String) -> some View {
+        let quote = store.quote(symbol: symbol)
+        return MarketTerminalMetric(
+            title: title,
+            value: quote.map { number($0.price, digits: 2) } ?? "—",
+            change: quote?.formattedPercent ?? "等待行情",
+            tint: quoteTint(quote),
+            trend: quote?.trend ?? []
+        )
     }
 }
 
@@ -450,9 +485,15 @@ private struct ChinaMarketMetrics: View {
 
     private var exchangeRate: MarketQuote? { store.quote(symbol: "USDCNY") }
     private var breadth: MarketBreadth? { store.dashboard?.ashareOverview?.breadth }
-    private var totalTurnover: Double? {
-        let values = [store.quote(symbol: "000001.SS")?.turnover, store.quote(symbol: "399001.SZ")?.turnover].compactMap { $0 }
-        return values.isEmpty ? nil : values.reduce(0, +)
+    private var turnoverMetric: (title: String, value: Double, note: String)? {
+        let shanghai = store.quote(symbol: "000001.SS")?.turnover
+        let shenzhen = store.quote(symbol: "399001.SZ")?.turnover
+        return switch (shanghai, shenzhen) {
+        case let (.some(shanghai), .some(shenzhen)): ("两市成交额", shanghai + shenzhen, "沪深合计")
+        case let (.some(shanghai), .none): ("沪市成交额", shanghai, "深市待补")
+        case let (.none, .some(shenzhen)): ("深市成交额", shenzhen, "沪市待补")
+        case (.none, .none): nil
+        }
     }
 
     var body: some View {
@@ -466,9 +507,9 @@ private struct ChinaMarketMetrics: View {
             )
             TerminalDivider()
             MarketTerminalMetric(
-                title: "两市成交额",
-                value: totalTurnover.map(turnoverText) ?? "—",
-                change: totalTurnover == nil ? "等待行情" : "沪深合计",
+                title: turnoverMetric?.title ?? "成交额",
+                value: turnoverMetric.map { turnoverText($0.value) } ?? "—",
+                change: turnoverMetric?.note ?? "等待行情",
                 tint: .secondary,
                 trend: []
             )
@@ -561,7 +602,8 @@ private struct MarketTerminalMetric: View {
                         .font(.system(size: 17, weight: .semibold))
                         .monospacedDigit()
                         .lineLimit(1)
-                        .minimumScaleFactor(0.68)
+                        .minimumScaleFactor(0.55)
+                        .layoutPriority(1)
                     Text(change)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(tint)
@@ -570,11 +612,11 @@ private struct MarketTerminalMetric: View {
                         .minimumScaleFactor(0.72)
                 }
                 Spacer(minLength: 3)
-                Sparkline(values: trend, color: tint, showsFill: false).frame(width: 34, height: 24)
+                Sparkline(values: trend, color: tint, showsFill: false).frame(width: 28, height: 24)
             }
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -697,6 +739,27 @@ private struct MarketIndexTable: View {
                     }
                     .buttonStyle(MarketPressStyle())
                     if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
+                }
+            }
+
+            if region == .unitedStates, let components = store.dashboard?.components, !components.isEmpty {
+                HStack {
+                    Text(store.dashboard?.componentsMeta?.label ?? "主要成分股")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 14)
+                .padding(.bottom, 6)
+
+                Divider().opacity(0.45)
+                ForEach(Array(components.enumerated()), id: \.element.symbol) { index, quote in
+                    Button { onSelectIndex(quote.symbol) } label: {
+                        MarketIndexTableRow(quote: quote, overnightQuote: nil)
+                    }
+                    .buttonStyle(MarketPressStyle())
+                    if index < components.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
                 }
             }
 
@@ -928,6 +991,10 @@ private struct MarketSessionSchedule: View {
             return [.init("上午盘", "08:00–10:30"), .init("午间休市", "10:30–11:30"), .init("下午盘", "11:30–14:30")]
         case .korea:
             return [.init("常规交易", "08:00–14:30")]
+        case .europe:
+            return berlinIsDaylightSaving(at: date)
+                ? [.init("常规交易", "15:00–23:30")]
+                : [.init("常规交易", "16:00–次日00:30")]
         case .crypto:
             return [.init("全天交易", "00:00–24:00")]
         }
@@ -953,6 +1020,10 @@ private struct MarketSessionSchedule: View {
             if (690..<870).contains(minute) { return 2 }
         case .korea:
             if (480..<870).contains(minute) { return 0 }
+        case .europe:
+            let start = berlinIsDaylightSaving(at: date) ? 900 : 960
+            let end = berlinIsDaylightSaving(at: date) ? 1410 : 30
+            if end > start ? (start..<end).contains(minute) : (minute >= start || minute < end) { return 0 }
         case .crypto:
             return 0
         }
@@ -979,6 +1050,7 @@ private struct MarketSessionSchedule: View {
         case .china, .crypto: identifier = "Asia/Shanghai"
         case .japan: identifier = "Asia/Tokyo"
         case .korea: identifier = "Asia/Seoul"
+        case .europe: identifier = "Europe/Berlin"
         }
         calendar.timeZone = TimeZone(identifier: identifier)!
         return !calendar.isDateInWeekend(date)
@@ -986,6 +1058,10 @@ private struct MarketSessionSchedule: View {
 
     private func newYorkIsDaylightSaving(at date: Date) -> Bool {
         TimeZone(identifier: "America/New_York")?.isDaylightSavingTime(for: date) == true
+    }
+
+    private func berlinIsDaylightSaving(at date: Date) -> Bool {
+        TimeZone(identifier: "Europe/Berlin")?.isDaylightSavingTime(for: date) == true
     }
 }
 
@@ -1006,6 +1082,7 @@ private extension MarketRegion {
         case .china: "上海"
         case .japan: "东京"
         case .korea: "首尔"
+        case .europe: "法兰克福"
         case .crypto: "加密市场"
         }
     }
@@ -1015,6 +1092,7 @@ private extension MarketRegion {
         case .china: "午间休市 11:30–13:00；法定节假日休市"
         case .japan: "以上时间已由东京时间换算为北京时间"
         case .korea: "以上时间已由首尔时间换算为北京时间"
+        case .europe: "以上时间已由欧洲中部时间换算为北京时间"
         case .crypto: "全年无休，行情以 USDT 计价"
         case .unitedStates: ""
         }
