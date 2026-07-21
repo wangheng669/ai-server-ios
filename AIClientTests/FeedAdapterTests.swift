@@ -3,7 +3,7 @@ import XCTest
 
 final class FeedAdapterTests: XCTestCase {
     @MainActor
-    func testNewYorkTimesRSSSelectionPrefetchesVisibleArticleBodies() async throws {
+    func testNewYorkTimesRSSSelectionPrefetchesEveryArticleBody() async throws {
         let feedPosts = try (1...6).map { id in
             try JSONDecoder().decode(
                 Post.self,
@@ -26,8 +26,8 @@ final class FeedAdapterTests: XCTestCase {
 
         await model.selectRSSFeed(47)
 
-        XCTAssertGreaterThanOrEqual(model.selectedRSSPosts.count, 5)
-        XCTAssertTrue(model.selectedRSSPosts.prefix(5).allSatisfy {
+        XCTAssertEqual(model.selectedRSSPosts.count, feedPosts.count)
+        XCTAssertTrue(model.selectedRSSPosts.allSatisfy {
             model.preloadedNewYorkTimesArticle(for: $0.id) != nil
         })
         XCTAssertFalse(model.isLoadingRSSSelection)
