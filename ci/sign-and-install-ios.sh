@@ -15,8 +15,28 @@ set -euo pipefail
 security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" \
   "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true
 
-if ! xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1; then
-  echo "The configured iPhone is not connected or available: $DEVICE_UDID" >&2
+device_attempts=${IOS_DEVICE_WAIT_ATTEMPTS:-12}
+device_wait_seconds=${IOS_DEVICE_WAIT_SECONDS:-5}
+device_available=false
+
+for ((attempt = 1; attempt <= device_attempts; attempt++)); do
+  if xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1; then
+    device_available=true
+    echo "iPhone is available (attempt $attempt/$device_attempts)."
+    break
+  fi
+
+  if [[ "$attempt" -lt "$device_attempts" ]]; then
+    echo "Waiting for iPhone $DEVICE_UDID (attempt $attempt/$device_attempts)..."
+    if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+      ./ci/report-ios-deployment.sh running 0.86 waiting-for-device || true
+    fi
+    sleep "$device_wait_seconds"
+  fi
+done
+
+if [[ "$device_available" != true ]]; then
+  echo "The configured iPhone did not become available after $device_attempts attempts: $DEVICE_UDID" >&2
   exit 1
 fi
 

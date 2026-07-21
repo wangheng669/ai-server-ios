@@ -57,19 +57,14 @@ jobs:
 
       - name: Choose iPhone installer
         id: choose-installer
-        env:
-          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
         run: |
-          if xcrun devicectl list devices \
-            --filter "UDID = '$DEVICE_UDID' AND State = 'available'" \
-            --hide-headers 2>/dev/null | grep -Fq "$DEVICE_UDID"; then
-            echo "label=office-builder" >> "$GITHUB_OUTPUT"
-            echo "iPhone is reachable from Mac mini; selecting office installer."
-          else
-            echo "label=home-installer" >> "$GITHUB_OUTPUT"
-            echo "iPhone is not reachable from Mac mini; selecting home installer."
-          fi
+          # The build job proves the office runner is online. A transient iPhone
+          # discovery failure does not prove that the home runner is online, and
+          # targeting an offline runner leaves the job queued indefinitely.
+          # Auto deployments therefore stay on the office runner, where the
+          # installation script can retry device discovery and fail explicitly.
+          echo "label=office-builder" >> "$GITHUB_OUTPUT"
+          echo "Auto install is pinned to the online office runner."
       - name: Run tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
