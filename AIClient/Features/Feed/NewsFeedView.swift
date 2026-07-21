@@ -77,7 +77,10 @@ struct NewsFeedView: View {
                    let link = post.linkURL {
                     EmbeddedWebPage(url: link, source: source, preparedWebView: preparedWebViews[post.id])
                 } else {
-                    PostDetailView(post: post)
+                    PostDetailView(
+                        post: post,
+                        preloadedNewYorkTimesArticle: model.preloadedNewYorkTimesArticle(for: post.id)
+                    )
                 }
             }
         }
