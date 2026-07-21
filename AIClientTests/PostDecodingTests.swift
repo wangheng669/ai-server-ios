@@ -315,4 +315,22 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertGreaterThan(article.blocks.count, 1)
         XCTAssertTrue(article.blocks.allSatisfy { if case .paragraph = $0 { return true }; return false })
     }
+
+    func testNewYorkTimesFeedExcerptDoesNotExposeTheCompleteArticle() throws {
+        let body = Array(repeating: "纽约时报正文段落。", count: 100).joined()
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "post": [
+                "id": 501,
+                "source": "rss:47",
+                "title": "测试文章",
+                "content": body
+            ]
+        ])
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: payload).post
+
+        XCTAssertLessThanOrEqual(post.newYorkTimesFeedExcerpt.count, 281)
+        XCTAssertTrue(post.newYorkTimesFeedExcerpt.hasSuffix("…"))
+        XCTAssertLessThan(post.newYorkTimesFeedExcerpt.count, body.count)
+        XCTAssertNotEqual(post.newYorkTimesFeedExcerpt, body)
+    }
 }
