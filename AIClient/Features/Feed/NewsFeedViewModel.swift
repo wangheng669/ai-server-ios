@@ -105,7 +105,7 @@ final class NewsFeedViewModel: ObservableObject {
                 return
             }
 
-            let warmedPosts = await prefetchNewYorkTimesBodies(for: result)
+            let warmedPosts = try await prefetchNewYorkTimesBodies(for: result)
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
             selectedRSSPosts = warmedPosts
         } catch is CancellationError {
@@ -116,29 +116,26 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    private func prefetchNewYorkTimesBodies(for posts: [Post]) async -> [Post] {
-        await withTaskGroup(of: (Int, Post, NewYorkTimesArticle?).self, returning: [Post].self) { group in
+    private func prefetchNewYorkTimesBodies(for posts: [Post]) async throws -> [Post] {
+        try await withThrowingTaskGroup(of: (Int, Post, NewYorkTimesArticle?).self, returning: [Post].self) { group in
             for (index, post) in posts.enumerated() {
                 group.addTask { [fetchPostDetail, fetchNewYorkTimesArticle] in
-                    guard post.isNewYorkTimes,
-                          (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText) == nil else {
-                        let article = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
-                        return (index, post, article)
-                    }
-                    let detail = (try? await fetchPostDetail(post.id)) ?? post
+                    guard post.isNewYorkTimes else { return (index, post, nil) }
+
+                    // The list endpoint intentionally truncates content. Always
+                    // read the raw database row before publishing a tappable card.
+                    let detail = try await fetchPostDetail(post.id)
                     if let article = (detail.contentZH ?? detail.content).flatMap(NewYorkTimesArticle.storedText) {
                         return (index, detail, article)
                     }
-                    guard let link = detail.linkURL ?? post.linkURL,
-                          let article = try? await fetchNewYorkTimesArticle(link) else {
-                        return (index, detail, nil)
-                    }
+                    guard let link = detail.linkURL ?? post.linkURL else { throw APIError.invalidURL }
+                    let article = try await fetchNewYorkTimesArticle(link)
                     return (index, detail, article)
                 }
             }
 
             var warmed = posts
-            for await (index, post, article) in group {
+            for try await (index, post, article) in group {
                 warmed[index] = post
                 if let article {
                     preloadedNewYorkTimesArticles[post.id] = article
@@ -350,7 +347,11 @@ final class NewsFeedViewModel: ObservableObject {
         var lastError: Error?
         for attempt in 0..<2 {
             do {
-                return try await fetchPosts(page, limit, source)
+                let result = try await fetchPosts(page, limit, source)
+                if source == .newYorkTimes {
+                    return try await prefetchNewYorkTimesBodies(for: result)
+                }
+                return result
             } catch is CancellationError {
                 throw CancellationError()
             } catch {

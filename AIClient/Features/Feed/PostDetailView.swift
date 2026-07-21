@@ -1484,14 +1484,6 @@ struct PostDetailView: View {
 
         guard !Task.isCancelled, let article = newYorkTimesArticle else { return }
         await enrichNewYorkTimesArticle(article)
-
-        guard !Task.isCancelled, let detail = try? await client.fetchPost(id: post.id) else { return }
-        post = detail
-        if let refreshedArticle = (detail.contentZH ?? detail.content).flatMap(NewYorkTimesArticle.storedText),
-           refreshedArticle != article {
-            newYorkTimesArticle = refreshedArticle
-            await enrichNewYorkTimesArticle(refreshedArticle)
-        }
     }
 
     private func enrichNewYorkTimesArticle(_ article: NewYorkTimesArticle) async {

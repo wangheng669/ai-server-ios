@@ -3,11 +3,43 @@ import XCTest
 
 final class FeedAdapterTests: XCTestCase {
     @MainActor
+    func testNewYorkTimesSourceDoesNotPublishCardsUntilFullBodiesAreReady() async throws {
+        let feedPosts = try (1...5).map { id in
+            try JSONDecoder().decode(
+                Post.self,
+                from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"这是 RSS 提供的长摘要，不是完整正文。","post_link":"https://example.com/\#(id)"}"#.utf8)
+            )
+        }
+        let model = NewsFeedViewModel(
+            source: .newYorkTimes,
+            fetchPosts: { _, _, _ in feedPosts },
+            fetchPostDetail: { id in
+                try JSONDecoder().decode(
+                    Post.self,
+                    from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"数据库完整正文 \#(id)。这是正文的第二段。","post_link":"https://example.com/\#(id)"}"#.utf8)
+                )
+            },
+            fetchNewYorkTimesArticle: { url in
+                NewYorkTimesArticle(blocks: [.paragraph("不应使用网页预览 \(url.lastPathComponent)。")])
+            }
+        )
+
+        await model.refresh()
+
+        XCTAssertEqual(model.posts.count, feedPosts.count)
+        XCTAssertTrue(model.posts.allSatisfy {
+            model.preloadedNewYorkTimesArticle(for: $0.id) == NewYorkTimesArticle(
+                blocks: [.paragraph("数据库完整正文 \($0.id)。这是正文的第二段。")]
+            )
+        })
+    }
+
+    @MainActor
     func testNewYorkTimesRSSSelectionPrefetchesEveryArticleBody() async throws {
         let feedPosts = try (1...6).map { id in
             try JSONDecoder().decode(
                 Post.self,
-                from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","post_link":"https://example.com/\#(id)"}"#.utf8)
+                from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"RSS 中已有一段很长、但并不完整的文章摘要。","post_link":"https://example.com/\#(id)"}"#.utf8)
             )
         }
         let model = NewsFeedViewModel(
@@ -16,11 +48,11 @@ final class FeedAdapterTests: XCTestCase {
             fetchPostDetail: { id in
                 try JSONDecoder().decode(
                     Post.self,
-                    from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","post_link":"https://example.com/\#(id)"}"#.utf8)
+                    from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"数据库完整正文 \#(id)。这是正文的第二段。","post_link":"https://example.com/\#(id)"}"#.utf8)
                 )
             },
             fetchNewYorkTimesArticle: { url in
-                NewYorkTimesArticle(blocks: [.paragraph("完整正文 \(url.lastPathComponent)。")])
+                NewYorkTimesArticle(blocks: [.paragraph("不应使用网页预览 \(url.lastPathComponent)。")])
             }
         )
 
@@ -28,7 +60,9 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(model.selectedRSSPosts.count, feedPosts.count)
         XCTAssertTrue(model.selectedRSSPosts.allSatisfy {
-            model.preloadedNewYorkTimesArticle(for: $0.id) != nil
+            model.preloadedNewYorkTimesArticle(for: $0.id) == NewYorkTimesArticle(
+                blocks: [.paragraph("数据库完整正文 \($0.id)。这是正文的第二段。")]
+            )
         })
         XCTAssertFalse(model.isLoadingRSSSelection)
     }
