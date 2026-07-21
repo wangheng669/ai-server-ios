@@ -2604,8 +2604,8 @@ private struct NewsCardView: View {
                 .lineSpacing(2)
                 .multilineTextAlignment(.leading)
 
-            if post.displayContent != post.displayTitle {
-                Text(post.displayContent)
+            if post.newYorkTimesFeedExcerpt != post.displayTitle {
+                Text(post.newYorkTimesFeedExcerpt)
                     .font(.system(size: 15, weight: .regular, design: .serif))
                     .foregroundStyle(.secondary)
                     .lineSpacing(4)

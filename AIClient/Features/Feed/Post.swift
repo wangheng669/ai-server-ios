@@ -189,6 +189,15 @@ struct Post: Decodable, Identifiable, Hashable {
         let value = clean(summary) ?? clean(text)
         return value == displayTitle ? nil : value
     }
+    var newYorkTimesFeedExcerpt: String {
+        let raw = clean(summary) ?? clean(text) ?? clean(contentZH) ?? clean(content) ?? displayTitle
+        let boundedRaw = String(raw.prefix(600))
+        let normalized = (htmlText(boundedRaw) ?? boundedRaw)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let excerpt = String(normalized.prefix(280))
+        return excerpt + (normalized.count > excerpt.count || raw.count > boundedRaw.count ? "…" : "")
+    }
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }

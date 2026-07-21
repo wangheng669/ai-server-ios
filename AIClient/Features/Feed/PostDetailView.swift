@@ -33,7 +33,12 @@ struct PostDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(post: Post) {
+        let storedArticle = post.isNewYorkTimes
+            ? (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
+            : nil
         _post = State(initialValue: post)
+        _newYorkTimesArticle = State(initialValue: storedArticle)
+        _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
         _isTruthBookmarked = State(initialValue: TruthBookmarkStore.contains(post.id))
     }
 
@@ -84,7 +89,11 @@ struct PostDetailView: View {
         }
         .task {
             let commentsTask = post.sourceName == "X" ? Task { await loadXComments() } : nil
-            await loadDetail()
+            if post.isNewYorkTimes {
+                await loadNewYorkTimesDetail()
+            } else {
+                await loadDetail()
+            }
             await commentsTask?.value
             #if DEBUG
             if post.isYouTube,
@@ -153,16 +162,7 @@ struct PostDetailView: View {
 
                 Divider()
 
-                if isLoadingNewYorkTimesBody {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("正在加载完整正文…")
-                    }
-                    .font(.system(size: 16, design: .serif))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 30)
-                } else if let article = newYorkTimesArticle {
+                if let article = newYorkTimesArticle {
                     LazyVStack(alignment: .leading, spacing: 22) {
                         ForEach(Array(article.blocks.enumerated()), id: \.offset) { index, block in
                             switch block {
@@ -1455,18 +1455,46 @@ struct PostDetailView: View {
         } else if let video = post.videoURLs.first, detectedVideoAspectRatio == nil {
             await detectVideoAspectRatio(url: video)
         }
-        guard post.isNewYorkTimes, let link = post.linkURL else { return }
-        isLoadingNewYorkTimesBody = true
-        defer { isLoadingNewYorkTimesBody = false }
-        let storedArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
-        let article: NewYorkTimesArticle?
-        if let storedArticle {
-            article = storedArticle
-        } else {
-            article = try? await client.fetchNewYorkTimesArticle(url: link)
+    }
+
+    private func loadNewYorkTimesDetail() async {
+        guard !post.isSynthetic, let link = post.linkURL else {
+            isLoadingNewYorkTimesBody = false
+            return
         }
-        guard let article else { return }
-        newYorkTimesArticle = article
+        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+
+        // The feed already carries the article body. Render it immediately and
+        // keep network refreshes and Wikipedia enrichment off the first-paint path.
+        if newYorkTimesArticle != nil {
+            isLoadingNewYorkTimesBody = false
+        } else {
+            if let detail = try? await client.fetchPost(id: post.id) {
+                post = detail
+            }
+            guard !Task.isCancelled else { return }
+            let storedArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
+            if let storedArticle {
+                newYorkTimesArticle = storedArticle
+            } else {
+                newYorkTimesArticle = try? await client.fetchNewYorkTimesArticle(url: link)
+            }
+            isLoadingNewYorkTimesBody = false
+        }
+
+        guard !Task.isCancelled, let article = newYorkTimesArticle else { return }
+        await enrichNewYorkTimesArticle(article)
+
+        guard !Task.isCancelled, let detail = try? await client.fetchPost(id: post.id) else { return }
+        post = detail
+        if let refreshedArticle = (detail.contentZH ?? detail.content).flatMap(NewYorkTimesArticle.storedText),
+           refreshedArticle != article {
+            newYorkTimesArticle = refreshedArticle
+            await enrichNewYorkTimesArticle(refreshedArticle)
+        }
+    }
+
+    private func enrichNewYorkTimesArticle(_ article: NewYorkTimesArticle) async {
         let paragraphs = article.blocks.compactMap { block -> String? in
             guard case .paragraph(let text) = block else { return nil }
             return text
