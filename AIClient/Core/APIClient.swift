@@ -262,7 +262,6 @@ struct APIClient {
         var parts = URLComponents(url: baseURL.appending(path: "api/v1/post/preview"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
             .init(name: "url", value: articleURL.absoluteString),
-            .init(name: "prefer_remote", value: "1"),
         ]
         return parts?.url
     }

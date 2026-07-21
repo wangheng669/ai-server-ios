@@ -344,7 +344,7 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(components.path, "/api/v1/post/preview")
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, article.absoluteString)
-        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "prefer_remote" })?.value, "1")
+        XCTAssertNil(components.queryItems?.first(where: { $0.name == "prefer_remote" }))
     }
 
     func testNewYorkTimesHeroVariantsAreRecognizedAsTheSameImage() throws {
