@@ -88,7 +88,10 @@ private struct MarketHomeView: View {
 
                     VStack(spacing: 0) {
                         if let error = store.errorMessage {
-                            MarketErrorBanner(message: error) { await store.refresh() }
+                            MarketErrorBanner(
+                                message: marketHealthSummary(store.healthIssues) ?? error,
+                                isRetrying: store.isRetrying
+                            ) { await store.refresh() }
                         }
                         MarketRegionPicker(selection: $selectedMarket)
                         MarketIndexTable(
@@ -106,12 +109,13 @@ private struct MarketHomeView: View {
                         }
                     }
                     .padding(.top, 8)
-                    .padding(.bottom, 92)
+                    .padding(.bottom, 24)
                     .background(MarketStyle.canvas)
                 }
             }
             .background(MarketTerminalPalette.header.ignoresSafeArea())
             .scrollIndicators(.hidden)
+            .safeAreaPadding(.bottom, 64)
             .refreshable { await store.refresh() }
             .task {
                 #if DEBUG
@@ -234,39 +238,44 @@ private struct MarketTerminalHero: View {
             }
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
-                HStack(alignment: .bottom, spacing: 15) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text(quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name)
-                                .font(.system(size: 22, weight: .semibold))
-                                .lineLimit(1)
-                            Text(overnightQuote.map { "\(CoreDescriptor(symbol: region.primarySymbol).code) · \($0.displayCode) 夜盘" }
-                                ?? quote?.displayCode
-                                ?? CoreDescriptor(symbol: region.primarySymbol).code)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Color.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.72)
-                        }
-                        Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                            .font(.system(size: 36, weight: .semibold))
-                            .monospacedDigit()
-                            .tracking(-0.8)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name)
+                            .font(.system(size: 22, weight: .semibold))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                        Text(displayedQuote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情")
-                            .font(.system(size: 16, weight: .semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(quoteTint(displayedQuote))
+                            .layoutPriority(1)
+                        Text(overnightQuote.map { "\(CoreDescriptor(symbol: region.primarySymbol).code) · \($0.displayCode) 夜盘" }
+                            ?? quote?.displayCode
+                            ?? CoreDescriptor(symbol: region.primarySymbol).code)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Spacer(minLength: 0)
                     }
-                    .frame(width: 142, alignment: .leading)
+                    HStack(alignment: .bottom, spacing: 15) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                                .font(.system(size: 36, weight: .semibold))
+                                .monospacedDigit()
+                                .tracking(-0.8)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+                            Text(displayedQuote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情")
+                                .font(.system(size: 16, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(quoteTint(displayedQuote))
+                        }
+                        .frame(width: 142, alignment: .leading)
 
-                    TerminalLeadChart(quote: displayedQuote, isOvernight: overnightQuote != nil)
-                        .frame(maxWidth: .infinity, minHeight: 128)
+                        TerminalLeadChart(quote: displayedQuote, isOvernight: overnightQuote != nil)
+                            .frame(maxWidth: .infinity, minHeight: 128)
+                    }
                 }
                 .foregroundStyle(.primary)
             }
             .buttonStyle(MarketPressStyle())
+            .accessibilityLabel(heroAccessibilityLabel)
             .accessibilityHint("打开代表指数详情")
 
             if region == .crypto {
@@ -361,7 +370,13 @@ private struct MarketTerminalHero: View {
 
     private var heroDate: String {
         let date = quote?.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
-        return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits))
+        return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
+    }
+
+    private var heroAccessibilityLabel: String {
+        let name = quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name
+        guard let displayedQuote else { return "\(name)，等待行情" }
+        return "\(name)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
     }
 }
 
@@ -1131,15 +1146,24 @@ private struct MarketLiveStatus: View {
 
 private struct MarketErrorBanner: View {
     let message: String
+    let isRetrying: Bool
     let retry: () async -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             Text(message).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
-            Button("重试") { Task { await retry() } }
+            Button { Task { await retry() } } label: {
+                if isRetrying {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("重试")
+                }
+            }
                 .font(.system(size: 12, weight: .semibold))
                 .frame(minWidth: 44, minHeight: 44)
+                .disabled(isRetrying)
+                .accessibilityLabel(isRetrying ? "正在重试行情" : "重试缺失行情")
         }
         .padding(.horizontal, 12)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
@@ -2014,9 +2038,13 @@ private struct Sparkline: View {
                     if showsFill {
                         Path { path in
                             guard let first = points.first, let last = points.last else { return }
-                            path.move(to: CGPoint(x: first.x, y: proxy.size.height)); path.addLine(to: first)
+                            path.move(to: CGPoint(x: -2, y: proxy.size.height))
+                            path.addLine(to: CGPoint(x: -2, y: first.y))
+                            path.addLine(to: first)
                             points.dropFirst().forEach { path.addLine(to: $0) }
-                            path.addLine(to: CGPoint(x: last.x, y: proxy.size.height)); path.closeSubpath()
+                            path.addLine(to: CGPoint(x: proxy.size.width + 2, y: last.y))
+                            path.addLine(to: CGPoint(x: proxy.size.width + 2, y: proxy.size.height))
+                            path.closeSubpath()
                         }.fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0)], startPoint: .top, endPoint: .bottom))
                     }
                     Path { path in guard let first = points.first else { return }; path.move(to: first); points.dropFirst().forEach { path.addLine(to: $0) } }

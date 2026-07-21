@@ -11,6 +11,7 @@ final class MarketStore {
     private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
     private(set) var constituentErrors: [String: String] = [:]
     private(set) var isLoading = false
+    private(set) var isRetrying = false
     private(set) var errorMessage: String?
     private(set) var realtimeStatus: MarketRealtimeClient.Status = .stopped
     private(set) var lastRealtimeMessageAt: Date?
@@ -56,8 +57,10 @@ final class MarketStore {
         guard !isRefreshing else { return }
         isRefreshing = true
         if dashboard == nil { isLoading = true }
+        else if force { isRetrying = true }
         defer {
             isLoading = false
+            isRetrying = false
             isRefreshing = false
         }
         do {
@@ -167,6 +170,16 @@ final class MarketStore {
         return max(1, Int(ceil(Double(seconds) / 60)))
     }
 
+    var healthIssues: [MarketSymbolHealth] {
+        guard let dashboard else { return [] }
+        if !dashboard.symbolHealth.isEmpty {
+            return dashboard.symbolHealth.filter { $0.status == .missing || $0.status == .stale }
+        }
+        return dashboard.missingSymbols.map {
+            MarketSymbolHealth(symbol: $0, status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: "quote_unavailable")
+        }
+    }
+
     func quote(symbol: String) -> MarketQuote? {
         if let quote = dashboard?.coreIndices.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.metrics.first(where: { $0.symbol == symbol }) { return quote }
@@ -256,6 +269,28 @@ private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {
     }
     // Compatibility with servers that predate per-symbol health metadata.
     return dashboard.missingSymbols.isEmpty ? nil : "\(dashboard.missingSymbols.count) 项行情暂未返回"
+}
+
+func marketHealthSummary(_ issues: [MarketSymbolHealth]) -> String? {
+    guard !issues.isEmpty else { return nil }
+    let names = issues.prefix(3).map { marketSymbolDisplayName($0.symbol) }
+    let listedNames = names.joined(separator: "、")
+    let suffix = issues.count > names.count ? "\(listedNames)等 \(issues.count) 项" : listedNames
+    let staleCount = issues.filter { $0.status == .stale }.count
+    let missingCount = issues.count - staleCount
+    if missingCount > 0, staleCount > 0 { return "部分行情缺失或延迟：\(suffix)" }
+    if missingCount > 0 { return "部分行情暂缺：\(suffix)" }
+    return "部分行情更新延迟：\(suffix)"
+}
+
+func marketSymbolDisplayName(_ symbol: String) -> String {
+    switch symbol {
+    case "932000.SS": "中证2000"
+    case "THS:883418": "微盘股"
+    case "^TOPX": "东证指数"
+    case "JP10Y": "日本10年国债"
+    default: symbol
+    }
 }
 
 struct ChartKey: Hashable {
