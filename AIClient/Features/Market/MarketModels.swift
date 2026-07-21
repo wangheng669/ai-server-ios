@@ -493,7 +493,7 @@ func marketDisplayPoints(
     let minuteMs: Int64 = 60_000
     let end = fallbackTimestamp - fallbackTimestamp % minuteMs
     let start = end - Int64(fallbackValues.count - 1) * minuteMs
-    return fallbackValues.enumerated().map { index, value in
+    let fallback = fallbackValues.enumerated().map { index, value in
         MarketChartPoint(
             timestamp: start + Int64(index) * minuteMs,
             value: value,
@@ -504,6 +504,11 @@ func marketDisplayPoints(
             volume: nil
         )
     }
+    guard selected.count > 1, let selectedFirst = selected.first, let selectedLast = selected.last else { return fallback }
+    if fallbackTimestamp - selectedLast.timestamp > 4 * 60 * 60 * 1_000 { return fallback }
+    let selectedSpan = selectedLast.timestamp - selectedFirst.timestamp
+    let fallbackSpan = (fallback.last?.timestamp ?? 0) - (fallback.first?.timestamp ?? 0)
+    return selectedSpan > fallbackSpan ? selected : fallback
 }
 
 func marketAxisDigits(values: [Double]) -> Int {
@@ -617,13 +622,13 @@ extension MarketQuote {
             let base = symbol.dropFirst("BINANCE:".count).dropLast("USDT".count)
             return "\(base)/USDT"
         }
+        if symbol.hasSuffix(".SS") {
+            return String(symbol.dropLast(3)) + ".SH"
+        }
         return switch symbol {
         case "^GSPC": "SPX"
         case "^NDX": "NDX"
         case "^DJI": "DJI"
-        case "000001.SS": "000001.SH"
-        case "000300.SS": "000300.SH"
-        case "000688.SS": "000688.SH"
         case "^HSTECH": "HSTECH"
         case "^HSI": "HSI"
         case "^N225": "N225"

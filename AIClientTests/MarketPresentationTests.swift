@@ -9,6 +9,13 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.displayCode, "BTC/USDT")
     }
 
+    func testShanghaiDisplayCodeUsesConsistentExchangeSuffix() throws {
+        let data = Data(#"{"symbol":"000905.SS","name":"中证500","price":7000}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.displayCode, "000905.SH")
+    }
+
     func testDashboardDecodesCryptoQuotes() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-16T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":79591.91,"previousClose":78000,"marketSession":"always-open","changePercent":"2.04%"}],"missingSymbols":[]}}"#.utf8)
 
@@ -149,6 +156,17 @@ final class MarketPresentationTests: XCTestCase {
 
         XCTAssertEqual(result.map(\.displayValue), [15.82, 16.30, 16.11])
         XCTAssertEqual(result.map(\.timestamp), [8 * 60_000, 9 * 60_000, 10 * 60_000])
+    }
+
+    func testDayChartKeepsServerHistoryWhenItContainsMultiplePoints() {
+        let serverPoints = (0..<24).map {
+            chartPoint(timestamp: Int64($0) * 60 * 60 * 1_000, close: 100 + Double($0))
+        }
+
+        XCTAssertEqual(
+            marketDisplayPoints(serverPoints, range: .day, fallbackValues: [90, 91, 92], fallbackTimestamp: 121_000),
+            serverPoints
+        )
     }
 
     func testDayChartUsesSameQuoteTrendAsMarketCardEvenWithCurrentChartPoints() {

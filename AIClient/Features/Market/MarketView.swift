@@ -79,6 +79,7 @@ private struct MarketHomeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id("market-top")
                     ZStack {
                         MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
                             .id(selectedMarket)
@@ -87,9 +88,9 @@ private struct MarketHomeView: View {
                     .animation(.easeInOut(duration: 0.18), value: selectedMarket)
 
                     VStack(spacing: 0) {
-                        if let error = store.errorMessage {
+                        if let error = regionalHealthMessage {
                             MarketErrorBanner(
-                                message: marketHealthSummary(store.healthIssues) ?? error,
+                                message: error,
                                 isRetrying: store.isRetrying
                             ) { await store.refresh() }
                         }
@@ -117,6 +118,11 @@ private struct MarketHomeView: View {
             .scrollIndicators(.hidden)
             .safeAreaPadding(.bottom, 64)
             .refreshable { await store.refresh() }
+            .onChange(of: selectedMarket) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("market-top", anchor: .top)
+                }
+            }
             .task {
                 #if DEBUG
                 guard ProcessInfo.processInfo.arguments.contains("--market-map-preview") else { return }
@@ -125,6 +131,12 @@ private struct MarketHomeView: View {
                 #endif
             }
         }
+    }
+
+    private var regionalHealthMessage: String? {
+        let relevant = store.healthIssues.filter { selectedMarket.relevantHealthSymbols.contains($0.symbol) }
+        if let summary = marketHealthSummary(relevant) { return summary }
+        return store.healthIssues.isEmpty ? store.errorMessage : nil
     }
 
     private var regionSwipeGesture: some Gesture {
@@ -203,6 +215,16 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
     }
 
     var primarySymbol: String { symbols[0] }
+
+    var relevantHealthSymbols: Set<String> {
+        switch self {
+        case .unitedStates: Set(symbols + ["^TNX"])
+        case .china: Set(allSymbols.filter { $0 != "THS:883418" } + ["USDCNY", "399001.SZ"])
+        case .japan: Set(symbols + ["USDJPY", "JP10Y", "^TOPX"])
+        case .korea: Set(symbols + ["USDKRW", "KR10Y"])
+        case .crypto: Set(symbols)
+        }
+    }
 }
 
 private struct MarketTerminalHero: View {
@@ -261,7 +283,7 @@ private struct MarketTerminalHero: View {
                                 .tracking(-0.8)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.78)
-                            Text(displayedQuote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情")
+                            Text(displayedQuote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情")
                                 .font(.system(size: 16, weight: .semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(quoteTint(displayedQuote))
@@ -297,8 +319,8 @@ private struct MarketTerminalHero: View {
                     exchangeDigits: 2,
                     yieldTitle: "日本 10Y 国债",
                     yieldSymbol: "JP10Y",
-                    turnoverTitle: "东证成交额",
-                    turnoverSymbol: "^TOPX"
+                    companionTitle: "东证指数",
+                    companionSymbol: "^TOPX"
                 )
             } else if region == .korea {
                 RegionalMarketMetrics(
@@ -308,8 +330,8 @@ private struct MarketTerminalHero: View {
                     exchangeDigits: 1,
                     yieldTitle: "韩国 10Y 国债",
                     yieldSymbol: "KR10Y",
-                    turnoverTitle: "KOSPI 成交额",
-                    turnoverSymbol: "^KS11"
+                    companionTitle: "KOSPI 指数",
+                    companionSymbol: "^KS11"
                 )
             } else {
                 HStack(spacing: 0) {
@@ -387,12 +409,12 @@ private struct RegionalMarketMetrics: View {
     let exchangeDigits: Int
     let yieldTitle: String
     let yieldSymbol: String
-    let turnoverTitle: String
-    let turnoverSymbol: String
+    let companionTitle: String
+    let companionSymbol: String
 
     private var exchangeQuote: MarketQuote? { store.quote(symbol: exchangeSymbol) }
     private var yieldQuote: MarketQuote? { store.quote(symbol: yieldSymbol) }
-    private var turnoverQuote: MarketQuote? { store.quote(symbol: turnoverSymbol) }
+    private var companionQuote: MarketQuote? { store.quote(symbol: companionSymbol) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -413,19 +435,13 @@ private struct RegionalMarketMetrics: View {
             )
             TerminalDivider()
             MarketTerminalMetric(
-                title: turnoverTitle,
-                value: turnoverQuote.flatMap(\.turnover).map(regionalTurnoverText) ?? "—",
-                change: turnoverQuote.flatMap(\.turnover) == nil ? "等待行情" : "当日累计",
-                tint: .secondary,
-                trend: []
+                title: companionTitle,
+                value: companionQuote.map { number($0.price, digits: 2) } ?? "—",
+                change: companionQuote?.formattedPercent ?? "等待行情",
+                tint: quoteTint(companionQuote),
+                trend: companionQuote?.trend ?? []
             )
         }
-    }
-
-    private func regionalTurnoverText(_ value: Double) -> String {
-        if value >= 1_000_000_000_000 { return String(format: "%.2f万亿", value / 1_000_000_000_000) }
-        if value >= 100_000_000 { return String(format: "%.0f亿", value / 100_000_000) }
-        return compactNumber(value)
     }
 }
 
@@ -462,7 +478,7 @@ private struct ChinaMarketMetrics: View {
     }
 
     private func turnoverText(_ value: Double) -> String {
-        if value >= 100_000_000_000 { return String(format: "%.2f万亿", value / 1_000_000_000_000) }
+        if value >= 100_000_000_000 { return String(format: "%.1f万亿", value / 1_000_000_000_000) }
         return String(format: "%.0f亿", value / 100_000_000)
     }
 }
@@ -746,7 +762,7 @@ private struct MarketIndexTableRow: View {
                 Text(displayedQuote.formattedPercent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
-                Text(signed(displayedQuote.changeValue, digits: 2))
+                Text(signed(displayedQuote.changeValue, digits: cryptoChangeDigits(displayedQuote)))
                     .font(.caption2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -1275,7 +1291,7 @@ private struct MarketCoreIndexCard: View {
                 Spacer(minLength: 1)
                 Text(quote.map { number($0.price, digits: 2) } ?? "—")
                     .font(.system(size: 14.5, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-                Text(quote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情数据")
+                    Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
                     .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote)).lineLimit(1)
             }
             Sparkline(values: quote?.trend ?? [], color: quoteTint(quote)).frame(width: 56, height: 32)
@@ -1507,7 +1523,7 @@ private struct MarketIndexDetailView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—").font(.system(size: 33, weight: .bold)).monospacedDigit().tracking(-0.8).foregroundStyle(quoteTint(quote))
-                    Text(quote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情数据")
+                    Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
                         .font(.system(size: 16, weight: .semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
                     HStack(spacing: 7) {
                         Circle().fill(sessionColor).frame(width: 6, height: 6)
@@ -1552,7 +1568,7 @@ private struct MarketIndexDetailView: View {
         VStack(alignment: .leading, spacing: 9) {
             Text("关键数据").font(.system(size: 17, weight: .semibold))
             Grid(horizontalSpacing: 10, verticalSpacing: 13) {
-                GridRow { metric("开盘", quote?.openPrice); metric("最高", quote?.high, MarketStyle.gain); metric("最低", quote?.low, MarketStyle.loss); metric("昨收", quote?.previousClose) }
+                GridRow { metric("开盘", quote?.openPrice); metric("最高", quote?.high, MarketStyle.gain); metric("最低", quote?.low, MarketStyle.loss); metric(isCrypto ? "24H开盘" : "昨收", quote?.previousClose) }
                 GridRow { metric("成交量", quote?.volume, compact: true); metric("市值", quote?.marketCap, compact: true); metric("市盈率", quote?.pe); textMetric("状态", quote?.freshnessLabel ?? "更新中") }
             }
             .padding(12).marketCard(cornerRadius: 10)
@@ -1604,6 +1620,7 @@ private struct MarketIndexDetailView: View {
     private var sessionText: String {
         switch quote?.marketSession { case "regular": "交易中"; case "always-open": "24小时交易"; case "pre": "盘前"; case "post", "after": "盘后"; default: "已收盘" }
     }
+    private var isCrypto: Bool { symbol.hasPrefix("BINANCE:") }
     private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
 
     private var showsIndexSession: Bool {
@@ -1731,11 +1748,23 @@ private struct MarketDetailChart: View {
                 }
             }
             .font(.caption2).foregroundStyle(.secondary).padding(.leading, 48).padding(.trailing, 5)
-            VolumeBars(points: points).frame(height: 25).padding(.leading, 48)
+            Group {
+                if hasVolume {
+                    VolumeBars(points: points).frame(height: 25).padding(.leading, 48)
+                } else {
+                    Color.clear.frame(height: 25)
+                }
+            }
                 .overlay(alignment: .topTrailing) {
-                    Text(selectedRange.apiInterval == "1m" ? "分时走势 · 成交量" : "日线走势 · 成交量")
+                    Text(chartCaption)
                         .font(.caption2).foregroundStyle(.secondary)
                 }
+            if let coverageMessage {
+                Text(coverageMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.horizontal, 18)
         .task(id: selectedRange) {
@@ -1750,6 +1779,19 @@ private struct MarketDetailChart: View {
     private var timelineLabels: [String] {
         guard let first = points.first, let last = points.last else { return ["—", "—", "—"] }
         return [first, points[points.count / 2], last].map { chartTime($0.timestamp, range: selectedRange) }
+    }
+
+    private var hasVolume: Bool { points.contains { ($0.volume ?? 0) > 0 } }
+    private var chartCaption: String {
+        let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
+        return hasVolume ? "\(base) · 成交量" : base
+    }
+    private var coverageMessage: String? {
+        guard selectedRange == .day, symbol.hasPrefix("BINANCE:"),
+              let first = points.first, let last = points.last else { return nil }
+        let coveredHours = Double(last.timestamp - first.timestamp) / 3_600_000
+        guard coveredHours < 20 else { return nil }
+        return String(format: "当前仅有近 %.1f 小时走势，历史数据仍在积累", max(coveredHours, 0))
     }
 
 }
@@ -2121,6 +2163,9 @@ private func cryptoPriceDigits(_ price: Double, symbol: String = "BINANCE:") -> 
     if price < 1 { return 5 }
     if price < 100 { return 3 }
     return 2
+}
+private func cryptoChangeDigits(_ quote: MarketQuote) -> Int {
+    cryptoPriceDigits(max(abs(quote.changeValue), quote.price), symbol: quote.symbol)
 }
 private func chartTime(_ timestamp: Int64, range: MarketRange) -> String {
     let formatter = DateFormatter()
