@@ -105,20 +105,9 @@ final class NewsFeedViewModel: ObservableObject {
                 return
             }
 
-            let visibleCount = min(5, result.count)
-            let visiblePosts = Array(result.prefix(visibleCount))
-            let warmedVisiblePosts = await prefetchNewYorkTimesBodies(for: visiblePosts)
+            let warmedPosts = await prefetchNewYorkTimesBodies(for: result)
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
-            selectedRSSPosts = warmedVisiblePosts
-
-            let remainingPosts = Array(result.dropFirst(visibleCount))
-            guard !remainingPosts.isEmpty else { return }
-            Task { [weak self] in
-                guard let self else { return }
-                let warmedRemaining = await self.prefetchNewYorkTimesBodies(for: remainingPosts)
-                guard !Task.isCancelled, self.selectedRSSFeedID == feedID else { return }
-                self.selectedRSSPosts += warmedRemaining
-            }
+            selectedRSSPosts = warmedPosts
         } catch is CancellationError {
             return
         } catch {
