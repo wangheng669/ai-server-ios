@@ -29,12 +29,18 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int) async throws -> [Post]
+    private let fetchPostDetail: (Int) async throws -> Post
+    private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
+    private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
 
     init(
         source initialSource: FeedSource? = nil,
         fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
-        fetchXTranslation: ((String) async throws -> XTranslation)? = nil
+        fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
+        fetchRSSFeedPosts: ((Int) async throws -> [Post])? = nil,
+        fetchPostDetail: ((Int) async throws -> Post)? = nil,
+        fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil
     ) {
         #if DEBUG
         let override = ProcessInfo.processInfo.environment["AI_FEED_SOURCE"]
@@ -51,7 +57,15 @@ final class NewsFeedViewModel: ObservableObject {
             try await client.fetchXTranslation(tweetID: tweetID)
         }
         self.fetchRSSFeeds = { try await client.fetchRSSFeeds() }
-        self.fetchRSSFeedPosts = { feedID in try await client.fetchRSSFeedPosts(feedID: feedID) }
+        self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID in
+            try await client.fetchRSSFeedPosts(feedID: feedID)
+        }
+        self.fetchPostDetail = fetchPostDetail ?? { postID in
+            try await client.fetchPost(id: postID)
+        }
+        self.fetchNewYorkTimesArticle = fetchNewYorkTimesArticle ?? { url in
+            try await client.fetchNewYorkTimesArticle(url: url)
+        }
         if usesXFeedPreview {
             self.fetchPosts = { _, _, _ in Self.xFeedPreviewPosts }
         } else if let fetchPosts {
@@ -86,7 +100,25 @@ final class NewsFeedViewModel: ObservableObject {
         do {
             let result = try await fetchRSSFeedPosts(feedID)
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
-            selectedRSSPosts = result
+            guard result.contains(where: \.isNewYorkTimes) else {
+                selectedRSSPosts = result
+                return
+            }
+
+            let visibleCount = min(5, result.count)
+            let visiblePosts = Array(result.prefix(visibleCount))
+            let warmedVisiblePosts = await prefetchNewYorkTimesBodies(for: visiblePosts)
+            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
+            selectedRSSPosts = warmedVisiblePosts
+
+            let remainingPosts = Array(result.dropFirst(visibleCount))
+            guard !remainingPosts.isEmpty else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                let warmedRemaining = await self.prefetchNewYorkTimesBodies(for: remainingPosts)
+                guard !Task.isCancelled, self.selectedRSSFeedID == feedID else { return }
+                self.selectedRSSPosts += warmedRemaining
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -95,9 +127,45 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
+    private func prefetchNewYorkTimesBodies(for posts: [Post]) async -> [Post] {
+        await withTaskGroup(of: (Int, Post, NewYorkTimesArticle?).self, returning: [Post].self) { group in
+            for (index, post) in posts.enumerated() {
+                group.addTask { [fetchPostDetail, fetchNewYorkTimesArticle] in
+                    guard post.isNewYorkTimes,
+                          (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText) == nil else {
+                        let article = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
+                        return (index, post, article)
+                    }
+                    let detail = (try? await fetchPostDetail(post.id)) ?? post
+                    if let article = (detail.contentZH ?? detail.content).flatMap(NewYorkTimesArticle.storedText) {
+                        return (index, detail, article)
+                    }
+                    guard let link = detail.linkURL ?? post.linkURL,
+                          let article = try? await fetchNewYorkTimesArticle(link) else {
+                        return (index, detail, nil)
+                    }
+                    return (index, detail, article)
+                }
+            }
+
+            var warmed = posts
+            for await (index, post, article) in group {
+                warmed[index] = post
+                if let article {
+                    preloadedNewYorkTimesArticles[post.id] = article
+                }
+            }
+            return warmed
+        }
+    }
+
     func postForDisplay(_ post: Post) -> Post {
         guard let translation = xTranslations[post.id] else { return post }
         return post.replacingTranslation(with: translation)
+    }
+
+    func preloadedNewYorkTimesArticle(for postID: Int) -> NewYorkTimesArticle? {
+        preloadedNewYorkTimesArticles[postID]
     }
 
     func posts(for source: FeedSource) -> [Post] {

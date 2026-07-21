@@ -2,6 +2,37 @@ import XCTest
 @testable import AIServerClient
 
 final class FeedAdapterTests: XCTestCase {
+    @MainActor
+    func testNewYorkTimesRSSSelectionPrefetchesVisibleArticleBodies() async throws {
+        let feedPosts = try (1...6).map { id in
+            try JSONDecoder().decode(
+                Post.self,
+                from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","post_link":"https://example.com/\#(id)"}"#.utf8)
+            )
+        }
+        let model = NewsFeedViewModel(
+            source: .rss,
+            fetchRSSFeedPosts: { _ in feedPosts },
+            fetchPostDetail: { id in
+                try JSONDecoder().decode(
+                    Post.self,
+                    from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","post_link":"https://example.com/\#(id)"}"#.utf8)
+                )
+            },
+            fetchNewYorkTimesArticle: { url in
+                NewYorkTimesArticle(blocks: [.paragraph("完整正文 \(url.lastPathComponent)。")])
+            }
+        )
+
+        await model.selectRSSFeed(47)
+
+        XCTAssertGreaterThanOrEqual(model.selectedRSSPosts.count, 5)
+        XCTAssertTrue(model.selectedRSSPosts.prefix(5).allSatisfy {
+            model.preloadedNewYorkTimesArticle(for: $0.id) != nil
+        })
+        XCTAssertFalse(model.isLoadingRSSSelection)
+    }
+
     func testYouTubeRequestsAllScores() {
         let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .youtube)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in

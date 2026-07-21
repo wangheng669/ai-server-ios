@@ -32,10 +32,10 @@ struct PostDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
-    init(post: Post) {
-        let storedArticle = post.isNewYorkTimes
+    init(post: Post, preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil) {
+        let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
             ? (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
-            : nil
+            : nil)
         _post = State(initialValue: post)
         _newYorkTimesArticle = State(initialValue: storedArticle)
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
