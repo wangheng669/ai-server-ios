@@ -83,7 +83,7 @@ private struct EditorialRootView: View {
                     snapshot: deploymentStatus,
                     initiallyExpanded: deploymentPreview != nil
                         ? !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
-                        : true
+                        : false
                 )
                     .id(deploymentStatus.identity)
                     .padding(.top, 6)
@@ -94,7 +94,7 @@ private struct EditorialRootView: View {
             deploymentStore.start()
             await PeopleImagePreheater.preheatTechnologyLeaders()
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 deploymentStore.start()
             } else {

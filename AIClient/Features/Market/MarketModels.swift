@@ -120,6 +120,11 @@ struct MarketIndexConstituents: Decodable {
     let generatedAt: String
     var items: [MarketIndexConstituent]
     let missingSymbols: [String]
+    let staleSymbols: [String]?
+
+    var symbolsPendingRefresh: [String] {
+        Array(Set(missingSymbols + (staleSymbols ?? []))).sorted()
+    }
 
     mutating func merge(_ update: MarketQuoteUpdate) {
         guard let index = items.firstIndex(where: { $0.quote.symbol == update.symbol }) else { return }
@@ -441,12 +446,6 @@ enum MarketRange: String, CaseIterable, Identifiable {
         }
     }
 
-    var shouldPreload: Bool {
-        switch self {
-        case .week, .month, .quarter, .year, .fiveYears, .maximum: true
-        case .day: false
-        }
-    }
 }
 
 struct MarketCandleSample: Identifiable, Equatable {
@@ -485,30 +484,15 @@ func marketDisplayPoints(
 ) -> [MarketChartPoint] {
     let selected = marketPointsForRange(points, range: range)
     guard range == .day else { return selected }
-    guard fallbackValues.count > 1,
-          fallbackValues.allSatisfy(\.isFinite),
-          let fallbackTimestamp,
-          fallbackTimestamp > 0 else { return [] }
-
-    let minuteMs: Int64 = 60_000
-    let end = fallbackTimestamp - fallbackTimestamp % minuteMs
-    let start = end - Int64(fallbackValues.count - 1) * minuteMs
-    let fallback = fallbackValues.enumerated().map { index, value in
-        MarketChartPoint(
-            timestamp: start + Int64(index) * minuteMs,
-            value: value,
-            open: value,
-            high: value,
-            low: value,
-            close: value,
-            volume: nil
-        )
+    // A value-only trend has no trustworthy time axis. Never synthesize minute
+    // timestamps because that makes historical samples look like live intraday data.
+    guard selected.count > 1, let selectedLast = selected.last else { return [] }
+    if let fallbackTimestamp,
+       fallbackTimestamp > selectedLast.timestamp,
+       fallbackTimestamp - selectedLast.timestamp > 4 * 60 * 60 * 1_000 {
+        return []
     }
-    guard selected.count > 1, let selectedFirst = selected.first, let selectedLast = selected.last else { return fallback }
-    if fallbackTimestamp - selectedLast.timestamp > 4 * 60 * 60 * 1_000 { return fallback }
-    let selectedSpan = selectedLast.timestamp - selectedFirst.timestamp
-    let fallbackSpan = (fallback.last?.timestamp ?? 0) - (fallback.first?.timestamp ?? 0)
-    return selectedSpan > fallbackSpan ? selected : fallback
+    return selected
 }
 
 func marketAxisDigits(values: [Double]) -> Int {
@@ -645,15 +629,25 @@ extension MarketQuote {
 }
 
 func marketShortTimestamp(_ timestamp: Int64) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "zh_CN")
-    formatter.dateFormat = "MM-dd HH:mm"
-    return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
+    MarketDateFormatters.shortTimestamp.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
 }
 
 func marketISODate(_ value: String?) -> Date? {
     guard let value else { return nil }
-    let fractional = ISO8601DateFormatter()
-    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    return MarketDateFormatters.isoFractional.date(from: value) ?? MarketDateFormatters.iso.date(from: value)
+}
+
+private enum MarketDateFormatters {
+    static let shortTimestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter
+    }()
+    static let isoFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    static let iso = ISO8601DateFormatter()
 }

@@ -112,9 +112,6 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.month.apiInterval, "1d")
         XCTAssertEqual(MarketRange.fiveYears.apiLimit, 1_000)
         XCTAssertEqual(MarketRange.maximum.apiLimit, 1_000)
-        XCTAssertTrue(MarketRange.year.shouldPreload)
-        XCTAssertTrue(MarketRange.fiveYears.shouldPreload)
-        XCTAssertTrue(MarketRange.maximum.shouldPreload)
     }
 
     func testDayRangeKeepsOnlyLatestTradingSession() {
@@ -143,7 +140,7 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketAxisDigits(values: [4_900, 4_950]), 0)
     }
 
-    func testDayChartUsesQuoteTrendWhenLatestSessionHasOnlyOneMinute() {
+    func testDayChartDoesNotInventTimestampsWhenLatestSessionHasOnlyOneMinute() {
         let timestamp: Int64 = 10 * 60_000
         let point = chartPoint(timestamp: timestamp, close: 16.11)
 
@@ -154,13 +151,12 @@ final class MarketPresentationTests: XCTestCase {
             fallbackTimestamp: timestamp
         )
 
-        XCTAssertEqual(result.map(\.displayValue), [15.82, 16.30, 16.11])
-        XCTAssertEqual(result.map(\.timestamp), [8 * 60_000, 9 * 60_000, 10 * 60_000])
+        XCTAssertTrue(result.isEmpty)
     }
 
     func testDayChartKeepsServerHistoryWhenItContainsMultiplePoints() {
         let serverPoints = (0..<24).map {
-            chartPoint(timestamp: Int64($0) * 60 * 60 * 1_000, close: 100 + Double($0))
+            chartPoint(timestamp: Int64($0) * 60_000, close: 100 + Double($0))
         }
 
         XCTAssertEqual(
@@ -169,7 +165,7 @@ final class MarketPresentationTests: XCTestCase {
         )
     }
 
-    func testDayChartUsesSameQuoteTrendAsMarketCardEvenWithCurrentChartPoints() {
+    func testDayChartUsesTimestampedServerPointsInsteadOfValueOnlyTrend() {
         let points = [
             chartPoint(timestamp: 9 * 60_000, close: 16.08),
             chartPoint(timestamp: 10 * 60_000, close: 16.11)
@@ -182,11 +178,11 @@ final class MarketPresentationTests: XCTestCase {
             fallbackTimestamp: 10 * 60_000
         )
 
-        XCTAssertEqual(result.map(\.displayValue), [15.82, 16.30])
+        XCTAssertEqual(result.map(\.displayValue), [16.08, 16.11])
         XCTAssertEqual(result.map(\.timestamp), [9 * 60_000, 10 * 60_000])
     }
 
-    func testDayChartUsesQuoteTrendWhenTimestampedChartIsFromPreviousSession() {
+    func testDayChartHidesTimestampedChartFromPreviousSession() {
         let hour: Int64 = 60 * 60 * 1_000
         let stalePoints = [
             chartPoint(timestamp: hour, close: 16.40),
@@ -200,28 +196,27 @@ final class MarketPresentationTests: XCTestCase {
             fallbackTimestamp: 8 * hour
         )
 
-        XCTAssertEqual(result.map(\.displayValue), [16.50, 16.20, 16.07])
-        XCTAssertEqual(result.last?.timestamp, 8 * hour)
+        XCTAssertTrue(result.isEmpty)
     }
 
-    func testDayChartDoesNotSubstituteAnotherSourceWhenCardTrendIsUnavailable() {
+    func testDayChartUsesTimestampedSourceWhenCardTrendIsUnavailable() {
         let chartPoints = [
             chartPoint(timestamp: 9 * 60_000, close: 16.08),
             chartPoint(timestamp: 10 * 60_000, close: 16.11)
         ]
 
-        XCTAssertTrue(marketDisplayPoints(
+        XCTAssertEqual(marketDisplayPoints(
             chartPoints,
             range: .day,
             fallbackValues: [],
             fallbackTimestamp: nil
-        ).isEmpty)
-        XCTAssertTrue(marketDisplayPoints(
+        ), chartPoints)
+        XCTAssertEqual(marketDisplayPoints(
             chartPoints,
             range: .day,
             fallbackValues: [16.11],
             fallbackTimestamp: 10 * 60_000
-        ).isEmpty)
+        ), chartPoints)
     }
 
     func testWeekRangeKeepsFiveLatestTradingDays() {
