@@ -105,6 +105,10 @@ private struct MarketHomeView: View {
                         .transition(.opacity)
                         .animation(.easeInOut(duration: 0.16), value: selectedMarket)
                         .simultaneousGesture(regionSwipeGesture)
+                        if selectedMarket == .china {
+                            ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
+                                .id("market-structure")
+                        }
                         if selectedMarket != .crypto {
                             MarketWorldMap(store: store, selection: $selectedMarket)
                                 .id("market-map")
@@ -126,11 +130,22 @@ private struct MarketHomeView: View {
             }
             .task {
                 #if DEBUG
-                guard ProcessInfo.processInfo.arguments.contains("--market-map-preview") else { return }
-                try? await Task.sleep(for: .milliseconds(700))
-                proxy.scrollTo("market-map", anchor: .bottom)
+                if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
+                    try? await Task.sleep(for: .seconds(2))
+                    proxy.scrollTo("market-structure", anchor: .top)
+                } else if ProcessInfo.processInfo.arguments.contains("--market-map-preview") {
+                    try? await Task.sleep(for: .milliseconds(700))
+                    proxy.scrollTo("market-map", anchor: .bottom)
+                }
                 #endif
             }
+            #if DEBUG
+            .onChange(of: store.dashboard?.marketStructure?.generatedAt) { _, generatedAt in
+                guard generatedAt != nil,
+                      ProcessInfo.processInfo.arguments.contains("--market-structure-preview") else { return }
+                proxy.scrollTo("market-structure", anchor: .top)
+            }
+            #endif
         }
     }
 
@@ -773,6 +788,244 @@ private struct MarketIndexTable: View {
         .padding(.horizontal, 18)
         .animation(.easeOut(duration: 0.16), value: region)
     }
+}
+
+private struct ChinaMarketStructurePanel: View {
+    let structure: MarketStructure?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("资金与杠杆信号")
+                        .font(.headline)
+                    Text("交易所官方日频数据 · 趋势判断不代表预测")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let asOf = structure?.marginBalance.asOf {
+                    Text("截至 \(asOf)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let structure {
+                ETFSubscriptionSignal(subscription: structure.etfSubscription)
+                Divider().opacity(0.45)
+                MarginBalanceSignal(balance: structure.marginBalance)
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在等待 ETF 份额与两融余额日频数据")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .marketCard(cornerRadius: 16)
+        .padding(.horizontal, 18)
+        .padding(.top, 20)
+    }
+}
+
+private struct ETFSubscriptionSignal: View {
+    let subscription: MarketETFSubscription
+
+    private var tint: Color {
+        subscription.status == "outflow" ? MarketStyle.loss : MarketStyle.gain
+    }
+
+    private var statusLabel: String {
+        switch subscription.status {
+        case "accelerating": "持续放量"
+        case "inflow": "保持净申购"
+        case "outflow": "转为净赎回"
+        default: "多空交错"
+        }
+    }
+
+    private var streakLabel: String {
+        guard subscription.consecutiveDays > 0 else { return "连续性待观察" }
+        let direction = subscription.consecutiveDirection == "outflow" ? "净赎回" : "净申购"
+        return "连续 \(subscription.consecutiveDays) 日\(direction)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("科创50ETF 净申购", systemImage: "arrow.left.arrow.right.circle")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                MarketSignalBadge(label: statusLabel, tint: tint)
+            }
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(marketSignedShares(subscription.latestNetSubscriptionShares))
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(subscription.latestNetSubscriptionShares >= 0 ? MarketStyle.gain : MarketStyle.loss)
+                    Text("当日份额变化 · \(subscription.fundCode)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                MarketFlowBars(values: subscription.points.suffix(10).map(\.netSubscriptionShares))
+                    .frame(width: 112, height: 42)
+            }
+            HStack(spacing: 12) {
+                MarketSignalDatum(title: "近 5 日", value: marketSignedShares(subscription.netSubscriptionShares5d))
+                MarketSignalDatum(title: "前 5 日", value: marketSignedShares(subscription.previousNetShares5d))
+                MarketSignalDatum(title: "净流入天数", value: "\(subscription.positiveDays5d) / 5")
+            }
+            Text("\(streakLabel)；净申购按上交所披露的每日基金总份额变化计算。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MarginBalanceSignal: View {
+    let balance: MarketMarginBalance
+
+    private var tint: Color {
+        switch balance.status {
+        case "recovering", "stabilizing": MarketStyle.gain
+        case "declining": .orange
+        default: .secondary
+        }
+    }
+
+    private var statusLabel: String {
+        switch balance.status {
+        case "recovering": "回升确认"
+        case "stabilizing": "初步企稳"
+        case "declining": "尚未企稳"
+        default: "方向待定"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("两融余额企稳观察", systemImage: "scale.3d")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                MarketSignalBadge(label: statusLabel, tint: tint)
+            }
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(marketMoney(balance.totalBalance))
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text("沪深两融余额 · 日变动 \(marketSignedMoney(balance.latestChange))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Sparkline(
+                    values: balance.points.suffix(15).map(\.totalBalance),
+                    color: tint,
+                    showsFill: true
+                )
+                .frame(width: 112, height: 42)
+            }
+            HStack(spacing: 12) {
+                MarketSignalDatum(title: "3 日变化", value: marketSignedMoney(balance.change3d))
+                MarketSignalDatum(title: "5 日变化", value: marketSignedMoney(balance.change5d))
+                MarketSignalDatum(title: "回升天数", value: "\(balance.positiveDays5d) / 5")
+            }
+            Text("企稳口径：短期斜率转正或跌幅显著收窄；连续回升后标记为回升确认。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MarketSignalBadge: View {
+    let label: String
+    let tint: Color
+
+    var body: some View {
+        Text(label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .frame(height: 23)
+            .background(tint.opacity(0.10), in: Capsule())
+    }
+}
+
+private struct MarketSignalDatum: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MarketFlowBars: View {
+    let values: [Double]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let maximum = max(values.map(abs).max() ?? 0, 1)
+            let width = proxy.size.width / CGFloat(max(values.count, 1))
+            let middle = proxy.size.height / 2
+            ZStack {
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: middle))
+                    path.addLine(to: CGPoint(x: proxy.size.width, y: middle))
+                }
+                .stroke(Color.secondary.opacity(0.20), lineWidth: 0.5)
+                flowPath(values: values, positive: true, maximum: maximum, width: width, middle: middle)
+                    .fill(MarketStyle.gain.opacity(0.86))
+                flowPath(values: values, positive: false, maximum: maximum, width: width, middle: middle)
+                    .fill(MarketStyle.loss.opacity(0.86))
+            }
+        }
+    }
+
+    private func flowPath(values: [Double], positive: Bool, maximum: Double, width: CGFloat, middle: CGFloat) -> Path {
+        Path { path in
+            for (index, value) in values.enumerated() where (value >= 0) == positive {
+                let height = max(1, middle * CGFloat(abs(value) / maximum))
+                let x = CGFloat(index) * width + 1
+                let y = positive ? middle - height : middle
+                path.addRoundedRect(
+                    in: CGRect(x: x, y: y, width: max(1, width - 2), height: height),
+                    cornerSize: CGSize(width: 1.5, height: 1.5)
+                )
+            }
+        }
+    }
+}
+
+private func marketSignedShares(_ value: Double) -> String {
+    String(format: "%@%.2f亿份", value >= 0 ? "+" : "−", abs(value) / 100_000_000)
+}
+
+private func marketMoney(_ value: Double) -> String {
+    if value >= 1_000_000_000_000 { return String(format: "%.2f万亿", value / 1_000_000_000_000) }
+    return String(format: "%.0f亿", value / 100_000_000)
+}
+
+private func marketSignedMoney(_ value: Double) -> String {
+    String(format: "%@%.0f亿", value >= 0 ? "+" : "−", abs(value) / 100_000_000)
 }
 
 private enum ChinaIndexScope: String, CaseIterable, Identifiable {

@@ -46,6 +46,17 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.regions.first?.metricSymbols, ["USDJPY", "JP10Y", "^TOPX"])
     }
 
+    func testDashboardDecodesChinaMarketStructureSignals() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":[],"marketStructure":{"dataContract":"market_structure_v1","generatedAt":"2026-07-22T09:00:00Z","etfSubscription":{"fundCode":"588000","fundName":"科创50","asOf":"2026-07-21","status":"accelerating","latestShares":45512668200,"latestNetSubscriptionShares":459000000,"netSubscriptionShares5d":900000000,"previousNetShares5d":500000000,"positiveDays5d":4,"consecutiveDirection":"inflow","consecutiveDays":2,"points":[{"date":"2026-07-21","totalShares":45512668200,"netSubscriptionShares":459000000}]},"marginBalance":{"asOf":"2026-07-21","status":"stabilizing","financingBalance":2689521390293,"securitiesBalance":20402350759,"totalBalance":2709923741052,"latestChange":1086577120,"change3d":-1200000000,"change5d":-5100000000,"positiveDays5d":2,"points":[{"date":"2026-07-21","financingBalance":2689521390293,"securitiesBalance":20402350759,"totalBalance":2709923741052,"dailyChange":1086577120}]},"sources":[{"name":"上交所","url":"https://www.sse.com.cn/"}]}}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+
+        XCTAssertEqual(response.data.marketStructure?.etfSubscription.status, "accelerating")
+        XCTAssertEqual(response.data.marketStructure?.etfSubscription.consecutiveDays, 2)
+        XCTAssertEqual(response.data.marketStructure?.marginBalance.status, "stabilizing")
+        XCTAssertEqual(response.data.marketStructure?.marginBalance.points.first?.dailyChange, 1_086_577_120)
+    }
+
     func testDashboardDoesNotPresentStaleAShareBreadthAsCurrent() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":[],"ashareOverview":{"breadth":{"Up":2219,"Down":3202,"Flat":94,"Total":5515},"hotSectors":[],"stale":true}}}"#.utf8)
 
