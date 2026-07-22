@@ -93,7 +93,6 @@ final class MarketStore {
         defer { loadingCharts.remove(key) }
         do {
             charts[key] = try await service.chart(symbol: symbol, range: range)
-            if range == .day, let quote = realtimeQuotes[symbol] { appendRealtimePoint(quote) }
         } catch is CancellationError {
             return
         } catch {
@@ -239,7 +238,6 @@ final class MarketStore {
             dashboard.replace(quote)
             mergeConstituent(update)
             realtimeQuotes[quote.symbol] = quote
-            appendRealtimePoint(quote)
         }
         self.dashboard = dashboard
     }
@@ -254,12 +252,6 @@ final class MarketStore {
         await refresh(force: false)
     }
 
-    private func appendRealtimePoint(_ quote: MarketQuote) {
-        let key = ChartKey(symbol: quote.symbol, range: .day)
-        guard var chart = charts[key], let timestamp = quote.timestamp else { return }
-        chart.points = marketMergingRealtimePrice(quote.price, timestamp: timestamp, into: chart.points)
-        charts[key] = chart
-    }
 }
 
 private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {

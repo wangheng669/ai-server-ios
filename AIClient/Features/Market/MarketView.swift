@@ -1761,13 +1761,7 @@ private struct MarketDetailChart: View {
 
     private var chart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
     private var points: [MarketChartPoint] {
-        let quote = store.quote(symbol: symbol)
-        return marketDisplayPoints(
-            chart?.points ?? [],
-            range: selectedRange,
-            fallbackValues: quote?.trend ?? [],
-            fallbackTimestamp: quote?.timestamp
-        )
+        (chart?.candles ?? []).sorted { $0.timestamp < $1.timestamp }
     }
     private var values: [Double] {
         let bounds = points.flatMap { [$0.low, $0.high].compactMap { $0 } }
@@ -1801,7 +1795,7 @@ private struct MarketDetailChart: View {
                             Button("重新加载") { Task { await store.loadChart(symbol: symbol, range: selectedRange, force: true) } }
                                 .font(.system(size: 12, weight: .semibold)).frame(minWidth: 88, minHeight: 44)
                         }
-                    } else { Text("该周期暂无行情数据").font(.system(size: 12)).foregroundStyle(.secondary) }
+                    } else { Text(chartStatusMessage).font(.system(size: 12)).foregroundStyle(.secondary) }
                 } else {
                     MarketLineChart(
                         values: points.compactMap(\.displayValue),
@@ -1815,7 +1809,7 @@ private struct MarketDetailChart: View {
             .frame(height: 184)
             .animation(MarketStyle.chartTransition, value: selectedRange)
             if let inspectedPoint {
-                Text("\(chartTime(inspectedPoint.timestamp, range: selectedRange))  \(number(inspectedPoint.displayValue ?? 0, digits: 2))")
+                Text("\(chartTime(inspectedPoint.timestamp, range: selectedRange, timezone: chart?.timezone))  \(number(inspectedPoint.displayValue ?? 0, digits: 2))")
                     .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -1855,20 +1849,36 @@ private struct MarketDetailChart: View {
 
     private var timelineLabels: [String] {
         guard let first = points.first, let last = points.last else { return ["—", "—", "—"] }
-        return [first, points[points.count / 2], last].map { chartTime($0.timestamp, range: selectedRange) }
+        return [first, points[points.count / 2], last].map { chartTime($0.timestamp, range: selectedRange, timezone: chart?.timezone) }
     }
 
     private var hasVolume: Bool { points.contains { ($0.volume ?? 0) > 0 } }
     private var chartCaption: String {
         let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
-        return hasVolume ? "\(base) · 成交量" : base
+        let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
+        return hasVolume ? "\(dated) · 成交量" : dated
     }
     private var coverageMessage: String? {
-        guard selectedRange == .day, symbol.hasPrefix("BINANCE:"),
-              let first = points.first, let last = points.last else { return nil }
-        let coveredHours = Double(last.timestamp - first.timestamp) / 3_600_000
-        guard coveredHours < 20 else { return nil }
-        return String(format: "当前仅有近 %.1f 小时走势，历史数据仍在积累", max(coveredHours, 0))
+        guard let quality = chart?.quality else { return nil }
+        switch quality.status {
+        case .complete:
+            return points.last?.state == "provisional" ? "当前分钟更新中" : nil
+        case .repairing:
+            return "数据补齐中 · 已有 \(quality.actual)/\(quality.expected) 个真实数据点"
+        case .partial:
+            return "数据不完整 · 缺少 \(max(quality.expected - quality.actual, 0)) 个数据点"
+        case .unavailable:
+            return "当前交易日暂无可用行情"
+        }
+    }
+
+    private var chartStatusMessage: String {
+        switch chart?.quality.status {
+        case .repairing: "数据补齐中"
+        case .partial: "该交易日行情不完整"
+        case .unavailable: "当前交易日暂无可用行情"
+        case .complete, .none: "暂无行情数据"
+        }
     }
 
 }
@@ -2019,7 +2029,7 @@ private struct VolumeBars: View {
             let maxVolume = points.compactMap(\.volume).max() ?? 1
             HStack(alignment: .bottom, spacing: 1) {
                 ForEach(points.suffix(80)) { point in
-                    let rising = (point.close ?? point.value ?? 0) >= (point.open ?? point.close ?? point.value ?? 0)
+                    let rising = point.close >= point.open
                     Rectangle().fill((rising ? MarketStyle.gain : MarketStyle.loss).opacity(0.68))
                         .frame(maxWidth: .infinity).frame(height: max(2, proxy.size.height * CGFloat((point.volume ?? 0) / maxVolume)))
                         .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
@@ -2241,8 +2251,8 @@ private func cryptoPriceDigits(_ price: Double, symbol: String = "BINANCE:") -> 
 private func cryptoChangeDigits(_ quote: MarketQuote) -> Int {
     cryptoPriceDigits(max(abs(quote.changeValue), quote.price), symbol: quote.symbol)
 }
-private func chartTime(_ timestamp: Int64, range: MarketRange) -> String {
-    let formatter = MarketViewDateFormatters.chart(range: range)
+private func chartTime(_ timestamp: Int64, range: MarketRange, timezone: String?) -> String {
+    let formatter = MarketViewDateFormatters.chart(range: range, timezone: timezone)
     return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
 }
 
@@ -2260,18 +2270,20 @@ private enum MarketViewDateFormatters {
         return formatter
     }
 
-    static func chart(range: MarketRange) -> DateFormatter {
+    static func chart(range: MarketRange, timezone: String?) -> DateFormatter {
         let format: String
         switch range {
         case .day, .week: format = "MM-dd HH:mm"
         case .month, .quarter, .year: format = "MM-dd"
         case .fiveYears, .maximum: format = "yyyy-MM"
         }
-        if let cached = chartCache[format] { return cached }
+        let cacheKey = "\(format)|\(timezone ?? "")"
+        if let cached = chartCache[cacheKey] { return cached }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
+        if let timezone { formatter.timeZone = TimeZone(identifier: timezone) }
         formatter.dateFormat = format
-        chartCache[format] = formatter
+        chartCache[cacheKey] = formatter
         return formatter
     }
 }
