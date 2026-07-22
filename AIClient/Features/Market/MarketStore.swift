@@ -88,7 +88,7 @@ final class MarketStore {
 
     func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
         let key = ChartKey(symbol: symbol, range: range)
-        if !force, charts[key] != nil { return }
+        if !force, let cached = charts[key], marketChartCanUseCache(cached) { return }
         guard !loadingCharts.contains(key) else { return }
         loadingCharts.insert(key)
         chartErrors[key] = nil
@@ -287,6 +287,10 @@ final class MarketStore {
 
 func marketChartNeedsRetry(_ chart: MarketChart) -> Bool {
     chart.candles.isEmpty && chart.quality.status != .complete
+}
+
+func marketChartCanUseCache(_ chart: MarketChart) -> Bool {
+    !marketChartNeedsRetry(chart)
 }
 
 private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {
