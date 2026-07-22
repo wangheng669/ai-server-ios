@@ -17,6 +17,7 @@ final class MarketPresentationTests: XCTestCase {
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
 
         XCTAssertTrue(marketChartNeedsRetry(response.data))
+        XCTAssertFalse(marketChartCanUseCache(response.data))
     }
 
     func testCryptoDisplayCodeUsesTradingPair() throws {
