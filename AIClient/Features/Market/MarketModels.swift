@@ -429,6 +429,26 @@ struct MarketMarginBalance: Codable {
     let change5d: Double
     let positiveDays5d: Int
     let points: [MarketMarginPoint]
+
+    var riskAppetite: MarketLeverageRiskAppetite {
+        MarketLeverageRiskAppetite(status: status)
+    }
+}
+
+enum MarketLeverageRiskAppetite: Equatable {
+    case weak
+    case repairing
+    case strong
+    case uncertain
+
+    init(status: String) {
+        switch status {
+        case "declining": self = .weak
+        case "stabilizing": self = .repairing
+        case "recovering": self = .strong
+        default: self = .uncertain
+        }
+    }
 }
 
 struct MarketMarginPoint: Codable, Identifiable {

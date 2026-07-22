@@ -893,26 +893,53 @@ private struct MarginBalanceSignal: View {
     let balance: MarketMarginBalance
 
     private var tint: Color {
-        switch balance.status {
-        case "recovering", "stabilizing": MarketStyle.gain
-        case "declining": .orange
-        default: .secondary
+        switch balance.riskAppetite {
+        case .strong: MarketStyle.gain
+        case .repairing: .blue
+        case .weak: .orange
+        case .uncertain: .secondary
         }
     }
 
     private var statusLabel: String {
-        switch balance.status {
-        case "recovering": "回升确认"
-        case "stabilizing": "初步企稳"
-        case "declining": "尚未企稳"
-        default: "方向待定"
+        switch balance.riskAppetite {
+        case .strong: "明显走强"
+        case .repairing: "企稳修复"
+        case .weak: "偏弱"
+        case .uncertain: "方向待定"
+        }
+    }
+
+    private var summary: String {
+        switch balance.riskAppetite {
+        case .strong:
+            "短中期余额同步回升，杠杆资金风险偏好明显走强。"
+        case .repairing where balance.latestChange > 0:
+            "单日资金回流，短期跌势正在收窄，处于企稳修复阶段。"
+        case .repairing:
+            "短期跌幅已经收窄，杠杆资金处于企稳观察阶段。"
+        case .weak where balance.latestChange > 0:
+            "单日有所回流，但 3 日及 5 日趋势仍向下，尚未形成企稳信号。"
+        case .weak:
+            "日、3 日及 5 日趋势仍向下，杠杆资金风险偏好偏弱。"
+        case .uncertain:
+            "日、3 日与 5 日变化方向不一致，风险偏好方向仍待确认。"
+        }
+    }
+
+    private var summaryIcon: String {
+        switch balance.riskAppetite {
+        case .strong: "arrow.up.right"
+        case .repairing: "waveform.path.ecg"
+        case .weak: "arrow.down.right"
+        case .uncertain: "arrow.left.and.right"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("两融余额企稳观察", systemImage: "scale.3d")
+                Label("沪深两融余额", systemImage: "scale.3d")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 MarketSignalBadge(label: statusLabel, tint: tint)
@@ -939,9 +966,28 @@ private struct MarginBalanceSignal: View {
                 MarketSignalDatum(title: "5 日变化", value: marketSignedMoney(balance.change5d))
                 MarketSignalDatum(title: "回升天数", value: "\(balance.positiveDays5d) / 5")
             }
-            Text("企稳口径：短期斜率转正或跌幅显著收窄；连续回升后标记为回升确认。")
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: summaryIcon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 24, height: 24)
+                    .background(tint.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("杠杆风险偏好：\(statusLabel)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                    Text(summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Text("判断综合日、3 日和 5 日余额变化；两融余额仅作为杠杆风险偏好的代理指标。")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
         }
         .accessibilityElement(children: .combine)
     }
