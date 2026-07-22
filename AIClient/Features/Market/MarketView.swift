@@ -484,7 +484,8 @@ private struct ChinaMarketMetrics: View {
     let store: MarketStore
 
     private var exchangeRate: MarketQuote? { store.quote(symbol: "USDCNY") }
-    private var breadth: MarketBreadth? { store.dashboard?.ashareOverview?.breadth }
+    private var breadth: MarketBreadth? { store.dashboard?.currentAShareBreadth }
+    private var breadthIsStale: Bool { store.dashboard?.ashareOverview?.stale == true }
     private var turnoverMetric: (title: String, value: Double, note: String)? {
         let shanghai = store.quote(symbol: "000001.SS")?.turnover
         let shenzhen = store.quote(symbol: "399001.SZ")?.turnover
@@ -514,7 +515,7 @@ private struct ChinaMarketMetrics: View {
                 trend: []
             )
             TerminalDivider()
-            MarketBreadthMetric(breadth: breadth)
+            MarketBreadthMetric(breadth: breadth, isStale: breadthIsStale)
         }
     }
 
@@ -526,16 +527,21 @@ private struct ChinaMarketMetrics: View {
 
 private struct MarketBreadthMetric: View {
     let breadth: MarketBreadth?
+    var isStale = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("市场宽度").font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
-            Text(breadth.map { "\($0.up) / \($0.down)" } ?? "—")
+            Text(isStale ? "数据过期" : (breadth.map { "\($0.up) / \($0.down)" } ?? "—"))
                 .font(.system(size: 15, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.72)
             HStack(spacing: 3) {
-                Text("上涨").foregroundStyle(MarketStyle.gain)
-                Text("/").foregroundStyle(.secondary)
-                Text("下跌").foregroundStyle(MarketStyle.loss)
+                if isStale {
+                    Text("等待实时刷新").foregroundStyle(.secondary)
+                } else {
+                    Text("上涨").foregroundStyle(MarketStyle.gain)
+                    Text("/").foregroundStyle(.secondary)
+                    Text("下跌").foregroundStyle(MarketStyle.loss)
+                }
             }
             .font(.system(size: 9.5, weight: .medium))
             MarketBreadthComposition(
@@ -1394,7 +1400,7 @@ private struct GlobalMarketOverviewGrid: View {
                 city: "北京",
                 timeZone: "Asia/Shanghai",
                 symbol: "000001.SS",
-                breadth: store.dashboard?.ashareOverview?.breadth
+                breadth: store.dashboard?.currentAShareBreadth
             )
             countryButton(
                 country: "美国",
@@ -1862,7 +1868,8 @@ private struct MarketDetailChart: View {
         guard let quality = chart?.quality else { return nil }
         switch quality.status {
         case .complete:
-            return points.last?.state == "provisional" ? "当前分钟更新中" : nil
+            guard points.last?.state == "provisional" else { return nil }
+            return selectedRange.apiInterval == "1m" ? "当前分钟更新中" : "当日数据更新中"
         case .repairing:
             return "数据补齐中 · 已有 \(quality.actual)/\(quality.expected) 个真实数据点"
         case .partial:
