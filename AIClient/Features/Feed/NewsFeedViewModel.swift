@@ -47,7 +47,6 @@ final class NewsFeedViewModel: ObservableObject {
         let usesXFeedPreview = ProcessInfo.processInfo.arguments.contains("--x-feed-preview")
         #else
         let override: String? = nil
-        let usesXFeedPreview = false
         #endif
         source = initialSource
             ?? FeedSource(rawValue: override ?? UserDefaults.standard.string(forKey: "feed.source") ?? "x")
@@ -66,6 +65,7 @@ final class NewsFeedViewModel: ObservableObject {
         self.fetchNewYorkTimesArticle = fetchNewYorkTimesArticle ?? { url in
             try await client.fetchNewYorkTimesArticle(url: url)
         }
+        #if DEBUG
         if usesXFeedPreview {
             self.fetchPosts = { _, _, _ in Self.xFeedPreviewPosts }
         } else if let fetchPosts {
@@ -75,6 +75,15 @@ final class NewsFeedViewModel: ObservableObject {
                 try await client.fetchPosts(page: page, limit: limit, source: source)
             }
         }
+        #else
+        if let fetchPosts {
+            self.fetchPosts = fetchPosts
+        } else {
+            self.fetchPosts = { page, limit, source in
+                try await client.fetchPosts(page: page, limit: limit, source: source)
+            }
+        }
+        #endif
     }
 
     func loadRSSFeedsIfNeeded() async {
