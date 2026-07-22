@@ -387,7 +387,14 @@ struct MarketStructure: Codable {
     let generatedAt: String
     let etfSubscription: MarketETFSubscription
     let marginBalance: MarketMarginBalance
+    let combinedSignal: MarketCombinedSignal?
     let sources: [MarketStructureSource]
+}
+
+struct MarketCombinedSignal: Codable {
+    let status: String
+    let title: String
+    let summary: String
 }
 
 struct MarketStructureSource: Codable, Identifiable {
@@ -399,10 +406,14 @@ struct MarketStructureSource: Codable, Identifiable {
 struct MarketETFSubscription: Codable {
     let fundCode: String
     let fundName: String
+    let fundCount: Int?
+    let fundCodes: [String]?
     let asOf: String
     let status: String
     let latestShares: Double
     let latestNetSubscriptionShares: Double
+    let latestEstimatedNetFlowCNY: Double?
+    let estimatedFlowFundCount: Int?
     let netSubscriptionShares5d: Double
     let previousNetShares5d: Double
     let positiveDays5d: Int
@@ -428,6 +439,10 @@ struct MarketMarginBalance: Codable {
     let change3d: Double
     let change5d: Double
     let positiveDays5d: Int
+    let financingBuyAmount: Double?
+    let aShareTurnover: Double?
+    let financingBuyRatio: Double?
+    let activityStatus: String?
     let points: [MarketMarginPoint]
 
     var riskAppetite: MarketLeverageRiskAppetite {
@@ -457,6 +472,7 @@ struct MarketMarginPoint: Codable, Identifiable {
     let securitiesBalance: Double
     let totalBalance: Double
     let dailyChange: Double
+    let financingBuyAmount: Double?
     var id: String { date }
 }
 

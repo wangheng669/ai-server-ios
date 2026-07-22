@@ -812,6 +812,10 @@ private struct ChinaMarketStructurePanel: View {
             }
 
             if let structure {
+                if let combinedSignal = structure.combinedSignal {
+                    CombinedCapitalSignal(signal: combinedSignal)
+                    Divider().opacity(0.45)
+                }
                 ETFSubscriptionSignal(subscription: structure.etfSubscription)
                 Divider().opacity(0.45)
                 MarginBalanceSignal(balance: structure.marginBalance)
@@ -829,6 +833,53 @@ private struct ChinaMarketStructurePanel: View {
         .marketCard(cornerRadius: 16)
         .padding(.horizontal, 18)
         .padding(.top, 20)
+    }
+}
+
+private struct CombinedCapitalSignal: View {
+    let signal: MarketCombinedSignal
+
+    private var tint: Color {
+        switch signal.status {
+        case "resonance": MarketStyle.gain
+        case "allocation_support": .blue
+        case "leverage_driven": .orange
+        case "risk_off": MarketStyle.loss
+        default: .secondary
+        }
+    }
+
+    private var icon: String {
+        switch signal.status {
+        case "resonance": "arrow.trianglehead.2.clockwise.rotate.90"
+        case "allocation_support": "shield.lefthalf.filled"
+        case "leverage_driven": "bolt.fill"
+        case "risk_off": "arrow.down.right"
+        default: "arrow.left.and.right"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(signal.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                Text(signal.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -857,7 +908,7 @@ private struct ETFSubscriptionSignal: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("科创50ETF 净申购", systemImage: "arrow.left.arrow.right.circle")
+                Label("科创50ETF 合计净申购", systemImage: "arrow.left.arrow.right.circle")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 MarketSignalBadge(label: statusLabel, tint: tint)
@@ -868,7 +919,7 @@ private struct ETFSubscriptionSignal: View {
                         .font(.system(size: 23, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(subscription.latestNetSubscriptionShares >= 0 ? MarketStyle.gain : MarketStyle.loss)
-                    Text("当日份额变化 · \(subscription.fundCode)")
+                    Text("当日份额变化 · \(subscription.fundCount ?? 1) 只主要ETF")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -880,6 +931,18 @@ private struct ETFSubscriptionSignal: View {
                 MarketSignalDatum(title: "近 5 日", value: marketSignedShares(subscription.netSubscriptionShares5d))
                 MarketSignalDatum(title: "前 5 日", value: marketSignedShares(subscription.previousNetShares5d))
                 MarketSignalDatum(title: "净流入天数", value: "\(subscription.positiveDays5d) / 5")
+            }
+            if let estimatedFlow = subscription.latestEstimatedNetFlowCNY,
+               let coverage = subscription.estimatedFlowFundCount,
+               coverage > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "yensign.circle")
+                    Text("按收盘价估算当日净流入 \(marketSignedMoney(estimatedFlow))")
+                    Spacer(minLength: 4)
+                    Text("覆盖 \(coverage) 只")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(tint)
             }
             Text("\(streakLabel)；净申购按上交所披露的每日基金总份额变化计算。")
                 .font(.caption2)
@@ -936,6 +999,15 @@ private struct MarginBalanceSignal: View {
         }
     }
 
+    private var activityLabel: String {
+        switch balance.activityStatus {
+        case "aggressive": "偏积极"
+        case "active": "中性活跃"
+        case "cautious": "偏谨慎"
+        default: "待更新"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -966,6 +1038,25 @@ private struct MarginBalanceSignal: View {
                 MarketSignalDatum(title: "5 日变化", value: marketSignedMoney(balance.change5d))
                 MarketSignalDatum(title: "回升天数", value: "\(balance.positiveDays5d) / 5")
             }
+            if let ratio = balance.financingBuyRatio {
+                HStack(spacing: 7) {
+                    Image(systemName: "gauge.with.dots.needle.50percent")
+                        .foregroundStyle(tint)
+                    Text("融资买入占A股成交额")
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%.2f%%", ratio))
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                    Spacer(minLength: 4)
+                    Text(activityLabel)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(tint)
+                }
+                .font(.caption2)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: summaryIcon)
                     .font(.caption.weight(.bold))
@@ -985,7 +1076,7 @@ private struct MarginBalanceSignal: View {
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text("判断综合日、3 日和 5 日余额变化；两融余额仅作为杠杆风险偏好的代理指标。")
+            Text("判断综合余额趋势与融资买入活跃度；两融数据仅作为杠杆风险偏好的代理指标。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
