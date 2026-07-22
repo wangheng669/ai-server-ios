@@ -60,11 +60,13 @@ struct PeopleView: View {
             .navigationBarHidden(true)
             .navigationDestination(item: $selectedPerson) { person in
                 PersonDetailPage(person: person)
-                    .onAppear { showsDetail = true }
-                    .onDisappear { showsDetail = false }
             }
         }
         .task { await store.load() }
+        .onAppear { showsDetail = selectedPerson != nil }
+        .onChange(of: selectedPerson) { _, person in
+            showsDetail = person != nil
+        }
         .onDisappear { showsDetail = false }
     }
 
@@ -207,6 +209,7 @@ private struct PersonDetailPage: View {
     @State private var store = PersonDetailStore()
     @State private var section = PersonDetailSection.posts
     @State private var isBioExpanded = false
+    @State private var selectedPost: Post?
 
     var body: some View {
         ScrollView {
@@ -221,7 +224,7 @@ private struct PersonDetailPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .navigationDestination(for: Post.self) { post in PostDetailView(post: post) }
+        .navigationDestination(item: $selectedPost) { post in PostDetailView(post: post) }
         .task(id: person.id) { await store.load(person: person) }
     }
 
@@ -301,11 +304,33 @@ private struct PersonDetailPage: View {
                 discussionContent(posts)
             } else {
                 ForEach(posts) { post in
-                    NavigationLink(value: post) { PersonPostRow(post: post, compact: false) }
+                    let displayPost = store.postForDisplay(post)
+                    Button { selectedPost = displayPost } label: {
+                        PersonPostRow(post: displayPost, compact: false)
+                    }
                         .buttonStyle(.plain)
+                        .task { await store.translateXPostIfNeeded(post) }
+                        .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
                     Divider().padding(.leading, 20)
                 }
+                ownPostsPaginationStatus
             }
+        }
+    }
+
+    @ViewBuilder
+    private var ownPostsPaginationStatus: some View {
+        if store.isLoadingMoreOwnPosts {
+            ProgressView("正在载入更多动态…")
+                .frame(maxWidth: .infinity)
+                .padding(20)
+        } else if store.ownPostsLoadMoreError != nil, let last = store.ownPosts.last {
+            Button("加载失败，点按重试") {
+                Task { await store.loadMoreOwnPostsIfNeeded(current: last, person: person) }
+            }
+            .font(.footnote)
+            .frame(maxWidth: .infinity)
+            .padding(20)
         }
     }
 
@@ -340,8 +365,12 @@ private struct PersonDetailPage: View {
             }
             .padding(.horizontal, 20).padding(.top, 15).padding(.bottom, 7)
             ForEach(posts) { post in
-                NavigationLink(value: post) { PersonPostRow(post: post, compact: true) }
+                let displayPost = store.postForDisplay(post)
+                Button { selectedPost = displayPost } label: {
+                    PersonPostRow(post: displayPost, compact: true)
+                }
                     .buttonStyle(.plain)
+                    .task { await store.translateXPostIfNeeded(post) }
                 Divider().padding(.leading, 72)
             }
         }
