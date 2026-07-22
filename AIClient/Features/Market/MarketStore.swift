@@ -27,6 +27,8 @@ final class MarketStore {
     private var isRefreshing = false
     private var lastSnapshotRefreshAt: Date?
     private var constituentRetryTasks: [String: Task<Void, Never>] = [:]
+    private var chartRetryTasks: [ChartKey: Task<Void, Never>] = [:]
+    private var chartRetryAttempts: [ChartKey: Int] = [:]
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -92,11 +94,40 @@ final class MarketStore {
         chartErrors[key] = nil
         defer { loadingCharts.remove(key) }
         do {
-            charts[key] = try await service.chart(symbol: symbol, range: range)
+            let value = try await service.chart(symbol: symbol, range: range)
+            charts[key] = value
+            if marketChartNeedsRetry(value) {
+                scheduleChartRetry(symbol: symbol, range: range, key: key)
+            } else {
+                chartRetryTasks[key]?.cancel()
+                chartRetryTasks[key] = nil
+                chartRetryAttempts[key] = nil
+            }
         } catch is CancellationError {
             return
         } catch {
             chartErrors[key] = error.localizedDescription
+        }
+    }
+
+    private func scheduleChartRetry(symbol: String, range: MarketRange, key: ChartKey) {
+        guard chartRetryTasks[key] == nil else { return }
+        let attempt = chartRetryAttempts[key, default: 0]
+        guard attempt < 3 else { return }
+        chartRetryAttempts[key] = attempt + 1
+        let delay = [1.5, 3.0, 5.0][attempt]
+        chartRetryTasks[key] = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch {
+                self?.chartRetryTasks[key] = nil
+                return
+            }
+            guard !Task.isCancelled else {
+                self?.chartRetryTasks[key] = nil
+                return
+            }
+            self?.chartRetryTasks[key] = nil
+            await self?.loadChart(symbol: symbol, range: range, force: true)
         }
     }
 
@@ -252,6 +283,10 @@ final class MarketStore {
         await refresh(force: false)
     }
 
+}
+
+func marketChartNeedsRetry(_ chart: MarketChart) -> Bool {
+    chart.candles.isEmpty && chart.quality.status != .complete
 }
 
 private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {

@@ -2393,8 +2393,12 @@ private struct CompanyLogo: View {
         AsyncImage(url: logoURL) { phase in
             if let image = phase.image {
                 image.resizable().scaledToFit().padding(6)
+            } else if phase.error == nil {
+                ProgressView().controlSize(.small)
             } else {
-                fallback
+                Image(systemName: "building.2.crop.circle")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(width: 40, height: 40)
@@ -2407,12 +2411,6 @@ private struct CompanyLogo: View {
         return URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
     }
 
-    private var fallback: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10).fill(stockColor(quote.symbol).opacity(0.10))
-            Text(String(quote.symbol.prefix(1))).font(.system(size: 16, weight: .bold)).foregroundStyle(stockColor(quote.symbol))
-        }
-    }
 }
 
 private struct Sparkline: View {
