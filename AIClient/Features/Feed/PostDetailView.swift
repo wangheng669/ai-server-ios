@@ -1445,7 +1445,13 @@ struct PostDetailView: View {
             await detectVideoAspectRatio(url: video)
         }
 
-        if let detail = try? await client.fetchPost(id: post.id) { post = detail }
+        if let detail = try? await client.fetchPost(id: post.id) {
+            if detail.hasTranslation || !post.hasTranslation {
+                post = detail
+            } else {
+                post = detail.replacingTranslation(with: post.displayContent)
+            }
+        }
         if post.isYouTube || post.isBilibili {
             player?.pause()
             player = nil
