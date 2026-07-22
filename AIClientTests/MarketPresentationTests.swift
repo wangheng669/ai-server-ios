@@ -155,8 +155,8 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.week.apiInterval, "1d")
         XCTAssertEqual(MarketRange.week.apiLimit, 8)
         XCTAssertEqual(MarketRange.month.apiInterval, "1d")
-        XCTAssertEqual(MarketRange.fiveYears.apiLimit, 1_000)
-        XCTAssertEqual(MarketRange.maximum.apiLimit, 1_000)
+        XCTAssertEqual(MarketRange.fiveYears.apiLimit, 600)
+        XCTAssertEqual(MarketRange.maximum.apiLimit, 600)
     }
 
     func testAxisDigitsKeepSmallVIXMovesVisible() {
