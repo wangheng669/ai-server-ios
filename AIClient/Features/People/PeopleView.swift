@@ -205,7 +205,7 @@ private struct PersonSignalRow: View {
 private struct PersonDetailPage: View {
     let person: SpecialPerson
     @State private var store = PersonDetailStore()
-    @State private var section = PersonDetailSection.discussions
+    @State private var section = PersonDetailSection.posts
     @State private var isBioExpanded = false
 
     var body: some View {

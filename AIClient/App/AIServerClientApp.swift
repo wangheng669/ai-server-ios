@@ -31,7 +31,6 @@ private struct EditorialRootView: View {
     @State private var feedShowsDetail = false
     @State private var peopleShowsDetail = false
     @State private var feedHidesTabBar = false
-    @State private var isShowingLaunchCover = true
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -91,24 +90,9 @@ private struct EditorialRootView: View {
                     .padding(.trailing, 12)
             }
         }
-        .overlay {
-            if isShowingLaunchCover {
-                LaunchCoverView()
-                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
-                    .zIndex(100)
-            }
-        }
         .task {
             deploymentStore.start()
             await PeopleImagePreheater.preheatTechnologyLeaders()
-        }
-        .task {
-            guard isShowingLaunchCover, !Task.isCancelled else { return }
-            try? await Task.sleep(for: .milliseconds(650))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.42)) {
-                isShowingLaunchCover = false
-            }
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active {
