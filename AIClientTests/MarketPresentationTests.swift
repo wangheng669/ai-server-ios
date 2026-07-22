@@ -57,6 +57,15 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.marketStructure?.marginBalance.points.first?.dailyChange, 1_086_577_120)
     }
 
+    func testDashboardDoesNotPresentStaleAShareBreadthAsCurrent() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":[],"ashareOverview":{"breadth":{"Up":2219,"Down":3202,"Flat":94,"Total":5515},"hotSectors":[],"stale":true}}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+
+        XCTAssertTrue(response.data.ashareOverview?.stale == true)
+        XCTAssertNil(response.data.currentAShareBreadth)
+    }
+
     func testDelayedOpenMarketQuoteExplainsSourceDelay() throws {
         let data = Data(#"{"symbol":"^NDX","name":"纳斯达克100","price":23000,"marketSession":"regular","delaySeconds":900}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
