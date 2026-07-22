@@ -36,6 +36,19 @@ struct MarketService {
         return try await request(url, as: MarketChartResponse.self).data
     }
 
+    /// 收盘后日内 trend 兜底：拉取 5 日 5 分钟线，客户端截取最近一个交易日。
+    func recentIntradayChart(symbol: String) async throws -> MarketChart {
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/chart"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            .init(name: "symbol", value: symbol),
+            .init(name: "interval", value: "5m"),
+            .init(name: "range", value: "5d"),
+            .init(name: "limit", value: "1000")
+        ]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        return try await request(url, as: MarketChartResponse.self).data
+    }
+
     func indexConstituents(symbol: String) async throws -> MarketIndexConstituents {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/index-constituents"), resolvingAgainstBaseURL: false)
         components?.queryItems = [

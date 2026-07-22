@@ -13,11 +13,13 @@ final class MarketStore {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var realtimeStatus: MarketRealtimeClient.Status = .stopped
+    private(set) var trendFallbacks: [String: [Double]] = [:]
 
     private let service: MarketService
     private let realtime: MarketRealtimeClient
     private var loadedCache = false
     private var realtimeQuotes: [String: MarketQuote] = [:]
+    private var loadingTrendFallbacks: Set<String> = []
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -60,6 +62,7 @@ final class MarketStore {
             dashboard = value
             errorMessage = value.missingSymbols.isEmpty ? nil : "部分行情暂未返回"
             MarketSnapshotCache.save(value)
+            await backfillClosedTrends()
         } catch is CancellationError {
             return
         } catch {
@@ -132,6 +135,42 @@ final class MarketStore {
     var hasOpenMarket: Bool {
         dashboard?.freshness?.hasOpenMarket
             ?? ((dashboard?.coreIndices ?? []) + (dashboard?.metrics ?? [])).contains { $0.marketSession != "closed" }
+    }
+
+    /// 收盘后服务端不再下发日内 trend，这里用 5 日图表中最近一个交易日的数据兜底。
+    func trendValues(for quote: MarketQuote?) -> [Double] {
+        guard let quote else { return [] }
+        if quote.trend.count > 1 { return quote.trend }
+        return trendFallbacks[quote.symbol] ?? []
+    }
+
+    private func backfillClosedTrends() async {
+        guard let dashboard else { return }
+        var seen: Set<String> = []
+        var symbols: [String] = []
+        for quote in dashboard.coreIndices + dashboard.metrics + dashboard.components
+        where quote.trend.count <= 1 && quote.marketSession == "closed" && seen.insert(quote.symbol).inserted {
+            symbols.append(quote.symbol)
+            if symbols.count >= 12 { break }
+        }
+        for symbol in symbols {
+            guard !Task.isCancelled else { return }
+            await loadTrendFallback(symbol: symbol)
+        }
+    }
+
+    private func loadTrendFallback(symbol: String) async {
+        guard trendFallbacks[symbol] == nil, !loadingTrendFallbacks.contains(symbol) else { return }
+        loadingTrendFallbacks.insert(symbol)
+        defer { loadingTrendFallbacks.remove(symbol) }
+        do {
+            let chart = try await service.recentIntradayChart(symbol: symbol)
+            let values = marketPointsForRange(chart.points, range: .day).compactMap { $0.close ?? $0.value }
+            guard values.count > 1, values.allSatisfy(\.isFinite) else { return }
+            trendFallbacks[symbol] = values
+        } catch is CancellationError {
+            return
+        } catch { }
     }
 
     func quote(symbol: String) -> MarketQuote? {
