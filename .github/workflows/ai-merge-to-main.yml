@@ -27,6 +27,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
 
       - name: Report merge started
         continue-on-error: true

@@ -12,6 +12,7 @@ struct AIServerClientApp: App {
 private struct EditorialRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var deploymentStore = DeploymentStatusStore()
+    @State private var peopleStore = PeopleStore()
     @State private var selectedTab: RootTab = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
@@ -57,14 +58,15 @@ private struct EditorialRootView: View {
     }
 
     var body: some View {
-        Group {
-            switch selectedTab {
-            case .observation:
+        ZStack {
+            tabContent(.observation) {
                 NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
-            case .investment:
+            }
+            tabContent(.investment) {
                 InvestmentView(showsDetail: $marketShowsDetail)
-            case .people:
-                PeopleView(showsDetail: $peopleShowsDetail)
+            }
+            tabContent(.people) {
+                PeopleView(store: peopleStore, showsDetail: $peopleShowsDetail)
             }
         }
         .background(Color.white.ignoresSafeArea())
@@ -81,21 +83,35 @@ private struct EditorialRootView: View {
                     snapshot: deploymentStatus,
                     initiallyExpanded: deploymentPreview != nil
                         ? !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
-                        : true
+                        : false
                 )
                     .id(deploymentStatus.identity)
                     .padding(.top, 6)
                     .padding(.trailing, 12)
             }
         }
-        .task { deploymentStore.start() }
-        .onChange(of: scenePhase) { phase in
+        .task {
+            deploymentStore.start()
+            await PeopleImagePreheater.preheatTechnologyLeaders()
+        }
+        .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 deploymentStore.start()
             } else {
                 deploymentStore.stop()
             }
         }
+    }
+
+    private func tabContent<Content: View>(
+        _ tab: RootTab,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .opacity(selectedTab == tab ? 1 : 0)
+            .allowsHitTesting(selectedTab == tab)
+            .accessibilityHidden(selectedTab != tab)
+            .zIndex(selectedTab == tab ? 1 : 0)
     }
 }
 

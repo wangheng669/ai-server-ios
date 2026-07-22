@@ -2,12 +2,52 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testDecodesXQuotedTweetForPersonPostCard() throws {
+        let data = #"{"post":{"id":1,"source":"x","meta":{"quoted_tweet":{"id":"99","text":"Gemini who?","text_zh":"双子座是谁？","author":{"name":"Example","screenName":"example","profileImageUrl":"https://example.com/a.jpg"},"media":[{"type":"photo","url":"https://example.com/p.jpg","thumbnail_url":"https://example.com/t.jpg","width":1200,"height":800}]}}}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
+
+        XCTAssertEqual(post.meta?.quotedTweet?.author?.handle, "@example")
+        XCTAssertEqual(post.meta?.quotedTweet?.displayText, "双子座是谁？")
+        XCTAssertEqual(post.meta?.quotedTweet?.media?.first?.displayURL?.absoluteString, "https://example.com/t.jpg")
+    }
+
+    func testProtectsModelNamesInXTranslation() {
+        XCTAssertEqual(
+            PersonDetailStore.presentedTranslation("双子座是谁？格罗克也来了。", original: "Gemini who? Grok is here."),
+            "Gemini是谁？Grok也来了。"
+        )
+    }
+
+    func testServerPersonWithPostsCanLoadOwnPostFeed() throws {
+        let data = #"{"success":true,"users":[{"user_id":"rss:16","user_name":"但斌","user_screen_name":"雪球-但斌","today_count":2,"total_count":30}]}"#.data(using: .utf8)!
+        let person = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data).users[0]
+
+        XCTAssertFalse(person.isCurated)
+        XCTAssertFalse(person.hasXSource)
+        XCTAssertTrue(person.hasOwnPostSource)
+    }
+
+    func testCuratedPersonWithoutAccountDoesNotRequestOwnPostFeed() {
+        let person = SpecialPerson.politicalFigures[0]
+
+        XCTAssertTrue(person.isCurated)
+        XCTAssertFalse(person.hasOwnPostSource)
+    }
+
     func testRSSFeedPrefersHighResolutionAvatarAndVersionsStaticIcon() throws {
         let data = #"{"data":{"feeds":[{"id":64,"name":"Example","icon":"/img/rss-feed-icons/rss-feed-64.jpg","avatar_url":"https://cdn.example.com/avatar-180.jpg","updated_at":"2026-07-18T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
         let feed = try JSONDecoder().decode(RSSFeedsResponse.self, from: data).data.feeds[0]
 
         XCTAssertEqual(feed.preferredAvatarURL?.absoluteString, "https://cdn.example.com/avatar-180.jpg")
         XCTAssertTrue(feed.iconURL?.absoluteString.contains("v=2026-07-18T10:00:00Z") == true)
+    }
+
+    func testRSSFeedRecognizesServerManagedAvatar() throws {
+        let data = #"{"data":{"feeds":[{"id":78,"name":"人民日报微博","icon":"/img/rss-feed-icons/rss-feed-78.jpg","avatar_url":"/api/v1/rss/feeds/78/avatar?v=abc123","updated_at":"2026-07-20T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
+        let feed = try JSONDecoder().decode(RSSFeedsResponse.self, from: data).data.feeds[0]
+
+        XCTAssertTrue(feed.hasManagedAvatar)
+        XCTAssertEqual(feed.preferredAvatarURL?.path, "/api/v1/rss/feeds/78/avatar")
     }
 
     func testWikipediaCandidateExtractionFindsNamedEntitiesWithoutDuplicates() {
@@ -306,5 +346,23 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertGreaterThan(article.blocks.count, 1)
         XCTAssertTrue(article.blocks.allSatisfy { if case .paragraph = $0 { return true }; return false })
+    }
+
+    func testNewYorkTimesFeedExcerptDoesNotExposeTheCompleteArticle() throws {
+        let body = Array(repeating: "纽约时报正文段落。", count: 100).joined()
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "post": [
+                "id": 501,
+                "source": "rss:47",
+                "title": "测试文章",
+                "content": body
+            ]
+        ])
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: payload).post
+
+        XCTAssertLessThanOrEqual(post.newYorkTimesFeedExcerpt.count, 281)
+        XCTAssertTrue(post.newYorkTimesFeedExcerpt.hasSuffix("…"))
+        XCTAssertLessThan(post.newYorkTimesFeedExcerpt.count, body.count)
+        XCTAssertNotEqual(post.newYorkTimesFeedExcerpt, body)
     }
 }

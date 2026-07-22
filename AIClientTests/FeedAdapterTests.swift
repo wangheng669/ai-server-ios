@@ -2,6 +2,71 @@ import XCTest
 @testable import AIServerClient
 
 final class FeedAdapterTests: XCTestCase {
+    @MainActor
+    func testNewYorkTimesSourceDoesNotPublishCardsUntilFullBodiesAreReady() async throws {
+        let feedPosts = try (1...5).map { id in
+            try JSONDecoder().decode(
+                Post.self,
+                from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"这是 RSS 提供的长摘要，不是完整正文。","post_link":"https://example.com/\#(id)"}"#.utf8)
+            )
+        }
+        let model = NewsFeedViewModel(
+            source: .newYorkTimes,
+            fetchPosts: { _, _, _ in feedPosts },
+            fetchPostDetail: { id in
+                try JSONDecoder().decode(
+                    Post.self,
+                    from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"数据库完整正文 \#(id)。这是正文的第二段。","post_link":"https://example.com/\#(id)"}"#.utf8)
+                )
+            },
+            fetchNewYorkTimesArticle: { url in
+                NewYorkTimesArticle(blocks: [.paragraph("不应使用网页预览 \(url.lastPathComponent)。")])
+            }
+        )
+
+        await model.refresh()
+
+        XCTAssertEqual(model.posts.count, feedPosts.count)
+        XCTAssertTrue(model.posts.allSatisfy {
+            model.preloadedNewYorkTimesArticle(for: $0.id) == NewYorkTimesArticle(
+                blocks: [.paragraph("数据库完整正文 \($0.id)。这是正文的第二段。")]
+            )
+        })
+    }
+
+    @MainActor
+    func testNewYorkTimesRSSSelectionPrefetchesEveryArticleBody() async throws {
+        let feedPosts = try (1...6).map { id in
+            try JSONDecoder().decode(
+                Post.self,
+                from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"RSS 中已有一段很长、但并不完整的文章摘要。","post_link":"https://example.com/\#(id)"}"#.utf8)
+            )
+        }
+        let model = NewsFeedViewModel(
+            source: .rss,
+            fetchRSSFeedPosts: { _ in feedPosts },
+            fetchPostDetail: { id in
+                try JSONDecoder().decode(
+                    Post.self,
+                    from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"数据库完整正文 \#(id)。这是正文的第二段。","post_link":"https://example.com/\#(id)"}"#.utf8)
+                )
+            },
+            fetchNewYorkTimesArticle: { url in
+                NewYorkTimesArticle(blocks: [.paragraph("不应使用网页预览 \(url.lastPathComponent)。")])
+            }
+        )
+
+        await model.selectRSSFeed(47)
+
+        XCTAssertEqual(model.selectedRSSPosts.count, feedPosts.count)
+        XCTAssertTrue(model.selectedRSSPosts.allSatisfy {
+            model.preloadedNewYorkTimesArticle(for: $0.id) == NewYorkTimesArticle(
+                blocks: [.paragraph("数据库完整正文 \($0.id)。这是正文的第二段。")]
+            )
+        })
+        XCTAssertFalse(model.isLoadingRSSSelection)
+    }
+
     func testYouTubeRequestsAllScores() {
         let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .youtube)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
@@ -31,6 +96,18 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, "http://example.com:3001/api/v1/post/video-playback/stream?formatId=18")
     }
 
+    func testVideoThumbnailUsesOriginalMediaURL() throws {
+        let baseURL = ServerConfiguration.defaultURL
+        let original = "https://video.twimg.com/ext_tw_video/1/pu/vid/avc1/720x720/example.mp4?tag=12"
+        let proxied = try XCTUnwrap(MediaURL.video(original))
+        let thumbnail = try XCTUnwrap(MediaURL.videoThumbnail(for: proxied))
+        let components = try XCTUnwrap(URLComponents(url: thumbnail, resolvingAgainstBaseURL: false))
+
+        XCTAssertEqual(components.path, "/api/v1/video-thumbnail")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, original)
+        XCTAssertEqual(thumbnail.host, baseURL.host)
+    }
+
     @MainActor
     func testHotTopicChannelsRequestLargerFirstPage() async {
         var requestedLimit = 0
@@ -48,6 +125,19 @@ final class FeedAdapterTests: XCTestCase {
     func testTruthRequestsEnoughPostsToIncludeMediaUpdates() async {
         var requestedLimit = 0
         let model = NewsFeedViewModel(source: .truth) { _, limit, _ in
+            requestedLimit = limit
+            return []
+        }
+
+        await model.refresh()
+
+        XCTAssertEqual(requestedLimit, 20)
+    }
+
+    @MainActor
+    func testFlashRequestsEnoughPostsForClientSideFilters() async {
+        var requestedLimit = 0
+        let model = NewsFeedViewModel(source: .flash) { _, limit, _ in
             requestedLimit = limit
             return []
         }
@@ -96,6 +186,24 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testFilteredFeedLoadsMoreFromVisibleTail() async throws {
+        var requestedPages: [Int] = []
+        let visibleTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"flash"}"#.utf8))
+        let hiddenRawTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"flash"}"#.utf8))
+        let nextMatch = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3,"source":"flash"}"#.utf8))
+        let model = NewsFeedViewModel(source: .flash) { page, _, _ in
+            requestedPages.append(page)
+            return page == 1 ? [visibleTail, hiddenRawTail] : [nextMatch]
+        }
+
+        await model.refresh()
+        await model.loadMoreIfNeeded(current: visibleTail, thresholdPostID: visibleTail.id)
+
+        XCTAssertEqual(requestedPages, [1, 2])
+        XCTAssertEqual(model.posts.map(\.id), [visibleTail.id, hiddenRawTail.id, nextMatch.id])
+    }
+
+    @MainActor
     func testRealtimePostWaitsUntilFeedAcceptsIt() async throws {
         let existing = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
         let incoming = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"x"}"#.utf8))
@@ -126,6 +234,22 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertFalse(model.isSwitchingSource)
         XCTAssertEqual(Set(requestedSources), Set(FeedSource.allCases.filter { $0 != .x }))
+    }
+
+    @MainActor
+    func testSwitchingToUncachedSourceClearsPreviousChannelPosts() async throws {
+        let youtubePost = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss","post_link":"https://www.youtube.com/watch?v=abc"}"#.utf8)
+        )
+        let model = NewsFeedViewModel(source: .youtube) { _, _, _ in [youtubePost] }
+
+        await model.refresh()
+        model.select(.flash)
+
+        XCTAssertEqual(model.source, .flash)
+        XCTAssertTrue(model.posts.isEmpty)
+        XCTAssertTrue(model.isSwitchingSource)
     }
 
     @MainActor
@@ -208,6 +332,17 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(post.tagNames.isEmpty)
     }
 
+    func testFlashMapsMergedPlatformMetadata() throws {
+        let json = #"{"success":true,"data":{"items":[{"id":"f3","time":"18:02","text":"同一消息","source":"flash:cls","similarityGroupId":123,"similarityScore":0.96,"similarCount":4,"platformCount":3,"platforms":["cls","jin10","sina"]}],"hasMore":false}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(FlashResponse.self, from: json)
+        let post = Post.flash(try XCTUnwrap(response.data.items.first))
+
+        XCTAssertEqual(post.meta?.flashSimilarityGroupId, 123)
+        XCTAssertEqual(post.meta?.flashSimilarCount, 4)
+        XCTAssertEqual(post.meta?.flashPlatformCount, 3)
+        XCTAssertEqual(post.meta?.flashPlatforms ?? [], ["cls", "jin10", "sina"])
+    }
+
     @MainActor
     func testFlashChannelAcceptsRealtimeFlashPosts() throws {
         let data = #"{"id":101,"source":"flash","content":"实时快讯"}"#.data(using: .utf8)!
@@ -243,7 +378,7 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(components.path, "/api/v1/post/preview")
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, article.absoluteString)
-        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "prefer_remote" })?.value, "1")
+        XCTAssertNil(components.queryItems?.first(where: { $0.name == "prefer_remote" }))
     }
 
     func testNewYorkTimesHeroVariantsAreRecognizedAsTheSameImage() throws {

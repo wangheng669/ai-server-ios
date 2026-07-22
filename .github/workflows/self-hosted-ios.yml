@@ -10,6 +10,15 @@ on:
         description: Branch, tag, or commit SHA to build and install
         required: false
         type: string
+      install_target:
+        description: Mac that can currently reach the iPhone
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - home
+          - office
 
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('Install {0}', inputs.git_ref || github.ref_name) || github.event.head_commit.message }}
 
@@ -25,6 +34,8 @@ permissions:
 jobs:
   build:
     name: Build on office Mac mini
+    outputs:
+      installer_label: ${{ steps.choose-installer.outputs.label }}
     runs-on:
       - self-hosted
       - macOS
@@ -44,6 +55,16 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh running 0.08 testing
 
+      - name: Choose iPhone installer
+        id: choose-installer
+        run: |
+          # The build job proves the office runner is online. A transient iPhone
+          # discovery failure does not prove that the home runner is online, and
+          # targeting an offline runner leaves the job queued indefinitely.
+          # Auto deployments therefore stay on the office runner, where the
+          # installation script can retry device discovery and fail explicitly.
+          echo "label=office-builder" >> "$GITHUB_OUTPUT"
+          echo "Auto install is pinned to the online office runner."
       - name: Run tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -102,13 +123,13 @@ jobs:
         run: ./ci/report-ios-deployment.sh failed 0 build-failed
 
   install:
-    name: Sign and install on home iPhone
+    name: Sign and install on selected iPhone host
     needs: build
     runs-on:
       - self-hosted
       - macOS
       - ARM64
-      - home-installer
+      - ${{ inputs.install_target == 'office' && 'office-builder' || inputs.install_target == 'home' && 'home-installer' || needs.build.outputs.installer_label }}
     timeout-minutes: 10
 
     steps:

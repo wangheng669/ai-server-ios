@@ -86,6 +86,7 @@ struct DeploymentStatusSnapshot: Equatable {
         case "testing": "正在运行测试"
         case "building": "正在构建 App"
         case "waiting-for-installer": "正在等待安装设备"
+        case "waiting-for-device": "正在等待 iPhone 连接"
         case "downloading": "正在下载安装包"
         case "signing": "正在签名"
         case "installing": "正在安装到 iPhone"

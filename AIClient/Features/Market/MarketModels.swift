@@ -7,6 +7,7 @@ struct MarketDashboardResponse: Decodable {
 
 struct MarketDashboard: Codable {
     let dataContract: String
+    let definitionVersion: String?
     let generatedAt: String
     let refreshIntervalMs: Int
     var coreIndices: [MarketQuote]
@@ -17,17 +18,28 @@ struct MarketDashboard: Codable {
     let componentsMeta: MarketComponentsMeta?
     let freshness: MarketDashboardFreshness?
     let missingSymbols: [String]
+    let expectedSymbols: [String]
+    let symbolHealth: [MarketSymbolHealth]
+    let regions: [MarketRegionDefinition]
     let ashareOverview: MarketAShareOverview?
+    let marketStructure: MarketStructure?
     let sentiment: MarketSentiment?
 
+    var currentAShareBreadth: MarketBreadth? {
+        guard ashareOverview?.stale != true else { return nil }
+        return ashareOverview?.breadth
+    }
+
     enum CodingKeys: String, CodingKey {
-        case dataContract, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
-        case indexSessions, componentsMeta, freshness, missingSymbols, ashareOverview, sentiment
+        case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
+        case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
+        case ashareOverview, marketStructure, sentiment
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dataContract = try values.decode(String.self, forKey: .dataContract)
+        definitionVersion = try values.decodeIfPresent(String.self, forKey: .definitionVersion)
         generatedAt = try values.decode(String.self, forKey: .generatedAt)
         refreshIntervalMs = try values.decode(Int.self, forKey: .refreshIntervalMs)
         coreIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .coreIndices) ?? []
@@ -38,7 +50,11 @@ struct MarketDashboard: Codable {
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
         freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
         missingSymbols = try values.decodeIfPresent([String].self, forKey: .missingSymbols) ?? []
+        expectedSymbols = try values.decodeIfPresent([String].self, forKey: .expectedSymbols) ?? []
+        symbolHealth = try values.decodeIfPresent([MarketSymbolHealth].self, forKey: .symbolHealth) ?? []
+        regions = try values.decodeIfPresent([MarketRegionDefinition].self, forKey: .regions) ?? []
         ashareOverview = try values.decodeIfPresent(MarketAShareOverview.self, forKey: .ashareOverview)
+        marketStructure = try values.decodeIfPresent(MarketStructure.self, forKey: .marketStructure)
         sentiment = try values.decodeIfPresent(MarketSentiment.self, forKey: .sentiment)
     }
 
@@ -74,6 +90,25 @@ struct MarketDashboard: Codable {
     }
 }
 
+struct MarketSymbolHealth: Codable, Hashable {
+    enum Status: String, Codable {
+        case live, delayed, stale, missing
+    }
+
+    let symbol: String
+    let status: Status
+    let asOf: String?
+    let timestamp: Int64?
+    let source: String?
+    let delaySeconds: Int?
+    let reason: String?
+}
+
+struct MarketRegionDefinition: Codable, Hashable {
+    let id: String
+    let metricSymbols: [String]
+}
+
 struct MarketComponentsMeta: Codable {
     let label: String
     let selectionBasis: String
@@ -92,6 +127,11 @@ struct MarketIndexConstituents: Decodable {
     let generatedAt: String
     var items: [MarketIndexConstituent]
     let missingSymbols: [String]
+    let staleSymbols: [String]?
+
+    var symbolsPendingRefresh: [String] {
+        Array(Set(missingSymbols + (staleSymbols ?? []))).sorted()
+    }
 
     mutating func merge(_ update: MarketQuoteUpdate) {
         guard let index = items.firstIndex(where: { $0.quote.symbol == update.symbol }) else { return }
@@ -127,6 +167,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let pe: Double?
     let marketCap: Double?
     let volume: Double?
+    let turnover: Double?
     let dataSource: String?
     let delaySeconds: Int?
     let marketSession: String?
@@ -163,7 +204,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case symbol, name, price, openPrice, previousClose, high, low, pe, marketCap, volume
+        case symbol, name, price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
         case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, trend, nightTrend, stale
     }
@@ -179,6 +220,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         pe: Double?,
         marketCap: Double?,
         volume: Double?,
+        turnover: Double?,
         dataSource: String?,
         delaySeconds: Int?,
         marketSession: String?,
@@ -202,6 +244,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.pe = pe
         self.marketCap = marketCap
         self.volume = volume
+        self.turnover = turnover
         self.dataSource = dataSource
         self.delaySeconds = delaySeconds
         self.marketSession = marketSession
@@ -228,6 +271,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         pe = try values.decodeIfPresent(Double.self, forKey: .pe)
         marketCap = try values.decodeIfPresent(Double.self, forKey: .marketCap)
         volume = try values.decodeIfPresent(Double.self, forKey: .volume)
+        turnover = try values.decodeIfPresent(Double.self, forKey: .turnover)
         dataSource = try values.decodeIfPresent(String.self, forKey: .dataSource)
         delaySeconds = try values.decodeIfPresent(Int.self, forKey: .delaySeconds)
         marketSession = try values.decodeIfPresent(String.self, forKey: .marketSession)
@@ -254,6 +298,7 @@ struct MarketQuoteUpdate: Decodable {
     let pe: Double?
     let marketCap: Double?
     let volume: Double?
+    let turnover: Double?
     let dataSource: String?
     let delaySeconds: Int?
     let marketSession: String?
@@ -283,6 +328,7 @@ struct MarketQuoteUpdate: Decodable {
             pe: pe ?? current?.pe,
             marketCap: marketCap ?? current?.marketCap,
             volume: volume ?? current?.volume,
+            turnover: turnover ?? current?.turnover,
             dataSource: dataSource ?? current?.dataSource,
             delaySeconds: delaySeconds ?? current?.delaySeconds,
             marketSession: marketSession ?? current?.marketSession,
@@ -336,6 +382,100 @@ struct MarketSector: Codable, Identifiable {
     }
 }
 
+struct MarketStructure: Codable {
+    let dataContract: String
+    let generatedAt: String
+    let etfSubscription: MarketETFSubscription
+    let marginBalance: MarketMarginBalance
+    let combinedSignal: MarketCombinedSignal?
+    let sources: [MarketStructureSource]
+}
+
+struct MarketCombinedSignal: Codable {
+    let status: String
+    let title: String
+    let summary: String
+}
+
+struct MarketStructureSource: Codable, Identifiable {
+    let name: String
+    let url: String
+    var id: String { url }
+}
+
+struct MarketETFSubscription: Codable {
+    let fundCode: String
+    let fundName: String
+    let fundCount: Int?
+    let fundCodes: [String]?
+    let asOf: String
+    let status: String
+    let latestShares: Double
+    let latestNetSubscriptionShares: Double
+    let latestEstimatedNetFlowCNY: Double?
+    let estimatedFlowFundCount: Int?
+    let netSubscriptionShares5d: Double
+    let previousNetShares5d: Double
+    let positiveDays5d: Int
+    let consecutiveDirection: String
+    let consecutiveDays: Int
+    let points: [MarketETFSubscriptionPoint]
+}
+
+struct MarketETFSubscriptionPoint: Codable, Identifiable {
+    let date: String
+    let totalShares: Double
+    let netSubscriptionShares: Double
+    var id: String { date }
+}
+
+struct MarketMarginBalance: Codable {
+    let asOf: String
+    let status: String
+    let financingBalance: Double
+    let securitiesBalance: Double
+    let totalBalance: Double
+    let latestChange: Double
+    let change3d: Double
+    let change5d: Double
+    let positiveDays5d: Int
+    let financingBuyAmount: Double?
+    let aShareTurnover: Double?
+    let financingBuyRatio: Double?
+    let activityStatus: String?
+    let points: [MarketMarginPoint]
+
+    var riskAppetite: MarketLeverageRiskAppetite {
+        MarketLeverageRiskAppetite(status: status)
+    }
+}
+
+enum MarketLeverageRiskAppetite: Equatable {
+    case weak
+    case repairing
+    case strong
+    case uncertain
+
+    init(status: String) {
+        switch status {
+        case "declining": self = .weak
+        case "stabilizing": self = .repairing
+        case "recovering": self = .strong
+        default: self = .uncertain
+        }
+    }
+}
+
+struct MarketMarginPoint: Codable, Identifiable {
+    let date: String
+    let financingBalance: Double
+    let securitiesBalance: Double
+    let totalBalance: Double
+    let dailyChange: Double
+    let financingBuyAmount: Double?
+    var id: String { date }
+}
+
 struct MarketSentiment: Codable {
     let score: Double
     let previousClose: Double?
@@ -354,28 +494,56 @@ struct MarketChartResponse: Decodable {
 
 struct MarketChart: Decodable {
     let symbol: String
-    let source: String?
-    let delaySeconds: Int?
-    let marketSession: String?
+    let market: String
+    let tradingDate: String
+    let timezone: String
+    let session: String
+    let interval: String
+    let quality: MarketChartQuality
+    let quote: MarketChartQuote
+    let candles: [MarketChartPoint]
+}
+
+enum MarketChartQualityStatus: String, Decodable {
+    case complete, repairing, partial, unavailable
+}
+
+struct MarketChartQuality: Decodable {
+    let status: MarketChartQualityStatus
+    let expected: Int
+    let actual: Int
+    let missing: [MarketChartGap]
+    let freshnessSeconds: Int?
+    let isFinal: Bool
+}
+
+struct MarketChartGap: Decodable, Equatable {
+    let startTimestamp: Int64
+    let endTimestamp: Int64
+}
+
+struct MarketChartQuote: Decodable {
+    let price: Double?
     let previousClose: Double?
-    let latestPrice: Double?
-    let latestTimestamp: Int64?
-    let high: Double?
-    let low: Double?
-    var points: [MarketChartPoint]
+    let change: Double?
+    let changePercent: Double?
+    let providerTimestamp: Int64?
+    let receivedTimestamp: Int64?
+    let source: String
 }
 
 struct MarketChartPoint: Decodable, Identifiable, Equatable {
     var id: Int64 { timestamp }
     let timestamp: Int64
-    let value: Double?
-    let open: Double?
-    let high: Double?
-    let low: Double?
-    let close: Double?
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
     let volume: Double?
+    let state: String
+    let source: String
 
-    var displayValue: Double? { close ?? value }
+    var displayValue: Double? { close }
 }
 
 enum MarketRange: String, CaseIterable, Identifiable {
@@ -403,16 +571,10 @@ enum MarketRange: String, CaseIterable, Identifiable {
         case .month: 64
         case .quarter: 128
         case .year: 400
-        case .fiveYears, .maximum: 1_000
+        case .fiveYears, .maximum: 600
         }
     }
 
-    var shouldPreload: Bool {
-        switch self {
-        case .week, .month, .quarter, .year, .fiveYears, .maximum: true
-        case .day: false
-        }
-    }
 }
 
 struct MarketCandleSample: Identifiable, Equatable {
@@ -425,53 +587,6 @@ struct MarketCandleSample: Identifiable, Equatable {
     let volume: Double?
 }
 
-func marketPointsForRange(_ points: [MarketChartPoint], range: MarketRange) -> [MarketChartPoint] {
-    let ordered = points.sorted { $0.timestamp < $1.timestamp }
-    guard range == .day || range == .week, ordered.count > 1 else { return ordered }
-
-    let sessionGapMs: Int64 = 4 * 60 * 60 * 1_000
-    var sessions: [[MarketChartPoint]] = [[]]
-    for point in ordered {
-        if let previous = sessions.last?.last, point.timestamp - previous.timestamp > sessionGapMs {
-            sessions.append([])
-        }
-        sessions[sessions.count - 1].append(point)
-    }
-    if range == .day {
-        return sessions.last ?? []
-    }
-    return sessions.suffix(5).flatMap { $0 }
-}
-
-func marketDisplayPoints(
-    _ points: [MarketChartPoint],
-    range: MarketRange,
-    fallbackValues: [Double],
-    fallbackTimestamp: Int64?
-) -> [MarketChartPoint] {
-    let selected = marketPointsForRange(points, range: range)
-    guard range == .day else { return selected }
-    guard fallbackValues.count > 1,
-          fallbackValues.allSatisfy(\.isFinite),
-          let fallbackTimestamp,
-          fallbackTimestamp > 0 else { return [] }
-
-    let minuteMs: Int64 = 60_000
-    let end = fallbackTimestamp - fallbackTimestamp % minuteMs
-    let start = end - Int64(fallbackValues.count - 1) * minuteMs
-    return fallbackValues.enumerated().map { index, value in
-        MarketChartPoint(
-            timestamp: start + Int64(index) * minuteMs,
-            value: value,
-            open: value,
-            high: value,
-            low: value,
-            close: value,
-            volume: nil
-        )
-    }
-}
-
 func marketAxisDigits(values: [Double]) -> Int {
     guard let low = values.min(), let high = values.max(), high > low else { return 2 }
     let step = (high - low) / 4
@@ -482,13 +597,13 @@ func marketAxisDigits(values: [Double]) -> Int {
 
 func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [MarketCandleSample] {
     let candles = points.compactMap { point -> MarketCandleSample? in
-        guard let close = point.close ?? point.value else { return nil }
-        let open = point.open ?? close
+        let close = point.close
+        let open = point.open
         return MarketCandleSample(
             timestamp: point.timestamp,
             open: open,
-            high: max(point.high ?? close, max(open, close)),
-            low: min(point.low ?? close, min(open, close)),
+            high: max(point.high, max(open, close)),
+            low: min(point.low, min(open, close)),
             close: close,
             volume: point.volume
         )
@@ -512,47 +627,6 @@ func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [Market
             volume: volumes.isEmpty ? nil : volumes.reduce(0, +)
         )
     }
-}
-
-func marketMergingRealtimePrice(
-    _ price: Double,
-    timestamp: Int64,
-    into points: [MarketChartPoint],
-    limit: Int = 600
-) -> [MarketChartPoint] {
-    guard price.isFinite, timestamp > 0, limit > 0 else { return points }
-    let minuteMs: Int64 = 60_000
-    let minute = timestamp - timestamp % minuteMs
-    var result = points
-
-    if let last = result.last {
-        let lastMinute = last.timestamp - last.timestamp % minuteMs
-        if lastMinute > minute { return result }
-        if lastMinute == minute {
-            let open = last.open ?? last.displayValue ?? price
-            result[result.count - 1] = MarketChartPoint(
-                timestamp: minute,
-                value: price,
-                open: open,
-                high: max(last.high ?? open, price),
-                low: min(last.low ?? open, price),
-                close: price,
-                volume: last.volume
-            )
-            return Array(result.suffix(limit))
-        }
-    }
-
-    result.append(MarketChartPoint(
-        timestamp: minute,
-        value: price,
-        open: price,
-        high: price,
-        low: price,
-        close: price,
-        volume: nil
-    ))
-    return Array(result.suffix(limit))
 }
 
 func marketTrendIsUp(values: [Double], fallbackIsUp: Bool) -> Bool {
@@ -583,13 +657,13 @@ extension MarketQuote {
             let base = symbol.dropFirst("BINANCE:".count).dropLast("USDT".count)
             return "\(base)/USDT"
         }
+        if symbol.hasSuffix(".SS") {
+            return String(symbol.dropLast(3)) + ".SH"
+        }
         return switch symbol {
         case "^GSPC": "SPX"
         case "^NDX": "NDX"
         case "^DJI": "DJI"
-        case "000001.SS": "000001.SH"
-        case "000300.SS": "000300.SH"
-        case "000688.SS": "000688.SH"
         case "^HSTECH": "HSTECH"
         case "^HSI": "HSI"
         case "^N225": "N225"
@@ -606,15 +680,25 @@ extension MarketQuote {
 }
 
 func marketShortTimestamp(_ timestamp: Int64) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "zh_CN")
-    formatter.dateFormat = "MM-dd HH:mm"
-    return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
+    MarketDateFormatters.shortTimestamp.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
 }
 
 func marketISODate(_ value: String?) -> Date? {
     guard let value else { return nil }
-    let fractional = ISO8601DateFormatter()
-    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    return MarketDateFormatters.isoFractional.date(from: value) ?? MarketDateFormatters.iso.date(from: value)
+}
+
+private enum MarketDateFormatters {
+    static let shortTimestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter
+    }()
+    static let isoFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    static let iso = ISO8601DateFormatter()
 }

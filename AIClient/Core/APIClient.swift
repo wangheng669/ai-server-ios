@@ -34,7 +34,10 @@ struct APIClient {
         var feeds: [RSSFeedSource] = []
         for page in 1...10 {
             var parts = URLComponents(url: baseURL.appending(path: "api/v1/rss/feeds"), resolvingAgainstBaseURL: false)
-            parts?.queryItems = [.init(name: "page", value: String(page))]
+            parts?.queryItems = [
+                .init(name: "page", value: String(page)),
+                .init(name: "exclude_social", value: "true")
+            ]
             guard let url = parts?.url else { throw APIError.invalidURL }
             let response: RSSFeedsResponse = try await get(url)
             feeds += response.data.feeds.filter(\.isEnabled)
@@ -259,7 +262,6 @@ struct APIClient {
         var parts = URLComponents(url: baseURL.appending(path: "api/v1/post/preview"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
             .init(name: "url", value: articleURL.absoluteString),
-            .init(name: "prefer_remote", value: "1"),
         ]
         return parts?.url
     }

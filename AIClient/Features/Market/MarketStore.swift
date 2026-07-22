@@ -11,15 +11,26 @@ final class MarketStore {
     private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
     private(set) var constituentErrors: [String: String] = [:]
     private(set) var isLoading = false
+    private(set) var isRetrying = false
     private(set) var errorMessage: String?
     private(set) var realtimeStatus: MarketRealtimeClient.Status = .stopped
     private(set) var trendFallbacks: [String: [Double]] = [:]
+    private(set) var lastRealtimeMessageAt: Date?
+    private(set) var cacheSavedAt: Date?
+    private(set) var isShowingCachedSnapshot = false
 
     private let service: MarketService
     private let realtime: MarketRealtimeClient
     private var loadedCache = false
     private var realtimeQuotes: [String: MarketQuote] = [:]
     private var loadingTrendFallbacks: Set<String> = []
+    private var pendingRealtimeUpdates: [String: MarketQuoteUpdate] = [:]
+    private var realtimeFlushTask: Task<Void, Never>?
+    private var isRefreshing = false
+    private var lastSnapshotRefreshAt: Date?
+    private var constituentRetryTasks: [String: Task<Void, Never>] = [:]
+    private var chartRetryTasks: [ChartKey: Task<Void, Never>] = [:]
+    private var chartRetryAttempts: [ChartKey: Int] = [:]
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -29,29 +40,34 @@ final class MarketStore {
     func runUpdates() async {
         loadCacheIfNeeded()
         realtime.onQuote = { [weak self] update in
-            guard var dashboard = self?.dashboard else { return }
-            let quote = update.merging(into: self?.quote(symbol: update.symbol))
-            dashboard.replace(quote)
-            self?.dashboard = dashboard
-            self?.mergeConstituent(update)
-            if let mergedQuote = self?.quote(symbol: quote.symbol) {
-                self?.realtimeQuotes[quote.symbol] = mergedQuote
-                self?.appendRealtimePoint(mergedQuote)
-            }
+            self?.enqueueRealtimeUpdate(update)
         }
         realtime.onStatus = { [weak self] status in self?.realtimeStatus = status }
         realtime.start()
         defer { realtime.stop() }
         await refresh(force: true)
         while !Task.isCancelled {
-            do { try await Task.sleep(for: .seconds(3_600)) }
+            do { try await Task.sleep(for: .seconds(5)) }
             catch { break }
+            await maintainFreshness()
         }
     }
 
+    func resumeUpdates() async {
+        realtime.reconnect()
+        await refresh(force: false)
+    }
+
     func refresh(force: Bool = true) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
         if dashboard == nil { isLoading = true }
-        defer { isLoading = false }
+        else if force { isRetrying = true }
+        defer {
+            isLoading = false
+            isRetrying = false
+            isRefreshing = false
+        }
         do {
             var value = try await service.dashboard(refresh: force)
             guard !Task.isCancelled else { return }
@@ -60,8 +76,11 @@ final class MarketStore {
                 if quote.timestamp ?? 0 >= serverTimestamp { value.replace(quote) }
             }
             dashboard = value
-            errorMessage = value.missingSymbols.isEmpty ? nil : "部分行情暂未返回"
-            MarketSnapshotCache.save(value)
+            lastSnapshotRefreshAt = Date()
+            isShowingCachedSnapshot = false
+            cacheSavedAt = nil
+            errorMessage = marketHealthMessage(for: value)
+            MarketSnapshotCache.save(value, at: Date())
             await backfillClosedTrends()
         } catch is CancellationError {
             return
@@ -72,14 +91,21 @@ final class MarketStore {
 
     func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
         let key = ChartKey(symbol: symbol, range: range)
-        if !force, charts[key] != nil { return }
+        if !force, let cached = charts[key], marketChartCanUseCache(cached) { return }
         guard !loadingCharts.contains(key) else { return }
         loadingCharts.insert(key)
         chartErrors[key] = nil
         defer { loadingCharts.remove(key) }
         do {
-            charts[key] = try await service.chart(symbol: symbol, range: range)
-            if range == .day, let quote = realtimeQuotes[symbol] { appendRealtimePoint(quote) }
+            let value = try await service.chart(symbol: symbol, range: range)
+            charts[key] = value
+            if marketChartNeedsRetry(value) {
+                scheduleChartRetry(symbol: symbol, range: range, key: key)
+            } else {
+                chartRetryTasks[key]?.cancel()
+                chartRetryTasks[key] = nil
+                chartRetryAttempts[key] = nil
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -87,14 +113,24 @@ final class MarketStore {
         }
     }
 
-    func preloadCharts(symbol: String) async {
-        do { try await Task.sleep(for: .milliseconds(500)) }
-        catch { return }
-        for range in MarketRange.allCases where range.shouldPreload {
-            guard !Task.isCancelled else { return }
-            await loadChart(symbol: symbol, range: range)
-            do { try await Task.sleep(for: .milliseconds(150)) }
-            catch { return }
+    private func scheduleChartRetry(symbol: String, range: MarketRange, key: ChartKey) {
+        guard chartRetryTasks[key] == nil else { return }
+        let attempt = chartRetryAttempts[key, default: 0]
+        guard attempt < 3 else { return }
+        chartRetryAttempts[key] = attempt + 1
+        let delay = [1.5, 3.0, 5.0][attempt]
+        chartRetryTasks[key] = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch {
+                self?.chartRetryTasks[key] = nil
+                return
+            }
+            guard !Task.isCancelled else {
+                self?.chartRetryTasks[key] = nil
+                return
+            }
+            self?.chartRetryTasks[key] = nil
+            await self?.loadChart(symbol: symbol, range: range, force: true)
         }
     }
 
@@ -106,15 +142,29 @@ final class MarketStore {
         chartErrors[ChartKey(symbol: symbol, range: range)]
     }
 
-    func loadIndexConstituents(symbol: String) async {
-        if indexConstituents[symbol] != nil { return }
+    func loadIndexConstituents(symbol: String, force: Bool = false) async {
+        if !force, indexConstituents[symbol] != nil { return }
         do {
-            indexConstituents[symbol] = try await service.indexConstituents(symbol: symbol)
+            let value = try await service.indexConstituents(symbol: symbol)
+            indexConstituents[symbol] = value
             constituentErrors[symbol] = nil
+            scheduleConstituentRetryIfNeeded(symbol: symbol, pendingSymbols: value.symbolsPendingRefresh)
         } catch is CancellationError {
             return
         } catch {
             constituentErrors[symbol] = error.localizedDescription
+        }
+    }
+
+    private func scheduleConstituentRetryIfNeeded(symbol: String, pendingSymbols: [String]) {
+        guard !pendingSymbols.isEmpty, constituentRetryTasks[symbol] == nil else { return }
+        constituentRetryTasks[symbol] = Task { [weak self] in
+            defer { self?.constituentRetryTasks[symbol] = nil }
+            do { try await Task.sleep(for: .seconds(3)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            // One controlled retry closes the async refresh loop without polling forever.
+            await self?.loadIndexConstituents(symbol: symbol, force: true)
         }
     }
 
@@ -165,7 +215,7 @@ final class MarketStore {
         defer { loadingTrendFallbacks.remove(symbol) }
         do {
             let chart = try await service.recentIntradayChart(symbol: symbol)
-            let values = marketPointsForRange(chart.points, range: .day).compactMap { $0.close ?? $0.value }
+            let values = chart.candles.sorted { $0.timestamp < $1.timestamp }.map(\.close)
             guard values.count > 1, values.allSatisfy(\.isFinite) else { return }
             trendFallbacks[symbol] = values
         } catch is CancellationError {
@@ -173,12 +223,46 @@ final class MarketStore {
         } catch { }
     }
 
+    var realtimeIsFresh: Bool {
+        guard realtimeStatus == .connected, let lastRealtimeMessageAt else { return false }
+        return Date().timeIntervalSince(lastRealtimeMessageAt) < 30
+    }
+
+    var cachedSnapshotAge: TimeInterval? {
+        guard isShowingCachedSnapshot, let cacheSavedAt else { return nil }
+        return max(0, Date().timeIntervalSince(cacheSavedAt))
+    }
+
+    var maximumOpenMarketDelayMinutes: Int? {
+        let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.metrics ?? []) + (dashboard?.components ?? [])
+        let seconds = quotes
+            .filter { $0.marketSession == "regular" }
+            .compactMap(\.delaySeconds)
+            .max()
+        guard let seconds, seconds > 0 else { return nil }
+        return max(1, Int(ceil(Double(seconds) / 60)))
+    }
+
+    var healthIssues: [MarketSymbolHealth] {
+        guard let dashboard else { return [] }
+        if !dashboard.symbolHealth.isEmpty {
+            return dashboard.symbolHealth.filter { $0.status == .missing || $0.status == .stale }
+        }
+        return dashboard.missingSymbols.map {
+            MarketSymbolHealth(symbol: $0, status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: "quote_unavailable")
+        }
+    }
+
     func quote(symbol: String) -> MarketQuote? {
-        dashboard?.coreIndices.first(where: { $0.symbol == symbol })
-            ?? dashboard?.metrics.first(where: { $0.symbol == symbol })
-            ?? dashboard?.components.first(where: { $0.symbol == symbol })
-            ?? dashboard?.crypto.first(where: { $0.symbol == symbol })
-            ?? indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })?.quote
+        if let quote = dashboard?.coreIndices.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.metrics.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.components.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.crypto.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.indexSessions?.values.first(where: { $0.symbol == symbol }) { return quote }
+        return indexConstituents.values.lazy
+            .flatMap(\.items)
+            .first(where: { $0.quote.symbol == symbol })?
+            .quote
     }
 
     func constituent(symbol: String) -> MarketIndexConstituent? {
@@ -194,14 +278,92 @@ final class MarketStore {
     private func loadCacheIfNeeded() {
         guard !loadedCache else { return }
         loadedCache = true
-        dashboard = MarketSnapshotCache.load()
+        guard let snapshot = MarketSnapshotCache.load() else { return }
+        dashboard = snapshot.dashboard
+        cacheSavedAt = snapshot.savedAt
+        isShowingCachedSnapshot = true
     }
 
-    private func appendRealtimePoint(_ quote: MarketQuote) {
-        let key = ChartKey(symbol: quote.symbol, range: .day)
-        guard var chart = charts[key], let timestamp = quote.timestamp else { return }
-        chart.points = marketMergingRealtimePrice(quote.price, timestamp: timestamp, into: chart.points)
-        charts[key] = chart
+    private func enqueueRealtimeUpdate(_ update: MarketQuoteUpdate) {
+        lastRealtimeMessageAt = Date()
+        pendingRealtimeUpdates[update.symbol] = update
+        guard realtimeFlushTask == nil else { return }
+        realtimeFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            self?.flushRealtimeUpdates()
+        }
+    }
+
+    private func flushRealtimeUpdates() {
+        realtimeFlushTask = nil
+        guard var dashboard, !pendingRealtimeUpdates.isEmpty else {
+            pendingRealtimeUpdates.removeAll()
+            return
+        }
+        let updates = pendingRealtimeUpdates.values
+        pendingRealtimeUpdates.removeAll(keepingCapacity: true)
+        for update in updates {
+            let quote = update.merging(into: self.quote(symbol: update.symbol))
+            dashboard.replace(quote)
+            mergeConstituent(update)
+            realtimeQuotes[quote.symbol] = quote
+        }
+        self.dashboard = dashboard
+    }
+
+    private func maintainFreshness(now: Date = Date()) async {
+        let serverInterval = TimeInterval(dashboard?.refreshIntervalMs ?? 15_000) / 1_000
+        let disconnected = realtimeStatus != .connected
+        let messageIsStale = lastRealtimeMessageAt.map { now.timeIntervalSince($0) >= 30 } ?? true
+        let desiredInterval = disconnected || messageIsStale ? max(15, serverInterval) : max(30, serverInterval * 2)
+        guard now.timeIntervalSince(lastSnapshotRefreshAt ?? .distantPast) >= desiredInterval else { return }
+        if messageIsStale, realtimeStatus == .connected { realtime.reconnect() }
+        await refresh(force: false)
+    }
+
+}
+
+func marketChartNeedsRetry(_ chart: MarketChart) -> Bool {
+    chart.candles.isEmpty && chart.quality.status != .complete
+}
+
+func marketChartCanUseCache(_ chart: MarketChart) -> Bool {
+    !marketChartNeedsRetry(chart)
+}
+
+private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {
+    let missing = dashboard.symbolHealth.filter { $0.status == .missing }
+    let stale = dashboard.symbolHealth.filter { $0.status == .stale }
+    if !missing.isEmpty {
+        return "\(missing.count) 项行情暂未返回"
+    }
+    if !stale.isEmpty {
+        return "\(stale.count) 项行情更新延迟"
+    }
+    // Compatibility with servers that predate per-symbol health metadata.
+    return dashboard.missingSymbols.isEmpty ? nil : "\(dashboard.missingSymbols.count) 项行情暂未返回"
+}
+
+func marketHealthSummary(_ issues: [MarketSymbolHealth]) -> String? {
+    guard !issues.isEmpty else { return nil }
+    let names = issues.prefix(3).map { marketSymbolDisplayName($0.symbol) }
+    let listedNames = names.joined(separator: "、")
+    let suffix = issues.count > names.count ? "\(listedNames)等 \(issues.count) 项" : listedNames
+    let staleCount = issues.filter { $0.status == .stale }.count
+    let missingCount = issues.count - staleCount
+    if missingCount > 0, staleCount > 0 { return "部分行情缺失或延迟：\(suffix)" }
+    if missingCount > 0 { return "部分行情暂缺：\(suffix)" }
+    return "部分行情更新延迟：\(suffix)"
+}
+
+func marketSymbolDisplayName(_ symbol: String) -> String {
+    switch symbol {
+    case "932000.SS": "中证2000"
+    case "THS:883418": "微盘股"
+    case "^TOPX": "东证指数"
+    case "JP10Y": "日本10年国债"
+    default: symbol
     }
 }
 
@@ -213,13 +375,20 @@ struct ChartKey: Hashable {
 private enum MarketSnapshotCache {
     private static let key = "market.dashboard.cache.v1"
 
-    static func load() -> MarketDashboard? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(MarketDashboard.self, from: data)
+    struct Snapshot: Codable {
+        let dashboard: MarketDashboard
+        let savedAt: Date
     }
 
-    static func save(_ dashboard: MarketDashboard) {
-        guard let data = try? JSONEncoder().encode(dashboard) else { return }
+    static func load() -> Snapshot? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) { return snapshot }
+        guard let dashboard = try? JSONDecoder().decode(MarketDashboard.self, from: data) else { return nil }
+        return Snapshot(dashboard: dashboard, savedAt: marketISODate(dashboard.generatedAt) ?? .distantPast)
+    }
+
+    static func save(_ dashboard: MarketDashboard, at date: Date) {
+        guard let data = try? JSONEncoder().encode(Snapshot(dashboard: dashboard, savedAt: date)) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 }

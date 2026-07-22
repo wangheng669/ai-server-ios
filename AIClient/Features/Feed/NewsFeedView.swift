@@ -34,7 +34,6 @@ struct NewsFeedView: View {
     @Binding private var hidesTabBar: Bool
     @StateObject private var model = NewsFeedViewModel()
     @State private var path: [Post] = []
-    @State private var isShowingLaunchCover = true
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
@@ -77,7 +76,10 @@ struct NewsFeedView: View {
                    let link = post.linkURL {
                     EmbeddedWebPage(url: link, source: source, preparedWebView: preparedWebViews[post.id])
                 } else {
-                    PostDetailView(post: post)
+                    PostDetailView(
+                        post: post,
+                        preloadedNewYorkTimesArticle: model.preloadedNewYorkTimesArticle(for: post.id)
+                    )
                 }
             }
         }
@@ -116,13 +118,6 @@ struct NewsFeedView: View {
             showsDetail = false
             hidesTabBar = false
         }
-        .overlay {
-            if isShowingLaunchCover {
-                LaunchCoverView()
-                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
-                    .zIndex(10)
-            }
-        }
         .task(id: model.source) {
             await model.loadInitial()
             hasLoadedFeedOnce = true
@@ -144,14 +139,6 @@ struct NewsFeedView: View {
         }
         .task {
             await model.warmSourceCache()
-        }
-        .task {
-            guard isShowingLaunchCover, !Task.isCancelled else { return }
-            try? await Task.sleep(for: .milliseconds(650))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.42)) {
-                isShowingLaunchCover = false
-            }
         }
     }
 
@@ -182,14 +169,6 @@ struct NewsFeedView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(FeedSource.allCases) { source in sourceButton(source).id(source.id) }
-                        Button { open("daily") } label: {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 19, weight: .semibold))
-                                .foregroundStyle(.purple)
-                                .frame(width: 42, height: 50)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("日报")
                     }
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
@@ -335,6 +314,14 @@ struct NewsFeedView: View {
                     }
                     if source == .flash {
                         flashFeedHeader
+                        if visiblePosts.isEmpty, !posts.isEmpty {
+                            ContentUnavailableView(
+                                "暂无\(flashFilter.title)快讯",
+                                systemImage: "line.3.horizontal.decrease.circle"
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 36)
+                        }
                     }
                     ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
                         let displayPost = model.postForDisplay(post)
@@ -382,9 +369,12 @@ struct NewsFeedView: View {
                                 guard source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
-                            .task {
+                            .task(id: source == .flash ? posts.last?.id : post.id) {
                                 guard source == model.source else { return }
-                                await model.loadMoreIfNeeded(current: post)
+                                await model.loadMoreIfNeeded(
+                                    current: post,
+                                    thresholdPostID: source == .flash ? visiblePosts.last?.id : nil
+                                )
                             }
                         if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
@@ -505,7 +495,12 @@ struct NewsFeedView: View {
             HStack(alignment: .top, spacing: 10) {
                 rssSourceButton(id: nil, name: "全部", avatarURL: nil)
                 ForEach(model.rssFeeds) { feed in
-                    rssSourceButton(id: feed.id, name: feed.name, avatarURL: feed.preferredAvatarURL)
+                    rssSourceButton(
+                        id: feed.id,
+                        name: feed.name,
+                        avatarURL: feed.preferredAvatarURL,
+                        rejectsUpscaledImages: !feed.hasManagedAvatar
+                    )
                 }
             }
             .padding(.horizontal, 14)
@@ -514,7 +509,12 @@ struct NewsFeedView: View {
         .background(Color(uiColor: .systemBackground))
     }
 
-    private func rssSourceButton(id: Int?, name: String, avatarURL: URL?) -> some View {
+    private func rssSourceButton(
+        id: Int?,
+        name: String,
+        avatarURL: URL?,
+        rejectsUpscaledImages: Bool = false
+    ) -> some View {
         let isSelected = model.selectedRSSFeedID == id
         return Button {
             Task { await model.selectRSSFeed(id) }
@@ -522,7 +522,12 @@ struct NewsFeedView: View {
             VStack(spacing: 5) {
                 ZStack {
                     if let id {
-                        AvatarView(url: avatarURL, name: name, size: 34, rejectsUpscaledImages: true)
+                        AvatarView(
+                            url: avatarURL,
+                            name: name,
+                            size: 34,
+                            rejectsUpscaledImages: rejectsUpscaledImages
+                        )
                             .id(id)
                     } else {
                         Circle()
@@ -555,45 +560,33 @@ struct NewsFeedView: View {
     }
 
     private var flashFeedHeader: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 9) {
-                Text("快讯")
-                    .font(.system(size: 24, weight: .bold))
-                Circle()
-                    .fill(.red)
-                    .frame(width: 6, height: 6)
-                Text("实时更新")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(FlashFilter.allCases) { filter in
-                        Button {
-                            withAnimation(.easeOut(duration: 0.18)) { flashFilter = filter }
-                        } label: {
-                            Text(filter.title)
-                                .font(.system(size: 14, weight: flashFilter == filter ? .semibold : .regular))
-                                .foregroundStyle(flashFilter == filter ? Color.white : Color.primary)
-                                .padding(.horizontal, 18)
-                                .frame(height: 36)
-                                .background(
-                                    flashFilter == filter ? Color.blue : Color(uiColor: .secondarySystemBackground),
-                                    in: Capsule()
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(flashFilter == filter ? .isSelected : [])
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(FlashFilter.allCases) { filter in
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) { flashFilter = filter }
+                    } label: {
+                        Text(filter.title)
+                            .font(.system(size: 14, weight: flashFilter == filter ? .semibold : .medium))
+                            .foregroundStyle(flashFilter == filter ? Color.white : Color.secondary)
+                            .padding(.horizontal, 17)
+                            .frame(height: 34)
+                            .background(
+                                flashFilter == filter ? Color.accentColor : Color(uiColor: .secondarySystemBackground),
+                                in: Capsule()
+                            )
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(flashFilter == filter ? .isSelected : [])
                 }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
+        .padding(.vertical, 10)
         .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.45)
+        }
     }
 
     private func flashUnreadDivider(count: Int) -> some View {
@@ -638,55 +631,6 @@ struct NewsFeedView: View {
         if let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL { openURL(url) }
     }
 
-}
-
-private struct LaunchCoverView: View {
-    @State private var isAnimating = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
-
-            VStack(spacing: 22) {
-                Image("LaunchLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 190, height: 190)
-                    .scaleEffect(isAnimating || reduceMotion ? 1 : 0.92)
-                    .shadow(color: .black.opacity(0.06), radius: 18, y: 8)
-
-                VStack(spacing: 7) {
-                    Text("化繁为简")
-                        .font(.system(size: 29, weight: .bold, design: .rounded))
-                        .tracking(2)
-                    Text("穿过纷繁，抵达清晰")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 9) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("正在梳理信息")
-                        .font(.caption)
-                }
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 6)
-            }
-            .opacity(isAnimating || reduceMotion ? 1 : 0.45)
-            .scaleEffect(isAnimating || reduceMotion ? 1 : 0.96)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("化繁为简，正在梳理信息")
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeOut(duration: 0.55)) {
-                isAnimating = true
-            }
-        }
-    }
 }
 
 @MainActor
@@ -1058,7 +1002,10 @@ private struct EmbeddedWebView: UIViewRepresentable {
         }
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
+        // Weibo's photo viewer uses horizontal swipes to move between images.
+        // WKWebView's history gesture competes with that gesture and can navigate
+        // back to the hot-search list while the user is browsing photos.
+        webView.allowsBackForwardNavigationGestures = !Self.isWeiboURL(url)
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         context.coordinator.observe(webView)
         model.webView = webView
@@ -1816,13 +1763,22 @@ private struct NewsCardView: View {
             VStack(alignment: .leading, spacing: 10) {
                 xAuthorHeader
 
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(Array(xTimelineParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                        xRichText(paragraph)
-                            .font(.system(size: 17, weight: .regular))
-                            .lineSpacing(3)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 5) {
+                    xRichText(xTimelineContent)
+                        .font(.system(size: 17, weight: .regular))
+                        .lineSpacing(3)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(isLongXPost ? 8 : nil)
+                        .fixedSize(horizontal: false, vertical: !isLongXPost)
+
+                    if isLongXPost {
+                        Button(action: { onOpen?() }) {
+                            Text("显示更多")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看完整帖子")
                     }
                 }
 
@@ -1896,6 +1852,16 @@ private struct NewsCardView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return sentences.count > 1 ? sentences : [normalized]
+    }
+
+    /// Keep ordinary posts complete in the timeline, while giving translated long-form
+    /// posts the same compact handoff to detail that X uses for "Show more".
+    private var xTimelineContent: String {
+        xTimelineParagraphs.joined(separator: "\n\n")
+    }
+
+    private var isLongXPost: Bool {
+        xTimelineContent.count > 180
     }
 
     private func xRichText(_ value: String) -> Text {
@@ -2245,17 +2211,59 @@ private struct NewsCardView: View {
     }
 
     private var flashCard: some View {
-        HStack(alignment: .top, spacing: 0) {
+        HStack(alignment: .top, spacing: 10) {
             Text(post.formattedTime ?? "--:--")
-                .font(.system(size: 14, weight: .regular, design: .rounded).monospacedDigit())
+                .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 66, alignment: .leading)
-                .padding(.leading, 13)
+                .frame(width: 42, alignment: .trailing)
+                .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(isImportantFlash ? Color.orange : Color.accentColor)
+                    .frame(width: 7, height: 7)
+                    .overlay {
+                        Circle()
+                            .stroke((isImportantFlash ? Color.orange : Color.accentColor).opacity(0.18), lineWidth: 5)
+                    }
+                    .padding(.top, 7)
+
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.16))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                    .padding(.top, 7)
+            }
+            .frame(width: 10)
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 7) {
+                    Text(flashCategory)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(isImportantFlash ? Color.orange : Color.accentColor)
+                        .padding(.horizontal, 8)
+                        .frame(height: 22)
+                        .background(
+                            (isImportantFlash ? Color.orange : Color.accentColor).opacity(0.10),
+                            in: Capsule()
+                        )
+
+                    Text(post.authorName)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+
+                    if let aggregationLabel = flashAggregationLabel {
+                        Label(aggregationLabel, systemImage: "square.stack.3d.up.fill")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
                 Text(post.displayContent)
-                    .font(.system(size: 16, weight: .regular))
-                    .lineSpacing(5)
+                    .font(.system(size: 16, weight: isImportantFlash ? .medium : .regular))
+                    .lineSpacing(4)
                     .lineLimit(isExpandedFlash ? nil : 4)
                     .multilineTextAlignment(.leading)
 
@@ -2268,18 +2276,30 @@ private struct NewsCardView: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.blue)
                 }
-
-                Text("来源：\(post.authorName)")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.leading, 16)
+        .padding(.leading, 12)
         .padding(.trailing, 16)
-        .padding(.vertical, 14)
+        .padding(.top, 15)
+        .padding(.bottom, 16)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+
+    private var isImportantFlash: Bool {
+        post.tagNames.contains("重要")
+    }
+
+    private var flashAggregationLabel: String? {
+        let platformCount = post.meta?.flashPlatformCount ?? 1
+        let similarCount = post.meta?.flashSimilarCount ?? 1
+        guard platformCount > 1 || similarCount > 1 else { return nil }
+
+        var parts: [String] = []
+        if platformCount > 1 { parts.append("\(platformCount) 个平台发布") }
+        if similarCount > 1 { parts.append("合并 \(similarCount) 条") }
+        return parts.joined(separator: " · ")
     }
 
     private var flashCategory: String {
@@ -2522,8 +2542,8 @@ private struct NewsCardView: View {
                 .lineSpacing(2)
                 .multilineTextAlignment(.leading)
 
-            if post.displayContent != post.displayTitle {
-                Text(post.displayContent)
+            if post.newYorkTimesFeedExcerpt != post.displayTitle {
+                Text(post.newYorkTimesFeedExcerpt)
                     .font(.system(size: 15, weight: .regular, design: .serif))
                     .foregroundStyle(.secondary)
                     .lineSpacing(4)

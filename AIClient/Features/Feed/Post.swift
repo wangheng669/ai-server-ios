@@ -41,6 +41,14 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
         }
         return iconURL
     }
+
+    var hasManagedAvatar: Bool {
+        guard let avatar, !avatar.isEmpty,
+              let url = URL(string: avatar, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else {
+            return false
+        }
+        return url.path.hasSuffix("/avatar")
+    }
 }
 struct PostDetailResponse: Decodable { let post: Post }
 
@@ -132,8 +140,14 @@ struct FlashItem: Decodable {
     let id, time, text, source, linkURL, avatarURL: String?
     let isImportant: Bool?
     let finalScore: Double?
+    let similarityGroupId: Int64?
+    let similarityScore: Double?
+    let similarCount: Int?
+    let platformCount: Int?
+    let platforms: [String]?
     enum CodingKeys: String, CodingKey {
         case id, time, text, source, isImportant, finalScore
+        case similarityGroupId, similarityScore, similarCount, platformCount, platforms
         case linkURL = "linkUrl"
         case avatarURL = "avatarUrl"
     }
@@ -174,6 +188,15 @@ struct Post: Decodable, Identifiable, Hashable {
     var displaySummary: String? {
         let value = clean(summary) ?? clean(text)
         return value == displayTitle ? nil : value
+    }
+    var newYorkTimesFeedExcerpt: String {
+        let raw = clean(summary) ?? clean(text) ?? clean(contentZH) ?? clean(content) ?? displayTitle
+        let boundedRaw = String(raw.prefix(600))
+        let normalized = (htmlText(boundedRaw) ?? boundedRaw)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let excerpt = String(normalized.prefix(280))
+        return excerpt + (normalized.count > excerpt.count || raw.count > boundedRaw.count ? "…" : "")
     }
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
@@ -568,13 +591,20 @@ struct Post: Decodable, Identifiable, Hashable {
     static func flash(_ item: FlashItem) -> Post {
         let isImportant = item.finalScore.map { $0 >= importantFlashScore } ?? (item.isImportant == true)
         return Post(
-            id: syntheticID("flash:\(item.id ?? ""):\(item.text ?? "")"),
+            id: syntheticID("flash:\(item.similarityGroupId.map(String.init) ?? item.id ?? ""):\(item.text ?? "")"),
             title: nil, text: item.text, summary: nil, content: item.text, contentZH: nil,
             source: "flash", formattedTime: item.time, weightReason: nil, finalScore: item.finalScore, weight: nil,
             postLink: item.linkURL, articlePostAt: nil,
             user: .init(userName: nil, userScreenName: flashSourceName(item.source), avatarURL: item.avatarURL, userDesc: nil),
             postTags: isImportant ? [.init(id: 0, name: "重要")] : [],
-            images: [], videos: [], feedRank: nil, meta: nil
+            images: [], videos: [], feedRank: nil,
+            meta: .flash(
+                similarityGroupId: item.similarityGroupId,
+                similarityScore: item.similarityScore,
+                similarCount: item.similarCount,
+                platformCount: item.platformCount,
+                platforms: item.platforms
+            )
         )
     }
 
@@ -597,6 +627,7 @@ struct PostMeta: Decodable, Hashable {
     let metrics: PostMetrics?
     let lang: String?
     let urls: [String]?
+    let quotedTweet: XQuotedPost?
     let photoCredit: String?
     let zhihuRank: Int?
     let zhihuHeat: String?
@@ -611,8 +642,14 @@ struct PostMeta: Decodable, Hashable {
     let zhihuAnswerCommentCount: Int?
     let rssFeedName: String?
     let rssArticleLink: String?
+    let flashSimilarityGroupId: Int64?
+    let flashSimilarityScore: Double?
+    let flashSimilarCount: Int?
+    let flashPlatformCount: Int?
+    let flashPlatforms: [String]?
     enum CodingKeys: String, CodingKey {
         case metrics, lang, urls
+        case quotedTweet = "quoted_tweet"
         case photoCredit = "photo_credit"
         case zhihuRank = "zhihu_rank"
         case zhihuHeat = "zhihu_heat"
@@ -627,7 +664,84 @@ struct PostMeta: Decodable, Hashable {
         case zhihuAnswerCommentCount = "zhihu_answer_comment_count"
         case rssFeedName = "rss_feed_name"
         case rssArticleLink = "rss_article_link"
+        case flashSimilarityGroupId, flashSimilarityScore, flashSimilarCount, flashPlatformCount, flashPlatforms
     }
+
+    static func flash(
+        similarityGroupId: Int64?,
+        similarityScore: Double?,
+        similarCount: Int?,
+        platformCount: Int?,
+        platforms: [String]?
+    ) -> PostMeta {
+        PostMeta(
+            metrics: nil, lang: nil, urls: nil, quotedTweet: nil, photoCredit: nil,
+            zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
+            zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
+            zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
+            zhihuAnswerVoteupCount: nil, zhihuAnswerCommentCount: nil,
+            rssFeedName: nil, rssArticleLink: nil,
+            flashSimilarityGroupId: similarityGroupId,
+            flashSimilarityScore: similarityScore,
+            flashSimilarCount: similarCount,
+            flashPlatformCount: platformCount,
+            flashPlatforms: platforms
+        )
+    }
+}
+
+struct XQuotedPost: Decodable, Hashable {
+    let id: String?
+    let text: String?
+    let textZH: String?
+    let createdAt: String?
+    let author: XQuotedAuthor?
+    let media: [XQuotedMedia]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, text, author, media
+        case textZH = "text_zh"
+        case createdAt
+    }
+
+    var displayText: String? { xNonempty(textZH) ?? xNonempty(text) }
+    var originalText: String? { xNonempty(text) }
+}
+
+struct XQuotedAuthor: Decodable, Hashable {
+    let name: String?
+    let screenName: String?
+    let profileImageURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, screenName
+        case profileImageURL = "profileImageUrl"
+    }
+
+    var handle: String? {
+        guard let screenName = xNonempty(screenName) else { return nil }
+        return screenName.hasPrefix("@") ? screenName : "@\(screenName)"
+    }
+}
+
+struct XQuotedMedia: Decodable, Hashable {
+    let type: String?
+    let url: String?
+    let thumbnailURL: String?
+    let width: Int?
+    let height: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case type, url, width, height
+        case thumbnailURL = "thumbnail_url"
+    }
+
+    var displayURL: URL? { (thumbnailURL ?? url).flatMap(MediaURL.image) }
+}
+
+private func xNonempty(_ value: String?) -> String? {
+    guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+    return value
 }
 
 struct ZhihuAnswerAuthor: Decodable, Hashable {
@@ -755,6 +869,27 @@ enum MediaURL {
                 .appending(path: "video.mp4")
         }
         return resolved(value, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
+    }
+
+    static func videoThumbnail(for videoURL: URL) -> URL? {
+        let originalURL: URL
+        if videoURL.path.hasSuffix("/media-proxy"),
+           let proxiedURL = URLComponents(url: videoURL, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "url" })?
+            .value,
+           let resolvedURL = URL(string: proxiedURL) {
+            originalURL = resolvedURL
+        } else {
+            originalURL = videoURL
+        }
+
+        var components = URLComponents(
+            url: ServerConfiguration.currentURL.appending(path: "api/v1/video-thumbnail"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [.init(name: "url", value: originalURL.absoluteString)]
+        return components?.url
     }
 
     private static func bilibiliBVID(from url: URL) -> String? {

@@ -26,6 +26,7 @@ struct MarketView: View {
         []
         #endif
     }()
+    @Environment(\.scenePhase) private var scenePhase
 
     init(showsDetail: Binding<Bool> = .constant(false)) { _showsDetail = showsDetail }
 
@@ -42,6 +43,10 @@ struct MarketView: View {
                 .toolbar(.hidden, for: .navigationBar)
         }
         .task { await store.runUpdates() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await store.resumeUpdates() }
+        }
         .onChange(of: path) { _, path in showsDetail = !path.isEmpty }
         .onAppear { showsDetail = !path.isEmpty }
         .onDisappear { showsDetail = false }
@@ -60,6 +65,7 @@ private struct MarketHomeView: View {
         case "china": return .china
         case "japan": return .japan
         case "korea": return .korea
+        case "europe": return .europe
         case "crypto": return .crypto
         default: return .unitedStates
         }
@@ -74,6 +80,7 @@ private struct MarketHomeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id("market-top")
                     ZStack {
                         MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
                             .id(selectedMarket)
@@ -82,8 +89,11 @@ private struct MarketHomeView: View {
                     .animation(.easeInOut(duration: 0.18), value: selectedMarket)
 
                     VStack(spacing: 0) {
-                        if let error = store.errorMessage {
-                            MarketErrorBanner(message: error) { await store.refresh() }
+                        if let error = regionalHealthMessage {
+                            MarketErrorBanner(
+                                message: error,
+                                isRetrying: store.isRetrying
+                            ) { await store.refresh() }
                         }
                         MarketRegionPicker(selection: $selectedMarket)
                         MarketIndexTable(
@@ -95,27 +105,54 @@ private struct MarketHomeView: View {
                         .transition(.opacity)
                         .animation(.easeInOut(duration: 0.16), value: selectedMarket)
                         .simultaneousGesture(regionSwipeGesture)
+                        if selectedMarket == .china {
+                            ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
+                                .id("market-structure")
+                        }
                         if selectedMarket != .crypto {
                             MarketWorldMap(store: store, selection: $selectedMarket)
                                 .id("market-map")
                         }
                     }
                     .padding(.top, 8)
-                    .padding(.bottom, 92)
+                    .padding(.bottom, 24)
                     .background(MarketStyle.canvas)
                 }
             }
             .background(MarketTerminalPalette.header.ignoresSafeArea())
             .scrollIndicators(.hidden)
+            .safeAreaPadding(.bottom, 112)
             .refreshable { await store.refresh() }
+            .onChange(of: selectedMarket) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("market-top", anchor: .top)
+                }
+            }
             .task {
                 #if DEBUG
-                guard ProcessInfo.processInfo.arguments.contains("--market-map-preview") else { return }
-                try? await Task.sleep(for: .milliseconds(700))
-                proxy.scrollTo("market-map", anchor: .bottom)
+                if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
+                    try? await Task.sleep(for: .seconds(2))
+                    proxy.scrollTo("market-structure", anchor: .top)
+                } else if ProcessInfo.processInfo.arguments.contains("--market-map-preview") {
+                    try? await Task.sleep(for: .milliseconds(700))
+                    proxy.scrollTo("market-map", anchor: .bottom)
+                }
                 #endif
             }
+            #if DEBUG
+            .onChange(of: store.dashboard?.marketStructure?.generatedAt) { _, generatedAt in
+                guard generatedAt != nil,
+                      ProcessInfo.processInfo.arguments.contains("--market-structure-preview") else { return }
+                proxy.scrollTo("market-structure", anchor: .top)
+            }
+            #endif
         }
+    }
+
+    private var regionalHealthMessage: String? {
+        let relevant = store.healthIssues.filter { selectedMarket.relevantHealthSymbols.contains($0.symbol) }
+        if let summary = marketHealthSummary(relevant) { return summary }
+        return store.healthIssues.isEmpty ? store.errorMessage : nil
     }
 
     private var regionSwipeGesture: some Gesture {
@@ -171,6 +208,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
     case china = "中国"
     case japan = "日本"
     case korea = "韩国"
+    case europe = "欧洲"
     case crypto = "加密"
 
     var id: Self { self }
@@ -181,11 +219,31 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
         case .china: ["000001.SS", "000300.SS", "000688.SS", "^HSTECH", "^HSI"]
         case .japan: ["^N225"]
         case .korea: ["^KS11"]
+        case .europe: ["^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]
         case .crypto: ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT", "BINANCE:SOLUSDT", "BINANCE:BNBUSDT", "BINANCE:XRPUSDT", "BINANCE:DOGEUSDT"]
         }
     }
 
+    var allSymbols: [String] {
+        guard self == .china else { return symbols }
+        return [
+            "000001.SS", "000016.SS", "000300.SS", "399006.SZ", "000688.SS",
+            "000905.SS", "000852.SS", "932000.SS", "THS:883418", "^HSTECH", "^HSI"
+        ]
+    }
+
     var primarySymbol: String { symbols[0] }
+
+    var relevantHealthSymbols: Set<String> {
+        switch self {
+        case .unitedStates: Set(symbols + ["^TNX"])
+        case .china: Set(allSymbols.filter { $0 != "THS:883418" } + ["USDCNY", "399001.SZ"])
+        case .japan: Set(symbols + ["USDJPY", "JP10Y", "^TOPX"])
+        case .korea: Set(symbols + ["USDKRW", "KR10Y"])
+        case .europe: Set(symbols)
+        case .crypto: Set(symbols)
+        }
+    }
 }
 
 private struct MarketTerminalHero: View {
@@ -194,6 +252,13 @@ private struct MarketTerminalHero: View {
     let onSelectIndex: (String) -> Void
 
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
+    private var overnightQuote: MarketQuote? {
+        guard region == .unitedStates, quote?.marketSession != "regular",
+              let session = store.dashboard?.indexSessions?[region.primarySymbol],
+              session.marketSession == "regular" else { return nil }
+        return session
+    }
+    private var displayedQuote: MarketQuote? { overnightQuote ?? quote }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -214,39 +279,53 @@ private struct MarketTerminalHero: View {
             }
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
-                HStack(alignment: .bottom, spacing: 15) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text(quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name)
-                                .font(.system(size: 22, weight: .semibold))
-                                .lineLimit(1)
-                            Text(quote?.displayCode ?? CoreDescriptor(symbol: region.primarySymbol).code)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Color.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.72)
-                        }
-                        Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                            .font(.system(size: 36, weight: .semibold))
-                            .monospacedDigit()
-                            .tracking(-0.8)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name)
+                            .font(.system(size: 22, weight: .semibold))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                        Text(quote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情")
-                            .font(.system(size: 16, weight: .semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(quoteTint(quote))
+                            .layoutPriority(1)
+                        Text(overnightQuote.map { "\(CoreDescriptor(symbol: region.primarySymbol).code) · \($0.displayCode) 夜盘" }
+                            ?? quote?.displayCode
+                            ?? CoreDescriptor(symbol: region.primarySymbol).code)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Spacer(minLength: 0)
                     }
-                    .frame(width: 142, alignment: .leading)
+                    HStack(alignment: .bottom, spacing: 15) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                                .font(.system(size: 36, weight: .semibold))
+                                .monospacedDigit()
+                                .tracking(-0.8)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+                            Text(displayedQuote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情")
+                                .font(.system(size: 16, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(quoteTint(displayedQuote))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.68)
+                        }
+                        .frame(width: 142, alignment: .leading)
 
-                    TerminalLeadChart(quote: quote, trend: store.trendValues(for: quote))
-                        .frame(maxWidth: .infinity, minHeight: 128)
+                        TerminalLeadChart(
+                            quote: displayedQuote,
+                            trend: store.trendValues(for: displayedQuote),
+                            isOvernight: overnightQuote != nil
+                        )
+                             .frame(maxWidth: .infinity, minHeight: 128)
+                     }
                 }
                 .foregroundStyle(.primary)
             }
             .buttonStyle(MarketPressStyle())
+            .accessibilityLabel(heroAccessibilityLabel)
             .accessibilityHint("打开代表指数详情")
 
+            Group {
             if region == .crypto {
                 HStack(spacing: 0) {
                     cryptoMetric(symbol: "BINANCE:ETHUSDT")
@@ -256,28 +335,55 @@ private struct MarketTerminalHero: View {
                     cryptoMetric(symbol: "BINANCE:BNBUSDT")
                 }
                 .frame(height: 76)
-            } else {
+            } else if region == .china {
+                ChinaMarketMetrics(store: store)
+            } else if region == .japan {
+                RegionalMarketMetrics(
+                    store: store,
+                    exchangeTitle: "美元兑日元",
+                    exchangeSymbol: "USDJPY",
+                    exchangeDigits: 2,
+                    yieldTitle: "日本 10Y 国债",
+                    yieldSymbol: "JP10Y",
+                    companionTitle: "东证指数",
+                    companionSymbol: "^TOPX"
+                )
+            } else if region == .korea {
+                RegionalMarketMetrics(
+                    store: store,
+                    exchangeTitle: "美元兑韩元",
+                    exchangeSymbol: "USDKRW",
+                    exchangeDigits: 1,
+                    yieldTitle: "韩国 10Y 国债",
+                    yieldSymbol: "KR10Y",
+                    companionTitle: "KOSPI 指数",
+                    companionSymbol: "^KS11"
+                )
+            } else if region == .unitedStates {
                 HStack(spacing: 0) {
-                MarketTerminalMetric(
-                    title: "VIX 恐慌指数",
-                    value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
-                    change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
-                    tint: quoteTint(store.quote(symbol: "^VIX")),
-                    trend: store.trendValues(for: store.quote(symbol: "^VIX"))
-                )
-                TerminalDivider()
-                MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
-                TerminalDivider()
-                MarketTerminalMetric(
-                    title: "美国 10Y 国债收益率",
-                    value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
-                    change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
-                    tint: quoteTint(store.quote(symbol: "^TNX")),
-                    trend: store.trendValues(for: store.quote(symbol: "^TNX"))
-                )
+                     MarketTerminalMetric(
+                        title: "VIX 恐慌指数",
+                        value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
+                        change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
+                        tint: quoteTint(store.quote(symbol: "^VIX")),
+                         trend: store.trendValues(for: store.quote(symbol: "^VIX"))
+                    )
+                    TerminalDivider()
+                    MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
+                    TerminalDivider()
+                    MarketTerminalMetric(
+                        title: "美国 10Y 国债收益率",
+                        value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
+                        change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
+                        tint: quoteTint(store.quote(symbol: "^TNX")),
+                         trend: store.trendValues(for: store.quote(symbol: "^TNX"))
+                    )
+                }
+            } else {
+                 EuropeMarketMetrics(store: store)
             }
-                .frame(height: 76)
             }
+            .frame(height: 76)
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -287,6 +393,7 @@ private struct MarketTerminalHero: View {
 
     private var sessionLabel: String {
         if region == .crypto { return "24H 交易中" }
+        if overnightQuote != nil { return "夜盘" }
         return switch quote?.marketSession {
         case "regular": "交易中"
         case "pre": "盘前"
@@ -296,7 +403,7 @@ private struct MarketTerminalHero: View {
     }
 
     private var sessionTint: Color {
-        region == .crypto || quote?.marketSession == "regular"
+        region == .crypto || quote?.marketSession == "regular" || overnightQuote != nil
             ? Color(red: 0.08, green: 0.83, blue: 0.47)
             : Color.secondary
     }
@@ -314,13 +421,165 @@ private struct MarketTerminalHero: View {
 
     private var heroDate: String {
         let date = quote?.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
-        return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits))
+        return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
+    }
+
+    private var heroAccessibilityLabel: String {
+        let name = quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name
+        guard let displayedQuote else { return "\(name)，等待行情" }
+        return "\(name)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
+    }
+}
+
+private struct EuropeMarketMetrics: View {
+    let store: MarketStore
+
+    var body: some View {
+        HStack(spacing: 0) {
+            metric("欧洲50", "^STOXX50E")
+            TerminalDivider()
+            metric("德国 DAX", "^GDAXI")
+            TerminalDivider()
+            metric("英国 FTSE", "^FTSE")
+        }
+    }
+
+    private func metric(_ title: String, _ symbol: String) -> some View {
+        let quote = store.quote(symbol: symbol)
+        return MarketTerminalMetric(
+            title: title,
+            value: quote.map { number($0.price, digits: 2) } ?? "—",
+            change: quote?.formattedPercent ?? "等待行情",
+            tint: quoteTint(quote),
+            trend: quote?.trend ?? []
+        )
+    }
+}
+
+private struct RegionalMarketMetrics: View {
+    let store: MarketStore
+    let exchangeTitle: String
+    let exchangeSymbol: String
+    let exchangeDigits: Int
+    let yieldTitle: String
+    let yieldSymbol: String
+    let companionTitle: String
+    let companionSymbol: String
+
+    private var exchangeQuote: MarketQuote? { store.quote(symbol: exchangeSymbol) }
+    private var yieldQuote: MarketQuote? { store.quote(symbol: yieldSymbol) }
+    private var companionQuote: MarketQuote? { store.quote(symbol: companionSymbol) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            MarketTerminalMetric(
+                title: exchangeTitle,
+                value: exchangeQuote.map { number($0.price, digits: exchangeDigits) } ?? "—",
+                change: exchangeQuote?.formattedPercent ?? exchangeSymbol,
+                tint: quoteTint(exchangeQuote),
+                trend: exchangeQuote?.trend ?? []
+            )
+            TerminalDivider()
+            MarketTerminalMetric(
+                title: yieldTitle,
+                value: yieldQuote.map { String(format: "%.2f%%", $0.price) } ?? "—",
+                change: yieldQuote?.formattedPercent ?? "等待行情",
+                tint: quoteTint(yieldQuote),
+                trend: yieldQuote?.trend ?? []
+            )
+            TerminalDivider()
+            MarketTerminalMetric(
+                title: companionTitle,
+                value: companionQuote.map { number($0.price, digits: 2) } ?? "—",
+                change: companionQuote?.formattedPercent ?? "等待行情",
+                tint: quoteTint(companionQuote),
+                trend: companionQuote?.trend ?? []
+            )
+        }
+    }
+}
+
+private struct ChinaMarketMetrics: View {
+    let store: MarketStore
+
+    private var exchangeRate: MarketQuote? { store.quote(symbol: "USDCNY") }
+    private var breadth: MarketBreadth? { store.dashboard?.currentAShareBreadth }
+    private var breadthIsStale: Bool { store.dashboard?.ashareOverview?.stale == true }
+    private var turnoverMetric: (title: String, value: Double, note: String)? {
+        let shanghai = store.quote(symbol: "000001.SS")?.turnover
+        let shenzhen = store.quote(symbol: "399001.SZ")?.turnover
+        return switch (shanghai, shenzhen) {
+        case let (.some(shanghai), .some(shenzhen)): ("两市成交额", shanghai + shenzhen, "沪深合计")
+        case let (.some(shanghai), .none): ("沪市成交额", shanghai, "深市待补")
+        case let (.none, .some(shenzhen)): ("深市成交额", shenzhen, "沪市待补")
+        case (.none, .none): nil
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            MarketTerminalMetric(
+                title: "人民币汇率",
+                value: exchangeRate.map { number($0.price, digits: 4) } ?? "—",
+                change: exchangeRate?.formattedPercent ?? "USD/CNY",
+                tint: quoteTint(exchangeRate),
+                trend: exchangeRate?.trend ?? []
+            )
+            TerminalDivider()
+            MarketTerminalMetric(
+                title: turnoverMetric?.title ?? "成交额",
+                value: turnoverMetric.map { turnoverText($0.value) } ?? "—",
+                change: turnoverMetric?.note ?? "等待行情",
+                tint: .secondary,
+                trend: []
+            )
+            TerminalDivider()
+            MarketBreadthMetric(breadth: breadth, isStale: breadthIsStale)
+        }
+    }
+
+    private func turnoverText(_ value: Double) -> String {
+        if value >= 100_000_000_000 { return String(format: "%.1f万亿", value / 1_000_000_000_000) }
+        return String(format: "%.0f亿", value / 100_000_000)
+    }
+}
+
+private struct MarketBreadthMetric: View {
+    let breadth: MarketBreadth?
+    var isStale = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("市场宽度").font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+            Text(isStale ? "数据过期" : (breadth.map { "\($0.up) / \($0.down)" } ?? "—"))
+                .font(.system(size: 15, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.72)
+            HStack(spacing: 3) {
+                if isStale {
+                    Text("等待实时刷新").foregroundStyle(.secondary)
+                } else {
+                    Text("上涨").foregroundStyle(MarketStyle.gain)
+                    Text("/").foregroundStyle(.secondary)
+                    Text("下跌").foregroundStyle(MarketStyle.loss)
+                }
+            }
+            .font(.system(size: 9.5, weight: .medium))
+            MarketBreadthComposition(
+                up: breadth?.up ?? 0,
+                down: breadth?.down ?? 0,
+                flat: breadth?.flat ?? 0,
+                total: breadth.map { max($0.total, $0.up + $0.down + $0.flat) } ?? 0
+            )
+            .frame(height: 5)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
 
 private struct TerminalLeadChart: View {
     let quote: MarketQuote?
     let trend: [Double]
+    let isOvernight: Bool
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 7) {
@@ -335,9 +594,9 @@ private struct TerminalLeadChart: View {
                     .padding(.vertical, 5)
             }
             HStack {
-                Text("开盘")
+                Text(isOvernight ? "夜盘开盘" : "开盘")
                 Spacer()
-                Text("盘中")
+                Text(isOvernight ? "夜盘中" : "盘中")
                 Spacer()
                 Text(trailingLabel)
             }
@@ -376,7 +635,8 @@ private struct MarketTerminalMetric: View {
                         .font(.system(size: 17, weight: .semibold))
                         .monospacedDigit()
                         .lineLimit(1)
-                        .minimumScaleFactor(0.68)
+                        .minimumScaleFactor(0.55)
+                        .layoutPriority(1)
                     Text(change)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(tint)
@@ -385,11 +645,11 @@ private struct MarketTerminalMetric: View {
                         .minimumScaleFactor(0.72)
                 }
                 Spacer(minLength: 3)
-                Sparkline(values: trend, color: tint, showsFill: false).frame(width: 34, height: 24)
+                Sparkline(values: trend, color: tint, showsFill: false).frame(width: 28, height: 24)
             }
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -470,10 +730,16 @@ private struct MarketIndexTable: View {
     let store: MarketStore
     let onSelectIndex: (String) -> Void
 
-    private var quotes: [MarketQuote] { region.symbols.compactMap { store.quote(symbol: $0) } }
+    @State private var chinaScope: ChinaIndexScope = .core
+
+    private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
+    private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
 
     var body: some View {
         VStack(spacing: 0) {
+            if region == .china {
+                ChinaIndexScopePicker(selection: $chinaScope)
+            }
             HStack(spacing: 8) {
                 Text("名称 / 代码").frame(width: 112, alignment: .leading)
                 Text("最新价").frame(maxWidth: .infinity, alignment: .trailing)
@@ -497,10 +763,43 @@ private struct MarketIndexTable: View {
             } else {
                 ForEach(Array(quotes.enumerated()), id: \.element.symbol) { index, quote in
                     Button { onSelectIndex(quote.symbol) } label: {
-                        MarketIndexTableRow(quote: quote, trend: store.trendValues(for: quote))
+                         MarketIndexTableRow(
+                             quote: quote,
+                             overnightQuote: region == .unitedStates && quote.marketSession != "regular"
+                                 ? store.dashboard?.indexSessions?[quote.symbol]
+                                 : nil,
+                             trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
+                                 ? store.dashboard?.indexSessions?[quote.symbol] ?? quote
+                                 : quote)
+                         )
                     }
                     .buttonStyle(MarketPressStyle())
                     if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
+                }
+            }
+
+            if region == .unitedStates, let components = store.dashboard?.components, !components.isEmpty {
+                HStack {
+                    Text(store.dashboard?.componentsMeta?.label ?? "主要成分股")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 14)
+                .padding(.bottom, 6)
+
+                Divider().opacity(0.45)
+                ForEach(Array(components.enumerated()), id: \.element.symbol) { index, quote in
+                    Button { onSelectIndex(quote.symbol) } label: {
+                        MarketIndexTableRow(
+                            quote: quote,
+                            overnightQuote: nil,
+                            trend: store.trendValues(for: quote)
+                        )
+                    }
+                    .buttonStyle(MarketPressStyle())
+                    if index < components.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
                 }
             }
 
@@ -510,8 +809,415 @@ private struct MarketIndexTable: View {
     }
 }
 
+private struct ChinaMarketStructurePanel: View {
+    let structure: MarketStructure?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("资金与杠杆信号")
+                        .font(.headline)
+                    Text("交易所官方日频数据 · 趋势判断不代表预测")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let asOf = structure?.marginBalance.asOf {
+                    Text("截至 \(asOf)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let structure {
+                if let combinedSignal = structure.combinedSignal {
+                    CombinedCapitalSignal(signal: combinedSignal)
+                    Divider().opacity(0.45)
+                }
+                ETFSubscriptionSignal(subscription: structure.etfSubscription)
+                Divider().opacity(0.45)
+                MarginBalanceSignal(balance: structure.marginBalance)
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在等待 ETF 份额与两融余额日频数据")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .marketCard(cornerRadius: 16)
+        .padding(.horizontal, 18)
+        .padding(.top, 20)
+    }
+}
+
+private struct CombinedCapitalSignal: View {
+    let signal: MarketCombinedSignal
+
+    private var tint: Color {
+        switch signal.status {
+        case "resonance": MarketStyle.gain
+        case "allocation_support": .blue
+        case "leverage_driven": .orange
+        case "risk_off": MarketStyle.loss
+        default: .secondary
+        }
+    }
+
+    private var icon: String {
+        switch signal.status {
+        case "resonance": "arrow.trianglehead.2.clockwise.rotate.90"
+        case "allocation_support": "shield.lefthalf.filled"
+        case "leverage_driven": "bolt.fill"
+        case "risk_off": "arrow.down.right"
+        default: "arrow.left.and.right"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(signal.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                Text(signal.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ETFSubscriptionSignal: View {
+    let subscription: MarketETFSubscription
+
+    private var tint: Color {
+        subscription.status == "outflow" ? MarketStyle.loss : MarketStyle.gain
+    }
+
+    private var statusLabel: String {
+        switch subscription.status {
+        case "accelerating": "持续放量"
+        case "inflow": "保持净申购"
+        case "outflow": "转为净赎回"
+        default: "多空交错"
+        }
+    }
+
+    private var streakLabel: String {
+        guard subscription.consecutiveDays > 0 else { return "连续性待观察" }
+        let direction = subscription.consecutiveDirection == "outflow" ? "净赎回" : "净申购"
+        return "连续 \(subscription.consecutiveDays) 日\(direction)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("科创50ETF 合计净申购", systemImage: "arrow.left.arrow.right.circle")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                MarketSignalBadge(label: statusLabel, tint: tint)
+            }
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(marketSignedShares(subscription.latestNetSubscriptionShares))
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(subscription.latestNetSubscriptionShares >= 0 ? MarketStyle.gain : MarketStyle.loss)
+                    Text("当日份额变化 · \(subscription.fundCount ?? 1) 只主要ETF")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                MarketFlowBars(values: subscription.points.suffix(10).map(\.netSubscriptionShares))
+                    .frame(width: 112, height: 42)
+            }
+            HStack(spacing: 12) {
+                MarketSignalDatum(title: "近 5 日", value: marketSignedShares(subscription.netSubscriptionShares5d))
+                MarketSignalDatum(title: "前 5 日", value: marketSignedShares(subscription.previousNetShares5d))
+                MarketSignalDatum(title: "净流入天数", value: "\(subscription.positiveDays5d) / 5")
+            }
+            if let estimatedFlow = subscription.latestEstimatedNetFlowCNY,
+               let coverage = subscription.estimatedFlowFundCount,
+               coverage > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "yensign.circle")
+                    Text("按收盘价估算当日净流入 \(marketSignedMoney(estimatedFlow))")
+                    Spacer(minLength: 4)
+                    Text("覆盖 \(coverage) 只")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(tint)
+            }
+            Text("\(streakLabel)；净申购按上交所披露的每日基金总份额变化计算。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MarginBalanceSignal: View {
+    let balance: MarketMarginBalance
+
+    private var tint: Color {
+        switch balance.riskAppetite {
+        case .strong: MarketStyle.gain
+        case .repairing: .blue
+        case .weak: .orange
+        case .uncertain: .secondary
+        }
+    }
+
+    private var statusLabel: String {
+        switch balance.riskAppetite {
+        case .strong: "明显走强"
+        case .repairing: "企稳修复"
+        case .weak: "偏弱"
+        case .uncertain: "方向待定"
+        }
+    }
+
+    private var summary: String {
+        switch balance.riskAppetite {
+        case .strong:
+            "短中期余额同步回升，杠杆资金风险偏好明显走强。"
+        case .repairing where balance.latestChange > 0:
+            "单日资金回流，短期跌势正在收窄，处于企稳修复阶段。"
+        case .repairing:
+            "短期跌幅已经收窄，杠杆资金处于企稳观察阶段。"
+        case .weak where balance.latestChange > 0:
+            "单日有所回流，但 3 日及 5 日趋势仍向下，尚未形成企稳信号。"
+        case .weak:
+            "日、3 日及 5 日趋势仍向下，杠杆资金风险偏好偏弱。"
+        case .uncertain:
+            "日、3 日与 5 日变化方向不一致，风险偏好方向仍待确认。"
+        }
+    }
+
+    private var summaryIcon: String {
+        switch balance.riskAppetite {
+        case .strong: "arrow.up.right"
+        case .repairing: "waveform.path.ecg"
+        case .weak: "arrow.down.right"
+        case .uncertain: "arrow.left.and.right"
+        }
+    }
+
+    private var activityLabel: String {
+        switch balance.activityStatus {
+        case "aggressive": "偏积极"
+        case "active": "中性活跃"
+        case "cautious": "偏谨慎"
+        default: "待更新"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("沪深两融余额", systemImage: "scale.3d")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                MarketSignalBadge(label: statusLabel, tint: tint)
+            }
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(marketMoney(balance.totalBalance))
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text("沪深两融余额 · 日变动 \(marketSignedMoney(balance.latestChange))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Sparkline(
+                    values: balance.points.suffix(15).map(\.totalBalance),
+                    color: tint,
+                    showsFill: true
+                )
+                .frame(width: 112, height: 42)
+            }
+            HStack(spacing: 12) {
+                MarketSignalDatum(title: "3 日变化", value: marketSignedMoney(balance.change3d))
+                MarketSignalDatum(title: "5 日变化", value: marketSignedMoney(balance.change5d))
+                MarketSignalDatum(title: "回升天数", value: "\(balance.positiveDays5d) / 5")
+            }
+            if let ratio = balance.financingBuyRatio {
+                HStack(spacing: 7) {
+                    Image(systemName: "gauge.with.dots.needle.50percent")
+                        .foregroundStyle(tint)
+                    Text("融资买入占A股成交额")
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%.2f%%", ratio))
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                    Spacer(minLength: 4)
+                    Text(activityLabel)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(tint)
+                }
+                .font(.caption2)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: summaryIcon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 24, height: 24)
+                    .background(tint.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("杠杆风险偏好：\(statusLabel)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                    Text(summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Text("判断综合余额趋势与融资买入活跃度；两融数据仅作为杠杆风险偏好的代理指标。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MarketSignalBadge: View {
+    let label: String
+    let tint: Color
+
+    var body: some View {
+        Text(label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .frame(height: 23)
+            .background(tint.opacity(0.10), in: Capsule())
+    }
+}
+
+private struct MarketSignalDatum: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MarketFlowBars: View {
+    let values: [Double]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let maximum = max(values.map(abs).max() ?? 0, 1)
+            let width = proxy.size.width / CGFloat(max(values.count, 1))
+            let middle = proxy.size.height / 2
+            ZStack {
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: middle))
+                    path.addLine(to: CGPoint(x: proxy.size.width, y: middle))
+                }
+                .stroke(Color.secondary.opacity(0.20), lineWidth: 0.5)
+                flowPath(values: values, positive: true, maximum: maximum, width: width, middle: middle)
+                    .fill(MarketStyle.gain.opacity(0.86))
+                flowPath(values: values, positive: false, maximum: maximum, width: width, middle: middle)
+                    .fill(MarketStyle.loss.opacity(0.86))
+            }
+        }
+    }
+
+    private func flowPath(values: [Double], positive: Bool, maximum: Double, width: CGFloat, middle: CGFloat) -> Path {
+        Path { path in
+            for (index, value) in values.enumerated() where (value >= 0) == positive {
+                let height = max(1, middle * CGFloat(abs(value) / maximum))
+                let x = CGFloat(index) * width + 1
+                let y = positive ? middle - height : middle
+                path.addRoundedRect(
+                    in: CGRect(x: x, y: y, width: max(1, width - 2), height: height),
+                    cornerSize: CGSize(width: 1.5, height: 1.5)
+                )
+            }
+        }
+    }
+}
+
+private func marketSignedShares(_ value: Double) -> String {
+    String(format: "%@%.2f亿份", value >= 0 ? "+" : "−", abs(value) / 100_000_000)
+}
+
+private func marketMoney(_ value: Double) -> String {
+    if value >= 1_000_000_000_000 { return String(format: "%.2f万亿", value / 1_000_000_000_000) }
+    return String(format: "%.0f亿", value / 100_000_000)
+}
+
+private func marketSignedMoney(_ value: Double) -> String {
+    String(format: "%@%.0f亿", value >= 0 ? "+" : "−", abs(value) / 100_000_000)
+}
+
+private enum ChinaIndexScope: String, CaseIterable, Identifiable {
+    case core = "核心"
+    case all = "全部 A 股指数"
+    var id: Self { self }
+}
+
+private struct ChinaIndexScopePicker: View {
+    @Binding var selection: ChinaIndexScope
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(ChinaIndexScope.allCases) { scope in
+                Button { withAnimation(.easeOut(duration: 0.16)) { selection = scope } } label: {
+                    Text(scope.rawValue)
+                        .font(.caption.weight(selection == scope ? .semibold : .medium))
+                        .foregroundStyle(selection == scope ? MarketStyle.accent : Color.secondary)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(selection == scope ? MarketStyle.accent.opacity(0.09) : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == scope ? .isSelected : [])
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+    }
+}
+
 private struct MarketIndexTableRow: View {
     let quote: MarketQuote
+    let overnightQuote: MarketQuote?
+    private var displayedQuote: MarketQuote { overnightQuote ?? quote }
     let trend: [Double]
 
     var body: some View {
@@ -526,25 +1232,25 @@ private struct MarketIndexTableRow: View {
             }
             .frame(width: 112, alignment: .leading)
 
-            Text(number(quote.price, digits: cryptoPriceDigits(quote.price, symbol: quote.symbol)))
+            Text(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))
                 .font(.system(size: 13.5, weight: .medium)).monospacedDigit()
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1).minimumScaleFactor(0.72)
 
             VStack(alignment: .trailing, spacing: 3) {
-                Text(quote.formattedPercent)
+                Text(displayedQuote.formattedPercent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
-                Text(signed(quote.changeValue, digits: 2))
+                Text(signed(displayedQuote.changeValue, digits: cryptoChangeDigits(displayedQuote)))
                     .font(.caption2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
             .font(.footnote.weight(.semibold)).monospacedDigit()
-            .foregroundStyle(quoteTint(quote))
+            .foregroundStyle(quoteTint(displayedQuote))
             .frame(width: 64, alignment: .trailing)
 
-            Sparkline(values: trend, color: quoteTint(quote))
+            Sparkline(values: trend, color: quoteTint(displayedQuote))
                 .frame(width: 60, height: 32)
         }
         .padding(.horizontal, 12)
@@ -554,8 +1260,8 @@ private struct MarketIndexTableRow: View {
         .accessibilityHint("打开指数详情")
     }
 
-    private var sessionLabel: String { quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") ? "24H" : (quote.marketSession == "regular" ? "交易中" : "已收盘") }
-    private var sessionTint: Color { quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
+    private var sessionLabel: String { overnightQuote != nil ? "夜盘" : (quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") ? "24H" : (quote.marketSession == "regular" ? "交易中" : "已收盘")) }
+    private var sessionTint: Color { overnightQuote != nil || quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
 }
 
 private struct MarketWorldMap: View {
@@ -701,6 +1407,10 @@ private struct MarketSessionSchedule: View {
             return [.init("上午盘", "08:00–10:30"), .init("午间休市", "10:30–11:30"), .init("下午盘", "11:30–14:30")]
         case .korea:
             return [.init("常规交易", "08:00–14:30")]
+        case .europe:
+            return berlinIsDaylightSaving(at: date)
+                ? [.init("常规交易", "15:00–23:30")]
+                : [.init("常规交易", "16:00–次日00:30")]
         case .crypto:
             return [.init("全天交易", "00:00–24:00")]
         }
@@ -726,6 +1436,10 @@ private struct MarketSessionSchedule: View {
             if (690..<870).contains(minute) { return 2 }
         case .korea:
             if (480..<870).contains(minute) { return 0 }
+        case .europe:
+            let start = berlinIsDaylightSaving(at: date) ? 900 : 960
+            let end = berlinIsDaylightSaving(at: date) ? 1410 : 30
+            if end > start ? (start..<end).contains(minute) : (minute >= start || minute < end) { return 0 }
         case .crypto:
             return 0
         }
@@ -752,6 +1466,7 @@ private struct MarketSessionSchedule: View {
         case .china, .crypto: identifier = "Asia/Shanghai"
         case .japan: identifier = "Asia/Tokyo"
         case .korea: identifier = "Asia/Seoul"
+        case .europe: identifier = "Europe/Berlin"
         }
         calendar.timeZone = TimeZone(identifier: identifier)!
         return !calendar.isDateInWeekend(date)
@@ -759,6 +1474,10 @@ private struct MarketSessionSchedule: View {
 
     private func newYorkIsDaylightSaving(at date: Date) -> Bool {
         TimeZone(identifier: "America/New_York")?.isDaylightSavingTime(for: date) == true
+    }
+
+    private func berlinIsDaylightSaving(at date: Date) -> Bool {
+        TimeZone(identifier: "Europe/Berlin")?.isDaylightSavingTime(for: date) == true
     }
 }
 
@@ -779,6 +1498,7 @@ private extension MarketRegion {
         case .china: "上海"
         case .japan: "东京"
         case .korea: "首尔"
+        case .europe: "法兰克福"
         case .crypto: "加密市场"
         }
     }
@@ -788,6 +1508,7 @@ private extension MarketRegion {
         case .china: "午间休市 11:30–13:00；法定节假日休市"
         case .japan: "以上时间已由东京时间换算为北京时间"
         case .korea: "以上时间已由首尔时间换算为北京时间"
+        case .europe: "以上时间已由欧洲中部时间换算为北京时间"
         case .crypto: "全年无休，行情以 USDT 计价"
         case .unitedStates: ""
         }
@@ -889,10 +1610,18 @@ private struct MarketLiveStatus: View {
             Circle().fill(statusColor).frame(width: 7, height: 7)
             if store.isLoading && store.dashboard == nil {
                 Text("加载中")
-            } else if store.hasOpenMarket && store.realtimeStatus == .connected {
-                Text("实时连接")
+            } else if let age = store.cachedSnapshotAge {
+                Text(cacheLabel(age: age))
+            } else if store.hasOpenMarket && store.realtimeIsFresh {
+                if let delay = store.maximumOpenMarketDelayMinutes {
+                    Text("实时连接 · 部分延迟\(delay)分钟")
+                } else {
+                    Text("实时连接")
+                }
             } else if store.realtimeStatus == .connecting || store.realtimeStatus == .reconnecting {
                 Text("连接重试中")
+            } else if store.realtimeStatus == .connected {
+                Text("等待实时行情")
             } else if let date = store.latestQuoteDate {
                 Text("截至 \(date.formatted(date: .omitted, time: .shortened))")
             } else {
@@ -905,30 +1634,46 @@ private struct MarketLiveStatus: View {
     }
 
     private var statusColor: Color {
-        if store.errorMessage != nil || store.realtimeStatus == .reconnecting { return .orange }
-        if store.hasOpenMarket && store.realtimeStatus == .connected { return MarketStyle.loss }
+        if store.errorMessage != nil || store.realtimeStatus == .reconnecting || (store.cachedSnapshotAge ?? 0) >= 300 { return .orange }
+        if store.hasOpenMarket && store.realtimeIsFresh { return MarketStyle.loss }
         return .secondary
     }
 
     private var accessibilityStatus: String {
         if let error = store.errorMessage { return "行情更新异常：\(error)" }
-        if store.hasOpenMarket && store.realtimeStatus == .connected { return "行情实时连接正常" }
+        if let age = store.cachedSnapshotAge { return "当前显示\(cacheLabel(age: age))" }
+        if store.hasOpenMarket && store.realtimeIsFresh { return "行情实时连接正常" }
         if let date = store.latestQuoteDate { return "行情截至 \(date.formatted(date: .abbreviated, time: .shortened))" }
         return "行情等待更新"
+    }
+
+    private func cacheLabel(age: TimeInterval) -> String {
+        if age >= 86_400 { return "历史缓存 · 超过1天" }
+        if age >= 300 { return "缓存数据 · \(max(5, Int(age / 60)))分钟前" }
+        return "缓存数据"
     }
 }
 
 private struct MarketErrorBanner: View {
     let message: String
+    let isRetrying: Bool
     let retry: () async -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             Text(message).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
-            Button("重试") { Task { await retry() } }
+            Button { Task { await retry() } } label: {
+                if isRetrying {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("重试")
+                }
+            }
                 .font(.system(size: 12, weight: .semibold))
                 .frame(minWidth: 44, minHeight: 44)
+                .disabled(isRetrying)
+                .accessibilityLabel(isRetrying ? "正在重试行情" : "重试缺失行情")
         }
         .padding(.horizontal, 12)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
@@ -1040,7 +1785,7 @@ private struct MarketCoreIndexCard: View {
                 Spacer(minLength: 1)
                 Text(quote.map { number($0.price, digits: 2) } ?? "—")
                     .font(.system(size: 14.5, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-                Text(quote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情数据")
+                    Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
                     .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote)).lineLimit(1)
             }
             Sparkline(values: quote?.trend ?? [], color: quoteTint(quote)).frame(width: 56, height: 32)
@@ -1065,7 +1810,7 @@ private struct GlobalMarketOverviewGrid: View {
                 city: "北京",
                 timeZone: "Asia/Shanghai",
                 symbol: "000001.SS",
-                breadth: store.dashboard?.ashareOverview?.breadth
+                breadth: store.dashboard?.currentAShareBreadth
             )
             countryButton(
                 country: "美国",
@@ -1236,7 +1981,12 @@ private struct MarketIndexDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .background(InteractivePopGestureEnabler())
         .task {
-            if isIndex { await store.loadIndexConstituents(symbol: symbol) }
+            if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+        }
+        .refreshable {
+            await store.refresh(force: false)
+            if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+            await store.loadChart(symbol: symbol, range: selectedRange, force: true)
         }
     }
 
@@ -1267,7 +2017,7 @@ private struct MarketIndexDetailView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—").font(.system(size: 33, weight: .bold)).monospacedDigit().tracking(-0.8).foregroundStyle(quoteTint(quote))
-                    Text(quote.map { "\(signed($0.changeValue, digits: 2))  \($0.formattedPercent)" } ?? "等待行情数据")
+                    Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
                         .font(.system(size: 16, weight: .semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
                     HStack(spacing: 7) {
                         Circle().fill(sessionColor).frame(width: 6, height: 6)
@@ -1312,7 +2062,7 @@ private struct MarketIndexDetailView: View {
         VStack(alignment: .leading, spacing: 9) {
             Text("关键数据").font(.system(size: 17, weight: .semibold))
             Grid(horizontalSpacing: 10, verticalSpacing: 13) {
-                GridRow { metric("开盘", quote?.openPrice); metric("最高", quote?.high, MarketStyle.gain); metric("最低", quote?.low, MarketStyle.loss); metric("昨收", quote?.previousClose) }
+                GridRow { metric("开盘", quote?.openPrice); metric("最高", quote?.high, MarketStyle.gain); metric("最低", quote?.low, MarketStyle.loss); metric(isCrypto ? "24H开盘" : "昨收", quote?.previousClose) }
                 GridRow { metric("成交量", quote?.volume, compact: true); metric("市值", quote?.marketCap, compact: true); metric("市盈率", quote?.pe); textMetric("状态", quote?.freshnessLabel ?? "更新中") }
             }
             .padding(12).marketCard(cornerRadius: 10)
@@ -1364,6 +2114,7 @@ private struct MarketIndexDetailView: View {
     private var sessionText: String {
         switch quote?.marketSession { case "regular": "交易中"; case "always-open": "24小时交易"; case "pre": "盘前"; case "post", "after": "盘后"; default: "已收盘" }
     }
+    private var isCrypto: Bool { symbol.hasPrefix("BINANCE:") }
     private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
 
     private var showsIndexSession: Bool {
@@ -1426,13 +2177,7 @@ private struct MarketDetailChart: View {
 
     private var chart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
     private var points: [MarketChartPoint] {
-        let quote = store.quote(symbol: symbol)
-        return marketDisplayPoints(
-            chart?.points ?? [],
-            range: selectedRange,
-            fallbackValues: store.trendValues(for: quote),
-            fallbackTimestamp: quote?.timestamp
-        )
+        (chart?.candles ?? []).sorted { $0.timestamp < $1.timestamp }
     }
     private var values: [Double] {
         let bounds = points.flatMap { [$0.low, $0.high].compactMap { $0 } }
@@ -1466,7 +2211,7 @@ private struct MarketDetailChart: View {
                             Button("重新加载") { Task { await store.loadChart(symbol: symbol, range: selectedRange, force: true) } }
                                 .font(.system(size: 12, weight: .semibold)).frame(minWidth: 88, minHeight: 44)
                         }
-                    } else { Text("该周期暂无行情数据").font(.system(size: 12)).foregroundStyle(.secondary) }
+                    } else { Text(chartStatusMessage).font(.system(size: 12)).foregroundStyle(.secondary) }
                 } else {
                     MarketLineChart(
                         values: points.compactMap(\.displayValue),
@@ -1480,7 +2225,7 @@ private struct MarketDetailChart: View {
             .frame(height: 184)
             .animation(MarketStyle.chartTransition, value: selectedRange)
             if let inspectedPoint {
-                Text("\(chartTime(inspectedPoint.timestamp, range: selectedRange))  \(number(inspectedPoint.displayValue ?? 0, digits: 2))")
+                Text("\(chartTime(inspectedPoint.timestamp, range: selectedRange, timezone: chart?.timezone))  \(number(inspectedPoint.displayValue ?? 0, digits: 2))")
                     .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -1491,25 +2236,66 @@ private struct MarketDetailChart: View {
                 }
             }
             .font(.caption2).foregroundStyle(.secondary).padding(.leading, 48).padding(.trailing, 5)
-            VolumeBars(points: points).frame(height: 25).padding(.leading, 48)
+            Group {
+                if hasVolume {
+                    VolumeBars(points: points).frame(height: 25).padding(.leading, 48)
+                } else {
+                    Color.clear.frame(height: 25)
+                }
+            }
                 .overlay(alignment: .topTrailing) {
-                    Text(selectedRange.apiInterval == "1m" ? "分时走势 · 成交量" : "日线走势 · 成交量")
+                    Text(chartCaption)
                         .font(.caption2).foregroundStyle(.secondary)
                 }
+            if let coverageMessage {
+                Text(coverageMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.horizontal, 18)
         .task(id: selectedRange) {
             inspectedPoint = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
         }
-        .task(priority: .utility) { await store.preloadCharts(symbol: symbol) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedRange.rawValue)行情图表，可拖动查看具体时间和价格")
     }
 
     private var timelineLabels: [String] {
         guard let first = points.first, let last = points.last else { return ["—", "—", "—"] }
-        return [first, points[points.count / 2], last].map { chartTime($0.timestamp, range: selectedRange) }
+        return [first, points[points.count / 2], last].map { chartTime($0.timestamp, range: selectedRange, timezone: chart?.timezone) }
+    }
+
+    private var hasVolume: Bool { points.contains { ($0.volume ?? 0) > 0 } }
+    private var chartCaption: String {
+        let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
+        let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
+        return hasVolume ? "\(dated) · 成交量" : dated
+    }
+    private var coverageMessage: String? {
+        guard let quality = chart?.quality else { return nil }
+        switch quality.status {
+        case .complete:
+            guard points.last?.state == "provisional" else { return nil }
+            return selectedRange.apiInterval == "1m" ? "当前分钟更新中" : "当日数据更新中"
+        case .repairing:
+            return "数据补齐中 · 已有 \(quality.actual)/\(quality.expected) 个真实数据点"
+        case .partial:
+            return "数据不完整 · 缺少 \(max(quality.expected - quality.actual, 0)) 个数据点"
+        case .unavailable:
+            return "当前交易日暂无可用行情"
+        }
+    }
+
+    private var chartStatusMessage: String {
+        switch chart?.quality.status {
+        case .repairing: "数据补齐中"
+        case .partial: "该交易日行情不完整"
+        case .unavailable: "当前交易日暂无可用行情"
+        case .complete, .none: "暂无行情数据"
+        }
     }
 
 }
@@ -1660,7 +2446,7 @@ private struct VolumeBars: View {
             let maxVolume = points.compactMap(\.volume).max() ?? 1
             HStack(alignment: .bottom, spacing: 1) {
                 ForEach(points.suffix(80)) { point in
-                    let rising = (point.close ?? point.value ?? 0) >= (point.open ?? point.close ?? point.value ?? 0)
+                    let rising = point.close >= point.open
                     Rectangle().fill((rising ? MarketStyle.gain : MarketStyle.loss).opacity(0.68))
                         .frame(maxWidth: .infinity).frame(height: max(2, proxy.size.height * CGFloat((point.volume ?? 0) / maxVolume)))
                         .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
@@ -1765,8 +2551,12 @@ private struct CompanyLogo: View {
         AsyncImage(url: logoURL) { phase in
             if let image = phase.image {
                 image.resizable().scaledToFit().padding(6)
+            } else if phase.error == nil {
+                ProgressView().controlSize(.small)
             } else {
-                fallback
+                Image(systemName: "building.2.crop.circle")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(width: 40, height: 40)
@@ -1779,12 +2569,6 @@ private struct CompanyLogo: View {
         return URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
     }
 
-    private var fallback: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10).fill(stockColor(quote.symbol).opacity(0.10))
-            Text(String(quote.symbol.prefix(1))).font(.system(size: 16, weight: .bold)).foregroundStyle(stockColor(quote.symbol))
-        }
-    }
 }
 
 private struct Sparkline: View {
@@ -1799,9 +2583,13 @@ private struct Sparkline: View {
                     if showsFill {
                         Path { path in
                             guard let first = points.first, let last = points.last else { return }
-                            path.move(to: CGPoint(x: first.x, y: proxy.size.height)); path.addLine(to: first)
+                            path.move(to: CGPoint(x: -2, y: proxy.size.height))
+                            path.addLine(to: CGPoint(x: -2, y: first.y))
+                            path.addLine(to: first)
                             points.dropFirst().forEach { path.addLine(to: $0) }
-                            path.addLine(to: CGPoint(x: last.x, y: proxy.size.height)); path.closeSubpath()
+                            path.addLine(to: CGPoint(x: proxy.size.width + 2, y: last.y))
+                            path.addLine(to: CGPoint(x: proxy.size.width + 2, y: proxy.size.height))
+                            path.closeSubpath()
                         }.fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0)], startPoint: .top, endPoint: .bottom))
                     }
                     Path { path in guard let first = points.first else { return }; path.move(to: first); points.dropFirst().forEach { path.addLine(to: $0) } }
@@ -1846,17 +2634,14 @@ private struct CoreRegion: Identifiable {
 
 private struct CoreDescriptor {
     let symbol: String
-    var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "000001.SS": "上证指数"; case "000300.SS": "沪深300"; case "000688.SS": "科创50"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; default: symbol } }
+    var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "000001.SS": "上证指数"; case "000016.SS": "上证50"; case "000300.SS": "沪深300"; case "399006.SZ": "创业板指"; case "000688.SS": "科创50"; case "000905.SS": "中证500"; case "000852.SS": "中证1000"; case "932000.SS": "中证2000"; case "THS:883418": "微盘股"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; default: symbol } }
     var code: String { switch symbol { case "^GSPC": "SPX"; case "^NDX": "NDX"; case "^DJI": "DJI"; case "000001.SS": "000001.SH"; case "000300.SS": "000300.SH"; case "000688.SS": "000688.SH"; case "^HSTECH": "HSTECH"; case "^HSI": "HSI"; case "^N225": "N225"; case "^KS11": "KOSPI"; case "^STOXX50E": "SX5E"; case "^GDAXI": "DAX"; case "^FTSE": "FTSE"; case "^FCHI": "CAC40"; default: symbol } }
     var icon: String { switch symbol { case "^NDX": "n.circle.fill"; case "^DJI": "building.columns.fill"; case "000001.SS", "000300.SS": "building.2.fill"; case "000688.SS": "cpu.fill"; case "^HSTECH": "asterisk"; case "^HSI": "h.circle.fill"; case "^N225": "yensign.circle.fill"; case "^KS11": "k.circle.fill"; case "^STOXX50E": "globe.europe.africa.fill"; case "^GDAXI": "shield.fill"; case "^FTSE": "sterlingsign.circle.fill"; case "^FCHI": "f.circle.fill"; default: "star.fill" } }
 }
 
 private func marketLocalTime(_ timestamp: Int64?, city: String, timeZone: String) -> String {
     guard let timestamp else { return "等待更新" }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "zh_CN")
-    formatter.timeZone = TimeZone(identifier: timeZone)
-    formatter.dateFormat = "HH:mm"
+    let formatter = MarketViewDateFormatters.localTime(timeZone: timeZone)
     return "\(city) \(formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000)))"
 }
 
@@ -1879,15 +2664,44 @@ private func cryptoPriceDigits(_ price: Double, symbol: String = "BINANCE:") -> 
     if price < 100 { return 3 }
     return 2
 }
-private func chartTime(_ timestamp: Int64, range: MarketRange) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "zh_CN")
-    switch range {
-    case .day, .week: formatter.dateFormat = "MM-dd HH:mm"
-    case .month, .quarter, .year: formatter.dateFormat = "MM-dd"
-    case .fiveYears, .maximum: formatter.dateFormat = "yyyy-MM"
-    }
+private func cryptoChangeDigits(_ quote: MarketQuote) -> Int {
+    cryptoPriceDigits(max(abs(quote.changeValue), quote.price), symbol: quote.symbol)
+}
+private func chartTime(_ timestamp: Int64, range: MarketRange, timezone: String?) -> String {
+    let formatter = MarketViewDateFormatters.chart(range: range, timezone: timezone)
     return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
+}
+
+private enum MarketViewDateFormatters {
+    private static var localTimeCache: [String: DateFormatter] = [:]
+    private static var chartCache: [String: DateFormatter] = [:]
+
+    static func localTime(timeZone: String) -> DateFormatter {
+        if let cached = localTimeCache[timeZone] { return cached }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = TimeZone(identifier: timeZone)
+        formatter.dateFormat = "HH:mm"
+        localTimeCache[timeZone] = formatter
+        return formatter
+    }
+
+    static func chart(range: MarketRange, timezone: String?) -> DateFormatter {
+        let format: String
+        switch range {
+        case .day, .week: format = "MM-dd HH:mm"
+        case .month, .quarter, .year: format = "MM-dd"
+        case .fiveYears, .maximum: format = "yyyy-MM"
+        }
+        let cacheKey = "\(format)|\(timezone ?? "")"
+        if let cached = chartCache[cacheKey] { return cached }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        if let timezone { formatter.timeZone = TimeZone(identifier: timezone) }
+        formatter.dateFormat = format
+        chartCache[cacheKey] = formatter
+        return formatter
+    }
 }
 private func stockSymbol(_ symbol: String) -> String { switch symbol { case "AAPL": "apple.logo"; case "MSFT": "square.grid.2x2.fill"; case "META": "infinity"; case "AMZN": "a.circle.fill"; default: "eye.fill" } }
 private func stockColor(_ symbol: String) -> Color { switch symbol { case "AAPL": .primary; case "AMZN": .orange; case "NVDA": .green; default: .blue } }

@@ -53,7 +53,7 @@ struct MarketService {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/index-constituents"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             .init(name: "symbol", value: symbol),
-            .init(name: "contract", value: "7")
+            .init(name: "contract", value: "8")
         ]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketIndexConstituentsResponse.self).data
@@ -115,6 +115,7 @@ final class MarketRealtimeClient {
     private let baseURL: URL
     private var socket: URLSessionWebSocketTask?
     private var task: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
     private var active = false
     var onQuote: ((MarketQuoteUpdate) -> Void)?
     var onStatus: ((Status) -> Void)?
@@ -132,9 +133,18 @@ final class MarketRealtimeClient {
         active = false
         task?.cancel()
         task = nil
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         onStatus?(.stopped)
+    }
+
+    func reconnect() {
+        guard active else { return }
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        socket?.cancel(with: .goingAway, reason: nil)
     }
 
     private func connect() {
@@ -144,12 +154,7 @@ final class MarketRealtimeClient {
             let socket = URLSession.shared.webSocketTask(with: url)
             self.socket = socket
             socket.resume()
-            socket.sendPing { [weak self] error in
-                Task { @MainActor in
-                    guard let self, self.active else { return }
-                    self.onStatus?(error == nil ? .connected : .reconnecting)
-                }
-            }
+            self.startHeartbeat(for: socket)
             do {
                 while active, !Task.isCancelled {
                     let message = try await socket.receive()
@@ -163,16 +168,41 @@ final class MarketRealtimeClient {
                           let header = try? JSONDecoder().decode(MarketSocketHeader.self, from: data),
                           header.type == "market",
                           let quote = try? JSONDecoder().decode(MarketQuoteUpdate.self, from: data) else { continue }
+                    self.onStatus?(.connected)
                     onQuote?(quote)
                 }
             } catch { }
             socket.cancel(with: .goingAway, reason: nil)
             self.socket = nil
             self.task = nil
+            self.heartbeatTask?.cancel()
+            self.heartbeatTask = nil
             guard active, !Task.isCancelled else { return }
             self.onStatus?(.reconnecting)
             try? await Task.sleep(for: .seconds(2))
             connect()
+        }
+    }
+
+    private func startHeartbeat(for socket: URLSessionWebSocketTask) {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { [weak self, weak socket] in
+            while let self, let socket, self.active, !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(15)) }
+                catch { return }
+                guard self.socket === socket else { return }
+                socket.sendPing { [weak self, weak socket] error in
+                    Task { @MainActor in
+                        guard let self, let socket, self.active, self.socket === socket else { return }
+                        if error == nil {
+                            self.onStatus?(.connected)
+                        } else {
+                            self.onStatus?(.reconnecting)
+                            socket.cancel(with: .goingAway, reason: nil)
+                        }
+                    }
+                }
+            }
         }
     }
 

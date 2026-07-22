@@ -2,7 +2,7 @@ import SwiftUI
 
 struct PeopleView: View {
     @Binding private var showsDetail: Bool
-    @State private var store = PeopleStore()
+    private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson? = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--person-detail-preview") {
@@ -13,8 +13,10 @@ struct PeopleView: View {
     }()
     @State private var selectedTopic = PeopleTopic.technology
     @State private var query = ""
+    @State private var listScrollPersonID: SpecialPerson.ID?
 
-    init(showsDetail: Binding<Bool> = .constant(false)) {
+    init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
+        self.store = store
         _showsDetail = showsDetail
     }
 
@@ -59,11 +61,13 @@ struct PeopleView: View {
             .navigationBarHidden(true)
             .navigationDestination(item: $selectedPerson) { person in
                 PersonDetailPage(person: person)
-                    .onAppear { showsDetail = true }
-                    .onDisappear { showsDetail = false }
             }
         }
         .task { await store.load() }
+        .onAppear { showsDetail = selectedPerson != nil }
+        .onChange(of: selectedPerson) { _, person in
+            showsDetail = person != nil
+        }
         .onDisappear { showsDetail = false }
     }
 
@@ -119,10 +123,10 @@ struct PeopleView: View {
 
     @ViewBuilder
     private var peopleList: some View {
-        if store.isLoading && store.people.isEmpty {
+        if store.isLoading && filteredPeople.isEmpty {
             ProgressView("正在载入特别关心…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = store.errorMessage, store.people.isEmpty {
+        } else if let error = store.errorMessage, filteredPeople.isEmpty {
             ContentUnavailableView {
                 Label("载入失败", systemImage: "wifi.exclamationmark")
             } description: {
@@ -146,10 +150,14 @@ struct PeopleView: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.bottom, 18)
             }
+            .scrollPosition(id: $listScrollPersonID, anchor: .top)
             .scrollIndicators(.hidden)
             .refreshable { await store.load(force: true) }
+            .onChange(of: selectedTopic) { _, _ in listScrollPersonID = nil }
+            .onChange(of: query) { _, _ in listScrollPersonID = nil }
         }
     }
 }
@@ -204,8 +212,9 @@ private struct PersonSignalRow: View {
 private struct PersonDetailPage: View {
     let person: SpecialPerson
     @State private var store = PersonDetailStore()
-    @State private var section = PersonDetailSection.discussions
+    @State private var section = PersonDetailSection.posts
     @State private var isBioExpanded = false
+    @State private var selectedPost: Post?
 
     var body: some View {
         ScrollView {
@@ -220,7 +229,7 @@ private struct PersonDetailPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .navigationDestination(for: Post.self) { post in PostDetailView(post: post) }
+        .navigationDestination(item: $selectedPost) { post in PostDetailView(post: post) }
         .task(id: person.id) { await store.load(person: person) }
     }
 
@@ -300,11 +309,36 @@ private struct PersonDetailPage: View {
                 discussionContent(posts)
             } else {
                 ForEach(posts) { post in
-                    NavigationLink(value: post) { PersonPostRow(post: post, compact: false) }
-                        .buttonStyle(.plain)
+                    let displayPost = store.postForDisplay(post)
+                    PersonPostRow(post: displayPost, compact: false) { selectedPost = displayPost }
+                        .task { await store.translateXPostIfNeeded(post) }
+                        .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
                     Divider().padding(.leading, 20)
                 }
+                ownPostsPaginationStatus
             }
+        }
+    }
+
+    @ViewBuilder
+    private var ownPostsPaginationStatus: some View {
+        if store.isLoadingMoreOwnPosts {
+            ProgressView("正在载入更多动态…")
+                .frame(maxWidth: .infinity)
+                .padding(20)
+        } else if store.ownPostsLoadMoreError != nil, let last = store.ownPosts.last {
+            Button("加载失败，点按重试") {
+                Task { await store.loadMoreOwnPostsIfNeeded(current: last, person: person) }
+            }
+            .font(.footnote)
+            .frame(maxWidth: .infinity)
+            .padding(20)
+        } else if !store.canLoadMoreOwnPosts, !store.ownPosts.isEmpty {
+            Text("已显示全部动态")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(20)
         }
     }
 
@@ -339,8 +373,9 @@ private struct PersonDetailPage: View {
             }
             .padding(.horizontal, 20).padding(.top, 15).padding(.bottom, 7)
             ForEach(posts) { post in
-                NavigationLink(value: post) { PersonPostRow(post: post, compact: true) }
-                    .buttonStyle(.plain)
+                let displayPost = store.postForDisplay(post)
+                PersonPostRow(post: displayPost, compact: true) { selectedPost = displayPost }
+                    .task { await store.translateXPostIfNeeded(post) }
                 Divider().padding(.leading, 72)
             }
         }
@@ -360,35 +395,187 @@ private enum PersonDetailSection: String, CaseIterable, Identifiable {
 private struct PersonPostRow: View {
     let post: Post
     let compact: Bool
+    let onOpen: () -> Void
+    @State private var isExpanded = false
+    @State private var showsOriginal = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             AvatarView(url: post.avatarURL, name: post.authorName, size: compact ? 40 : 48)
-            VStack(alignment: .leading, spacing: compact ? 5 : 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(post.authorName).font(.system(size: compact ? 16 : 17, weight: .semibold)).lineLimit(1)
-                    if let handle = post.authorHandle {
-                        Text(handle).font(.system(size: compact ? 14 : 15)).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: compact ? 7 : 9) {
+                Button(action: onOpen) { authorHeader }
+                    .buttonStyle(.plain)
+
+                if isRepost {
+                    Label("转发了一条动态", systemImage: "arrow.2.squarepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if post.hasTranslation {
+                    HStack(spacing: 5) {
+                        Image(systemName: "character.bubble")
+                        Text(showsOriginal ? "英语原文" : "翻译自英语")
+                        Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
+                            .foregroundStyle(.blue)
                     }
-                    Spacer(minLength: 0)
-                    if !compact {
-                        Text(post.sourceName).font(.caption).foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Button(action: onOpen) {
+                    Text(visibleContent)
+                        .font(.system(size: compact ? 15 : 15.5))
+                        .lineSpacing(3)
+                        .lineLimit(isExpanded ? nil : (compact ? 4 : 7))
+                        .multilineTextAlignment(.leading)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                if shouldOfferExpansion {
+                    Button(isExpanded ? "收起" : "展开全文") { isExpanded.toggle() }
+                        .font(.subheadline.weight(.medium))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                }
+
+                if let quote = post.meta?.quotedTweet {
+                    XQuotedPostCard(quote: quote)
+                }
+
+                if post.previewURL != nil || !post.videoURLs.isEmpty {
+                    XFeedMediaView(post: post)
+                } else if let link = post.externalURL {
+                    Link(destination: link) {
+                        Label(link.host() ?? "打开链接", systemImage: "link")
+                            .font(.subheadline)
+                            .foregroundStyle(.blue)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                     }
                 }
-                if let time = post.formattedTime {
-                    Text(time).font(.caption).foregroundStyle(.secondary)
-                }
-                Text(post.displayContent)
-                    .font(.system(size: compact ? 15 : 15.5)).lineSpacing(3).lineLimit(compact ? 3 : 8)
-                    .multilineTextAlignment(.leading).foregroundStyle(.primary)
-                if !compact, let path = post.images?.first?.url, let imageURL = URL(string: path) {
-                    RemoteImage(url: imageURL, height: 170, cornerRadius: 12)
+
+                if !compact {
+                    FeedEngagementRow(post: post)
+                } else {
+                    HStack {
+                        FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: true)
+                        Spacer(minLength: 0)
+                        Button("查看详情", action: onOpen)
+                            .font(.caption.weight(.medium))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
         }
         .padding(.horizontal, 20).padding(.vertical, compact ? 13 : 16)
         .contentShape(Rectangle())
     }
+
+    private var authorHeader: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(post.authorName).font(.system(size: compact ? 16 : 17, weight: .semibold)).lineLimit(1)
+                if post.user?.verified == true {
+                    Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
+                }
+                Spacer(minLength: 6)
+                Text([post.sourceName, post.formattedTime].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            if let handle = post.authorHandle {
+                Text(handle).font(.system(size: compact ? 14 : 15)).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
+
+    private var visibleContent: String {
+        showsOriginal ? post.originalDisplayContent : post.displayContent
+    }
+
+    private var shouldOfferExpansion: Bool {
+        visibleContent.count > (compact ? 150 : 260) || visibleContent.filter(\.isNewline).count > 4
+    }
+
+    private var isRepost: Bool {
+        post.originalDisplayContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().hasPrefix("rt @")
+    }
+}
+
+private struct XQuotedPostCard: View {
+    let quote: XQuotedPost
+    @State private var showsOriginal = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                if let avatar = quote.author?.profileImageURL.flatMap(MediaURL.image) {
+                    RemoteImage(url: avatar, height: 24, cornerRadius: 12)
+                        .frame(width: 24, height: 24).clipped()
+                }
+                Text(quote.author?.name ?? "引用动态").font(.subheadline.weight(.semibold)).lineLimit(1)
+                if let handle = quote.author?.handle {
+                    Text(handle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            if quote.textZH != nil, quote.originalText != quote.displayText {
+                Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
+                    .font(.caption).buttonStyle(.plain).foregroundStyle(.blue)
+            }
+            if let text = showsOriginal ? quote.originalText : quote.displayText {
+                Text(text).font(.subheadline).lineSpacing(2).foregroundStyle(.primary)
+            }
+            let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
+            if !media.isEmpty {
+                XQuotedMediaGrid(urls: media)
+            }
+        }
+        .padding(11)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.18)))
+    }
+}
+
+private struct XQuotedMediaGrid: View {
+    let urls: [URL]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let spacing: CGFloat = 3
+            let columnCount = urls.count == 1 ? 1 : 2
+            let itemWidth = max(0, (proxy.size.width - spacing * CGFloat(columnCount - 1)) / CGFloat(columnCount))
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(itemWidth), spacing: spacing), count: columnCount),
+                spacing: spacing
+            ) {
+                ForEach(urls, id: \.self) { url in
+                    RemoteImage(
+                        url: url,
+                        height: itemHeight,
+                        cornerRadius: 6,
+                        contentMode: urls.count == 1 ? .fit : .fill
+                    )
+                    .frame(width: itemWidth, height: itemHeight)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipped()
+                }
+            }
+            .frame(width: proxy.size.width, alignment: .leading)
+            .clipped()
+        }
+        .frame(height: gridHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+
+    private var itemHeight: CGFloat { urls.count == 1 ? 180 : 100 }
+    private var gridHeight: CGFloat { urls.count > 2 ? itemHeight * 2 + 3 : itemHeight }
 }
 
 private extension Post {
@@ -406,5 +593,5 @@ private struct PeoplePressStyle: ButtonStyle {
 }
 
 #Preview("人物动态") {
-    PeopleView()
+    PeopleView(store: PeopleStore())
 }

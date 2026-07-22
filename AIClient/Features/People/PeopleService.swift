@@ -31,13 +31,13 @@ struct PeopleService {
         try await posts(userID: userID, limit: 1).first
     }
 
-    func posts(userID: String, limit: Int = 12) async throws -> [Post] {
+    func posts(userID: String, page: Int = 1, limit: Int = 12) async throws -> [Post] {
         let endpoint = baseURL
             .appending(path: "api/v1/post/user")
             .appending(path: userID)
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         components?.queryItems = [
-            .init(name: "page", value: "1"),
+            .init(name: "page", value: String(page)),
             .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc")
         ]
