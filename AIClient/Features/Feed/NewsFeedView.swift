@@ -492,7 +492,7 @@ struct NewsFeedView: View {
 
     private var rssSourceFilterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 rssSourceButton(id: nil, name: "全部", avatarURL: nil)
                 ForEach(model.rssFeeds) { feed in
                     rssSourceButton(
