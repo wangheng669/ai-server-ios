@@ -37,7 +37,7 @@ final class PersonDetailStore {
         ownPostsLoadMoreError = nil
         defer { isLoadingOwnPosts = false }
         do {
-            let posts = person.hasXSource ? try await service.posts(userID: person.userID, page: 1, limit: pageSize) : []
+            let posts = person.hasOwnPostSource ? try await service.posts(userID: person.userID, page: 1, limit: pageSize) : []
             ownPosts = posts
             ownPostsPage = 1
             canLoadMoreOwnPosts = posts.count == pageSize
@@ -49,7 +49,7 @@ final class PersonDetailStore {
     }
 
     func loadMoreOwnPostsIfNeeded(current post: Post, person: SpecialPerson) async {
-        guard person.hasXSource,
+        guard person.hasOwnPostSource,
               post.id == ownPosts.last?.id,
               canLoadMoreOwnPosts,
               !isLoadingOwnPosts,
