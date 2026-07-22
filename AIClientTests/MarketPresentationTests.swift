@@ -65,6 +65,13 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.marketStructure?.marginBalance.points.first?.dailyChange, 1_086_577_120)
     }
 
+    func testMarginStatusMapsToReadableLeverageRiskAppetite() {
+        XCTAssertEqual(MarketLeverageRiskAppetite(status: "declining"), .weak)
+        XCTAssertEqual(MarketLeverageRiskAppetite(status: "stabilizing"), .repairing)
+        XCTAssertEqual(MarketLeverageRiskAppetite(status: "recovering"), .strong)
+        XCTAssertEqual(MarketLeverageRiskAppetite(status: "mixed"), .uncertain)
+    }
+
     func testDashboardDoesNotPresentStaleAShareBreadthAsCurrent() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":[],"ashareOverview":{"breadth":{"Up":2219,"Down":3202,"Flat":94,"Total":5515},"hotSectors":[],"stale":true}}}"#.utf8)
 
