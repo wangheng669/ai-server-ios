@@ -37,3 +37,20 @@ final class PeopleStore {
         latestPosts[person.id]
     }
 }
+
+enum PeopleImagePreheater {
+    @MainActor
+    static func preheatTechnologyLeaders() async {
+        let requests = SpecialPerson.artificialIntelligenceLeaders
+            .prefix(6)
+            .compactMap { $0.avatarURL(baseURL: ServerConfiguration.currentURL) }
+
+        await withTaskGroup(of: Void.self) { group in
+            for url in requests {
+                group.addTask {
+                    _ = await ImageLoader.load(url, targetSize: CGSize(width: 52, height: 52))
+                }
+            }
+        }
+    }
+}

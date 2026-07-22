@@ -12,6 +12,7 @@ struct AIServerClientApp: App {
 private struct EditorialRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var deploymentStore = DeploymentStatusStore()
+    @State private var peopleStore = PeopleStore()
     @State private var selectedTab: RootTab = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
@@ -30,6 +31,7 @@ private struct EditorialRootView: View {
     @State private var feedShowsDetail = false
     @State private var peopleShowsDetail = false
     @State private var feedHidesTabBar = false
+    @State private var isShowingLaunchCover = true
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -57,14 +59,15 @@ private struct EditorialRootView: View {
     }
 
     var body: some View {
-        Group {
-            switch selectedTab {
-            case .observation:
+        ZStack {
+            tabContent(.observation) {
                 NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
-            case .investment:
+            }
+            tabContent(.investment) {
                 InvestmentView(showsDetail: $marketShowsDetail)
-            case .people:
-                PeopleView(showsDetail: $peopleShowsDetail)
+            }
+            tabContent(.people) {
+                PeopleView(store: peopleStore, showsDetail: $peopleShowsDetail)
             }
         }
         .background(Color.white.ignoresSafeArea())
@@ -88,7 +91,25 @@ private struct EditorialRootView: View {
                     .padding(.trailing, 12)
             }
         }
-        .task { deploymentStore.start() }
+        .overlay {
+            if isShowingLaunchCover {
+                LaunchCoverView()
+                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                    .zIndex(100)
+            }
+        }
+        .task {
+            deploymentStore.start()
+            await PeopleImagePreheater.preheatTechnologyLeaders()
+        }
+        .task {
+            guard isShowingLaunchCover, !Task.isCancelled else { return }
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.42)) {
+                isShowingLaunchCover = false
+            }
+        }
         .onChange(of: scenePhase) { phase in
             if phase == .active {
                 deploymentStore.start()
@@ -96,6 +117,17 @@ private struct EditorialRootView: View {
                 deploymentStore.stop()
             }
         }
+    }
+
+    private func tabContent<Content: View>(
+        _ tab: RootTab,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .opacity(selectedTab == tab ? 1 : 0)
+            .allowsHitTesting(selectedTab == tab)
+            .accessibilityHidden(selectedTab != tab)
+            .zIndex(selectedTab == tab ? 1 : 0)
     }
 }
 
