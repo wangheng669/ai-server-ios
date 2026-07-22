@@ -11,6 +11,14 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.tradingDate, "2026-07-22")
     }
 
+    func testUnavailableEmptyStockChartRequestsAControlledRetry() throws {
+        let data = Data(#"{"success":true,"data":{"symbol":"601398.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"closed","interval":"1m","quality":{"status":"unavailable","expected":240,"actual":0,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"price":7.6,"previousClose":7.56,"change":0.04,"changePercent":0.53,"providerTimestamp":1784707014348,"receivedTimestamp":1784707014348,"source":"eastmoney"},"candles":[]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
+
+        XCTAssertTrue(marketChartNeedsRetry(response.data))
+    }
+
     func testCryptoDisplayCodeUsesTradingPair() throws {
         let data = Data(#"{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":64000}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
