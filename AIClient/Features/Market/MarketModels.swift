@@ -24,6 +24,11 @@ struct MarketDashboard: Codable {
     let ashareOverview: MarketAShareOverview?
     let sentiment: MarketSentiment?
 
+    var currentAShareBreadth: MarketBreadth? {
+        guard ashareOverview?.stale != true else { return nil }
+        return ashareOverview?.breadth
+    }
+
     enum CodingKeys: String, CodingKey {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
