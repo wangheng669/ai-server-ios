@@ -555,7 +555,7 @@ enum MarketRange: String, CaseIterable, Identifiable {
         case .month: 64
         case .quarter: 128
         case .year: 400
-        case .fiveYears, .maximum: 1_000
+        case .fiveYears, .maximum: 600
         }
     }
 
