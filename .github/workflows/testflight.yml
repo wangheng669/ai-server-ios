@@ -1,0 +1,102 @@
+name: Upload iOS app to TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Branch, tag, or commit SHA to upload
+        required: false
+        default: main
+        type: string
+
+run-name: Upload ${{ inputs.git_ref || 'main' }} to TestFlight
+
+concurrency:
+  group: ios-testflight-upload
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    name: Test, archive, and upload
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - office-builder
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out requested version
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.git_ref || 'main' }}
+
+      - name: Prepare App Store Connect authentication
+        env:
+          APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64"
+          test -n "$APP_STORE_CONNECT_KEY_ID"
+          test -n "$APP_STORE_CONNECT_ISSUER_ID"
+          key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Run tests
+        env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project AIServerClient.xcodeproj \
+            -scheme AIServerClient \
+            -destination 'platform=iOS Simulator,name=iPhone 16e' \
+            -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Create App Store archive
+        env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project AIServerClient.xcodeproj \
+            -scheme AIServerClient \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
+            DEVELOPMENT_TEAM=9M7P4VLHY3 \
+            CODE_SIGN_STYLE=Automatic
+
+      - name: Upload archive to TestFlight
+        env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
+            -exportOptionsPlist ci/ExportOptions-TestFlight.plist \
+            -exportPath "$RUNNER_TEMP/TestFlightExport" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Remove authentication key
+        if: ${{ always() }}
+        run: rm -f "$APP_STORE_CONNECT_KEY_PATH"
