@@ -2,6 +2,22 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testServerPersonWithPostsCanLoadOwnPostFeed() throws {
+        let data = #"{"success":true,"users":[{"user_id":"rss:16","user_name":"但斌","user_screen_name":"雪球-但斌","today_count":2,"total_count":30}]}"#.data(using: .utf8)!
+        let person = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data).users[0]
+
+        XCTAssertFalse(person.isCurated)
+        XCTAssertFalse(person.hasXSource)
+        XCTAssertTrue(person.hasOwnPostSource)
+    }
+
+    func testCuratedPersonWithoutAccountDoesNotRequestOwnPostFeed() {
+        let person = SpecialPerson.politicalFigures[0]
+
+        XCTAssertTrue(person.isCurated)
+        XCTAssertFalse(person.hasOwnPostSource)
+    }
+
     func testRSSFeedPrefersHighResolutionAvatarAndVersionsStaticIcon() throws {
         let data = #"{"data":{"feeds":[{"id":64,"name":"Example","icon":"/img/rss-feed-icons/rss-feed-64.jpg","avatar_url":"https://cdn.example.com/avatar-180.jpg","updated_at":"2026-07-18T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
         let feed = try JSONDecoder().decode(RSSFeedsResponse.self, from: data).data.feeds[0]
