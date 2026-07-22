@@ -13,6 +13,7 @@ struct PeopleView: View {
     }()
     @State private var selectedTopic = PeopleTopic.technology
     @State private var query = ""
+    @State private var listScrollPersonID: SpecialPerson.ID?
 
     init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
         self.store = store
@@ -149,10 +150,14 @@ struct PeopleView: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.bottom, 18)
             }
+            .scrollPosition(id: $listScrollPersonID, anchor: .top)
             .scrollIndicators(.hidden)
             .refreshable { await store.load(force: true) }
+            .onChange(of: selectedTopic) { _, _ in listScrollPersonID = nil }
+            .onChange(of: query) { _, _ in listScrollPersonID = nil }
         }
     }
 }

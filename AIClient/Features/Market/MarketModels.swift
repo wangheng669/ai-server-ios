@@ -22,12 +22,18 @@ struct MarketDashboard: Codable {
     let symbolHealth: [MarketSymbolHealth]
     let regions: [MarketRegionDefinition]
     let ashareOverview: MarketAShareOverview?
+    let marketStructure: MarketStructure?
     let sentiment: MarketSentiment?
+
+    var currentAShareBreadth: MarketBreadth? {
+        guard ashareOverview?.stale != true else { return nil }
+        return ashareOverview?.breadth
+    }
 
     enum CodingKeys: String, CodingKey {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
-        case ashareOverview, sentiment
+        case ashareOverview, marketStructure, sentiment
     }
 
     init(from decoder: Decoder) throws {
@@ -48,6 +54,7 @@ struct MarketDashboard: Codable {
         symbolHealth = try values.decodeIfPresent([MarketSymbolHealth].self, forKey: .symbolHealth) ?? []
         regions = try values.decodeIfPresent([MarketRegionDefinition].self, forKey: .regions) ?? []
         ashareOverview = try values.decodeIfPresent(MarketAShareOverview.self, forKey: .ashareOverview)
+        marketStructure = try values.decodeIfPresent(MarketStructure.self, forKey: .marketStructure)
         sentiment = try values.decodeIfPresent(MarketSentiment.self, forKey: .sentiment)
     }
 
@@ -373,6 +380,64 @@ struct MarketSector: Codable, Identifiable {
     var percentValue: Double {
         Double(changePercent.replacingOccurrences(of: "%", with: "").replacingOccurrences(of: "+", with: "")) ?? 0
     }
+}
+
+struct MarketStructure: Codable {
+    let dataContract: String
+    let generatedAt: String
+    let etfSubscription: MarketETFSubscription
+    let marginBalance: MarketMarginBalance
+    let sources: [MarketStructureSource]
+}
+
+struct MarketStructureSource: Codable, Identifiable {
+    let name: String
+    let url: String
+    var id: String { url }
+}
+
+struct MarketETFSubscription: Codable {
+    let fundCode: String
+    let fundName: String
+    let asOf: String
+    let status: String
+    let latestShares: Double
+    let latestNetSubscriptionShares: Double
+    let netSubscriptionShares5d: Double
+    let previousNetShares5d: Double
+    let positiveDays5d: Int
+    let consecutiveDirection: String
+    let consecutiveDays: Int
+    let points: [MarketETFSubscriptionPoint]
+}
+
+struct MarketETFSubscriptionPoint: Codable, Identifiable {
+    let date: String
+    let totalShares: Double
+    let netSubscriptionShares: Double
+    var id: String { date }
+}
+
+struct MarketMarginBalance: Codable {
+    let asOf: String
+    let status: String
+    let financingBalance: Double
+    let securitiesBalance: Double
+    let totalBalance: Double
+    let latestChange: Double
+    let change3d: Double
+    let change5d: Double
+    let positiveDays5d: Int
+    let points: [MarketMarginPoint]
+}
+
+struct MarketMarginPoint: Codable, Identifiable {
+    let date: String
+    let financingBalance: Double
+    let securitiesBalance: Double
+    let totalBalance: Double
+    let dailyChange: Double
+    var id: String { date }
 }
 
 struct MarketSentiment: Codable {

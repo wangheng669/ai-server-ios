@@ -7,6 +7,7 @@ DerivedDataSim/
 .codex-derived-sim/
 .codex/DerivedData-*/
 artifacts/device-derived/
+artifacts/test-derived/
 artifacts/device-build/
 artifacts/device-install/
 artifacts/signing-backup/
