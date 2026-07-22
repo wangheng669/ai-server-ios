@@ -34,7 +34,6 @@ struct NewsFeedView: View {
     @Binding private var hidesTabBar: Bool
     @StateObject private var model = NewsFeedViewModel()
     @State private var path: [Post] = []
-    @State private var isShowingLaunchCover = true
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
@@ -119,13 +118,6 @@ struct NewsFeedView: View {
             showsDetail = false
             hidesTabBar = false
         }
-        .overlay {
-            if isShowingLaunchCover {
-                LaunchCoverView()
-                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
-                    .zIndex(10)
-            }
-        }
         .task(id: model.source) {
             await model.loadInitial()
             hasLoadedFeedOnce = true
@@ -147,14 +139,6 @@ struct NewsFeedView: View {
         }
         .task {
             await model.warmSourceCache()
-        }
-        .task {
-            guard isShowingLaunchCover, !Task.isCancelled else { return }
-            try? await Task.sleep(for: .milliseconds(650))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.42)) {
-                isShowingLaunchCover = false
-            }
         }
     }
 
@@ -649,7 +633,7 @@ struct NewsFeedView: View {
 
 }
 
-private struct LaunchCoverView: View {
+struct LaunchCoverView: View {
     @State private var isAnimating = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 

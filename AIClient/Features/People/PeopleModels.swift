@@ -102,7 +102,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
             let upgraded = path
                 .replacingOccurrences(of: "_normal.", with: "_200x200.")
                 .replacingOccurrences(of: "_40_normal.", with: "_200x200.")
-            return URL(string: upgraded) ?? url
+            return MediaURL.image(upgraded) ?? url
         }
         return URL(string: path, relativeTo: baseURL)?.absoluteURL
     }

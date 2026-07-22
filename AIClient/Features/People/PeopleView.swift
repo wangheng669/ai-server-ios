@@ -2,7 +2,7 @@ import SwiftUI
 
 struct PeopleView: View {
     @Binding private var showsDetail: Bool
-    @State private var store = PeopleStore()
+    private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson? = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--person-detail-preview") {
@@ -14,7 +14,8 @@ struct PeopleView: View {
     @State private var selectedTopic = PeopleTopic.technology
     @State private var query = ""
 
-    init(showsDetail: Binding<Bool> = .constant(false)) {
+    init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
+        self.store = store
         _showsDetail = showsDetail
     }
 
@@ -119,10 +120,10 @@ struct PeopleView: View {
 
     @ViewBuilder
     private var peopleList: some View {
-        if store.isLoading && store.people.isEmpty {
+        if store.isLoading && filteredPeople.isEmpty {
             ProgressView("正在载入特别关心…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = store.errorMessage, store.people.isEmpty {
+        } else if let error = store.errorMessage, filteredPeople.isEmpty {
             ContentUnavailableView {
                 Label("载入失败", systemImage: "wifi.exclamationmark")
             } description: {
@@ -406,5 +407,5 @@ private struct PeoplePressStyle: ButtonStyle {
 }
 
 #Preview("人物动态") {
-    PeopleView()
+    PeopleView(store: PeopleStore())
 }
