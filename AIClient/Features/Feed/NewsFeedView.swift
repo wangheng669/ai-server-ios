@@ -633,55 +633,6 @@ struct NewsFeedView: View {
 
 }
 
-struct LaunchCoverView: View {
-    @State private var isAnimating = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
-
-            VStack(spacing: 22) {
-                Image("LaunchLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 190, height: 190)
-                    .scaleEffect(isAnimating || reduceMotion ? 1 : 0.92)
-                    .shadow(color: .black.opacity(0.06), radius: 18, y: 8)
-
-                VStack(spacing: 7) {
-                    Text("化繁为简")
-                        .font(.system(size: 29, weight: .bold, design: .rounded))
-                        .tracking(2)
-                    Text("穿过纷繁，抵达清晰")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 9) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("正在梳理信息")
-                        .font(.caption)
-                }
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 6)
-            }
-            .opacity(isAnimating || reduceMotion ? 1 : 0.45)
-            .scaleEffect(isAnimating || reduceMotion ? 1 : 0.96)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("化繁为简，正在梳理信息")
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeOut(duration: 0.55)) {
-                isAnimating = true
-            }
-        }
-    }
-}
-
 @MainActor
 private final class EmbeddedWebPagePreloader: NSObject, WKNavigationDelegate {
     private var webView: WKWebView?
