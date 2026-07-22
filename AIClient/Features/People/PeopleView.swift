@@ -527,17 +527,50 @@ private struct XQuotedPostCard: View {
             }
             let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
             if !media.isEmpty {
-                LazyVGrid(columns: [.init(.flexible()), .init(.flexible())], spacing: 3) {
-                    ForEach(media, id: \.self) { url in
-                        RemoteImage(url: url, height: media.count == 1 ? 180 : 100, cornerRadius: 6)
-                    }
-                }
+                XQuotedMediaGrid(urls: media)
             }
         }
         .padding(11)
         .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.18)))
     }
+}
+
+private struct XQuotedMediaGrid: View {
+    let urls: [URL]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let spacing: CGFloat = 3
+            let columnCount = urls.count == 1 ? 1 : 2
+            let itemWidth = max(0, (proxy.size.width - spacing * CGFloat(columnCount - 1)) / CGFloat(columnCount))
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(itemWidth), spacing: spacing), count: columnCount),
+                spacing: spacing
+            ) {
+                ForEach(urls, id: \.self) { url in
+                    RemoteImage(
+                        url: url,
+                        height: itemHeight,
+                        cornerRadius: 6,
+                        contentMode: urls.count == 1 ? .fit : .fill
+                    )
+                    .frame(width: itemWidth, height: itemHeight)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipped()
+                }
+            }
+            .frame(width: proxy.size.width, alignment: .leading)
+            .clipped()
+        }
+        .frame(height: gridHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+
+    private var itemHeight: CGFloat { urls.count == 1 ? 180 : 100 }
+    private var gridHeight: CGFloat { urls.count > 2 ? itemHeight * 2 + 3 : itemHeight }
 }
 
 private extension Post {
