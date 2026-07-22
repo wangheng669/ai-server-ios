@@ -2,6 +2,22 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testDecodesXQuotedTweetForPersonPostCard() throws {
+        let data = #"{"post":{"id":1,"source":"x","meta":{"quoted_tweet":{"id":"99","text":"Gemini who?","text_zh":"双子座是谁？","author":{"name":"Example","screenName":"example","profileImageUrl":"https://example.com/a.jpg"},"media":[{"type":"photo","url":"https://example.com/p.jpg","thumbnail_url":"https://example.com/t.jpg","width":1200,"height":800}]}}}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
+
+        XCTAssertEqual(post.meta?.quotedTweet?.author?.handle, "@example")
+        XCTAssertEqual(post.meta?.quotedTweet?.displayText, "双子座是谁？")
+        XCTAssertEqual(post.meta?.quotedTweet?.media?.first?.displayURL?.absoluteString, "https://example.com/t.jpg")
+    }
+
+    func testProtectsModelNamesInXTranslation() {
+        XCTAssertEqual(
+            PersonDetailStore.presentedTranslation("双子座是谁？格罗克也来了。", original: "Gemini who? Grok is here."),
+            "Gemini是谁？Grok也来了。"
+        )
+    }
+
     func testServerPersonWithPostsCanLoadOwnPostFeed() throws {
         let data = #"{"success":true,"users":[{"user_id":"rss:16","user_name":"但斌","user_screen_name":"雪球-但斌","today_count":2,"total_count":30}]}"#.data(using: .utf8)!
         let person = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data).users[0]

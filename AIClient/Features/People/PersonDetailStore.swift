@@ -87,7 +87,10 @@ final class PersonDetailStore {
         do {
             let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
             guard !Task.isCancelled else { return }
-            let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = Self.presentedTranslation(
+                result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                original: post.originalDisplayContent
+            )
             guard !value.isEmpty, value != post.originalDisplayContent else { return }
             xTranslations[post.id] = value
         } catch is CancellationError {
@@ -95,6 +98,22 @@ final class PersonDetailStore {
         } catch {
             // Translation is best-effort. Keep the original post visible on failure.
         }
+    }
+
+    nonisolated static func presentedTranslation(_ translation: String, original: String) -> String {
+        var result = translation
+        let protectedTerms: [(original: String, mistranslations: [String])] = [
+            ("Gemini", ["双子座", "双子星座"]),
+            ("Grok", ["格罗克"]),
+            ("Claude", ["克劳德"]),
+            ("Llama", ["骆驼"])
+        ]
+        for term in protectedTerms where original.localizedCaseInsensitiveContains(term.original) {
+            for mistranslation in term.mistranslations {
+                result = result.replacingOccurrences(of: mistranslation, with: term.original)
+            }
+        }
+        return result
     }
 
     private func loadDiscussions(for person: SpecialPerson) async {

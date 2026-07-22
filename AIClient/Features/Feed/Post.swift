@@ -627,6 +627,7 @@ struct PostMeta: Decodable, Hashable {
     let metrics: PostMetrics?
     let lang: String?
     let urls: [String]?
+    let quotedTweet: XQuotedPost?
     let photoCredit: String?
     let zhihuRank: Int?
     let zhihuHeat: String?
@@ -648,6 +649,7 @@ struct PostMeta: Decodable, Hashable {
     let flashPlatforms: [String]?
     enum CodingKeys: String, CodingKey {
         case metrics, lang, urls
+        case quotedTweet = "quoted_tweet"
         case photoCredit = "photo_credit"
         case zhihuRank = "zhihu_rank"
         case zhihuHeat = "zhihu_heat"
@@ -673,7 +675,7 @@ struct PostMeta: Decodable, Hashable {
         platforms: [String]?
     ) -> PostMeta {
         PostMeta(
-            metrics: nil, lang: nil, urls: nil, photoCredit: nil,
+            metrics: nil, lang: nil, urls: nil, quotedTweet: nil, photoCredit: nil,
             zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
             zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
             zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
@@ -686,6 +688,60 @@ struct PostMeta: Decodable, Hashable {
             flashPlatforms: platforms
         )
     }
+}
+
+struct XQuotedPost: Decodable, Hashable {
+    let id: String?
+    let text: String?
+    let textZH: String?
+    let createdAt: String?
+    let author: XQuotedAuthor?
+    let media: [XQuotedMedia]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, text, author, media
+        case textZH = "text_zh"
+        case createdAt
+    }
+
+    var displayText: String? { xNonempty(textZH) ?? xNonempty(text) }
+    var originalText: String? { xNonempty(text) }
+}
+
+struct XQuotedAuthor: Decodable, Hashable {
+    let name: String?
+    let screenName: String?
+    let profileImageURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, screenName
+        case profileImageURL = "profileImageUrl"
+    }
+
+    var handle: String? {
+        guard let screenName = xNonempty(screenName) else { return nil }
+        return screenName.hasPrefix("@") ? screenName : "@\(screenName)"
+    }
+}
+
+struct XQuotedMedia: Decodable, Hashable {
+    let type: String?
+    let url: String?
+    let thumbnailURL: String?
+    let width: Int?
+    let height: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case type, url, width, height
+        case thumbnailURL = "thumbnail_url"
+    }
+
+    var displayURL: URL? { (thumbnailURL ?? url).flatMap(MediaURL.image) }
+}
+
+private func xNonempty(_ value: String?) -> String? {
+    guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+    return value
 }
 
 struct ZhihuAnswerAuthor: Decodable, Hashable {
