@@ -1,6 +1,6 @@
 # 两台 Mac 的 Codex 协作规则
 
-本仓库以 GitHub 的 `main` 分支作为两台 Mac 之间唯一的稳定代码源。开发任务通过 `codex/<简短任务名>` 分支提交，由 Mac mini 上的中央 AI 合并流程串行整合到 `main`。Mac mini 负责构建，MacBook Air 负责签名并安装到真机。
+本仓库以 GitHub 的 `main` 分支作为两台 Mac 之间唯一的稳定代码源。开发任务通过 `codex/<简短任务名>` 分支提交，由 Mac mini 上的中央 AI 合并流程串行整合到 `main`。Mac mini 负责构建；iPhone 已连接 Mac mini 且本机签名有效时，优先由 Mac mini 直接签名并安装，只有本地直装条件不满足时才回退到 GitHub Actions 的跨机器安装流程。
 
 ## AI Server 服务器
 
@@ -33,9 +33,10 @@
 默认含义是把当前 `main` 作为两台 Mac 的最新稳定版本安装：
 
 1. 如果存在未提交改动，按“完成并同步”的流程提交并推送任务分支，等待中央 AI 合并到 `main`。
-2. 如果 `main` 已经同步但没有新的推送，手动触发 `Build on Mac mini and install on iPhone`，并将 `git_ref` 设为 `main`。
-3. 等待 GitHub Actions 完成；只有 Mac mini 构建和 MacBook Air 安装均成功，才报告安装完成。
-4. 当前电脑工作区干净时，运行 `./ci/safe-sync.sh main`，使它停留在最新稳定代码。
+2. 当前电脑是 Mac mini，且 `xcrun devicectl` 能识别目标 iPhone、存在匹配的有效开发证书和描述文件时，先运行完整测试，再从最新 `main` 本地完成真机构建、签名与 `devicectl` 安装；此时不要为了安装而额外触发 GitHub 构建工作流。
+3. Mac mini 无法识别 iPhone、签名材料不可用或用户指定另一台安装机时，手动触发 `Build on Mac mini and install on iPhone`，将 `git_ref` 设为 `main`，并等待构建与安装任务完成。
+4. 只有目标 iPhone 上的安装命令成功后才报告安装完成；不能把“构建成功”当作“安装成功”。
+5. 当前电脑工作区干净时，运行 `./ci/safe-sync.sh main`，使它停留在最新稳定代码。
 
 如果用户明确要求只临时测试一个尚未合并的分支，则不要改动 `main`；使用 GitHub Actions 的手动入口并将 `git_ref` 设置为该分支或提交 SHA。
 

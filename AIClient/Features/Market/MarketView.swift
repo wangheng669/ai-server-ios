@@ -1849,7 +1849,6 @@ private struct MarketDetailChart: View {
             inspectedPoint = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
         }
-        .task(priority: .utility) { await store.preloadCharts(symbol: symbol) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedRange.rawValue)行情图表，可拖动查看具体时间和价格")
     }
@@ -2216,10 +2215,7 @@ private struct CoreDescriptor {
 
 private func marketLocalTime(_ timestamp: Int64?, city: String, timeZone: String) -> String {
     guard let timestamp else { return "等待更新" }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "zh_CN")
-    formatter.timeZone = TimeZone(identifier: timeZone)
-    formatter.dateFormat = "HH:mm"
+    let formatter = MarketViewDateFormatters.localTime(timeZone: timeZone)
     return "\(city) \(formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000)))"
 }
 
@@ -2246,14 +2242,38 @@ private func cryptoChangeDigits(_ quote: MarketQuote) -> Int {
     cryptoPriceDigits(max(abs(quote.changeValue), quote.price), symbol: quote.symbol)
 }
 private func chartTime(_ timestamp: Int64, range: MarketRange) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "zh_CN")
-    switch range {
-    case .day, .week: formatter.dateFormat = "MM-dd HH:mm"
-    case .month, .quarter, .year: formatter.dateFormat = "MM-dd"
-    case .fiveYears, .maximum: formatter.dateFormat = "yyyy-MM"
-    }
+    let formatter = MarketViewDateFormatters.chart(range: range)
     return formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
+}
+
+private enum MarketViewDateFormatters {
+    private static var localTimeCache: [String: DateFormatter] = [:]
+    private static var chartCache: [String: DateFormatter] = [:]
+
+    static func localTime(timeZone: String) -> DateFormatter {
+        if let cached = localTimeCache[timeZone] { return cached }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = TimeZone(identifier: timeZone)
+        formatter.dateFormat = "HH:mm"
+        localTimeCache[timeZone] = formatter
+        return formatter
+    }
+
+    static func chart(range: MarketRange) -> DateFormatter {
+        let format: String
+        switch range {
+        case .day, .week: format = "MM-dd HH:mm"
+        case .month, .quarter, .year: format = "MM-dd"
+        case .fiveYears, .maximum: format = "yyyy-MM"
+        }
+        if let cached = chartCache[format] { return cached }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = format
+        chartCache[format] = formatter
+        return formatter
+    }
 }
 private func stockSymbol(_ symbol: String) -> String { switch symbol { case "AAPL": "apple.logo"; case "MSFT": "square.grid.2x2.fill"; case "META": "infinity"; case "AMZN": "a.circle.fill"; default: "eye.fill" } }
 private func stockColor(_ symbol: String) -> Color { switch symbol { case "AAPL": .primary; case "AMZN": .orange; case "NVDA": .green; default: .blue } }

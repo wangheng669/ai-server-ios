@@ -26,6 +26,7 @@ final class MarketStore {
     private var realtimeFlushTask: Task<Void, Never>?
     private var isRefreshing = false
     private var lastSnapshotRefreshAt: Date?
+    private var constituentRetryTasks: [String: Task<Void, Never>] = [:]
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -100,17 +101,6 @@ final class MarketStore {
         }
     }
 
-    func preloadCharts(symbol: String) async {
-        do { try await Task.sleep(for: .milliseconds(500)) }
-        catch { return }
-        for range in MarketRange.allCases where range.shouldPreload {
-            guard !Task.isCancelled else { return }
-            await loadChart(symbol: symbol, range: range)
-            do { try await Task.sleep(for: .milliseconds(150)) }
-            catch { return }
-        }
-    }
-
     func chart(symbol: String, range: MarketRange) -> MarketChart? {
         charts[ChartKey(symbol: symbol, range: range)]
     }
@@ -122,12 +112,26 @@ final class MarketStore {
     func loadIndexConstituents(symbol: String, force: Bool = false) async {
         if !force, indexConstituents[symbol] != nil { return }
         do {
-            indexConstituents[symbol] = try await service.indexConstituents(symbol: symbol)
+            let value = try await service.indexConstituents(symbol: symbol)
+            indexConstituents[symbol] = value
             constituentErrors[symbol] = nil
+            scheduleConstituentRetryIfNeeded(symbol: symbol, pendingSymbols: value.symbolsPendingRefresh)
         } catch is CancellationError {
             return
         } catch {
             constituentErrors[symbol] = error.localizedDescription
+        }
+    }
+
+    private func scheduleConstituentRetryIfNeeded(symbol: String, pendingSymbols: [String]) {
+        guard !pendingSymbols.isEmpty, constituentRetryTasks[symbol] == nil else { return }
+        constituentRetryTasks[symbol] = Task { [weak self] in
+            defer { self?.constituentRetryTasks[symbol] = nil }
+            do { try await Task.sleep(for: .seconds(3)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            // One controlled retry closes the async refresh loop without polling forever.
+            await self?.loadIndexConstituents(symbol: symbol, force: true)
         }
     }
 
