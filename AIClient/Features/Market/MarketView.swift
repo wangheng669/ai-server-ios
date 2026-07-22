@@ -311,9 +311,13 @@ private struct MarketTerminalHero: View {
                         }
                         .frame(width: 142, alignment: .leading)
 
-                        TerminalLeadChart(quote: displayedQuote, isOvernight: overnightQuote != nil)
-                            .frame(maxWidth: .infinity, minHeight: 128)
-                    }
+                        TerminalLeadChart(
+                            quote: displayedQuote,
+                            trend: store.trendValues(for: displayedQuote),
+                            isOvernight: overnightQuote != nil
+                        )
+                             .frame(maxWidth: .infinity, minHeight: 128)
+                     }
                 }
                 .foregroundStyle(.primary)
             }
@@ -357,12 +361,12 @@ private struct MarketTerminalHero: View {
                 )
             } else if region == .unitedStates {
                 HStack(spacing: 0) {
-                    MarketTerminalMetric(
+                     MarketTerminalMetric(
                         title: "VIX 恐慌指数",
                         value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
                         change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
                         tint: quoteTint(store.quote(symbol: "^VIX")),
-                        trend: store.quote(symbol: "^VIX")?.trend ?? []
+                         trend: store.trendValues(for: store.quote(symbol: "^VIX"))
                     )
                     TerminalDivider()
                     MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
@@ -372,11 +376,11 @@ private struct MarketTerminalHero: View {
                         value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
                         change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
                         tint: quoteTint(store.quote(symbol: "^TNX")),
-                        trend: store.quote(symbol: "^TNX")?.trend ?? []
+                         trend: store.trendValues(for: store.quote(symbol: "^TNX"))
                     )
                 }
             } else {
-                EuropeMarketMetrics(store: store)
+                 EuropeMarketMetrics(store: store)
             }
             }
             .frame(height: 76)
@@ -411,7 +415,7 @@ private struct MarketTerminalHero: View {
             value: value.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—",
             change: value?.formattedPercent ?? "—",
             tint: quoteTint(value),
-            trend: value?.trend ?? []
+            trend: store.trendValues(for: value)
         )
     }
 
@@ -574,6 +578,7 @@ private struct MarketBreadthMetric: View {
 
 private struct TerminalLeadChart: View {
     let quote: MarketQuote?
+    let trend: [Double]
     let isOvernight: Bool
 
     var body: some View {
@@ -585,7 +590,7 @@ private struct TerminalLeadChart: View {
                         if index < 2 { Spacer() }
                     }
                 }
-                Sparkline(values: quote?.trend ?? [], color: quoteTint(quote))
+                Sparkline(values: trend, color: quoteTint(quote))
                     .padding(.vertical, 5)
             }
             HStack {
@@ -593,10 +598,17 @@ private struct TerminalLeadChart: View {
                 Spacer()
                 Text(isOvernight ? "夜盘中" : "盘中")
                 Spacer()
-                Text("最新")
+                Text(trailingLabel)
             }
             .font(.caption2)
             .foregroundStyle(Color.secondary)
+        }
+    }
+
+    private var trailingLabel: String {
+        switch quote?.marketSession {
+        case "regular", "pre": "最新"
+        default: "收盘"
         }
     }
 }
@@ -751,12 +763,15 @@ private struct MarketIndexTable: View {
             } else {
                 ForEach(Array(quotes.enumerated()), id: \.element.symbol) { index, quote in
                     Button { onSelectIndex(quote.symbol) } label: {
-                        MarketIndexTableRow(
-                            quote: quote,
-                            overnightQuote: region == .unitedStates && quote.marketSession != "regular"
-                                ? store.dashboard?.indexSessions?[quote.symbol]
-                                : nil
-                        )
+                         MarketIndexTableRow(
+                             quote: quote,
+                             overnightQuote: region == .unitedStates && quote.marketSession != "regular"
+                                 ? store.dashboard?.indexSessions?[quote.symbol]
+                                 : nil,
+                             trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
+                                 ? store.dashboard?.indexSessions?[quote.symbol] ?? quote
+                                 : quote)
+                         )
                     }
                     .buttonStyle(MarketPressStyle())
                     if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
@@ -777,7 +792,11 @@ private struct MarketIndexTable: View {
                 Divider().opacity(0.45)
                 ForEach(Array(components.enumerated()), id: \.element.symbol) { index, quote in
                     Button { onSelectIndex(quote.symbol) } label: {
-                        MarketIndexTableRow(quote: quote, overnightQuote: nil)
+                        MarketIndexTableRow(
+                            quote: quote,
+                            overnightQuote: nil,
+                            trend: store.trendValues(for: quote)
+                        )
                     }
                     .buttonStyle(MarketPressStyle())
                     if index < components.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
@@ -1199,6 +1218,7 @@ private struct MarketIndexTableRow: View {
     let quote: MarketQuote
     let overnightQuote: MarketQuote?
     private var displayedQuote: MarketQuote { overnightQuote ?? quote }
+    let trend: [Double]
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1230,7 +1250,7 @@ private struct MarketIndexTableRow: View {
             .foregroundStyle(quoteTint(displayedQuote))
             .frame(width: 64, alignment: .trailing)
 
-            Sparkline(values: displayedQuote.trend, color: quoteTint(displayedQuote))
+            Sparkline(values: trend, color: quoteTint(displayedQuote))
                 .frame(width: 60, height: 32)
         }
         .padding(.horizontal, 12)
@@ -2075,7 +2095,7 @@ private struct MarketIndexDetailView: View {
                     Button {
                         onSelectSymbol(item.quote.symbol)
                     } label: {
-                        MarketConstituentRow(item: item)
+                        MarketConstituentRow(item: item, trend: store.trendValues(for: item.quote))
                     }
                     .buttonStyle(.plain)
                     if item.id != items.last?.id { Divider().padding(.leading, 62) }
@@ -2472,6 +2492,7 @@ private struct MarketSummary: View {
 
 private struct MarketConstituentRow: View {
     let item: MarketIndexConstituent
+    let trend: [Double]
     private var quote: MarketQuote { item.quote }
 
     var body: some View {
@@ -2492,7 +2513,7 @@ private struct MarketConstituentRow: View {
                 }
             }
             Sparkline(
-                values: quote.trend,
+                values: trend,
                 color: quoteTint(quote),
                 showsFill: false
             )
