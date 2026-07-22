@@ -2,6 +2,15 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesMarketChartQualityContract() throws {
+        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney"}]}}"#.utf8)
+        let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
+        XCTAssertEqual(response.data.quality.status, .repairing)
+        XCTAssertEqual(response.data.quality.missing.count, 1)
+        XCTAssertEqual(response.data.candles.first?.state, "confirmed")
+        XCTAssertEqual(response.data.tradingDate, "2026-07-22")
+    }
+
     func testCryptoDisplayCodeUsesTradingPair() throws {
         let data = Data(#"{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":64000}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
@@ -114,115 +123,9 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.maximum.apiLimit, 1_000)
     }
 
-    func testDayRangeKeepsOnlyLatestTradingSession() {
-        let hour: Int64 = 60 * 60 * 1_000
-        let points = [
-            chartPoint(timestamp: 1, close: 100),
-            chartPoint(timestamp: 1 + hour, close: 101),
-            chartPoint(timestamp: 8 * hour, close: 102),
-            chartPoint(timestamp: 9 * hour, close: 103)
-        ]
-        XCTAssertEqual(marketPointsForRange(points, range: .day).map(\.timestamp), [8 * hour, 9 * hour])
-    }
-
-    func testDayRangePrefersLatestSessionEvenWhenItHasFewerPoints() {
-        let hour: Int64 = 60 * 60 * 1_000
-        let historical = (0..<20).map { chartPoint(timestamp: Int64($0) * 60_000, close: Double($0)) }
-        let realtimeTail = [
-            chartPoint(timestamp: 8 * hour, close: 100),
-            chartPoint(timestamp: 8 * hour + 60_000, close: 101)
-        ]
-        XCTAssertEqual(marketPointsForRange(historical + realtimeTail, range: .day), realtimeTail)
-    }
-
     func testAxisDigitsKeepSmallVIXMovesVisible() {
         XCTAssertEqual(marketAxisDigits(values: [15.77, 16.54]), 2)
         XCTAssertEqual(marketAxisDigits(values: [4_900, 4_950]), 0)
-    }
-
-    func testDayChartDoesNotInventTimestampsWhenLatestSessionHasOnlyOneMinute() {
-        let timestamp: Int64 = 10 * 60_000
-        let point = chartPoint(timestamp: timestamp, close: 16.11)
-
-        let result = marketDisplayPoints(
-            [point],
-            range: .day,
-            fallbackValues: [15.82, 16.30, 16.11],
-            fallbackTimestamp: timestamp
-        )
-
-        XCTAssertTrue(result.isEmpty)
-    }
-
-    func testDayChartKeepsServerHistoryWhenItContainsMultiplePoints() {
-        let serverPoints = (0..<24).map {
-            chartPoint(timestamp: Int64($0) * 60_000, close: 100 + Double($0))
-        }
-
-        XCTAssertEqual(
-            marketDisplayPoints(serverPoints, range: .day, fallbackValues: [90, 91, 92], fallbackTimestamp: 121_000),
-            serverPoints
-        )
-    }
-
-    func testDayChartUsesTimestampedServerPointsInsteadOfValueOnlyTrend() {
-        let points = [
-            chartPoint(timestamp: 9 * 60_000, close: 16.08),
-            chartPoint(timestamp: 10 * 60_000, close: 16.11)
-        ]
-
-        let result = marketDisplayPoints(
-            points,
-            range: .day,
-            fallbackValues: [15.82, 16.30],
-            fallbackTimestamp: 10 * 60_000
-        )
-
-        XCTAssertEqual(result.map(\.displayValue), [16.08, 16.11])
-        XCTAssertEqual(result.map(\.timestamp), [9 * 60_000, 10 * 60_000])
-    }
-
-    func testDayChartHidesTimestampedChartFromPreviousSession() {
-        let hour: Int64 = 60 * 60 * 1_000
-        let stalePoints = [
-            chartPoint(timestamp: hour, close: 16.40),
-            chartPoint(timestamp: 2 * hour, close: 16.07)
-        ]
-
-        let result = marketDisplayPoints(
-            stalePoints,
-            range: .day,
-            fallbackValues: [16.50, 16.20, 16.07],
-            fallbackTimestamp: 8 * hour
-        )
-
-        XCTAssertTrue(result.isEmpty)
-    }
-
-    func testDayChartUsesTimestampedSourceWhenCardTrendIsUnavailable() {
-        let chartPoints = [
-            chartPoint(timestamp: 9 * 60_000, close: 16.08),
-            chartPoint(timestamp: 10 * 60_000, close: 16.11)
-        ]
-
-        XCTAssertEqual(marketDisplayPoints(
-            chartPoints,
-            range: .day,
-            fallbackValues: [],
-            fallbackTimestamp: nil
-        ), chartPoints)
-        XCTAssertEqual(marketDisplayPoints(
-            chartPoints,
-            range: .day,
-            fallbackValues: [16.11],
-            fallbackTimestamp: 10 * 60_000
-        ), chartPoints)
-    }
-
-    func testWeekRangeKeepsFiveLatestTradingDays() {
-        let day: Int64 = 24 * 60 * 60 * 1_000
-        let points = (1...7).map { chartPoint(timestamp: Int64($0) * day, close: Double($0)) }
-        XCTAssertEqual(marketPointsForRange(points, range: .week).map(\.timestamp), (3...7).map { Int64($0) * day })
     }
 
     func testCandlesAggregateWithoutLosingOHLCBounds() {
@@ -234,22 +137,6 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(candle, MarketCandleSample(timestamp: 2, open: 10, high: 15, low: 9, close: 14, volume: 10))
     }
 
-    func testRealtimePricesMergeIntoCurrentMinuteCandle() {
-        var points = marketMergingRealtimePrice(100, timestamp: 61_000, into: [])
-        points = marketMergingRealtimePrice(103, timestamp: 75_000, into: points)
-        points = marketMergingRealtimePrice(98, timestamp: 119_000, into: points)
-        XCTAssertEqual(points.count, 1)
-        XCTAssertEqual(points[0].timestamp, 60_000)
-        XCTAssertEqual(points[0].open, 100)
-        XCTAssertEqual(points[0].high, 103)
-        XCTAssertEqual(points[0].low, 98)
-        XCTAssertEqual(points[0].close, 98)
-
-        points = marketMergingRealtimePrice(101, timestamp: 120_000, into: points)
-        XCTAssertEqual(points.count, 2)
-        XCTAssertEqual(points.last?.open, 101)
-    }
-
     private func chartPoint(
         timestamp: Int64,
         open: Double? = nil,
@@ -258,6 +145,15 @@ final class MarketPresentationTests: XCTestCase {
         close: Double,
         volume: Double? = nil
     ) -> MarketChartPoint {
-        MarketChartPoint(timestamp: timestamp, value: close, open: open, high: high, low: low, close: close, volume: volume)
+        MarketChartPoint(
+            timestamp: timestamp,
+            open: open ?? close,
+            high: high ?? close,
+            low: low ?? close,
+            close: close,
+            volume: volume,
+            state: "confirmed",
+            source: "test"
+        )
     }
 }

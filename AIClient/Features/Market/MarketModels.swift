@@ -393,28 +393,56 @@ struct MarketChartResponse: Decodable {
 
 struct MarketChart: Decodable {
     let symbol: String
-    let source: String?
-    let delaySeconds: Int?
-    let marketSession: String?
+    let market: String
+    let tradingDate: String
+    let timezone: String
+    let session: String
+    let interval: String
+    let quality: MarketChartQuality
+    let quote: MarketChartQuote
+    let candles: [MarketChartPoint]
+}
+
+enum MarketChartQualityStatus: String, Decodable {
+    case complete, repairing, partial, unavailable
+}
+
+struct MarketChartQuality: Decodable {
+    let status: MarketChartQualityStatus
+    let expected: Int
+    let actual: Int
+    let missing: [MarketChartGap]
+    let freshnessSeconds: Int?
+    let isFinal: Bool
+}
+
+struct MarketChartGap: Decodable, Equatable {
+    let startTimestamp: Int64
+    let endTimestamp: Int64
+}
+
+struct MarketChartQuote: Decodable {
+    let price: Double?
     let previousClose: Double?
-    let latestPrice: Double?
-    let latestTimestamp: Int64?
-    let high: Double?
-    let low: Double?
-    var points: [MarketChartPoint]
+    let change: Double?
+    let changePercent: Double?
+    let providerTimestamp: Int64?
+    let receivedTimestamp: Int64?
+    let source: String
 }
 
 struct MarketChartPoint: Decodable, Identifiable, Equatable {
     var id: Int64 { timestamp }
     let timestamp: Int64
-    let value: Double?
-    let open: Double?
-    let high: Double?
-    let low: Double?
-    let close: Double?
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
     let volume: Double?
+    let state: String
+    let source: String
 
-    var displayValue: Double? { close ?? value }
+    var displayValue: Double? { close }
 }
 
 enum MarketRange: String, CaseIterable, Identifiable {
@@ -458,43 +486,6 @@ struct MarketCandleSample: Identifiable, Equatable {
     let volume: Double?
 }
 
-func marketPointsForRange(_ points: [MarketChartPoint], range: MarketRange) -> [MarketChartPoint] {
-    let ordered = points.sorted { $0.timestamp < $1.timestamp }
-    guard range == .day || range == .week, ordered.count > 1 else { return ordered }
-
-    let sessionGapMs: Int64 = 4 * 60 * 60 * 1_000
-    var sessions: [[MarketChartPoint]] = [[]]
-    for point in ordered {
-        if let previous = sessions.last?.last, point.timestamp - previous.timestamp > sessionGapMs {
-            sessions.append([])
-        }
-        sessions[sessions.count - 1].append(point)
-    }
-    if range == .day {
-        return sessions.last ?? []
-    }
-    return sessions.suffix(5).flatMap { $0 }
-}
-
-func marketDisplayPoints(
-    _ points: [MarketChartPoint],
-    range: MarketRange,
-    fallbackValues: [Double],
-    fallbackTimestamp: Int64?
-) -> [MarketChartPoint] {
-    let selected = marketPointsForRange(points, range: range)
-    guard range == .day else { return selected }
-    // A value-only trend has no trustworthy time axis. Never synthesize minute
-    // timestamps because that makes historical samples look like live intraday data.
-    guard selected.count > 1, let selectedLast = selected.last else { return [] }
-    if let fallbackTimestamp,
-       fallbackTimestamp > selectedLast.timestamp,
-       fallbackTimestamp - selectedLast.timestamp > 4 * 60 * 60 * 1_000 {
-        return []
-    }
-    return selected
-}
-
 func marketAxisDigits(values: [Double]) -> Int {
     guard let low = values.min(), let high = values.max(), high > low else { return 2 }
     let step = (high - low) / 4
@@ -505,13 +496,13 @@ func marketAxisDigits(values: [Double]) -> Int {
 
 func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [MarketCandleSample] {
     let candles = points.compactMap { point -> MarketCandleSample? in
-        guard let close = point.close ?? point.value else { return nil }
-        let open = point.open ?? close
+        let close = point.close
+        let open = point.open
         return MarketCandleSample(
             timestamp: point.timestamp,
             open: open,
-            high: max(point.high ?? close, max(open, close)),
-            low: min(point.low ?? close, min(open, close)),
+            high: max(point.high, max(open, close)),
+            low: min(point.low, min(open, close)),
             close: close,
             volume: point.volume
         )
@@ -535,47 +526,6 @@ func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [Market
             volume: volumes.isEmpty ? nil : volumes.reduce(0, +)
         )
     }
-}
-
-func marketMergingRealtimePrice(
-    _ price: Double,
-    timestamp: Int64,
-    into points: [MarketChartPoint],
-    limit: Int = 600
-) -> [MarketChartPoint] {
-    guard price.isFinite, timestamp > 0, limit > 0 else { return points }
-    let minuteMs: Int64 = 60_000
-    let minute = timestamp - timestamp % minuteMs
-    var result = points
-
-    if let last = result.last {
-        let lastMinute = last.timestamp - last.timestamp % minuteMs
-        if lastMinute > minute { return result }
-        if lastMinute == minute {
-            let open = last.open ?? last.displayValue ?? price
-            result[result.count - 1] = MarketChartPoint(
-                timestamp: minute,
-                value: price,
-                open: open,
-                high: max(last.high ?? open, price),
-                low: min(last.low ?? open, price),
-                close: price,
-                volume: last.volume
-            )
-            return Array(result.suffix(limit))
-        }
-    }
-
-    result.append(MarketChartPoint(
-        timestamp: minute,
-        value: price,
-        open: price,
-        high: price,
-        low: price,
-        close: price,
-        volume: nil
-    ))
-    return Array(result.suffix(limit))
 }
 
 func marketTrendIsUp(values: [Double], fallbackIsUp: Bool) -> Bool {
