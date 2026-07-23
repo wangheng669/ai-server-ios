@@ -21,7 +21,8 @@ private struct EditorialRootView: View {
         }
         if ProcessInfo.processInfo.arguments.contains("--market-preview") ||
             ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--retail-preview") { return .investment }
+            ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--sentiment-preview") { return .investment }
         return .observation
         #else
         .observation
