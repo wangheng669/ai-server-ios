@@ -3,11 +3,12 @@ import XCTest
 
 final class MarketPresentationTests: XCTestCase {
     func testDecodesMarketChartQualityContract() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney"}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
         XCTAssertEqual(response.data.quality.status, .repairing)
         XCTAssertEqual(response.data.quality.missing.count, 1)
         XCTAssertEqual(response.data.candles.first?.state, "confirmed")
+        XCTAssertEqual(response.data.candles.first?.session, "regular")
         XCTAssertEqual(response.data.tradingDate, "2026-07-22")
     }
 
@@ -193,7 +194,8 @@ final class MarketPresentationTests: XCTestCase {
             close: close,
             volume: volume,
             state: "confirmed",
-            source: "test"
+            source: "test",
+            session: "regular"
         )
     }
 }
