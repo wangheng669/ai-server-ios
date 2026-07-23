@@ -18,6 +18,8 @@ struct PostDetailView: View {
     @State private var youtubePlaybackLabel: String?
     @State private var youtubePlaybackURL: URL?
     @State private var youtubePlayerReloadID = UUID()
+    @State private var youtubePlaybackStartedAt: ContinuousClock.Instant?
+    @State private var youtubeSourceResolvedAt: ContinuousClock.Instant?
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
@@ -95,12 +97,9 @@ struct PostDetailView: View {
                 await loadDetail()
             }
             await commentsTask?.value
-            #if DEBUG
-            if post.isYouTube,
-               ProcessInfo.processInfo.arguments.contains("--youtube-autoplay-preview") {
+            if post.isYouTube {
                 await playYouTubeVideo()
             }
-            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
             guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
@@ -475,6 +474,7 @@ struct PostDetailView: View {
                 NativeVideoPlayer(
                     url: youtubePlaybackURL,
                     onReady: {
+                        logYouTubePlaybackReady()
                         withAnimation(.easeOut(duration: 0.18)) {
                             isYouTubeVideoReady = true
                             youtubePlaybackState = .playing
@@ -1419,10 +1419,18 @@ struct PostDetailView: View {
         youtubePlaybackState = .loading
         isYouTubeVideoReady = false
         youtubePlaybackURL = nil
+        youtubePlaybackStartedAt = .now
+        youtubeSourceResolvedAt = nil
         do {
             let source = try await APIClient(baseURL: ServerConfiguration.currentURL)
                 .resolveYouTubePlayback(url: link, title: post.displayTitle)
             guard !Task.isCancelled else { return }
+            youtubeSourceResolvedAt = .now
+            #if DEBUG
+            if let youtubePlaybackStartedAt {
+                print("YouTube playback source resolved in \(youtubePlaybackStartedAt.duration(to: .now).formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated)))")
+            }
+            #endif
             youtubePlaybackLabel = source.label
             youtubePlayerReloadID = UUID()
             youtubePlaybackURL = source.url
@@ -1433,9 +1441,30 @@ struct PostDetailView: View {
         }
     }
 
+    private func logYouTubePlaybackReady() {
+        #if DEBUG
+        if let youtubePlaybackStartedAt {
+            let total = youtubePlaybackStartedAt.duration(to: .now)
+            let player = youtubeSourceResolvedAt?.duration(to: .now)
+            print(
+                "YouTube playback ready in \(total.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated))); " +
+                "player preparation \(player?.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated)) ?? "unknown")"
+            )
+        }
+        #endif
+    }
+
     private func loadDetail() async {
         guard !post.isSynthetic else { return }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
+
+        // YouTube's list payload already contains everything rendered by this screen.
+        // Avoid fetching the same post again before starting video playback.
+        if post.isYouTube {
+            player?.pause()
+            player = nil
+            return
+        }
 
         if !post.isYouTube,
            !post.isBilibili,
