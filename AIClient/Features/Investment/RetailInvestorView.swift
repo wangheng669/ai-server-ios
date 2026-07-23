@@ -20,7 +20,6 @@ struct RetailInvestorView: View {
                         errorBanner(message)
                     }
                     aShareTemperatureCard
-                    breadthTemperatureCard
                     marketBreadthCard
                     capitalCard
                     sectorCard
@@ -47,63 +46,91 @@ struct RetailInvestorView: View {
         let metrics = store.temperature?.latest.aiServer
         let temperature = metrics?.compositeTemperature?.value
         let progress = CGFloat(min(max(temperature ?? 0, 0), 100) / 100)
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 16) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.secondary.opacity(0.12), lineWidth: 11)
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(
-                            AngularGradient(colors: [.blue, .yellow, .orange, .red], center: .center),
-                            style: StrokeStyle(lineWidth: 11, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                    VStack(spacing: 0) {
+        return VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("A 股市场温度")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(temperature.map { String(Int($0.rounded())) } ?? "—")
-                            .font(.system(size: 38, weight: .bold, design: .rounded))
-                        Text("℃")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 58, weight: .bold, design: .rounded))
+                            .contentTransition(.numericText())
+                        Text("°")
+                            .font(.system(size: 28, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                 }
-                .frame(width: 116, height: 116)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("A股市场温度 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
-
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(spacing: 7) {
-                        Text("A股市场温度")
-                            .font(.system(size: 20, weight: .bold))
-                        Text("自研")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.1), in: Capsule())
-                    }
-                    Text(metrics?.compositeTemperature?.label.nonEmpty ?? "等待温度数据")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(temperatureTint(temperature))
-                    Text("估值与市场情绪各占 50%，数值越高代表市场越热。")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer()
+                Text(metrics?.compositeTemperature?.label.nonEmpty ?? "等待数据")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.14), in: Capsule())
             }
 
-            Divider()
+            VStack(spacing: 8) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(red: 0.20, green: 0.55, blue: 1), .yellow, .orange, .red],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(height: 8)
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 18, height: 18)
+                            .shadow(color: .black.opacity(0.25), radius: 5, y: 2)
+                            .offset(x: max(0, min(proxy.size.width - 18, progress * proxy.size.width - 9)))
+                    }
+                    .frame(maxHeight: .infinity)
+                }
+                .frame(height: 18)
+                HStack {
+                    Text("冷静")
+                    Spacer()
+                    Text("中性")
+                    Spacer()
+                    Text("过热")
+                }
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+            }
+
             HStack(spacing: 0) {
-                temperatureMetric("估值", value: metrics?.valuationPercentile?.value)
-                Divider().frame(height: 36)
-                temperatureMetric("情绪", value: metrics?.sentimentPercentile?.value)
-                Divider().frame(height: 36)
-                temperatureMetric("上涨占比", value: metrics?.advancerShare.map { $0.value * 100 })
+                temperatureMetric("估值温度", value: metrics?.valuationPercentile?.value)
+                Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 36)
+                temperatureMetric("情绪温度", value: metrics?.sentimentPercentile?.value)
             }
-            sourceLine("AI Server · 长桥同类公式", suffix: metrics?.compositeTemperature?.fetchedAt)
+
+            HStack(spacing: 5) {
+                Image(systemName: "function")
+                Text("估值与情绪各占 50%")
+                Spacer()
+                if let fetchedAt = metrics?.compositeTemperature?.fetchedAt {
+                    Text(RetailSentimentFormat.shortTime(fetchedAt))
+                }
+            }
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(.white.opacity(0.5))
         }
-        .sentimentCard()
+        .padding(20)
+        .foregroundStyle(.white)
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.08, green: 0.10, blue: 0.18), Color(red: 0.26, green: 0.10, blue: 0.18)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("A股市场温度 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
     }
 
     private var header: some View {
@@ -111,7 +138,7 @@ struct RetailInvestorView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("市场情绪")
                     .font(.system(size: 27, weight: .bold))
-                Text("行情事实与公开观点样本分开展示")
+                Text("一眼看清市场冷热、广度与资金状态")
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
             }
@@ -128,59 +155,20 @@ struct RetailInvestorView: View {
         .padding(.vertical, 5)
     }
 
-    private var breadthTemperatureCard: some View {
-        let score = store.breadthScore
-        return HStack(spacing: 18) {
-            ZStack {
-                Circle()
-                    .stroke(Color.secondary.opacity(0.12), lineWidth: 10)
-                Circle()
-                    .trim(from: 0, to: score / 100)
-                    .stroke(
-                        AngularGradient(colors: [HoldingsPalette.purple.opacity(0.55), HoldingsPalette.purple, .red], center: .center),
-                        style: StrokeStyle(lineWidth: 10, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                VStack(spacing: 0) {
-                    Text(store.breadth == nil ? "—" : String(Int(score.rounded())))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text(store.breadthLabel)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(HoldingsPalette.purple)
-                }
-            }
-            .frame(width: 112, height: 112)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("市场广度温度 (Int(score.rounded()))，(store.breadthLabel)")
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    Text("市场广度温度")
-                        .font(.system(size: 20, weight: .bold))
-                    Text("计算值")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(HoldingsPalette.purple)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(HoldingsPalette.purple.opacity(0.1), in: Capsule())
-                }
-                Text("仅按上涨家数占上涨与下跌家数的比例计算，不混入博主观点。")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if store.dashboard?.ashareOverview?.stale == true {
-                    Label("行情快照已过期", systemImage: "clock.badge.exclamationmark")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.orange)
-                }
-            }
-        }
-        .sentimentCard()
-    }
-
     private var marketBreadthCard: some View {
         VStack(alignment: .leading, spacing: 13) {
-            sectionTitle("市场广度", icon: "chart.bar.fill")
+            HStack {
+                sectionTitle("市场广度", icon: "chart.bar.fill")
+                Spacer()
+                if let share = store.temperature?.latest.aiServer?.advancerShare?.value {
+                    Text("上涨占比 \(String(format: "%.1f%%", share * 100))")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(HoldingsPalette.purple)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(HoldingsPalette.purple.opacity(0.1), in: Capsule())
+                }
+            }
             HStack(spacing: 0) {
                 breadthMetric("上涨", value: store.breadth?.up, color: .red)
                 Divider().frame(height: 42)
@@ -337,7 +325,7 @@ struct RetailInvestorView: View {
     }
 
     private var methodologyNote: some View {
-        Label("市场数据与人物观点采用不同口径，人物样本不计入市场广度温度。", systemImage: "checkmark.shield.fill")
+        Label("人物观点仅作观察样本，不计入 A 股市场温度。", systemImage: "checkmark.shield.fill")
             .font(.system(size: 11.5))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 4)
@@ -363,22 +351,13 @@ struct RetailInvestorView: View {
         VStack(spacing: 3) {
             Text(title)
                 .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.55))
             Text(value.map { String(format: "%.1f%%", $0) } ?? "—")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private func temperatureTint(_ value: Double?) -> Color {
-        guard let value else { return .secondary }
-        switch value {
-        case 70...: return .red
-        case 55..<70: return .orange
-        case 40..<55: return .secondary
-        default: return .blue
-        }
     }
 
     private func capitalMetric(title: String, value: String, detail: String, change: Double?, systemImage: String) -> some View {
@@ -656,20 +635,6 @@ private final class RetailSentimentStore {
         let total = max(breadth.up + breadth.down + breadth.flat, 1)
         return CGFloat(breadth.down) / CGFloat(total)
     }
-    var breadthScore: Double {
-        guard let breadth else { return 0 }
-        return Double(breadth.up) / Double(max(breadth.up + breadth.down, 1)) * 100
-    }
-    var breadthLabel: String {
-        switch breadthScore {
-        case 60...: "偏热"
-        case 52..<60: "偏暖"
-        case 45..<52: "均衡"
-        case 35..<45: "偏冷"
-        default: breadth == nil ? "等待数据" : "较冷"
-        }
-    }
-
     func load(force: Bool = false) async {
         if loaded, !force { return }
         guard !isLoading else { return }
