@@ -114,11 +114,7 @@ struct PostDetailView: View {
             }
         }
         .onDisappear {
-            if let player, let url = post.videoURLs.first {
-                XVideoPlaybackSession.shared.pause(player, url: url)
-            } else {
-                player?.pause()
-            }
+            player?.pause()
             bilibiliPlaybackRetryTask?.cancel()
         }
     }
@@ -323,11 +319,7 @@ struct PostDetailView: View {
     private var xueqiuDetailToolbar: some View {
         HStack {
             Button {
-                if let player, let url = post.videoURLs.first {
-                    XVideoPlaybackSession.shared.pause(player, url: url)
-                } else {
-                    player?.pause()
-                }
+                player?.pause()
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
@@ -1371,7 +1363,12 @@ struct PostDetailView: View {
     }
 
     @ViewBuilder private var xMedia: some View {
-        if !post.videoURLs.isEmpty {
+        if post.sourceName == "X", let videoURL = post.videoURLs.first {
+            XVideoPlayerView(url: videoURL, thumbnailURL: post.previewURL)
+                .id(videoURL)
+                .frame(height: xVideoHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else if !post.videoURLs.isEmpty {
             Group {
                 if let player {
                     VideoPlayer(player: player)
@@ -1440,8 +1437,15 @@ struct PostDetailView: View {
         guard !post.isSynthetic else { return }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
 
-        if !post.isYouTube, !post.isBilibili, player == nil, let video = post.videoURLs.first {
+        if !post.isYouTube,
+           !post.isBilibili,
+           post.sourceName != "X",
+           player == nil,
+           let video = post.videoURLs.first {
             startVideoPlayback(url: video)
+            await detectVideoAspectRatio(url: video)
+        } else if post.sourceName == "X",
+                  let video = post.videoURLs.first {
             await detectVideoAspectRatio(url: video)
         }
 
@@ -1455,7 +1459,9 @@ struct PostDetailView: View {
         if post.isYouTube || post.isBilibili {
             player?.pause()
             player = nil
-        } else if player == nil, let video = post.videoURLs.first {
+        } else if post.sourceName != "X",
+                  player == nil,
+                  let video = post.videoURLs.first {
             startVideoPlayback(url: video)
             await detectVideoAspectRatio(url: video)
         } else if let video = post.videoURLs.first, detectedVideoAspectRatio == nil {
@@ -1578,11 +1584,7 @@ struct PostDetailView: View {
         player = newPlayer
         videoPlaybackFailed = false
         isVideoReady = false
-        if post.sourceName == "X" {
-            XVideoPlaybackSession.shared.play(newPlayer, url: url)
-        } else {
-            newPlayer.play()
-        }
+        newPlayer.play()
     }
 
     private func markBilibiliVideoReady() {
