@@ -366,9 +366,13 @@ final class XVideoPlaybackSession {
         activePlayer = player
         activeURL = url
         if let position = positions[url], position.isNumeric, position.seconds > 0.25 {
-            player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
+            player.seek(
+                to: position,
+                toleranceBefore: CMTime(seconds: 0.1, preferredTimescale: 600),
+                toleranceAfter: CMTime(seconds: 0.1, preferredTimescale: 600)
+            )
         }
-        player.play()
+        player.playImmediately(atRate: 1)
     }
 
     func pause(_ player: AVPlayer, url: URL) {
@@ -402,6 +406,7 @@ struct XVideoPlayerView: View {
     @State private var thumbnail: UIImage?
     @State private var playbackState: PlaybackState = .idle
     @State private var isVideoReady = false
+    @State private var isPrerolled = false
     @State private var thumbnailFailed = false
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let url: URL
@@ -500,30 +505,69 @@ struct XVideoPlayerView: View {
             }
         }
         .clipped()
-        .task(id: url) { await loadThumbnail() }
+        .task(id: url) {
+            preparePlayerIfNeeded()
+            async let thumbnailLoad: Void = loadThumbnail()
+            async let playerPreload: Void = prerollPlayer()
+            _ = await (thumbnailLoad, playerPreload)
+        }
         .onDisappear {
             stopPlayback()
         }
     }
 
     private func startPlayback() {
-        stopPlayback()
         activateAudioSession()
-        let item = AVPlayerItem(url: url)
-        item.preferredForwardBufferDuration = 1
-        let player = AVPlayer(playerItem: item)
+        let player = player ?? makePlayer()
         player.isMuted = isMuted
-        player.automaticallyWaitsToMinimizeStalling = true
         self.player = player
         isVideoReady = false
         playbackState = .preparing
         XVideoPlaybackSession.shared.play(player, url: url)
+        if isPrerolled {
+            markVideoReady()
+        }
+    }
+
+    private func preparePlayerIfNeeded() {
+        guard player == nil else { return }
+        player = makePlayer()
+    }
+
+    private func makePlayer() -> AVPlayer {
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 0
+        let player = AVPlayer(playerItem: item)
+        player.isMuted = isMuted
+        player.automaticallyWaitsToMinimizeStalling = false
+        return player
+    }
+
+    @MainActor
+    private func prerollPlayer() async {
+        guard let player, let asset = player.currentItem?.asset else { return }
+        guard (try? await asset.load(.isPlayable)) == true else { return }
+        while player.status == .unknown, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard !Task.isCancelled, self.player === player, player.status == .readyToPlay else { return }
+        let completed = await withCheckedContinuation { continuation in
+            player.preroll(atRate: 1) { finished in
+                continuation.resume(returning: finished)
+            }
+        }
+        guard !Task.isCancelled, self.player === player else { return }
+        isPrerolled = completed
     }
 
     private func stopPlayback() {
         guard let player else { return }
+        if player.status == .readyToPlay {
+            player.cancelPendingPrerolls()
+        }
         XVideoPlaybackSession.shared.pause(player, url: url)
         self.player = nil
+        isPrerolled = false
     }
 
     private func markVideoReady() {
