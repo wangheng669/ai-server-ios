@@ -2,6 +2,7 @@ import SwiftUI
 
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
+    case sentiment = "情绪"
     case holdings = "知名投资人"
 
     var id: Self { self }
@@ -17,7 +18,13 @@ struct InvestmentView: View {
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
         #if DEBUG
-        _section = State(initialValue: ProcessInfo.processInfo.arguments.contains("--holdings-preview") ? .holdings : .market)
+        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") {
+            _section = State(initialValue: .holdings)
+        } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") {
+            _section = State(initialValue: .sentiment)
+        } else {
+            _section = State(initialValue: .market)
+        }
         #else
         _section = State(initialValue: .market)
         #endif
@@ -32,6 +39,11 @@ struct InvestmentView: View {
                         InvestmentHeader(selection: $section, floatsOverContent: false)
                     }
                     MarketView(showsDetail: $marketShowsDetail)
+                }
+            case .sentiment:
+                VStack(spacing: 0) {
+                    InvestmentHeader(selection: $section, floatsOverContent: false)
+                    RetailInvestorView()
                 }
             case .holdings:
                 ZStack(alignment: .top) {

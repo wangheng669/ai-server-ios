@@ -66,6 +66,11 @@ struct MarketService {
         return try await request(url, as: FamousHoldingsResponse.self).data
     }
 
+    func investorMood() async throws -> InvestorMoodBoard {
+        let url = baseURL.appending(path: "api/v1/market/dashboard/investor-mood")
+        return try await request(url, as: InvestorMoodResponse.self).data
+    }
+
     private func request<Response: Decodable>(_ url: URL, as type: Response.Type) async throws -> Response {
         let data: Data
         let response: URLResponse

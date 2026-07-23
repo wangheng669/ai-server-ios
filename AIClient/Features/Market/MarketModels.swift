@@ -375,10 +375,69 @@ struct MarketSector: Codable, Identifiable {
     let changePercent: String
     let direction: String?
     let rank: Int?
+    let previousRank: Int?
+    let rankChange: Int?
+    let consecutiveTopCount: Int?
     let lastSeenAt: String?
 
     var percentValue: Double {
         Double(changePercent.replacingOccurrences(of: "%", with: "").replacingOccurrences(of: "+", with: "")) ?? 0
+    }
+}
+
+struct InvestorMoodResponse: Decodable {
+    let success: Bool
+    let data: InvestorMoodBoard
+}
+
+struct InvestorMoodBoard: Decodable {
+    let dataContract: String
+    let generatedAt: String
+    let methodology: String
+    let disclaimer: String
+    let items: [InvestorMoodItem]
+}
+
+struct InvestorMoodItem: Decodable, Identifiable {
+    var id: String { awemeId }
+    let nickname: String
+    let awemeId: String
+    let description: String
+    let url: String
+    let coverUrl: String
+    let createdAt: String?
+    let label: String
+    let reasons: [String]
+    let transcriptStatus: String
+    let analysis: String
+    let evidence: [String]
+    let analysisSource: String
+    let model: String
+    let stale: Bool
+    let ageHours: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case nickname, awemeId, description, url, coverUrl, createdAt, label, reasons
+        case transcriptStatus, analysis, evidence, analysisSource, model, stale, ageHours
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        nickname = try values.decode(String.self, forKey: .nickname)
+        awemeId = try values.decode(String.self, forKey: .awemeId)
+        description = try values.decodeIfPresent(String.self, forKey: .description) ?? ""
+        url = try values.decodeIfPresent(String.self, forKey: .url) ?? ""
+        coverUrl = try values.decodeIfPresent(String.self, forKey: .coverUrl) ?? ""
+        createdAt = try values.decodeIfPresent(String.self, forKey: .createdAt)
+        label = try values.decodeIfPresent(String.self, forKey: .label) ?? "中性"
+        reasons = try values.decodeIfPresent([String].self, forKey: .reasons) ?? []
+        transcriptStatus = try values.decodeIfPresent(String.self, forKey: .transcriptStatus) ?? ""
+        analysis = try values.decodeIfPresent(String.self, forKey: .analysis) ?? ""
+        evidence = try values.decodeIfPresent([String].self, forKey: .evidence) ?? []
+        analysisSource = try values.decodeIfPresent(String.self, forKey: .analysisSource) ?? ""
+        model = try values.decodeIfPresent(String.self, forKey: .model) ?? ""
+        stale = try values.decodeIfPresent(Bool.self, forKey: .stale) ?? false
+        ageHours = try values.decodeIfPresent(Double.self, forKey: .ageHours)
     }
 }
 

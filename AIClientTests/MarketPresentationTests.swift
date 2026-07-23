@@ -2,6 +2,28 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesInvestorMoodPublicVideoSamples() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
+        let response = try JSONDecoder().decode(InvestorMoodResponse.self, from: data)
+        XCTAssertEqual(response.data.dataContract, "market_investor_mood_v1")
+        XCTAssertEqual(response.data.methodology, "public-video-sample")
+        XCTAssertEqual(response.data.items.first?.nickname, "王小雨")
+        XCTAssertEqual(response.data.items.first?.label, "观望")
+        XCTAssertEqual(response.data.items.first?.analysis, "情绪保持中性。")
+        XCTAssertEqual(response.data.items.first?.stale, false)
+    }
+
+    func testDecodesHistoricalInvestorMoodWithoutAIFields() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"仅为公开样本","items":[{"nickname":"大曾子和酥妻","awemeId":"456","description":"最近一次公开视频","url":"https://www.douyin.com/video/456","coverUrl":"","createdAt":"2026-07-21T05:33:13Z","label":"中性","stale":true,"ageHours":46.8}]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(InvestorMoodResponse.self, from: data)
+
+        XCTAssertEqual(response.data.items.first?.nickname, "大曾子和酥妻")
+        XCTAssertEqual(response.data.items.first?.analysis, "")
+        XCTAssertEqual(response.data.items.first?.reasons, [])
+        XCTAssertEqual(response.data.items.first?.stale, true)
+    }
+
     func testDecodesMarketChartQualityContract() throws {
         let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
