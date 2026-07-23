@@ -16,10 +16,8 @@ struct PostDetailView: View {
     @State private var youtubePlaybackState: YouTubePlaybackState = .idle
     @State private var isYouTubeVideoReady = false
     @State private var youtubePlaybackLabel: String?
-    @State private var youtubePlaybackURL: URL?
     @State private var youtubePlayerReloadID = UUID()
     @State private var youtubePlaybackStartedAt: ContinuousClock.Instant?
-    @State private var youtubeSourceResolvedAt: ContinuousClock.Instant?
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
@@ -470,10 +468,10 @@ struct PostDetailView: View {
         ZStack {
             Color.black
 
-            if let youtubePlaybackURL {
-                NativeVideoPlayer(
-                    url: youtubePlaybackURL,
-                    onReady: {
+            if youtubePlaybackState != .idle, let videoID = post.youtubeVideoID {
+                YouTubeEmbeddedPlayer(
+                    videoID: videoID,
+                    onPlaying: {
                         logYouTubePlaybackReady()
                         withAnimation(.easeOut(duration: 0.18)) {
                             isYouTubeVideoReady = true
@@ -636,9 +634,7 @@ struct PostDetailView: View {
 
                 if youtubePlaybackState == .playing {
                     Button {
-                        isYouTubeVideoReady = false
-                        youtubePlayerReloadID = UUID()
-                        youtubePlaybackState = .loading
+                        Task { await playYouTubeVideo() }
                     } label: {
                         youtubeActionLabel("重新播放", symbol: "arrow.counterclockwise")
                     }
@@ -1412,44 +1408,22 @@ struct PostDetailView: View {
 
     @MainActor
     private func playYouTubeVideo() async {
-        guard let link = post.linkURL else {
+        guard post.youtubeVideoID != nil else {
             youtubePlaybackState = .failed
             return
         }
         youtubePlaybackState = .loading
         isYouTubeVideoReady = false
-        youtubePlaybackURL = nil
         youtubePlaybackStartedAt = .now
-        youtubeSourceResolvedAt = nil
-        do {
-            let source = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .resolveYouTubePlayback(url: link, title: post.displayTitle)
-            guard !Task.isCancelled else { return }
-            youtubeSourceResolvedAt = .now
-            #if DEBUG
-            if let youtubePlaybackStartedAt {
-                print("YouTube playback source resolved in \(youtubePlaybackStartedAt.duration(to: .now).formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated)))")
-            }
-            #endif
-            youtubePlaybackLabel = source.label
-            youtubePlayerReloadID = UUID()
-            youtubePlaybackURL = source.url
-        } catch is CancellationError {
-            return
-        } catch {
-            youtubePlaybackState = .failed
-        }
+        youtubePlaybackLabel = "自适应画质"
+        youtubePlayerReloadID = UUID()
     }
 
     private func logYouTubePlaybackReady() {
         #if DEBUG
         if let youtubePlaybackStartedAt {
             let total = youtubePlaybackStartedAt.duration(to: .now)
-            let player = youtubeSourceResolvedAt?.duration(to: .now)
-            print(
-                "YouTube playback ready in \(total.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated))); " +
-                "player preparation \(player?.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated)) ?? "unknown")"
-            )
+            print("YouTube embedded playback ready in \(total.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated)))")
         }
         #endif
     }
@@ -1905,6 +1879,112 @@ private final class BilibiliResourceLoader: NSObject, AVAssetResourceLoaderDeleg
         guard let value = response.value(forHTTPHeaderField: "Content-Range"),
               let total = value.split(separator: "/").last else { return nil }
         return Int64(total)
+    }
+}
+
+private struct YouTubeEmbeddedPlayer: UIViewRepresentable {
+    let videoID: String
+    let onPlaying: () -> Void
+    let onFailed: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPlaying: onPlaying, onFailed: onFailed)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let contentController = WKUserContentController()
+        contentController.add(context.coordinator, name: "youtubePlayer")
+
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.userContentController = contentController
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.isScrollEnabled = false
+        webView.loadHTMLString(Self.html(videoID: videoID), baseURL: URL(string: "https://www.youtube-nocookie.com"))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "youtubePlayer")
+    }
+
+    private static func html(videoID: String) -> String {
+        let safeID = videoID
+            .replacingOccurrences(of: "\\", with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\"", with: "")
+        return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+          <style>
+            html,body,#player { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#000; }
+          </style>
+        </head>
+        <body>
+          <div id="player"></div>
+          <script src="https://www.youtube.com/iframe_api"></script>
+          <script>
+            var player;
+            function onYouTubeIframeAPIReady() {
+              player = new YT.Player('player', {
+                videoId: '\(safeID)',
+                width: '100%',
+                height: '100%',
+                playerVars: {
+                  autoplay: 1,
+                  playsinline: 1,
+                  rel: 0,
+                  modestbranding: 1
+                },
+                events: {
+                  onReady: function(event) {
+                    event.target.playVideo();
+                  },
+                  onStateChange: function(event) {
+                    if (event.data === YT.PlayerState.PLAYING) {
+                      window.webkit.messageHandlers.youtubePlayer.postMessage('playing');
+                    }
+                  },
+                  onError: function(event) {
+                    window.webkit.messageHandlers.youtubePlayer.postMessage('error:' + event.data);
+                  }
+                }
+              });
+            }
+          </script>
+        </body>
+        </html>
+        """
+    }
+
+    final class Coordinator: NSObject, WKScriptMessageHandler {
+        let onPlaying: () -> Void
+        let onFailed: () -> Void
+        private var deliveredPlaying = false
+
+        init(onPlaying: @escaping () -> Void, onFailed: @escaping () -> Void) {
+            self.onPlaying = onPlaying
+            self.onFailed = onFailed
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let value = message.body as? String else { return }
+            if value == "playing", !deliveredPlaying {
+                deliveredPlaying = true
+                onPlaying()
+            } else if value.hasPrefix("error:") {
+                onFailed()
+            }
+        }
     }
 }
 
