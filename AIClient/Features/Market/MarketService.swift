@@ -78,6 +78,13 @@ struct MarketService {
         return try await request(url, as: MarketAShareTemperatureResponse.self).data
     }
 
+    func hongKongValuationHistory() async throws -> MarketHKValuationHistory {
+        guard let url = URL(string: "https://eniu.com/chart/peindex/hkhsi/t/all") else {
+            throw MarketServiceError.invalidURL
+        }
+        return try await request(url, as: MarketHKValuationHistory.self)
+    }
+
     private func request<Response: Decodable>(_ url: URL, as type: Response.Type) async throws -> Response {
         let data: Data
         let response: URLResponse
