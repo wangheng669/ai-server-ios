@@ -265,7 +265,8 @@ struct PostMediaGrid: View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
             if let videoURL = post.videoURLs.first {
-                XInlineVideoView(url: videoURL, thumbnailURL: post.previewURL)
+                XVideoPlayerView(url: videoURL, thumbnailURL: post.previewURL)
+                    .id(videoURL)
                     .frame(height: resolvedSingleImageHeight)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else if urls.count == 1, let url = urls.first {
@@ -319,7 +320,8 @@ struct XFeedMediaView: View {
 
     var body: some View {
         if let videoURL = post.videoURLs.first {
-            XInlineVideoView(url: videoURL, thumbnailURL: post.previewURL)
+            XVideoPlayerView(url: videoURL, thumbnailURL: post.previewURL)
+                .id(videoURL)
                 .frame(height: videoHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         } else {
@@ -386,12 +388,20 @@ final class XVideoPlaybackSession {
     }
 }
 
-private struct XInlineVideoView: View {
+struct XVideoPlayerView: View {
+    private enum PlaybackState {
+        case idle
+        case preparing
+        case playing
+        case failed
+    }
+
     private static let thumbnailCache = NSCache<NSURL, UIImage>()
 
     @State private var player: AVPlayer?
     @State private var thumbnail: UIImage?
-    @State private var hasStartedPlayback = false
+    @State private var playbackState: PlaybackState = .idle
+    @State private var isVideoReady = false
     @State private var thumbnailFailed = false
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let url: URL
@@ -406,26 +416,25 @@ private struct XInlineVideoView: View {
         ZStack {
             Color.black
 
-            if let thumbnail {
+            if !isVideoReady, let thumbnail {
                 Image(uiImage: thumbnail)
                     .resizable()
                     .scaledToFill()
-            } else if !hasStartedPlayback, !thumbnailFailed {
+            } else if playbackState == .idle, !thumbnailFailed {
                 ProgressView().tint(.white)
             }
 
-            VideoPlayer(player: player)
-                .opacity(hasStartedPlayback ? 1 : 0.001)
+            XPlayerLayerView(
+                player: player,
+                onReadyForDisplay: markVideoReady,
+                onFailure: markPlaybackFailed
+            )
+                .opacity(isVideoReady ? 1 : 0.001)
+                .allowsHitTesting(false)
 
-            if !hasStartedPlayback {
-                Button {
-                    activateAudioSession()
-                    let player = AVPlayer(url: url)
-                    player.isMuted = isMuted
-                    self.player = player
-                    hasStartedPlayback = true
-                    XVideoPlaybackSession.shared.play(player, url: url)
-                } label: {
+            switch playbackState {
+            case .idle:
+                Button(action: startPlayback) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(.white)
@@ -434,9 +443,29 @@ private struct XInlineVideoView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("播放视频")
+            case .preparing:
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                    .padding(14)
+                    .background(.black.opacity(0.56), in: Circle())
+                    .accessibilityLabel("正在加载视频")
+            case .failed:
+                Button(action: startPlayback) {
+                    Label("重试播放", systemImage: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.68), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("重试播放视频")
+            case .playing:
+                EmptyView()
             }
 
-            if hasStartedPlayback {
+            if playbackState == .preparing || playbackState == .playing {
                 Button {
                     isMuted.toggle()
                     player?.isMuted = isMuted
@@ -453,7 +482,7 @@ private struct XInlineVideoView: View {
                 .accessibilityLabel(isMuted ? "打开声音" : "静音")
             }
 
-            if thumbnailFailed, !hasStartedPlayback {
+            if thumbnailFailed, playbackState == .idle {
                 Button {
                     thumbnailFailed = false
                     Task { await loadThumbnail(ignoringCache: true) }
@@ -473,9 +502,43 @@ private struct XInlineVideoView: View {
         .clipped()
         .task(id: url) { await loadThumbnail() }
         .onDisappear {
-            guard let player else { return }
-            XVideoPlaybackSession.shared.pause(player, url: url)
+            stopPlayback()
         }
+    }
+
+    private func startPlayback() {
+        stopPlayback()
+        activateAudioSession()
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 1
+        let player = AVPlayer(playerItem: item)
+        player.isMuted = isMuted
+        player.automaticallyWaitsToMinimizeStalling = true
+        self.player = player
+        isVideoReady = false
+        playbackState = .preparing
+        XVideoPlaybackSession.shared.play(player, url: url)
+    }
+
+    private func stopPlayback() {
+        guard let player else { return }
+        XVideoPlaybackSession.shared.pause(player, url: url)
+        self.player = nil
+    }
+
+    private func markVideoReady() {
+        guard playbackState == .preparing else { return }
+        withAnimation(.easeOut(duration: 0.15)) {
+            isVideoReady = true
+            playbackState = .playing
+        }
+    }
+
+    private func markPlaybackFailed() {
+        guard playbackState == .preparing || playbackState == .playing else { return }
+        stopPlayback()
+        isVideoReady = false
+        playbackState = .failed
     }
 
     private func activateAudioSession() {
@@ -518,6 +581,117 @@ private struct XInlineVideoView: View {
         } catch {
             guard !Task.isCancelled else { return }
             thumbnailFailed = true
+        }
+    }
+}
+
+private struct XPlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer?
+    let onReadyForDisplay: () -> Void
+    let onFailure: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onReadyForDisplay: onReadyForDisplay,
+            onFailure: onFailure
+        )
+    }
+
+    func makeUIView(context: Context) -> PlayerView {
+        PlayerView()
+    }
+
+    func updateUIView(_ view: PlayerView, context: Context) {
+        view.playerLayer.player = player
+        context.coordinator.observe(player: player, layer: view.playerLayer)
+    }
+
+    static func dismantleUIView(_ view: PlayerView, coordinator: Coordinator) {
+        view.playerLayer.player = nil
+        coordinator.stopObserving()
+    }
+
+    final class PlayerView: UIView {
+        override class var layerClass: AnyClass {
+            AVPlayerLayer.self
+        }
+
+        var playerLayer: AVPlayerLayer {
+            layer as! AVPlayerLayer
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .black
+            playerLayer.videoGravity = .resizeAspect
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+    }
+
+    final class Coordinator {
+        private let onReadyForDisplay: () -> Void
+        private let onFailure: () -> Void
+        private weak var observedPlayer: AVPlayer?
+        private var readyObservation: NSKeyValueObservation?
+        private var statusObservation: NSKeyValueObservation?
+        private var failureObserver: NSObjectProtocol?
+
+        init(
+            onReadyForDisplay: @escaping () -> Void,
+            onFailure: @escaping () -> Void
+        ) {
+            self.onReadyForDisplay = onReadyForDisplay
+            self.onFailure = onFailure
+        }
+
+        func observe(player: AVPlayer?, layer: AVPlayerLayer) {
+            guard observedPlayer !== player else { return }
+            stopObserving()
+            observedPlayer = player
+            guard let player, let item = player.currentItem else { return }
+
+            readyObservation = layer.observe(
+                \.isReadyForDisplay,
+                options: [.initial, .new]
+            ) { [weak self] layer, _ in
+                guard layer.isReadyForDisplay else { return }
+                DispatchQueue.main.async {
+                    self?.onReadyForDisplay()
+                }
+            }
+            statusObservation = item.observe(
+                \.status,
+                options: [.initial, .new]
+            ) { [weak self] item, _ in
+                guard item.status == .failed else { return }
+                DispatchQueue.main.async {
+                    self?.onFailure()
+                }
+            }
+            failureObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemFailedToPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { [weak self] _ in
+                self?.onFailure()
+            }
+        }
+
+        func stopObserving() {
+            readyObservation = nil
+            statusObservation = nil
+            if let failureObserver {
+                NotificationCenter.default.removeObserver(failureObserver)
+            }
+            failureObserver = nil
+            observedPlayer = nil
+        }
+
+        deinit {
+            stopObserving()
         }
     }
 }
