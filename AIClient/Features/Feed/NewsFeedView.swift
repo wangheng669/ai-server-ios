@@ -29,6 +29,16 @@ private enum FlashFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
+    let videoID: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        YouTubeWarmPlayerPool.shared.prewarm(videoID: videoID)
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+}
+
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @Binding private var hidesTabBar: Bool
@@ -129,6 +139,9 @@ struct NewsFeedView: View {
             } else if opensYouTubeDetailPreview,
                       path.isEmpty,
                       let first = model.posts.first(where: \.isYouTube) {
+                if ProcessInfo.processInfo.arguments.contains("--youtube-prewarm-preview") {
+                    try? await Task.sleep(for: .seconds(10))
+                }
                 path = [first]
             } else if opensBilibiliDetailPreview,
                       path.isEmpty,
@@ -331,6 +344,16 @@ struct NewsFeedView: View {
                             isExpandedFlash: expandedFlashIDs.contains(post.id),
                             onOpen: { openPost(displayPost) }
                         )
+                            .background {
+                                if source == .youtube,
+                                   index == 0,
+                                   let videoID = displayPost.youtubeVideoID {
+                                    YouTubeFirstVideoPrewarmer(videoID: videoID)
+                                        .frame(width: 1, height: 1)
+                                        .opacity(0.01)
+                                        .allowsHitTesting(false)
+                                }
+                            }
                             .contentShape(Rectangle())
                             .modifier(ConditionalTapGestureModifier(isEnabled: !post.isXueqiu) {
                                 if post.isFlash {
