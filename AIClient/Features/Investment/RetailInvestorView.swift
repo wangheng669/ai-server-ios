@@ -218,9 +218,9 @@ struct RetailInvestorView: View {
             if store.investorMood?.items.isEmpty != false {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
-                ForEach(Array(items.prefix(4).enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     investorRow(item)
-                    if index < min(items.count, 4) - 1 { Divider() }
+                    if index < items.count - 1 { Divider() }
                 }
             }
             Text(store.investorMood?.disclaimer ?? "观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。")
