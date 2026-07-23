@@ -42,8 +42,10 @@ struct InvestmentView: View {
                 }
             case .sentiment:
                 VStack(spacing: 0) {
-                    InvestmentHeader(selection: $section, floatsOverContent: false)
-                    RetailInvestorView()
+                    if !showsDetail {
+                        InvestmentHeader(selection: $section, floatsOverContent: false)
+                    }
+                    RetailInvestorView(showsDetail: $showsDetail)
                 }
             case .holdings:
                 ZStack(alignment: .top) {

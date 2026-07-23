@@ -1,30 +1,45 @@
 import Observation
 import SwiftUI
+import WebKit
 
 struct RetailInvestorView: View {
+    @Binding private var showsDetail: Bool
     @State private var store = RetailSentimentStore()
+    @State private var path: [InvestorMoodRoute] = []
+
+    init(showsDetail: Binding<Bool> = .constant(false)) {
+        _showsDetail = showsDetail
+    }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                header
-                if let message = store.errorMessage {
-                    errorBanner(message)
+        NavigationStack(path: $path) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    header
+                    if let message = store.errorMessage {
+                        errorBanner(message)
+                    }
+                    breadthTemperatureCard
+                    marketBreadthCard
+                    capitalCard
+                    sectorCard
+                    investorMoodCard
+                    methodologyNote
                 }
-                breadthTemperatureCard
-                marketBreadthCard
-                capitalCard
-                sectorCard
-                investorMoodCard
-                methodologyNote
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
+                .padding(.bottom, 28)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 4)
-            .padding(.bottom, 28)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .refreshable { await store.load(force: true) }
+            .task { await store.load() }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: InvestorMoodRoute.self) { route in
+                InvestorMoodWebView(route: route)
+            }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
-        .refreshable { await store.load(force: true) }
-        .task { await store.load() }
+        .onChange(of: path) { _, path in showsDetail = !path.isEmpty }
+        .onDisappear { showsDetail = false }
     }
 
     private var header: some View {
@@ -217,7 +232,7 @@ struct RetailInvestorView: View {
     }
 
     private func investorRow(_ item: InvestorMoodItem) -> some View {
-        Link(destination: URL(string: item.url) ?? ServerConfiguration.currentURL) {
+        NavigationLink(value: InvestorMoodRoute(item: item)) {
             HStack(spacing: 11) {
                 AsyncImage(url: URL(string: item.coverUrl)) { phase in
                     if let image = phase.image {
@@ -334,6 +349,196 @@ struct RetailInvestorView: View {
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct InvestorMoodRoute: Hashable {
+    let title: String
+    let url: URL
+
+    init(item: InvestorMoodItem) {
+        title = item.nickname
+        url = URL(string: item.url) ?? ServerConfiguration.currentURL
+    }
+}
+
+private struct InvestorMoodWebView: View {
+    let route: InvestorMoodRoute
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var browser = InvestorMoodBrowserModel()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                Spacer()
+                Text(route.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                ShareLink(item: route.url) {
+                    Image(systemName: "square.and.arrow.up")
+                        .frame(width: 44, height: 44)
+                }
+            }
+            .padding(.horizontal, 6)
+
+            if browser.isLoading {
+                ProgressView(value: browser.progress)
+                    .progressViewStyle(.linear)
+            } else {
+                Divider()
+            }
+
+            InvestorMoodWebPage(url: route.url, browser: browser)
+
+            Divider()
+            HStack {
+                browserButton("chevron.left", enabled: browser.canGoBack) { browser.goBack() }
+                Spacer()
+                browserButton("chevron.right", enabled: browser.canGoForward) { browser.goForward() }
+                Spacer()
+                browserButton("arrow.clockwise", enabled: true) { browser.reload() }
+                Spacer()
+                ShareLink(item: browser.currentURL ?? route.url) {
+                    Image(systemName: "square.and.arrow.up")
+                        .frame(width: 44, height: 44)
+                }
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 50)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private func browserButton(_ systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .frame(width: 44, height: 44)
+        }
+        .disabled(!enabled)
+    }
+}
+
+@MainActor
+private final class InvestorMoodBrowserModel: ObservableObject {
+    @Published var isLoading = true
+    @Published var progress = 0.05
+    @Published var canGoBack = false
+    @Published var canGoForward = false
+    @Published var currentURL: URL?
+    fileprivate weak var webView: WKWebView?
+
+    func attach(_ webView: WKWebView) {
+        self.webView = webView
+        update(from: webView)
+    }
+
+    func update(from webView: WKWebView) {
+        isLoading = webView.isLoading
+        progress = max(webView.estimatedProgress, 0.05)
+        canGoBack = webView.canGoBack
+        canGoForward = webView.canGoForward
+        currentURL = webView.url
+    }
+
+    func goBack() { webView?.goBack() }
+    func goForward() { webView?.goForward() }
+    func reload() { webView?.reload() }
+}
+
+private struct InvestorMoodWebPage: UIViewRepresentable {
+    let url: URL
+    @ObservedObject var browser: InvestorMoodBrowserModel
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(browser: browser)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = true
+        context.coordinator.observe(webView)
+        browser.attach(webView)
+        webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard webView.url == nil else { return }
+        webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20))
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stopObserving()
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        private let browser: InvestorMoodBrowserModel
+        private var progressObservation: NSKeyValueObservation?
+
+        init(browser: InvestorMoodBrowserModel) {
+            self.browser = browser
+        }
+
+        func observe(_ webView: WKWebView) {
+            progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self, weak webView] _, _ in
+                guard let self, let webView else { return }
+                Task { @MainActor in self.browser.update(from: webView) }
+            }
+        }
+
+        func stopObserving() {
+            progressObservation?.invalidate()
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            browser.update(from: webView)
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            browser.update(from: webView)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            browser.update(from: webView)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            browser.update(from: webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            browser.update(from: webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+                webView.load(URLRequest(url: url))
+            }
+            return nil
+        }
     }
 }
 
