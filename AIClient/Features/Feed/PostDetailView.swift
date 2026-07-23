@@ -1882,37 +1882,19 @@ private final class BilibiliResourceLoader: NSObject, AVAssetResourceLoaderDeleg
     }
 }
 
-@MainActor
-final class YouTubeWarmPlayerPool: NSObject, WKScriptMessageHandler {
-    static let shared = YouTubeWarmPlayerPool()
+private struct YouTubeEmbeddedPlayer: UIViewRepresentable {
+    let videoID: String
+    let onPlaying: () -> Void
+    let onFailed: () -> Void
 
-    private var webViews: [String: WKWebView] = [:]
-    private var videoIDsByView: [ObjectIdentifier: String] = [:]
-    private var callbacks: [String: (playing: () -> Void, failed: () -> Void)] = [:]
-    private var prewarmedIDs: Set<String> = []
-
-    func prewarm(videoID: String) -> WKWebView {
-        playerView(videoID: videoID)
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPlaying: onPlaying, onFailed: onFailed)
     }
 
-    func start(videoID: String, onPlaying: @escaping () -> Void, onFailed: @escaping () -> Void) -> WKWebView {
-        callbacks[videoID] = (onPlaying, onFailed)
-        let webView = playerView(videoID: videoID)
-        if prewarmedIDs.contains(videoID) {
-            webView.evaluateJavaScript("beginPlayback()")
-        }
-        return webView
-    }
-
-    func stopCallbacks(videoID: String) {
-        callbacks[videoID] = nil
-    }
-
-    private func playerView(videoID: String) -> WKWebView {
-        if let existing = webViews[videoID] { return existing }
-
+    func makeUIView(context: Context) -> WKWebView {
         let contentController = WKUserContentController()
-        contentController.add(self, name: "youtubePlayer")
+        contentController.add(context.coordinator, name: "youtubePlayer")
+
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
@@ -1922,37 +1904,15 @@ final class YouTubeWarmPlayerPool: NSObject, WKScriptMessageHandler {
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.scrollView.isScrollEnabled = false
-        webViews[videoID] = webView
-        videoIDsByView[ObjectIdentifier(webView)] = videoID
         webView.loadHTMLString(Self.html(videoID: videoID), baseURL: URL(string: "https://www.youtube-nocookie.com"))
         return webView
     }
 
-    nonisolated func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        Task { @MainActor in
-            guard let webView = message.webView,
-                  let videoID = videoIDsByView[ObjectIdentifier(webView)],
-                  let value = message.body as? String else { return }
-            switch value {
-            case "ready":
-                if callbacks[videoID] != nil {
-                    _ = try? await webView.evaluateJavaScript("beginPlayback()")
-                } else {
-                    _ = try? await webView.evaluateJavaScript("beginPrewarm()")
-                }
-            case "playing":
-                if let callback = callbacks[videoID] {
-                    callback.playing()
-                } else if !prewarmedIDs.contains(videoID) {
-                    prewarmedIDs.insert(videoID)
-                    _ = try? await webView.evaluateJavaScript("player.pauseVideo()")
-                }
-            default:
-                if value.hasPrefix("error:") {
-                    callbacks[videoID]?.failed()
-                }
-            }
-        }
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "youtubePlayer")
     }
 
     private static func html(videoID: String) -> String {
@@ -1965,24 +1925,29 @@ final class YouTubeWarmPlayerPool: NSObject, WKScriptMessageHandler {
         <html>
         <head>
           <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-          <style>html,body,#player{width:100%;height:100%;margin:0;background:#000;overflow:hidden}</style>
+          <style>
+            html,body,#player { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#000; }
+          </style>
         </head>
         <body>
           <div id="player"></div>
           <script src="https://www.youtube.com/iframe_api"></script>
           <script>
             var player;
-            function beginPrewarm() { player.mute(); player.playVideo(); }
-            function beginPlayback() { player.unMute(); player.playVideo(); }
             function onYouTubeIframeAPIReady() {
               player = new YT.Player('player', {
                 videoId: '\(safeID)',
                 width: '100%',
                 height: '100%',
-                playerVars: { autoplay: 0, playsinline: 1, rel: 0, modestbranding: 1 },
+                playerVars: {
+                  autoplay: 1,
+                  playsinline: 1,
+                  rel: 0,
+                  modestbranding: 1
+                },
                 events: {
-                  onReady: function() {
-                    window.webkit.messageHandlers.youtubePlayer.postMessage('ready');
+                  onReady: function(event) {
+                    event.target.playVideo();
                   },
                   onStateChange: function(event) {
                     if (event.data === YT.PlayerState.PLAYING) {
@@ -2000,20 +1965,27 @@ final class YouTubeWarmPlayerPool: NSObject, WKScriptMessageHandler {
         </html>
         """
     }
-}
 
-private struct YouTubeEmbeddedPlayer: UIViewRepresentable {
-    let videoID: String
-    let onPlaying: () -> Void
-    let onFailed: () -> Void
+    final class Coordinator: NSObject, WKScriptMessageHandler {
+        let onPlaying: () -> Void
+        let onFailed: () -> Void
+        private var deliveredPlaying = false
 
-    func makeUIView(context: Context) -> WKWebView {
-        YouTubeWarmPlayerPool.shared.start(videoID: videoID, onPlaying: onPlaying, onFailed: onFailed)
+        init(onPlaying: @escaping () -> Void, onFailed: @escaping () -> Void) {
+            self.onPlaying = onPlaying
+            self.onFailed = onFailed
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let value = message.body as? String else { return }
+            if value == "playing", !deliveredPlaying {
+                deliveredPlaying = true
+                onPlaying()
+            } else if value.hasPrefix("error:") {
+                onFailed()
+            }
+        }
     }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Void) {}
 }
 
 private struct NativeVideoPlayer: UIViewControllerRepresentable {
