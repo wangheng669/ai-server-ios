@@ -71,6 +71,13 @@ struct MarketService {
         return try await request(url, as: InvestorMoodResponse.self).data
     }
 
+    func aShareTemperature(days: Int = 90) async throws -> MarketAShareTemperature {
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/ashare-temperature"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [.init(name: "days", value: String(days))]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        return try await request(url, as: MarketAShareTemperatureResponse.self).data
+    }
+
     private func request<Response: Decodable>(_ url: URL, as type: Response.Type) async throws -> Response {
         let data: Data
         let response: URLResponse

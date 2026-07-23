@@ -19,6 +19,7 @@ struct RetailInvestorView: View {
                     if let message = store.errorMessage {
                         errorBanner(message)
                     }
+                    aShareTemperatureCard
                     breadthTemperatureCard
                     marketBreadthCard
                     capitalCard
@@ -40,6 +41,69 @@ struct RetailInvestorView: View {
         }
         .onChange(of: path) { _, path in showsDetail = !path.isEmpty }
         .onDisappear { showsDetail = false }
+    }
+
+    private var aShareTemperatureCard: some View {
+        let metrics = store.temperature?.latest.aiServer
+        let temperature = metrics?.compositeTemperature?.value
+        let progress = CGFloat(min(max(temperature ?? 0, 0), 100) / 100)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 16) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 11)
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(
+                            AngularGradient(colors: [.blue, .yellow, .orange, .red], center: .center),
+                            style: StrokeStyle(lineWidth: 11, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                    VStack(spacing: 0) {
+                        Text(temperature.map { String(Int($0.rounded())) } ?? "—")
+                            .font(.system(size: 38, weight: .bold, design: .rounded))
+                        Text("℃")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 116, height: 116)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("A股市场温度 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
+
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 7) {
+                        Text("A股市场温度")
+                            .font(.system(size: 20, weight: .bold))
+                        Text("自研")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.1), in: Capsule())
+                    }
+                    Text(metrics?.compositeTemperature?.label.nonEmpty ?? "等待温度数据")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(temperatureTint(temperature))
+                    Text("估值与市场情绪各占 50%，数值越高代表市场越热。")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+            HStack(spacing: 0) {
+                temperatureMetric("估值", value: metrics?.valuationPercentile?.value)
+                Divider().frame(height: 36)
+                temperatureMetric("情绪", value: metrics?.sentimentPercentile?.value)
+                Divider().frame(height: 36)
+                temperatureMetric("上涨占比", value: metrics?.advancerShare.map { $0.value * 100 })
+            }
+            sourceLine("AI Server · 长桥同类公式", suffix: metrics?.compositeTemperature?.fetchedAt)
+        }
+        .sentimentCard()
     }
 
     private var header: some View {
@@ -295,6 +359,28 @@ struct RetailInvestorView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private func temperatureMetric(_ title: String, value: Double?) -> some View {
+        VStack(spacing: 3) {
+            Text(title)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+            Text(value.map { String(format: "%.1f%%", $0) } ?? "—")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func temperatureTint(_ value: Double?) -> Color {
+        guard let value else { return .secondary }
+        switch value {
+        case 70...: return .red
+        case 55..<70: return .orange
+        case 40..<55: return .secondary
+        default: return .blue
+        }
+    }
+
     private func capitalMetric(title: String, value: String, detail: String, change: Double?, systemImage: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: systemImage)
@@ -547,6 +633,7 @@ private struct InvestorMoodWebPage: UIViewRepresentable {
 private final class RetailSentimentStore {
     private(set) var dashboard: MarketDashboard?
     private(set) var investorMood: InvestorMoodBoard?
+    private(set) var temperature: MarketAShareTemperature?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private let service: MarketService
@@ -590,6 +677,7 @@ private final class RetailSentimentStore {
         defer { isLoading = false }
         async let dashboardRequest = service.dashboard(refresh: force)
         async let moodRequest = service.investorMood()
+        async let temperatureRequest = service.aShareTemperature()
         do {
             dashboard = try await dashboardRequest
             loaded = true
@@ -606,7 +694,18 @@ private final class RetailSentimentStore {
         } catch {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
+        do {
+            temperature = try await temperatureRequest
+        } catch is CancellationError {
+            return
+        } catch {
+            if dashboard == nil { errorMessage = error.localizedDescription }
+        }
     }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }
 
 private enum RetailSentimentFormat {

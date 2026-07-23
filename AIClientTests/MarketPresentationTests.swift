@@ -2,6 +2,18 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesAShareTemperatureContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_ashare_temperature_v3","days":90,"latest":{"ai_server":{"composite_temperature":{"value":84.55,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"valuation_percentile":{"value":82.35,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"sentiment_percentile":{"value":86.75,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"advancer_share":{"value":0.7759,"label":"","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"}}}}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketAShareTemperatureResponse.self, from: data)
+
+        XCTAssertEqual(response.data.dataContract, "market_ashare_temperature_v3")
+        XCTAssertEqual(response.data.latest.aiServer?.compositeTemperature?.value, 84.55)
+        XCTAssertEqual(response.data.latest.aiServer?.valuationPercentile?.value, 82.35)
+        XCTAssertEqual(response.data.latest.aiServer?.sentimentPercentile?.value, 86.75)
+        XCTAssertEqual(response.data.latest.aiServer?.advancerShare?.value, 0.7759)
+    }
+
     func testDecodesInvestorMoodPublicVideoSamples() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
         let response = try JSONDecoder().decode(InvestorMoodResponse.self, from: data)
