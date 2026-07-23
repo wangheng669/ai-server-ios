@@ -2,6 +2,14 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesHongKongValuationHistory() throws {
+        let data = Data(#"{"date":["2026-07-22","2026-07-23"],"pe":[13.79,13.97],"close":[25635.28,25950.93]}"#.utf8)
+        let history = try JSONDecoder().decode(MarketHKValuationHistory.self, from: data)
+
+        XCTAssertEqual(history.date.last, "2026-07-23")
+        XCTAssertEqual(history.pe.last, 13.97)
+    }
+
     func testDecodesAShareTemperatureContract() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_ashare_temperature_v3","days":90,"latest":{"ai_server":{"composite_temperature":{"value":84.55,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"valuation_percentile":{"value":82.35,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"sentiment_percentile":{"value":86.75,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"advancer_share":{"value":0.7759,"label":"","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"}}}}}"#.utf8)
 

@@ -6,6 +6,7 @@ struct RetailInvestorView: View {
     @Binding private var showsDetail: Bool
     @State private var store = RetailSentimentStore()
     @State private var path: [InvestorMoodRoute] = []
+    @State private var selectedMarket: SentimentMarket = .china
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
@@ -16,13 +17,19 @@ struct RetailInvestorView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     header
+                    marketPicker
                     if let message = store.errorMessage {
                         errorBanner(message)
                     }
-                    aShareTemperatureCard
-                    marketBreadthCard
-                    capitalCard
-                    sectorCard
+                    marketTemperatureCard
+                    if selectedMarket == .china {
+                        marketBreadthCard
+                        capitalCard
+                        sectorCard
+                    } else {
+                        globalMarketBreadthCard
+                        globalMethodologyCard
+                    }
                     investorMoodCard
                     methodologyNote
                 }
@@ -42,14 +49,14 @@ struct RetailInvestorView: View {
         .onDisappear { showsDetail = false }
     }
 
-    private var aShareTemperatureCard: some View {
-        let metrics = store.temperature?.latest.aiServer
-        let temperature = metrics?.compositeTemperature?.value
+    private var marketTemperatureCard: some View {
+        let snapshot = store.snapshot(for: selectedMarket)
+        let temperature = snapshot?.score
         let progress = CGFloat(min(max(temperature ?? 0, 0), 100) / 100)
         return VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("A 股市场温度")
+                    Text("\(selectedMarket.title)市场情绪")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -62,7 +69,7 @@ struct RetailInvestorView: View {
                     }
                 }
                 Spacer()
-                Text(metrics?.compositeTemperature?.label.nonEmpty ?? "等待数据")
+                Text(snapshot?.label.nonEmpty ?? "等待数据")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
@@ -103,16 +110,16 @@ struct RetailInvestorView: View {
             }
 
             HStack(spacing: 0) {
-                temperatureMetric("估值温度", value: metrics?.valuationPercentile?.value)
+                temperatureMetric(snapshot?.primaryTitle ?? "主要指标", value: snapshot?.primaryValue)
                 Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 36)
-                temperatureMetric("情绪温度", value: metrics?.sentimentPercentile?.value)
+                temperatureMetric(snapshot?.secondaryTitle ?? "辅助指标", value: snapshot?.secondaryValue)
             }
 
             HStack(spacing: 5) {
                 Image(systemName: "function")
-                Text("估值与情绪各占 50%")
+                Text(snapshot?.formula ?? selectedMarket.methodology)
                 Spacer()
-                if let fetchedAt = metrics?.compositeTemperature?.fetchedAt {
+                if let fetchedAt = snapshot?.fetchedAt {
                     Text(RetailSentimentFormat.shortTime(fetchedAt))
                 }
             }
@@ -130,7 +137,17 @@ struct RetailInvestorView: View {
             in: RoundedRectangle(cornerRadius: 22, style: .continuous)
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("A股市场温度 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
+        .accessibilityLabel("\(selectedMarket.title)市场情绪 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
+    }
+
+    private var marketPicker: some View {
+        Picker("市场", selection: $selectedMarket) {
+            ForEach(SentimentMarket.allCases) { market in
+                Text(market.title).tag(market)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("选择市场情绪")
     }
 
     private var header: some View {
@@ -186,6 +203,51 @@ struct RetailInvestorView: View {
             }
             .frame(height: 7)
             sourceLine(store.dashboard?.ashareOverview?.source ?? "A股行情快照", suffix: store.dashboard?.ashareOverview?.fetchedAt)
+        }
+        .sentimentCard()
+    }
+
+    private var globalMarketBreadthCard: some View {
+        let breadth = store.constituentBreadth(for: selectedMarket)
+        return VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                sectionTitle("核心成分表现", icon: "chart.bar.fill")
+                Spacer()
+                Text("样本 \(breadth.total)")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(HoldingsPalette.purple)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(HoldingsPalette.purple.opacity(0.1), in: Capsule())
+            }
+            HStack(spacing: 0) {
+                breadthMetric("上涨", value: breadth.up, color: .red)
+                Divider().frame(height: 42)
+                breadthMetric("下跌", value: breadth.down, color: .green)
+                Divider().frame(height: 42)
+                breadthMetric("平盘", value: breadth.flat, color: .secondary)
+            }
+            GeometryReader { proxy in
+                HStack(spacing: 2) {
+                    Rectangle().fill(Color.red.opacity(0.8)).frame(width: proxy.size.width * breadth.upRatio)
+                    Rectangle().fill(Color.green.opacity(0.8)).frame(width: proxy.size.width * breadth.downRatio)
+                    Rectangle().fill(Color.secondary.opacity(0.3))
+                }
+                .clipShape(Capsule())
+            }
+            .frame(height: 7)
+            sourceLine(selectedMarket == .hongKong ? "恒生指数核心成分" : "标普 500 核心成分", suffix: store.dashboard?.generatedAt)
+        }
+        .sentimentCard()
+    }
+
+    private var globalMethodologyCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            sectionTitle(selectedMarket == .unitedStates ? "情绪驱动" : "计算口径", icon: "info.circle.fill")
+            Text(store.snapshot(for: selectedMarket)?.detail ?? selectedMarket.detail)
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .sentimentCard()
     }
@@ -325,7 +387,7 @@ struct RetailInvestorView: View {
     }
 
     private var methodologyNote: some View {
-        Label("人物观点仅作观察样本，不计入 A 股市场温度。", systemImage: "checkmark.shield.fill")
+        Label("人物观点仅作观察样本，不计入市场情绪分数。", systemImage: "checkmark.shield.fill")
             .font(.system(size: 11.5))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 4)
@@ -613,6 +675,10 @@ private final class RetailSentimentStore {
     private(set) var dashboard: MarketDashboard?
     private(set) var investorMood: InvestorMoodBoard?
     private(set) var temperature: MarketAShareTemperature?
+    private(set) var hongKongConstituents: MarketIndexConstituents?
+    private(set) var unitedStatesConstituents: MarketIndexConstituents?
+    private(set) var hongKongValuationHistory: MarketHKValuationHistory?
+    private(set) var hongKongCharts: [MarketChart] = []
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private let service: MarketService
@@ -635,6 +701,107 @@ private final class RetailSentimentStore {
         let total = max(breadth.up + breadth.down + breadth.flat, 1)
         return CGFloat(breadth.down) / CGFloat(total)
     }
+
+    func snapshot(for market: SentimentMarket) -> SentimentSnapshot? {
+        switch market {
+        case .china:
+            guard let metrics = temperature?.latest.aiServer,
+                  let score = metrics.compositeTemperature?.value else { return nil }
+            return SentimentSnapshot(
+                score: score,
+                label: metrics.compositeTemperature?.label ?? "",
+                primaryTitle: "估值温度",
+                primaryValue: metrics.valuationPercentile?.value,
+                secondaryTitle: "情绪温度",
+                secondaryValue: metrics.sentimentPercentile?.value,
+                formula: "估值与情绪各占 50%",
+                fetchedAt: metrics.compositeTemperature?.fetchedAt,
+                detail: "当前市场市盈率中位数与上涨家数占比，分别映射到历史百分位后等权合成。"
+            )
+        case .hongKong:
+            let breadth = constituentBreadth(for: market)
+            guard breadth.total > 0,
+                  let valuationPercentile = hongKongValuationPercentile,
+                  let sentimentPercentile = hongKongSentimentPercentile else { return nil }
+            let score = (valuationPercentile + sentimentPercentile) / 2
+            return SentimentSnapshot(
+                score: score,
+                label: SentimentSnapshot.label(for: score),
+                primaryTitle: "估值温度",
+                primaryValue: valuationPercentile,
+                secondaryTitle: "情绪温度",
+                secondaryValue: sentimentPercentile,
+                formula: "估值与情绪各占 50%",
+                fetchedAt: dashboard?.generatedAt,
+                detail: "与 A 股采用相同公式：恒生指数当前市盈率的历史百分位，与核心成分上涨家数占比的近一年历史百分位等权合成。"
+            )
+        case .unitedStates:
+            guard let sentiment = dashboard?.sentiment, sentiment.available != false else { return nil }
+            return SentimentSnapshot(
+                score: sentiment.score,
+                label: sentiment.ratingZh,
+                primaryTitle: "当前情绪",
+                primaryValue: sentiment.score,
+                secondaryTitle: "昨日情绪",
+                secondaryValue: sentiment.previousClose,
+                formula: "CNN 七因子情绪指数",
+                fetchedAt: sentiment.updatedAt,
+                detail: sentiment.reasonSummary ?? "综合市场动能、价格强度与广度、期权、VIX、避险需求和垃圾债需求。"
+            )
+        }
+    }
+
+    func constituentBreadth(for market: SentimentMarket) -> SentimentBreadth {
+        let items: [MarketIndexConstituent]
+        switch market {
+        case .hongKong: items = hongKongConstituents?.items ?? []
+        case .unitedStates: items = unitedStatesConstituents?.items ?? []
+        case .china: items = []
+        }
+        var up = 0, down = 0, flat = 0
+        for item in items {
+            let change = item.quote.percentValue
+            if change > 0.001 { up += 1 }
+            else if change < -0.001 { down += 1 }
+            else { flat += 1 }
+        }
+        return SentimentBreadth(up: up, down: down, flat: flat)
+    }
+
+    private var hongKongValuationPercentile: Double? {
+        guard let values = hongKongValuationHistory?.pe.filter({ $0 > 0 }),
+              let current = values.last, !values.isEmpty else { return nil }
+        return percentile(of: current, in: values)
+    }
+
+    private var hongKongSentimentPercentile: Double? {
+        let current = constituentBreadth(for: .hongKong).weightedAdvancerShare
+        guard !hongKongCharts.isEmpty else { return nil }
+        var changesByDate: [Int64: [Double]] = [:]
+        for chart in hongKongCharts {
+            let candles = chart.candles.sorted { $0.timestamp < $1.timestamp }
+            for index in 1..<candles.count {
+                let previous = candles[index - 1].close
+                guard previous > 0 else { continue }
+                changesByDate[candles[index].timestamp, default: []].append((candles[index].close - previous) / previous)
+            }
+        }
+        let historicalShares = changesByDate.values.compactMap { changes -> Double? in
+            guard changes.count >= max(3, hongKongCharts.count / 2) else { return nil }
+            let up = changes.filter { $0 > 0.00001 }.count
+            let flat = changes.filter { abs($0) <= 0.00001 }.count
+            return (Double(up) + Double(flat) / 2) / Double(changes.count)
+        }
+        guard !historicalShares.isEmpty else { return nil }
+        return percentile(of: current, in: historicalShares)
+    }
+
+    private func percentile(of value: Double, in samples: [Double]) -> Double {
+        let less = samples.filter { $0 < value }.count
+        let equal = samples.filter { abs($0 - value) < 0.000_001 }.count
+        return 100 * (Double(less) + Double(equal) / 2) / Double(max(samples.count, 1))
+    }
+
     func load(force: Bool = false) async {
         if loaded, !force { return }
         guard !isLoading else { return }
@@ -643,6 +810,9 @@ private final class RetailSentimentStore {
         async let dashboardRequest = service.dashboard(refresh: force)
         async let moodRequest = service.investorMood()
         async let temperatureRequest = service.aShareTemperature()
+        async let hongKongRequest = service.indexConstituents(symbol: "^HSI")
+        async let unitedStatesRequest = service.indexConstituents(symbol: "^GSPC")
+        async let hongKongValuationRequest = service.hongKongValuationHistory()
         do {
             dashboard = try await dashboardRequest
             loaded = true
@@ -666,7 +836,103 @@ private final class RetailSentimentStore {
         } catch {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
+        do {
+            hongKongConstituents = try await hongKongRequest
+        } catch is CancellationError {
+            return
+        } catch {
+            if dashboard == nil { errorMessage = error.localizedDescription }
+        }
+        if let constituents = hongKongConstituents {
+            hongKongCharts = await withTaskGroup(of: MarketChart?.self) { group in
+                for item in constituents.items {
+                    group.addTask { [service] in
+                        try? await service.chart(symbol: item.quote.symbol, range: .year)
+                    }
+                }
+                var charts: [MarketChart] = []
+                for await chart in group {
+                    if let chart { charts.append(chart) }
+                }
+                return charts
+            }
+        }
+        do {
+            hongKongValuationHistory = try await hongKongValuationRequest
+        } catch is CancellationError {
+            return
+        } catch {
+            if dashboard == nil { errorMessage = error.localizedDescription }
+        }
+        do {
+            unitedStatesConstituents = try await unitedStatesRequest
+        } catch is CancellationError {
+            return
+        } catch {
+            if dashboard == nil { errorMessage = error.localizedDescription }
+        }
     }
+}
+
+private enum SentimentMarket: String, CaseIterable, Identifiable {
+    case china
+    case hongKong
+    case unitedStates
+
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .china: "A 股"
+        case .hongKong: "港股"
+        case .unitedStates: "美股"
+        }
+    }
+    var methodology: String {
+        switch self {
+        case .china: "估值与情绪各占 50%"
+        case .hongKong: "估值与情绪各占 50%"
+        case .unitedStates: "CNN 七因子情绪指数"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .china: "结合估值与市场广度的历史百分位。"
+        case .hongKong: "恒指估值与核心成分情绪各占 50%。"
+        case .unitedStates: "采用 CNN Fear & Greed 综合情绪指标。"
+        }
+    }
+}
+
+private struct SentimentSnapshot {
+    let score: Double
+    let label: String
+    let primaryTitle: String
+    let primaryValue: Double?
+    let secondaryTitle: String
+    let secondaryValue: Double?
+    let formula: String
+    let fetchedAt: String?
+    let detail: String
+
+    static func label(for value: Double) -> String {
+        switch value {
+        case ..<10: "极冷"
+        case ..<30: "偏冷"
+        case ..<70: "正常"
+        case ..<90: "偏热"
+        default: "极热"
+        }
+    }
+}
+
+private struct SentimentBreadth {
+    let up: Int
+    let down: Int
+    let flat: Int
+    var total: Int { up + down + flat }
+    var weightedAdvancerShare: Double { (Double(up) + Double(flat) / 2) / Double(max(total, 1)) }
+    var upRatio: CGFloat { CGFloat(up) / CGFloat(max(total, 1)) }
+    var downRatio: CGFloat { CGFloat(down) / CGFloat(max(total, 1)) }
 }
 
 private extension String {

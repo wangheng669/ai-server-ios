@@ -586,6 +586,11 @@ struct MarketTemperatureMetric: Decodable {
     let fetchedAt: String
 }
 
+struct MarketHKValuationHistory: Decodable {
+    let date: [String]
+    let pe: [Double]
+}
+
 struct MarketChartResponse: Decodable {
     let success: Bool
     let data: MarketChart
