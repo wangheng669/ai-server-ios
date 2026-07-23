@@ -542,6 +542,7 @@ struct MarketChartPoint: Decodable, Identifiable, Equatable {
     let volume: Double?
     let state: String
     let source: String
+    let session: String?
 
     var displayValue: Double? { close }
 }

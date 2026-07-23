@@ -2213,9 +2213,9 @@ private struct MarketDetailChart: View {
                         }
                     } else { Text(chartStatusMessage).font(.system(size: 12)).foregroundStyle(.secondary) }
                 } else {
-                    MarketLineChart(
-                        values: points.compactMap(\.displayValue),
-                        color: quoteTint(store.quote(symbol: symbol))
+                    MarketSessionLineChart(
+                        points: points,
+                        regularColor: quoteTint(store.quote(symbol: symbol))
                     )
                         .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
@@ -2272,7 +2272,8 @@ private struct MarketDetailChart: View {
     private var chartCaption: String {
         let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
         let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
-        return hasVolume ? "\(dated) · 成交量" : dated
+        let sessionText = points.contains { $0.session.map { $0 != "regular" && $0 != "closed" } == true } ? " · 含夜盘" : ""
+        return hasVolume ? "\(dated)\(sessionText) · 成交量" : "\(dated)\(sessionText)"
     }
     private var coverageMessage: String? {
         guard let quality = chart?.quality else { return nil }
@@ -2366,6 +2367,60 @@ private struct MarketLineChart: View {
                     withAnimation(.easeOut(duration: 0.45)) { progress = 1 }
                 }
             }
+    }
+}
+
+private struct MarketSessionLineChart: View {
+    let points: [MarketChartPoint]
+    let regularColor: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let sorted = points.sorted { $0.timestamp < $1.timestamp }
+            guard sorted.count > 1,
+                  let firstTimestamp = sorted.first?.timestamp,
+                  let lastTimestamp = sorted.last?.timestamp,
+                  lastTimestamp > firstTimestamp else { return }
+            let low = sorted.map(\.close).min() ?? 0
+            let high = sorted.map(\.close).max() ?? low
+            let span = max(high - low, 0.000_001)
+            let timeSpan = Double(lastTimestamp - firstTimestamp)
+
+            func canvasPoint(_ point: MarketChartPoint) -> CGPoint {
+                CGPoint(
+                    x: size.width * CGFloat(Double(point.timestamp - firstTimestamp) / timeSpan),
+                    y: size.height * (0.06 + CGFloat((high - point.close) / span) * 0.88)
+                )
+            }
+
+            var segment: [MarketChartPoint] = []
+            func drawSegment() {
+                guard segment.count > 1 else { return }
+                var path = Path()
+                path.move(to: canvasPoint(segment[0]))
+                segment.dropFirst().forEach { path.addLine(to: canvasPoint($0)) }
+                let isRegular = segment[0].session == nil || segment[0].session == "regular"
+                context.stroke(
+                    path,
+                    with: .color(isRegular ? regularColor : MarketStyle.purple),
+                    style: StrokeStyle(lineWidth: isRegular ? 1.7 : 2, lineCap: .round, lineJoin: .round)
+                )
+            }
+
+            for point in sorted {
+                if let previous = segment.last {
+                    let changedSession = (previous.session ?? "regular") != (point.session ?? "regular")
+                    let hasGap = point.timestamp - previous.timestamp > 15 * 60 * 1000
+                    if changedSession || hasGap {
+                        drawSegment()
+                        segment = []
+                    }
+                }
+                segment.append(point)
+            }
+            drawSegment()
+        }
+        .accessibilityHidden(true)
     }
 }
 
