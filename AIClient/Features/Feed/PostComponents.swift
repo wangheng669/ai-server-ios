@@ -392,108 +392,6 @@ final class XVideoPlaybackSession {
     }
 }
 
-@MainActor
-final class XVideoPlayerPool {
-    static let shared = XVideoPlayerPool()
-
-    private final class Entry {
-        let url: URL
-        let player: AVPlayer
-        var isPrerolled = false
-        var prerollTask: Task<Void, Never>?
-
-        init(url: URL, player: AVPlayer) {
-            self.url = url
-            self.player = player
-        }
-    }
-
-    private let capacity = 4
-    private var entries: [URL: Entry] = [:]
-    private var recency: [URL] = []
-
-    func prewarm(_ urls: [URL]) {
-        var seen: Set<URL> = []
-        for url in urls.filter({ seen.insert($0).inserted }).prefix(capacity) {
-            let entry = entry(for: url)
-            startPrerollIfNeeded(entry)
-        }
-        trimIfNeeded()
-    }
-
-    func player(for url: URL, isMuted: Bool) -> AVPlayer {
-        let entry = entry(for: url)
-        entry.player.isMuted = isMuted
-        startPrerollIfNeeded(entry)
-        return entry.player
-    }
-
-    func isPrerolled(_ url: URL) -> Bool {
-        entries[url]?.isPrerolled == true
-    }
-
-    func waitForPreroll(_ url: URL) async -> Bool {
-        guard let entry = entries[url] else { return false }
-        startPrerollIfNeeded(entry)
-        await entry.prerollTask?.value
-        return entry.isPrerolled
-    }
-
-    private func entry(for url: URL) -> Entry {
-        if let entry = entries[url] {
-            markRecent(url)
-            return entry
-        }
-        let item = AVPlayerItem(url: url)
-        item.preferredForwardBufferDuration = 0
-        let player = AVPlayer(playerItem: item)
-        player.automaticallyWaitsToMinimizeStalling = false
-        let entry = Entry(url: url, player: player)
-        entries[url] = entry
-        markRecent(url)
-        trimIfNeeded()
-        return entry
-    }
-
-    private func startPrerollIfNeeded(_ entry: Entry) {
-        guard !entry.isPrerolled, entry.prerollTask == nil else { return }
-        entry.prerollTask = Task { @MainActor [weak self, weak entry] in
-            guard let self, let entry, let asset = entry.player.currentItem?.asset else { return }
-            defer { entry.prerollTask = nil }
-            guard (try? await asset.load(.isPlayable)) == true else { return }
-            for _ in 0..<480 {
-                guard !Task.isCancelled, self.entries[entry.url] === entry else { return }
-                if entry.player.status != .unknown { break }
-                try? await Task.sleep(for: .milliseconds(25))
-            }
-            guard !Task.isCancelled,
-                  self.entries[entry.url] === entry,
-                  entry.player.status == .readyToPlay else { return }
-            entry.isPrerolled = await withCheckedContinuation { continuation in
-                entry.player.preroll(atRate: 1) { finished in
-                    continuation.resume(returning: finished)
-                }
-            }
-        }
-    }
-
-    private func markRecent(_ url: URL) {
-        recency.removeAll { $0 == url }
-        recency.append(url)
-    }
-
-    private func trimIfNeeded() {
-        while entries.count > capacity, let oldest = recency.first {
-            recency.removeFirst()
-            guard let entry = entries.removeValue(forKey: oldest) else { continue }
-            if entry.player.status == .readyToPlay {
-                entry.player.cancelPendingPrerolls()
-            }
-            entry.prerollTask?.cancel()
-        }
-    }
-}
-
 struct XVideoPlayerView: View {
     private enum PlaybackState {
         case idle
@@ -508,7 +406,6 @@ struct XVideoPlayerView: View {
     @State private var thumbnail: UIImage?
     @State private var playbackState: PlaybackState = .idle
     @State private var isVideoReady = false
-    @State private var isPrerolled = false
     @State private var thumbnailFailed = false
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let url: URL
@@ -608,10 +505,7 @@ struct XVideoPlayerView: View {
         }
         .clipped()
         .task(id: url) {
-            preparePlayerIfNeeded()
-            async let thumbnailLoad: Void = loadThumbnail()
-            async let playerPreload: Void = prerollPlayer()
-            _ = await (thumbnailLoad, playerPreload)
+            await loadThumbnail()
         }
         .onDisappear {
             stopPlayback()
@@ -620,38 +514,21 @@ struct XVideoPlayerView: View {
 
     private func startPlayback() {
         activateAudioSession()
-        let player = player ?? XVideoPlayerPool.shared.player(for: url, isMuted: isMuted)
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 0
+        let player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = false
         player.isMuted = isMuted
         self.player = player
-        isPrerolled = XVideoPlayerPool.shared.isPrerolled(url)
         isVideoReady = false
         playbackState = .preparing
         XVideoPlaybackSession.shared.play(player, url: url)
-        if isPrerolled {
-            markVideoReady()
-        }
-    }
-
-    private func preparePlayerIfNeeded() {
-        guard player == nil else { return }
-        player = XVideoPlayerPool.shared.player(for: url, isMuted: isMuted)
-    }
-
-    @MainActor
-    private func prerollPlayer() async {
-        let completed = await XVideoPlayerPool.shared.waitForPreroll(url)
-        guard !Task.isCancelled else { return }
-        isPrerolled = completed
     }
 
     private func stopPlayback() {
         guard let player else { return }
-        if player.status == .readyToPlay {
-            player.cancelPendingPrerolls()
-        }
         XVideoPlaybackSession.shared.pause(player, url: url)
         self.player = nil
-        isPrerolled = false
     }
 
     private func markVideoReady() {
