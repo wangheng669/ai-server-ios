@@ -85,6 +85,27 @@ struct MarketService {
         return try await request(url, as: MarketHKValuationHistory.self)
     }
 
+    func unitedStatesValuationHistory() async throws -> MarketUSValuationHistory {
+        guard let url = URL(string: "https://www.multpl.com/s-p-500-pe-ratio/table/by-month") else {
+            throw MarketServiceError.invalidURL
+        }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(from: url)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw MarketServiceError.transport(error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
+        guard let html = String(data: data, encoding: .utf8) else { throw MarketServiceError.invalidResponse }
+        let values = marketParseSP500PEHistory(html)
+        guard values.count >= 12 else { throw MarketServiceError.invalidResponse }
+        return MarketUSValuationHistory(pe: values)
+    }
+
     private func request<Response: Decodable>(_ url: URL, as type: Response.Type) async throws -> Response {
         let data: Data
         let response: URLResponse
@@ -101,6 +122,18 @@ struct MarketService {
         guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
         do { return try JSONDecoder().decode(type, from: data) }
         catch { throw MarketServiceError.decoding(error) }
+    }
+}
+
+func marketParseSP500PEHistory(_ html: String) -> [Double] {
+    guard let expression = try? NSRegularExpression(
+        pattern: #"<tr class=\"(?:odd|even)\">\s*<td>.*?</td>\s*<td>.*?([0-9]+(?:\.[0-9]+)?)\s*</td>\s*</tr>"#,
+        options: [.dotMatchesLineSeparators]
+    ) else { return [] }
+    let range = NSRange(html.startIndex..<html.endIndex, in: html)
+    return expression.matches(in: html, range: range).compactMap { match in
+        guard let capture = Range(match.range(at: 1), in: html) else { return nil }
+        return Double(html[capture])
     }
 }
 

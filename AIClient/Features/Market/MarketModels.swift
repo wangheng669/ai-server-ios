@@ -591,6 +591,10 @@ struct MarketHKValuationHistory: Decodable {
     let pe: [Double]
 }
 
+struct MarketUSValuationHistory {
+    let pe: [Double]
+}
+
 struct MarketChartResponse: Decodable {
     let success: Bool
     let data: MarketChart

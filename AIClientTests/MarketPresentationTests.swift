@@ -10,6 +10,17 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(history.pe.last, 13.97)
     }
 
+    func testParsesSP500PEHistoryTable() {
+        let html = #"""
+        <table id="datatable">
+        <tr class="odd"><td>Jul 22, 2026</td><td><abbr title="Estimate">†</abbr>28.85</td></tr>
+        <tr class="even"><td>Jun 1, 2026</td><td>&#x2002;25.43</td></tr>
+        </table>
+        """#
+
+        XCTAssertEqual(marketParseSP500PEHistory(html), [28.85, 25.43])
+    }
+
     func testDecodesAShareTemperatureContract() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_ashare_temperature_v3","days":90,"latest":{"ai_server":{"composite_temperature":{"value":84.55,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"valuation_percentile":{"value":82.35,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"sentiment_percentile":{"value":86.75,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"advancer_share":{"value":0.7759,"label":"","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"}}}}}"#.utf8)
 
