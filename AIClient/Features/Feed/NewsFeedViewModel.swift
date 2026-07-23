@@ -218,7 +218,6 @@ final class NewsFeedViewModel: ObservableObject {
             page = saved.page
             canLoadMore = saved.canLoadMore
             isSwitchingSource = false
-            prewarmXVideos(in: saved.posts)
         } else {
             // Do not render the previous channel while this channel's first page is loading.
             // Keeping it here makes the loading state source-safe for every feed type.
@@ -314,7 +313,6 @@ final class NewsFeedViewModel: ObservableObject {
             let result = try await fetchPage(1, limit: pageSize, source: requestedSource)
             guard source == requestedSource, activeRefreshID == refreshID else { return }
             posts = result
-            prewarmXVideos(in: result)
             pendingRealtimePosts = []
             page = 1
             canLoadMore = !result.isEmpty
@@ -347,7 +345,6 @@ final class NewsFeedViewModel: ObservableObject {
             guard source == requestedSource else { return }
             let ids = Set(posts.map(\.id))
             posts += result.filter { !ids.contains($0.id) }
-            prewarmXVideos(in: result)
             page += 1
             canLoadMore = !result.isEmpty
             errorMessage = nil
@@ -398,7 +395,6 @@ final class NewsFeedViewModel: ObservableObject {
         } else {
             pendingRealtimePosts.insert(post, at: 0)
         }
-        prewarmXVideos(in: [post])
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
     }
 
@@ -406,7 +402,6 @@ final class NewsFeedViewModel: ObservableObject {
         guard !pendingRealtimePosts.isEmpty else { return }
         let existingIDs = Set(posts.map(\.id))
         posts.insert(contentsOf: pendingRealtimePosts.filter { !existingIDs.contains($0.id) }, at: 0)
-        prewarmXVideos(in: posts)
         pendingRealtimePosts = []
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
     }
@@ -425,11 +420,6 @@ final class NewsFeedViewModel: ObservableObject {
         case .flash: return post.isFlash
         case .weibo, .douyin: return false
         }
-    }
-
-    private func prewarmXVideos(in posts: [Post]) {
-        guard source == .x else { return }
-        XVideoPlayerPool.shared.prewarm(posts.flatMap(\.videoURLs))
     }
 
     private func task(_ name: String, updates source: FeedSource) -> Bool {
