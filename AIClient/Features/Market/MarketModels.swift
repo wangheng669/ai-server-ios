@@ -546,6 +546,46 @@ struct MarketSentiment: Codable {
     let stale: Bool?
 }
 
+struct MarketAShareTemperatureResponse: Decodable {
+    let success: Bool
+    let data: MarketAShareTemperature
+}
+
+struct MarketAShareTemperature: Decodable {
+    let dataContract: String
+    let days: Int
+    let latest: MarketAShareTemperatureLatest
+}
+
+struct MarketAShareTemperatureLatest: Decodable {
+    let aiServer: MarketAShareTemperatureMetrics?
+
+    enum CodingKeys: String, CodingKey {
+        case aiServer = "ai_server"
+    }
+}
+
+struct MarketAShareTemperatureMetrics: Decodable {
+    let compositeTemperature: MarketTemperatureMetric?
+    let valuationPercentile: MarketTemperatureMetric?
+    let sentimentPercentile: MarketTemperatureMetric?
+    let advancerShare: MarketTemperatureMetric?
+
+    enum CodingKeys: String, CodingKey {
+        case compositeTemperature = "composite_temperature"
+        case valuationPercentile = "valuation_percentile"
+        case sentimentPercentile = "sentiment_percentile"
+        case advancerShare = "advancer_share"
+    }
+}
+
+struct MarketTemperatureMetric: Decodable {
+    let value: Double
+    let label: String
+    let tradeDate: String
+    let fetchedAt: String
+}
+
 struct MarketChartResponse: Decodable {
     let success: Bool
     let data: MarketChart
