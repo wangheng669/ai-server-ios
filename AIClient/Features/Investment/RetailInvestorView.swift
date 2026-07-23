@@ -7,6 +7,7 @@ struct RetailInvestorView: View {
     @State private var store = RetailSentimentStore()
     @State private var path: [InvestorMoodRoute] = []
     @State private var selectedMarket: SentimentMarket = .china
+    @State private var showsAllInvestorMood = false
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
@@ -309,7 +310,8 @@ struct RetailInvestorView: View {
     private var investorMoodCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                sectionTitle("散户观察", icon: "person.3.fill")
+                Text("散户观察")
+                    .font(.system(size: 17, weight: .bold))
                 Spacer()
                 Text("观点不计入温度")
                     .font(.system(size: 10.5, weight: .medium))
@@ -318,55 +320,110 @@ struct RetailInvestorView: View {
             if store.investorMood?.items.isEmpty != false {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                investorMoodSummary(items)
+
+                let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(3))
+                ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
                     investorRow(item)
-                    if index < items.count - 1 { Divider() }
+                    if index < visibleItems.count - 1 {
+                        Divider().padding(.leading, 47)
+                    }
+                }
+
+                if items.count > 3 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showsAllInvestorMood.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(showsAllInvestorMood ? "收起" : "查看全部 \(items.count) 条")
+                            Image(systemName: showsAllInvestorMood ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HoldingsPalette.purple)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(HoldingsPalette.purple.opacity(0.07), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            Text(store.investorMood?.disclaimer ?? "观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。")
-                .font(.system(size: 11.5))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.top, 8)
+        .padding(.top, 6)
+    }
+
+    private func investorMoodSummary(_ items: [InvestorMoodItem]) -> some View {
+        let groupedItems: [String: [InvestorMoodItem]] = Dictionary(grouping: items) { item in
+            item.label
+        }
+        let groups: [InvestorMoodCount] = groupedItems.map { label, values in
+            InvestorMoodCount(label: label, count: values.count)
+        }.sorted { lhs, rhs in
+            lhs.count == rhs.count ? lhs.label < rhs.label : lhs.count > rhs.count
+        }
+
+        return HStack(spacing: 12) {
+            ForEach(groups) { group in
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(RetailSentimentFormat.moodColor(group.label))
+                        .frame(width: 6, height: 6)
+                    Text("\(group.label) \(group.count)")
+                }
+            }
+            Spacer(minLength: 0)
+            Text("样本 \(items.count)")
+                .foregroundStyle(.tertiary)
+        }
+        .font(.system(size: 10.5, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     private func investorRow(_ item: InvestorMoodItem) -> some View {
         NavigationLink(value: InvestorMoodRoute(item: item)) {
-            HStack(spacing: 11) {
+            HStack(spacing: 9) {
                 AsyncImage(url: URL(string: item.coverUrl)) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
                     } else {
                         Image(systemName: "person.crop.circle.fill")
-                            .resizable().scaledToFit().padding(10)
+                            .resizable().scaledToFit().padding(8)
                             .foregroundStyle(HoldingsPalette.purple.opacity(0.65))
                     }
                 }
-                .frame(width: 48, height: 48)
+                .frame(width: 38, height: 38)
                 .background(HoldingsPalette.purple.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .clipShape(Circle())
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
                         Text(item.nickname)
-                            .font(.system(size: 14.5, weight: .semibold))
+                            .font(.system(size: 13.5, weight: .semibold))
                             .foregroundStyle(.primary)
-                        moodBadge(item.label, stale: item.stale)
+                        Text(item.stale ? "\(item.label) · 旧样本" : item.label)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(RetailSentimentFormat.moodColor(item.label))
+                        Spacer(minLength: 2)
+                        Text(RetailSentimentFormat.relativeTime(item.createdAt))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
                     }
                     Text(item.analysis.isEmpty ? (item.reasons.first ?? item.description) : item.analysis)
-                        .font(.system(size: 12.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                    Text(RetailSentimentFormat.relativeTime(item.createdAt))
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 3)
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -479,6 +536,12 @@ struct RetailInvestorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
+}
+
+private struct InvestorMoodCount: Identifiable {
+    var id: String { label }
+    let label: String
+    let count: Int
 }
 
 private struct InvestorMoodRoute: Hashable {
