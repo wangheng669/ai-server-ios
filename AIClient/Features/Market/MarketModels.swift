@@ -655,6 +655,12 @@ struct MarketChartPoint: Decodable, Identifiable, Equatable {
     var displayValue: Double? { close }
 }
 
+func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketChartPoint, interval: String?) -> Bool {
+    let changedSession = (previous.session ?? "regular") != (current.session ?? "regular")
+    let hasIntradayGap = interval == "1m" && current.timestamp - previous.timestamp > 15 * 60 * 1000
+    return changedSession || hasIntradayGap
+}
+
 enum MarketRange: String, CaseIterable, Identifiable {
     case day = "1日", week = "1周", month = "1月", quarter = "3月", year = "1年", fiveYears = "5年", maximum = "最大"
     var id: Self { self }
