@@ -34,8 +34,6 @@ permissions:
 jobs:
   build:
     name: Build on office Mac mini
-    outputs:
-      installer_label: ${{ steps.choose-installer.outputs.label }}
     runs-on:
       - self-hosted
       - macOS
@@ -55,16 +53,6 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh running 0.08 testing
 
-      - name: Choose iPhone installer
-        id: choose-installer
-        run: |
-          # The build job proves the office runner is online. A transient iPhone
-          # discovery failure does not prove that the home runner is online, and
-          # targeting an offline runner leaves the job queued indefinitely.
-          # Auto deployments therefore stay on the office runner, where the
-          # installation script can retry device discovery and fail explicitly.
-          echo "label=office-builder" >> "$GITHUB_OUTPUT"
-          echo "Auto install is pinned to the online office runner."
       - name: Run tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -102,6 +90,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
       - name: Upload device app
+        if: ${{ inputs.install_target == 'home' }}
         uses: actions/upload-artifact@v7
         with:
           name: ios-device-app
@@ -109,7 +98,34 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Report signing started
+        if: ${{ inputs.install_target != 'home' }}
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh running 0.82 signing
+
+      - name: Sign and install directly on office Mac mini
+        if: ${{ inputs.install_target != 'home' }}
+        env:
+          APP_ARCHIVE: ${{ runner.temp }}/AIServerClient.app.zip
+          APP_PATH: ${{ runner.temp }}/signed-app/AIServerClient.app
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/sign-and-install-ios.sh
+
+      - name: Report direct installation completed
+        if: ${{ inputs.install_target != 'home' }}
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh succeeded 1 installed
+
       - name: Report build completed
+        if: ${{ inputs.install_target == 'home' }}
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -125,11 +141,12 @@ jobs:
   install:
     name: Sign and install on selected iPhone host
     needs: build
+    if: ${{ inputs.install_target == 'home' }}
     runs-on:
       - self-hosted
       - macOS
       - ARM64
-      - ${{ inputs.install_target == 'office' && 'office-builder' || inputs.install_target == 'home' && 'home-installer' || needs.build.outputs.installer_label }}
+      - home-installer
     timeout-minutes: 10
 
     steps:
