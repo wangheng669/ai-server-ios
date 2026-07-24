@@ -675,6 +675,11 @@ func marketChartXFraction(timestamp: Int64, firstTimestamp: Int64, lastTimestamp
     return min(max(CGFloat(Double(timestamp - firstTimestamp) / Double(lastTimestamp - firstTimestamp)), 0), 1)
 }
 
+func marketVolumeBarX(fraction: CGFloat, width: CGFloat, barWidth: CGFloat) -> CGFloat {
+    let inset = min(max(barWidth / 2, 0), max(width / 2, 0))
+    return inset + min(max(fraction, 0), 1) * max(width - inset * 2, 0)
+}
+
 enum MarketRange: String, CaseIterable, Identifiable {
     case day = "1日", week = "1周", month = "1月", quarter = "3月", year = "1年", fiveYears = "5年", maximum = "最大"
     var id: Self { self }
