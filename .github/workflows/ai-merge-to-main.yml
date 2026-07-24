@@ -43,7 +43,17 @@ jobs:
           set -euo pipefail
           git config user.name "AI Merge Bot"
           git config user.email "actions@users.noreply.github.com"
-          git fetch --no-tags origin main
+          git config http.version HTTP/1.1
+          for attempt in 1 2 3 4 5; do
+            if git fetch --no-tags origin main; then
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "Unable to fetch main after $attempt attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 3))
+          done
           git switch --force-create ai-merge origin/main
 
           if git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
@@ -146,9 +156,28 @@ jobs:
         if: steps.merge.outputs.already_merged == 'false'
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main
+          git config http.version HTTP/1.1
+          for attempt in 1 2 3 4 5; do
+            if git fetch --no-tags origin main; then
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "Unable to verify main after $attempt attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 3))
+          done
           test "$(git rev-parse origin/main)" = "$(git rev-parse HEAD^1)"
-          git push origin HEAD:main
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "Unable to publish main after $attempt attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 3))
+          done
 
       - name: Install the newly merged main
         if: steps.merge.outputs.already_merged == 'false'
@@ -156,7 +185,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error \
+          curl --retry 5 --retry-all-errors --retry-delay 3 \
+            --fail-with-body --silent --show-error \
             --request POST \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GH_TOKEN" \
