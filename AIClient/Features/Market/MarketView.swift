@@ -2537,7 +2537,7 @@ private struct VolumeBars: View {
             for (index, point) in sorted.enumerated() {
                 guard let volume = point.volume, volume > 0 else { continue }
                 let height = max(2, size.height * CGFloat(volume / maxVolume))
-                let x = size.width * fractions[index]
+                let x = marketVolumeBarX(fraction: fractions[index], width: size.width, barWidth: barWidth)
                 let rect = CGRect(x: x - barWidth / 2, y: size.height - height, width: barWidth, height: height)
                 let color = point.close >= point.open ? MarketStyle.gain : MarketStyle.loss
                 context.fill(Path(rect), with: .color(color.opacity(0.68)))

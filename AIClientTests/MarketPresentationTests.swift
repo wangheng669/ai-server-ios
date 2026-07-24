@@ -231,6 +231,12 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketChartXFraction(timestamp: 5_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 1)
     }
 
+    func testVolumeBarsRemainFullyInsideChartBounds() {
+        XCTAssertEqual(marketVolumeBarX(fraction: 0, width: 300, barWidth: 8), 4)
+        XCTAssertEqual(marketVolumeBarX(fraction: 0.5, width: 300, barWidth: 8), 150)
+        XCTAssertEqual(marketVolumeBarX(fraction: 1, width: 300, barWidth: 8), 296)
+    }
+
     func testAxisDigitsKeepSmallVIXMovesVisible() {
         XCTAssertEqual(marketAxisDigits(values: [15.77, 16.54]), 2)
         XCTAssertEqual(marketAxisDigits(values: [4_900, 4_950]), 0)
