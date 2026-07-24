@@ -2215,7 +2215,8 @@ private struct MarketDetailChart: View {
                 } else {
                     MarketSessionLineChart(
                         points: points,
-                        regularColor: quoteTint(store.quote(symbol: symbol))
+                        regularColor: quoteTint(store.quote(symbol: symbol)),
+                        interval: chart?.interval
                     )
                         .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
@@ -2373,6 +2374,7 @@ private struct MarketLineChart: View {
 private struct MarketSessionLineChart: View {
     let points: [MarketChartPoint]
     let regularColor: Color
+    let interval: String?
 
     var body: some View {
         Canvas { context, size in
@@ -2409,9 +2411,7 @@ private struct MarketSessionLineChart: View {
 
             for point in sorted {
                 if let previous = segment.last {
-                    let changedSession = (previous.session ?? "regular") != (point.session ?? "regular")
-                    let hasGap = point.timestamp - previous.timestamp > 15 * 60 * 1000
-                    if changedSession || hasGap {
+                    if marketChartShouldSplitSegment(previous: previous, current: point, interval: interval) {
                         drawSegment()
                         segment = []
                     }
