@@ -10,16 +10,6 @@ on:
         description: Branch, tag, or commit SHA to build and install
         required: false
         type: string
-      install_target:
-        description: Mac that can currently reach the iPhone
-        required: false
-        default: auto
-        type: choice
-        options:
-          - auto
-          - home
-          - office
-
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('Install {0}', inputs.git_ref || github.ref_name) || github.event.head_commit.message }}
 
 concurrency:
@@ -89,24 +79,13 @@ jobs:
           test -d "$app_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
-      - name: Upload device app
-        if: ${{ inputs.install_target == 'home' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ios-device-app
-          path: ${{ runner.temp }}/AIServerClient.app.zip
-          if-no-files-found: error
-          retention-days: 3
-
       - name: Report signing started
-        if: ${{ inputs.install_target != 'home' }}
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh running 0.82 signing
 
       - name: Sign and install directly on office Mac mini
-        if: ${{ inputs.install_target != 'home' }}
         env:
           APP_ARCHIVE: ${{ runner.temp }}/AIServerClient.app.zip
           APP_PATH: ${{ runner.temp }}/signed-app/AIServerClient.app
@@ -118,18 +97,10 @@ jobs:
         run: ./ci/sign-and-install-ios.sh
 
       - name: Report direct installation completed
-        if: ${{ inputs.install_target != 'home' }}
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed
-
-      - name: Report build completed
-        if: ${{ inputs.install_target == 'home' }}
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh running 0.58 waiting-for-installer
 
       - name: Report build failure
         if: ${{ failure() }}
@@ -137,62 +108,3 @@ jobs:
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh failed 0 build-failed
-
-  install:
-    name: Sign and install on selected iPhone host
-    needs: build
-    if: ${{ inputs.install_target == 'home' }}
-    runs-on:
-      - self-hosted
-      - macOS
-      - ARM64
-      - home-installer
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out installation script
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.git_ref || github.sha }}
-
-      - name: Report installer started
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh running 0.68 downloading
-
-      - name: Download device app
-        uses: actions/download-artifact@v8
-        with:
-          name: ios-device-app
-          path: ${{ runner.temp }}/ios-device-app
-
-      - name: Report signing started
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh running 0.82 signing
-
-      - name: Extract, sign, and install
-        env:
-          APP_ARCHIVE: ${{ runner.temp }}/ios-device-app/AIServerClient.app.zip
-          APP_PATH: ${{ runner.temp }}/signed-app/AIServerClient.app
-          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
-          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
-          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/sign-and-install-ios.sh
-
-      - name: Report installation completed
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh succeeded 1 installed
-
-      - name: Report installation failure
-        if: ${{ failure() }}
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh failed 0 install-failed
