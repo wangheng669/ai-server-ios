@@ -225,6 +225,12 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertTrue(marketChartShouldSplitSegment(previous: previous, current: nextDay, interval: "1m"))
     }
 
+    func testChartXFractionUsesTimestampScale() {
+        XCTAssertEqual(marketChartXFraction(timestamp: 1_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 0)
+        XCTAssertEqual(marketChartXFraction(timestamp: 2_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 0.25)
+        XCTAssertEqual(marketChartXFraction(timestamp: 5_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 1)
+    }
+
     func testAxisDigitsKeepSmallVIXMovesVisible() {
         XCTAssertEqual(marketAxisDigits(values: [15.77, 16.54]), 2)
         XCTAssertEqual(marketAxisDigits(values: [4_900, 4_950]), 0)

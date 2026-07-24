@@ -10,6 +10,7 @@ final class MarketStore {
     private(set) var chartErrors: [ChartKey: String] = [:]
     private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
     private(set) var constituentErrors: [String: String] = [:]
+    private(set) var companyLogoPaths: [String: String] = [:]
     private(set) var isLoading = false
     private(set) var isRetrying = false
     private(set) var errorMessage: String?
@@ -267,6 +268,13 @@ final class MarketStore {
 
     func constituent(symbol: String) -> MarketIndexConstituent? {
         indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })
+    }
+
+    func loadCompanyLogo(symbol: String, name: String) async {
+        guard companyLogoPaths[symbol] == nil else { return }
+        if let path = try? await service.companyLogo(symbol: symbol, name: name) {
+            companyLogoPaths[symbol] = path
+        }
     }
 
     private func mergeConstituent(_ update: MarketQuoteUpdate) {
