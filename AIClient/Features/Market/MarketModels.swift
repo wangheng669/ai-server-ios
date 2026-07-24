@@ -147,6 +147,15 @@ struct MarketIndexConstituent: Decodable, Identifiable {
     var id: String { quote.symbol }
 }
 
+struct MarketCompanyLogoResponse: Decodable {
+    let data: MarketCompanyLogo
+}
+
+struct MarketCompanyLogo: Decodable {
+    let found: Bool
+    let url: String
+}
+
 struct MarketDashboardFreshness: Codable {
     let latestQuoteAt: String?
     let latestTimestamp: Int64?
@@ -659,6 +668,11 @@ func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketCh
     let changedSession = (previous.session ?? "regular") != (current.session ?? "regular")
     let hasIntradayGap = interval == "1m" && current.timestamp - previous.timestamp > 15 * 60 * 1000
     return changedSession || hasIntradayGap
+}
+
+func marketChartXFraction(timestamp: Int64, firstTimestamp: Int64, lastTimestamp: Int64) -> CGFloat {
+    guard lastTimestamp > firstTimestamp else { return 0 }
+    return min(max(CGFloat(Double(timestamp - firstTimestamp) / Double(lastTimestamp - firstTimestamp)), 0), 1)
 }
 
 enum MarketRange: String, CaseIterable, Identifiable {

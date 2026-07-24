@@ -59,6 +59,17 @@ struct MarketService {
         return try await request(url, as: MarketIndexConstituentsResponse.self).data
     }
 
+    func companyLogo(symbol: String, name: String) async throws -> String? {
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/company-logo"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            .init(name: "symbol", value: symbol),
+            .init(name: "name", value: name)
+        ]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        let logo = try await request(url, as: MarketCompanyLogoResponse.self).data
+        return logo.found && !logo.url.isEmpty ? logo.url : nil
+    }
+
     func famousHoldings(managerKey: String? = nil) async throws -> FamousHoldings {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/famous-holdings"), resolvingAgainstBaseURL: false)
         if let managerKey { components?.queryItems = [.init(name: "manager", value: managerKey)] }
