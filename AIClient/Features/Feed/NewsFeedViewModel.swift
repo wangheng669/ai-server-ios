@@ -437,3 +437,73 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 }
+
+@MainActor
+final class WeiboFollowingFeedModel: ObservableObject {
+    @Published private(set) var posts: [Post] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var canLoadMore = true
+    @Published var errorMessage: String?
+
+    private var page = 1
+    private let pageSize: Int
+    private let fetchPosts: (Int, Int) async throws -> [Post]
+
+    init(
+        pageSize: Int = 20,
+        fetchPosts: ((Int, Int) async throws -> [Post])? = nil
+    ) {
+        self.pageSize = pageSize
+        if let fetchPosts {
+            self.fetchPosts = fetchPosts
+        } else {
+            let client = APIClient(baseURL: ServerConfiguration.currentURL)
+            self.fetchPosts = { page, limit in
+                try await client.fetchWeiboFollowingPosts(page: page, limit: limit)
+            }
+        }
+    }
+
+    func loadInitial() async {
+        guard posts.isEmpty, !isLoading else { return }
+        await refresh()
+    }
+
+    func refresh() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let result = try await fetchPosts(1, pageSize)
+            guard !Task.isCancelled else { return }
+            posts = result
+            page = 1
+            canLoadMore = !result.isEmpty
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreIfNeeded(current post: Post) async {
+        guard post.id == posts.last?.id, canLoadMore, !isLoading, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let result = try await fetchPosts(page + 1, pageSize)
+            guard !Task.isCancelled else { return }
+            let existingIDs = Set(posts.map(\.id))
+            posts += result.filter { !existingIDs.contains($0.id) }
+            page += 1
+            canLoadMore = !result.isEmpty
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
