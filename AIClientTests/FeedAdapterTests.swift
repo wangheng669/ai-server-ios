@@ -88,6 +88,41 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(query["final_score"], String(Post.minimumFeedScore))
     }
 
+    func testWeiboFollowingRequestUsesPlatformAggregateContract() {
+        let items = APIClient.weiboFollowingQueryItems(page: 3, limit: 20)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["source"], "rss")
+        XCTAssertEqual(query["rss_platform"], "weibo")
+        XCTAssertEqual(query["page"], "3")
+        XCTAssertEqual(query["limit"], "20")
+        XCTAssertEqual(query["sort"], "time_desc")
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+        XCTAssertNil(query["group_similar"])
+    }
+
+    @MainActor
+    func testWeiboFollowingPaginationIsIndependentAndDeduplicated() async throws {
+        var requests: [(page: Int, limit: Int)] = []
+        let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:41"}"#.utf8))
+        let duplicate = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:41"}"#.utf8))
+        let second = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"rss:52"}"#.utf8))
+        let model = WeiboFollowingFeedModel { page, limit in
+            requests.append((page, limit))
+            return page == 1 ? [first] : [duplicate, second]
+        }
+
+        await model.refresh()
+        await model.loadMoreIfNeeded(current: first)
+
+        XCTAssertEqual(requests.map(\.page), [1, 2])
+        XCTAssertEqual(requests.map(\.limit), [20, 20])
+        XCTAssertEqual(model.posts.map(\.id), [1, 2])
+    }
+
     func testPlaybackStreamPathUsesAPIPrefix() throws {
         let url = try XCTUnwrap(APIClient.playbackURL(
             from: "/post/video-playback/stream?formatId=18",

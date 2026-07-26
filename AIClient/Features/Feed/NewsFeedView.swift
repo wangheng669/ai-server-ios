@@ -29,10 +29,19 @@ private enum FlashFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private enum WeiboSection: String, CaseIterable, Identifiable {
+    case hot
+    case following
+
+    var id: Self { self }
+    var title: String { self == .hot ? "热搜" : "关注" }
+}
+
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @Binding private var hidesTabBar: Bool
     @StateObject private var model = NewsFeedViewModel()
+    @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
     @State private var path: [Post] = []
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
@@ -41,6 +50,7 @@ struct NewsFeedView: View {
     @State private var hasLoadedFeedOnce = false
     @State private var flashFilter: FlashFilter = .all
     @State private var expandedFlashIDs: Set<Int> = []
+    @State private var weiboSection: WeiboSection = .hot
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
     @State private var preparedWebViews: [Int: WKWebView] = [:]
@@ -275,29 +285,138 @@ struct NewsFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @ViewBuilder
     private func sourcePage(_ source: FeedSource) -> some View {
-        let posts = model.posts(for: source)
-        return ZStack {
-            feedList(for: source, posts: posts)
-                .opacity(posts.isEmpty ? 0 : 1)
-                .allowsHitTesting(!posts.isEmpty)
+        if source == .weibo {
+            weiboPage
+        } else {
+            let posts = model.posts(for: source)
+            ZStack {
+                feedList(for: source, posts: posts)
+                    .opacity(posts.isEmpty ? 0 : 1)
+                    .allowsHitTesting(!posts.isEmpty)
 
-            if posts.isEmpty {
-                feedStatus(for: source)
+                if posts.isEmpty {
+                    feedStatus(for: source)
+                }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: source) {
-            if source == .rss { await model.loadRSSFeedsIfNeeded() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .task(id: source) {
+                if source == .rss { await model.loadRSSFeedsIfNeeded() }
+            }
         }
     }
 
-    private func feedList(for source: FeedSource, posts: [Post]) -> some View {
+    private var weiboPage: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: 53)
+            weiboSectionSelector
+            Divider().opacity(0.5)
+            if weiboSection == .hot {
+                let posts = model.posts(for: .weibo)
+                ZStack {
+                    feedList(for: .weibo, posts: posts, topInset: 0)
+                        .opacity(posts.isEmpty ? 0 : 1)
+                        .allowsHitTesting(!posts.isEmpty)
+                    if posts.isEmpty { feedStatus(for: .weibo, topInset: 0) }
+                }
+            } else {
+                weiboFollowingFeed
+            }
+        }
+        .task {
+            if weiboSection == .following {
+                await weiboFollowingModel.loadInitial()
+            }
+        }
+        .onChange(of: weiboSection) { _, section in
+            guard section == .following else { return }
+            Task { await weiboFollowingModel.loadInitial() }
+        }
+    }
+
+    private var weiboSectionSelector: some View {
+        HStack(spacing: 4) {
+            ForEach(WeiboSection.allCases) { section in
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { weiboSection = section }
+                } label: {
+                    Text(section.title)
+                        .font(.system(size: 13.5, weight: weiboSection == section ? .semibold : .medium))
+                        .foregroundStyle(weiboSection == section ? Color.primary : Color.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background(
+                            weiboSection == section ? Color(uiColor: .systemBackground) : Color.clear,
+                            in: Capsule()
+                        )
+                        .shadow(
+                            color: weiboSection == section ? .black.opacity(0.08) : .clear,
+                            radius: 3,
+                            y: 1
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(weiboSection == section ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .frame(width: 180)
+        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        .padding(.vertical, 8)
+        .sensoryFeedback(.selection, trigger: weiboSection)
+    }
+
+    private var weiboFollowingFeed: some View {
+        ZStack {
+            if !weiboFollowingModel.posts.isEmpty {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(weiboFollowingModel.posts) { post in
+                            NewsCardView(post: post, onOpen: { path.append(post) })
+                                .contentShape(Rectangle())
+                                .onTapGesture { path.append(post) }
+                                .task { await weiboFollowingModel.loadMoreIfNeeded(current: post) }
+                            Divider().opacity(0.6)
+                        }
+                        if weiboFollowingModel.isLoadingMore {
+                            ProgressView().padding(20)
+                        } else if weiboFollowingModel.errorMessage != nil {
+                            Button("加载失败，点按重试") {
+                                if let last = weiboFollowingModel.posts.last {
+                                    Task { await weiboFollowingModel.loadMoreIfNeeded(current: last) }
+                                }
+                            }
+                            .font(.footnote)
+                            .padding(16)
+                        }
+                        Color.clear.frame(height: 55)
+                    }
+                }
+                .refreshable { await weiboFollowingModel.refresh() }
+            } else if weiboFollowingModel.isLoading {
+                ProgressView("正在加载关注内容").font(.footnote)
+            } else if let error = weiboFollowingModel.errorMessage {
+                ContentUnavailableView {
+                    Label("关注内容加载失败", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("重新加载") { Task { await weiboFollowingModel.refresh() } }
+                }
+            } else {
+                ContentUnavailableView("暂无关注内容", systemImage: "person.2")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func feedList(for source: FeedSource, posts: [Post], topInset: CGFloat = 53) -> some View {
         let visiblePosts = visiblePosts(for: source, posts: posts)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    Color.clear.frame(height: 53).id("feed-top")
+                    Color.clear.frame(height: topInset).id("feed-top")
                     if source == .rss {
                         rssSourceFilterBar
                         Divider().opacity(0.55)
@@ -604,7 +723,7 @@ struct NewsFeedView: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private func feedStatus(for source: FeedSource) -> some View {
+    @ViewBuilder private func feedStatus(for source: FeedSource, topInset: CGFloat = 53) -> some View {
         VStack {
             if source == model.source, model.isLoading {
                 ProgressView("正在加载").font(.footnote)
@@ -616,7 +735,7 @@ struct NewsFeedView: View {
                 ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
             }
         }
-        .padding(.top, 53)
+        .padding(.top, topInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
