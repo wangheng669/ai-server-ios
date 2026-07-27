@@ -78,30 +78,34 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
-    func testRegularFeedsKeepMinimumScoreFilter() {
+    func testRSSFeedsUseElevatedScoreFilter() {
         let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .rss)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
             item.value.map { (item.name, $0) }
         })
 
         XCTAssertEqual(query["include_zero_score"], "false")
-        XCTAssertEqual(query["final_score"], String(Post.minimumFeedScore))
+        XCTAssertEqual(query["final_score"], "6")
     }
 
-    func testWeiboFollowingRequestUsesPlatformAggregateContract() {
-        let items = APIClient.weiboFollowingQueryItems(page: 3, limit: 20)
-        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
-            item.value.map { (item.name, $0) }
-        })
+    func testWeiboFeedIdentityUsesAuthoritativeFeedRoute() throws {
+        let decoder = JSONDecoder()
+        let direct = try decoder.decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":17,"name":"任意显示名","feed_url":"http://127.0.0.1:1200/weibo/user/1249424622","is_enabled":true}"#.utf8)
+        )
+        let imported = try decoder.decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":61,"name":"任意显示名","feed_url":"http://example.test/rss","folo_meta":{"raw_feed_url":"rsshub://weibo/user/1769173661"},"is_enabled":true}"#.utf8)
+        )
+        let unrelated = try decoder.decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":72,"name":"微博讨论区","feed_url":"http://127.0.0.1:1200/discourse/latest","is_enabled":true}"#.utf8)
+        )
 
-        XCTAssertEqual(query["source"], "rss")
-        XCTAssertEqual(query["rss_platform"], "weibo")
-        XCTAssertEqual(query["page"], "3")
-        XCTAssertEqual(query["limit"], "20")
-        XCTAssertEqual(query["sort"], "time_desc")
-        XCTAssertEqual(query["include_zero_score"], "true")
-        XCTAssertNil(query["final_score"])
-        XCTAssertNil(query["group_similar"])
+        XCTAssertTrue(direct.isWeiboFeed)
+        XCTAssertTrue(imported.isWeiboFeed)
+        XCTAssertFalse(unrelated.isWeiboFeed)
     }
 
     @MainActor
@@ -121,6 +125,22 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(requests.map(\.page), [1, 2])
         XCTAssertEqual(requests.map(\.limit), [20, 20])
         XCTAssertEqual(model.posts.map(\.id), [1, 2])
+    }
+
+    func testWeiboFollowingRequestUsesPlatformAggregateContract() {
+        let items = APIClient.weiboFollowingQueryItems(page: 3, limit: 20)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["source"], "rss")
+        XCTAssertEqual(query["rss_platform"], "weibo")
+        XCTAssertEqual(query["page"], "3")
+        XCTAssertEqual(query["limit"], "20")
+        XCTAssertEqual(query["sort"], "time_desc")
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+        XCTAssertNil(query["group_similar"])
     }
 
     func testPlaybackStreamPathUsesAPIPrefix() throws {

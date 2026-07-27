@@ -24,6 +24,7 @@ struct PostDetailView: View {
     @State private var selectedWikipediaEntity: WikipediaSelection?
     @State private var presentedWikipediaEntity: WikipediaEntity?
     @State private var isTruthBookmarked: Bool
+    @State private var isRSSBookmarked: Bool
     @State private var xComments: [XComment] = []
     @State private var isLoadingXComments = false
     @State private var xCommentsError: String?
@@ -40,6 +41,7 @@ struct PostDetailView: View {
         _newYorkTimesArticle = State(initialValue: storedArticle)
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
         _isTruthBookmarked = State(initialValue: TruthBookmarkStore.contains(post.id))
+        _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
     }
 
     var body: some View {
@@ -51,6 +53,7 @@ struct PostDetailView: View {
             else if post.sourceName == "知乎" { zhihuDetail }
             else if post.sourceName == "Truth" { truthDetail }
             else if post.isXueqiu { xueqiuDetail }
+            else if post.isRSS { rssDetail }
             else { standardDetail }
         }
         .navigationTitle(post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情"))))
@@ -84,6 +87,16 @@ struct PostDetailView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                     }
+                }
+            } else if post.isRSS {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isRSSBookmarked.toggle()
+                        RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
+                    } label: {
+                        Image(systemName: isRSSBookmarked ? "bookmark.fill" : "bookmark")
+                    }
+                    .accessibilityLabel(isRSSBookmarked ? "取消收藏" : "收藏")
                 }
             }
         }
@@ -242,6 +255,72 @@ struct PostDetailView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 14)
         }
+    }
+
+    private var rssDetail: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                rssSourceHeader
+
+                Text(post.displayTitle)
+                    .font(.system(size: 30, weight: .bold, design: .serif))
+                    .lineSpacing(4)
+
+                if post.summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+                   post.summary != post.displayTitle {
+                    Text(post.summary ?? "")
+                        .font(.system(size: 18, design: .serif))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(5)
+                }
+
+                rssMetadata
+
+                ForEach(rssContentImageURLs.prefix(1), id: \.self) { url in
+                    RemoteImage(url: url, height: 260, cornerRadius: 10)
+                }
+
+                Text(post.displayContent)
+                    .font(.system(size: 19, design: .serif))
+                    .lineSpacing(9)
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 36)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var rssSourceHeader: some View {
+        HStack(spacing: 10) {
+            AvatarView(url: post.avatarURL, name: post.sourceName, size: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(post.sourceName)
+                    .font(.system(size: 16, weight: .semibold))
+                Text("RSS · 原生阅读")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    private var rssMetadata: some View {
+        HStack(spacing: 7) {
+            if post.authorName != "RSS" { Text(post.authorName) }
+            if let time = post.formattedTime { Text("· \(time)") }
+            Text("· 图文")
+        }
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(.secondary)
+    }
+
+    private var rssContentImageURLs: [URL] {
+        (post.images ?? [])
+            .filter { !$0.isKnownInlineAsset }
+            .compactMap { MediaURL.image($0.url) }
     }
 
     private var xueqiuDetail: some View {
@@ -1882,19 +1961,69 @@ private final class BilibiliResourceLoader: NSObject, AVAssetResourceLoaderDeleg
     }
 }
 
-private struct YouTubeEmbeddedPlayer: UIViewRepresentable {
-    let videoID: String
-    let onPlaying: () -> Void
-    let onFailed: () -> Void
+@MainActor
+final class YouTubeWarmPlayerPool: NSObject, WKScriptMessageHandler {
+    static let shared = YouTubeWarmPlayerPool()
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onPlaying: onPlaying, onFailed: onFailed)
+    private var webViews: [String: WKWebView] = [:]
+    private var videoIDsByView: [ObjectIdentifier: String] = [:]
+    private var callbacks: [String: (playing: () -> Void, failed: () -> Void, time: (Double) -> Void)] = [:]
+    private var prewarmedIDs: Set<String> = []
+    private var fullscreenObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
+
+    func prewarm(videoID: String) -> WKWebView {
+        playerView(videoID: videoID, instanceID: "default", options: .standard)
     }
 
-    func makeUIView(context: Context) -> WKWebView {
-        let contentController = WKUserContentController()
-        contentController.add(context.coordinator, name: "youtubePlayer")
+    func start(
+        videoID: String,
+        instanceID: String,
+        options: YouTubePlayerOptions,
+        onPlaying: @escaping () -> Void,
+        onFailed: @escaping () -> Void,
+        onTime: @escaping (Double) -> Void
+    ) -> WKWebView {
+        let key = "\(videoID)::\(instanceID)::\(options.cacheKey)"
+        callbacks[key] = (onPlaying, onFailed, onTime)
+        let webView = playerView(videoID: videoID, instanceID: instanceID, options: options)
+        if prewarmedIDs.contains(key) {
+            webView.evaluateJavaScript("beginPlayback()")
+        }
+        return webView
+    }
 
+    func stopCallbacks(videoID: String) {
+        callbacks[videoID] = nil
+    }
+
+    func pause(
+        videoID: String,
+        instanceID: String,
+        options: YouTubePlayerOptions
+    ) {
+        let key = "\(videoID)::\(instanceID)::\(options.cacheKey)"
+        webViews[key]?.evaluateJavaScript("player.pauseVideo()")
+    }
+
+    func startPlayback(
+        videoID: String,
+        instanceID: String,
+        options: YouTubePlayerOptions
+    ) {
+        let key = "\(videoID)::\(instanceID)::\(options.cacheKey)"
+        webViews[key]?.evaluateJavaScript("beginPlayback()")
+    }
+
+    private func playerView(
+        videoID: String,
+        instanceID: String,
+        options: YouTubePlayerOptions
+    ) -> WKWebView {
+        let key = "\(videoID)::\(instanceID)::\(options.cacheKey)"
+        if let existing = webViews[key] { return existing }
+
+        let contentController = WKUserContentController()
+        contentController.add(self, name: "youtubePlayer")
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
@@ -1904,18 +2033,60 @@ private struct YouTubeEmbeddedPlayer: UIViewRepresentable {
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.scrollView.isScrollEnabled = false
-        webView.loadHTMLString(Self.html(videoID: videoID), baseURL: URL(string: "https://www.youtube-nocookie.com"))
+        webViews[key] = webView
+        let viewID = ObjectIdentifier(webView)
+        videoIDsByView[viewID] = key
+        if options.allowsNativeFullscreen {
+            fullscreenObservations[viewID] = webView.observe(
+                \.fullscreenState,
+                options: [.initial, .new]
+            ) { _, change in
+                let state = change.newValue ?? .notInFullscreen
+                Task { @MainActor in
+                    AppOrientationController.shared.setVideoFullscreen(
+                        state == .enteringFullscreen || state == .inFullscreen
+                    )
+                }
+            }
+        }
+        webView.loadHTMLString(
+            Self.html(videoID: videoID, options: options),
+            baseURL: URL(string: "https://www.youtube-nocookie.com")
+        )
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
-        webView.stopLoading()
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "youtubePlayer")
+    nonisolated func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        Task { @MainActor in
+            guard let webView = message.webView,
+                  let videoID = videoIDsByView[ObjectIdentifier(webView)],
+                  let value = message.body as? String else { return }
+            switch value {
+            case "ready":
+                if callbacks[videoID] != nil {
+                    _ = try? await webView.evaluateJavaScript("beginPlayback()")
+                } else {
+                    _ = try? await webView.evaluateJavaScript("beginPrewarm()")
+                }
+            case "playing":
+                if let callback = callbacks[videoID] {
+                    callback.playing()
+                } else if !prewarmedIDs.contains(videoID) {
+                    prewarmedIDs.insert(videoID)
+                    _ = try? await webView.evaluateJavaScript("player.pauseVideo()")
+                }
+            default:
+                if value.hasPrefix("error:") {
+                    callbacks[videoID]?.failed()
+                } else if value.hasPrefix("time:"),
+                          let seconds = Double(value.dropFirst(5)) {
+                    callbacks[videoID]?.time(seconds)
+                }
+            }
+        }
     }
 
-    private static func html(videoID: String) -> String {
+    private static func html(videoID: String, options: YouTubePlayerOptions) -> String {
         let safeID = videoID
             .replacingOccurrences(of: "\\", with: "")
             .replacingOccurrences(of: "'", with: "")
@@ -1925,29 +2096,41 @@ private struct YouTubeEmbeddedPlayer: UIViewRepresentable {
         <html>
         <head>
           <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-          <style>
-            html,body,#player { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#000; }
-          </style>
+          <style>html,body,#player{width:100%;height:100%;margin:0;background:#000;overflow:hidden}</style>
         </head>
         <body>
           <div id="player"></div>
           <script src="https://www.youtube.com/iframe_api"></script>
           <script>
             var player;
+            function beginPrewarm() { player.mute(); player.playVideo(); }
+            function beginPlayback() {
+              player.unMute();
+              player.playVideo();
+            }
             function onYouTubeIframeAPIReady() {
               player = new YT.Player('player', {
                 videoId: '\(safeID)',
                 width: '100%',
                 height: '100%',
                 playerVars: {
-                  autoplay: 1,
+                  autoplay: 0,
                   playsinline: 1,
                   rel: 0,
-                  modestbranding: 1
+                  modestbranding: 1,
+                  fs: \(options.allowsNativeFullscreen ? 1 : 0),
+                  cc_load_policy: \(options.loadsBuiltInCaptions ? 1 : 0),
+                  cc_lang_pref: 'zh',
+                  hl: 'zh-CN'
                 },
                 events: {
-                  onReady: function(event) {
-                    event.target.playVideo();
+                  onReady: function() {
+                    window.webkit.messageHandlers.youtubePlayer.postMessage('ready');
+                    setInterval(function() {
+                      if (player && player.getCurrentTime) {
+                        window.webkit.messageHandlers.youtubePlayer.postMessage('time:' + player.getCurrentTime());
+                      }
+                    }, 250);
                   },
                   onStateChange: function(event) {
                     if (event.data === YT.PlayerState.PLAYING) {
@@ -1965,27 +2148,48 @@ private struct YouTubeEmbeddedPlayer: UIViewRepresentable {
         </html>
         """
     }
+}
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
-        let onPlaying: () -> Void
-        let onFailed: () -> Void
-        private var deliveredPlaying = false
+struct YouTubePlayerOptions: Hashable {
+    let allowsNativeFullscreen: Bool
+    let loadsBuiltInCaptions: Bool
 
-        init(onPlaying: @escaping () -> Void, onFailed: @escaping () -> Void) {
-            self.onPlaying = onPlaying
-            self.onFailed = onFailed
-        }
+    static let standard = YouTubePlayerOptions(
+        allowsNativeFullscreen: true,
+        loadsBuiltInCaptions: true
+    )
+    static let customSubtitles = YouTubePlayerOptions(
+        allowsNativeFullscreen: false,
+        loadsBuiltInCaptions: false
+    )
 
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let value = message.body as? String else { return }
-            if value == "playing", !deliveredPlaying {
-                deliveredPlaying = true
-                onPlaying()
-            } else if value.hasPrefix("error:") {
-                onFailed()
-            }
-        }
+    var cacheKey: String {
+        "\(allowsNativeFullscreen ? 1 : 0)-\(loadsBuiltInCaptions ? 1 : 0)"
     }
+}
+
+struct YouTubeEmbeddedPlayer: UIViewRepresentable {
+    let videoID: String
+    var instanceID = "default"
+    var options = YouTubePlayerOptions.standard
+    let onPlaying: () -> Void
+    let onFailed: () -> Void
+    var onTime: (Double) -> Void = { _ in }
+
+    func makeUIView(context: Context) -> WKWebView {
+        YouTubeWarmPlayerPool.shared.start(
+            videoID: videoID,
+            instanceID: instanceID,
+            options: options,
+            onPlaying: onPlaying,
+            onFailed: onFailed,
+            onTime: onTime
+        )
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Void) {}
 }
 
 private struct NativeVideoPlayer: UIViewControllerRepresentable {
@@ -2091,6 +2295,24 @@ private enum TruthBookmarkStore {
             values.remove(postID)
         }
         UserDefaults.standard.set(values.sorted(), forKey: key)
+    }
+}
+
+private enum RSSBookmarkStore {
+    private static let key = "rss.bookmarkedPostIDs"
+
+    static func contains(_ postID: Int) -> Bool {
+        Set(UserDefaults.standard.array(forKey: key) as? [Int] ?? []).contains(postID)
+    }
+
+    static func set(_ isBookmarked: Bool, postID: Int) {
+        var ids = Set(UserDefaults.standard.array(forKey: key) as? [Int] ?? [])
+        if isBookmarked {
+            ids.insert(postID)
+        } else {
+            ids.remove(postID)
+        }
+        UserDefaults.standard.set(Array(ids), forKey: key)
     }
 }
 

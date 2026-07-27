@@ -2,7 +2,21 @@ import Foundation
 
 struct SpecialPeopleResponse: Decodable {
     let success: Bool
+    let categories: [PeopleCategory]?
     let users: [SpecialPerson]
+}
+
+struct PeopleCategory: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let sortOrder: Int
+
+    var topic: PeopleTopic? { PeopleTopic(apiValue: id) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case sortOrder = "sort_order"
+    }
 }
 
 struct SpecialPerson: Decodable, Identifiable, Hashable {
@@ -14,57 +28,58 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     let todayCount: Int
     let totalCount: Int
     let lastPostTime: String?
+    private let topicValue: String?
+    private let organizationNameValue: String?
+    private let avatarAssetNameValue: String?
+    private let discussionKeywordsValue: [String]?
+    private let hasOwnPostSourceValue: Bool?
+    private let focusTagsValue: [String]?
+    private let rolesValue: [PersonRole]?
+    private let milestonesValue: [PersonMilestone]?
+    private let relatedPeopleValue: [RelatedPerson]?
+    private let profileUpdatedAtValue: String?
 
     var id: String { userID }
     var isCurated: Bool { userID.hasPrefix("curated:") }
     var isIndustryPerson: Bool { topic == .technology }
-    var hasXSource: Bool { Self.aiLeaderXUserIDs.contains(userID) }
-    var hasOwnPostSource: Bool { !isCurated || hasXSource }
-    var isOrganizationAccount: Bool {
-        guard !isIndustryPerson else { return false }
-        let identity = (userScreenName ?? name)
-            .lowercased()
-            .filter { $0.isLetter || $0.isNumber }
-        let knownOrganizations: Set<String> = [
-            "openai", "anthropicai", "googledeepmind", "nvidia",
-            "worldcapitalai", "quiverquant", "figurerobot", "deepseekai"
-        ]
-        if knownOrganizations.contains(identity) { return true }
-        let description = (userDescription ?? "").lowercased()
-        return description.contains(" is an ai company")
-            || description.contains(" is an ai robotics company")
-            || description.contains("our mission is")
-            || description.contains("we’re hiring")
-            || description.contains("we're hiring")
-    }
+    var hasOwnPostSource: Bool { hasOwnPostSourceValue ?? !isCurated }
+    var hasXSource: Bool { hasOwnPostSource && userID.allSatisfy(\.isNumber) }
+    var isOrganizationAccount: Bool { false }
     var name: String { nonempty(userName) ?? nonempty(userScreenName) ?? "未知用户" }
     var handle: String? { nonempty(userScreenName).map { $0.hasPrefix("@") ? $0 : "@\($0)" } }
     var secondaryLabel: String? { isCurated ? nonempty(userScreenName) : handle }
     var organizationName: String? {
-        Self.aiLeaderOrganizations[userID] ?? (isCurated ? nonempty(userScreenName) : nil)
+        nonempty(organizationNameValue) ?? (isCurated ? nonempty(userScreenName) : nil)
     }
-    var avatarAssetName: String? {
-        switch userID {
-        case "curated:xi-jinping": "XiJinpingAvatar"
-        case "curated:donald-trump": "DonaldTrumpAvatar"
-        case "curated:jack-ma": "JackMaAvatar"
-        case "curated:lei-jun": "LeiJunAvatar"
-        case "curated:robin-li": "RobinLiAvatar"
-        case "curated:dong-mingzhu": "DongMingzhuAvatar"
-        case "curated:mao-zedong": "MaoZedongAvatar"
-        case "curated:deng-xiaoping": "DengXiaopingAvatar"
-        default: nil
-        }
-    }
+    var avatarAssetName: String? { nonempty(avatarAssetNameValue) }
     var discussionKeywords: [String] {
-        Self.aiLeaderDiscussionKeywords[userID] ?? [name]
+        guard let keywords = discussionKeywordsValue?.filter({
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }), !keywords.isEmpty else {
+            return [name]
+        }
+        return keywords
     }
+    var focusTags: [String] {
+        let tags = focusTagsValue?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? []
+        return tags.isEmpty ? Array(discussionKeywords.prefix(4)) : Array(tags.prefix(4))
+    }
+    var roles: [PersonRole] {
+        if let rolesValue, !rolesValue.isEmpty { return rolesValue }
+        return [PersonRole(organization: organizationName ?? topic.rawValue, title: secondaryLabel ?? "人物")]
+    }
+    var milestones: [PersonMilestone] { milestonesValue ?? [] }
+    var relatedPeople: [RelatedPerson] { relatedPeopleValue ?? [] }
+    var profileUpdatedAt: String? { nonempty(profileUpdatedAtValue) }
     var summary: String {
         if let description = nonempty(userDescription),
            !description.contains("127.0.0.1"), !description.contains("localhost") {
             return description
         }
         return todayCount > 0 ? "今天有 \(todayCount) 条新动态" : "暂无个人简介"
+    }
+    var topic: PeopleTopic {
+        topicValue.flatMap(PeopleTopic.init(apiValue:)) ?? .technology
     }
 
     enum CodingKeys: String, CodingKey {
@@ -76,6 +91,16 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         case todayCount = "today_count"
         case totalCount = "total_count"
         case lastPostTime = "last_post_time"
+        case topicValue = "topic"
+        case organizationNameValue = "organization_name"
+        case avatarAssetNameValue = "avatar_asset_name"
+        case discussionKeywordsValue = "discussion_keywords"
+        case hasOwnPostSourceValue = "has_own_post_source"
+        case focusTagsValue = "focus_tags"
+        case rolesValue = "roles"
+        case milestonesValue = "milestones"
+        case relatedPeopleValue = "related_people"
+        case profileUpdatedAtValue = "profile_updated_at"
     }
 
     init(
@@ -89,12 +114,22 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     ) {
         userID = xUserID ?? "curated:\(id)"
         userName = name
-        userScreenName = xScreenName ?? organization
+        userScreenName = xScreenName
         userDescription = summary
         avatarPath = avatarURL
         todayCount = 0
         totalCount = 0
         lastPostTime = nil
+        topicValue = nil
+        organizationNameValue = organization
+        avatarAssetNameValue = nil
+        discussionKeywordsValue = [name]
+        hasOwnPostSourceValue = xUserID != nil
+        focusTagsValue = nil
+        rolesValue = nil
+        milestonesValue = nil
+        relatedPeopleValue = nil
+        profileUpdatedAtValue = nil
     }
 
     func avatarURL(baseURL: URL) -> URL? {
@@ -108,26 +143,10 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         return URL(string: path, relativeTo: baseURL)?.absoluteURL
     }
 
-    var topic: PeopleTopic {
-        if Self.politicalFigureIDs.contains(userID) { return .politics }
-        if Self.businessFigureIDs.contains(userID) { return .business }
-        if Self.historicalFigureIDs.contains(userID) { return .history }
-        let identities = [name, userScreenName ?? ""]
-            .map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
-        if identities.contains(where: Self.technologyAccountIdentities.contains) { return .technology }
-        if identities.contains(where: Self.investmentAccountIdentities.contains) { return .investment }
-
-        let text = [name, userDescription ?? ""].joined(separator: " ").lowercased()
-        if text.contains("总统") || text.contains("政治") || text.contains("government") { return .politics }
-        if text.contains("投资") || text.contains("美股") || text.contains("capital") || text.contains("quant") || text.contains("finance") { return .investment }
-        if text.contains("历史") || text.contains("history") || text.contains("historian") { return .history }
-        if text.contains("科技") || text.contains("ai") || text.contains("openai") || text.contains("人工智能")
-            || text.contains("芯片") || text.contains("nvidia") || text.contains("robot") { return .technology }
-        return .business
-    }
-
     var relativeTime: String {
-        guard let value = nonempty(lastPostTime), let date = Self.dateFormatter.date(from: value) else { return "暂无更新" }
+        guard let value = nonempty(lastPostTime), let date = Self.dateFormatter.date(from: value) else {
+            return "暂无更新"
+        }
         let seconds = max(0, Int(Date().timeIntervalSince(date)))
         if seconds < 60 { return "刚刚" }
         if seconds < 3_600 { return "\(seconds / 60) 分钟前" }
@@ -143,99 +162,159 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     }()
 }
 
-extension SpecialPerson {
-    fileprivate static let historicalFigureIDs: Set<String> = [
-        "curated:mao-zedong", "curated:deng-xiaoping"
-    ]
-    fileprivate static let businessFigureIDs: Set<String> = [
-        "curated:jack-ma", "curated:lei-jun", "curated:robin-li", "curated:dong-mingzhu"
-    ]
-    fileprivate static let technologyAccountIdentities: Set<String> = [
-        "alexandr wang", "alexandr_wang", "jakub pachocki", "merettm",
-        "greg brockman", "gdb"
-    ]
-    fileprivate static let politicalFigureIDs: Set<String> = [
-        "curated:xi-jinping",
-        "curated:donald-trump"
-    ]
-    fileprivate static let investmentAccountIdentities: Set<String> = [
-        "雪球-但斌",
-        "雪球-大道无形我有型",
-        "猫笔刀的备忘录",
-        "mooomoocat"
-    ]
-    fileprivate static let aiLeaderXUserIDs: Set<String> = [
-        "1605", "874126509245476864", "1482581556", "44196397",
-        "20571756", "14130366", "20749410"
-    ]
-    fileprivate static let aiLeaderOrganizations: [String: String] = [
-        "1605": "OpenAI 联合创始人兼 CEO",
-        "874126509245476864": "Anthropic 联合创始人兼 CEO",
-        "1482581556": "Google DeepMind 联合创始人兼 CEO",
-        "44196397": "xAI 创始人",
-        "20571756": "Microsoft 董事长兼 CEO",
-        "14130366": "Google 与 Alphabet CEO",
-        "20749410": "Meta 创始人兼 CEO"
-    ]
-    fileprivate static let aiLeaderDiscussionKeywords: [String: [String]] = [
-        "curated:jack-ma": ["马云", "Jack Ma", "阿里巴巴"],
-        "curated:lei-jun": ["雷军", "小米"],
-        "curated:robin-li": ["李彦宏", "Robin Li", "百度"],
-        "curated:dong-mingzhu": ["董明珠", "格力"],
-        "curated:mao-zedong": ["毛泽东", "Mao Zedong"],
-        "curated:deng-xiaoping": ["邓小平", "Deng Xiaoping", "改革开放"],
-        "curated:xi-jinping": ["习近平", "Xi Jinping"],
-        "curated:donald-trump": ["特朗普", "Donald Trump", "Trump"],
-        "1605": ["奥特曼", "Sam Altman"],
-        "874126509245476864": ["阿莫迪", "Dario Amodei"],
-        "1482581556": ["哈萨比斯", "Demis Hassabis"],
-        "44196397": ["马斯克", "Elon Musk"],
-        "20571756": ["纳德拉", "Satya Nadella"],
-        "14130366": ["皮查伊", "Sundar Pichai"],
-        "20749410": ["扎克伯格", "马克·扎克伯格", "Mark Zuckerberg"]
-    ]
+struct PersonRole: Decodable, Hashable {
+    let organization: String
+    let title: String
+}
 
-    static let artificialIntelligenceLeaders: [SpecialPerson] = [
-        .init(id: "sam-altman", name: "Sam Altman", organization: "OpenAI", summary: "OpenAI 联合创始人兼 CEO，推动生成式人工智能产品与前沿模型发展。", avatarURL: "https://pbs.twimg.com/profile_images/2046764873200394240/r7BxVezs_normal.jpg", xUserID: "1605", xScreenName: "sama"),
-        .init(id: "dario-amodei", name: "Dario Amodei", organization: "Anthropic", summary: "Anthropic 联合创始人兼 CEO，长期关注大模型能力与人工智能安全。", avatarURL: "https://pbs.twimg.com/profile_images/2015835742577012736/uOwdzrEz_normal.jpg", xUserID: "874126509245476864", xScreenName: "DarioAmodei"),
-        .init(id: "demis-hassabis", name: "Demis Hassabis", organization: "Google DeepMind", summary: "Google DeepMind 联合创始人兼 CEO，领导 Gemini、AlphaFold 等研究。", avatarURL: "https://pbs.twimg.com/profile_images/1990472620614053888/xrAu0wQL_normal.jpg", xUserID: "1482581556", xScreenName: "demishassabis"),
-        .init(id: "jensen-huang", name: "黄仁勋", organization: "NVIDIA", summary: "NVIDIA 创始人兼 CEO，推动 GPU 计算平台成为人工智能基础设施核心。", avatarURL: "https://iprsoftwaremedia.com/219/files/202604/f0e9efa72f909f3f08cdd0a48ff92880/69e6b9293d633260eec67804_jensen-1920x1920/jensen-1920x1920_6a7e6ad5-c215-4503-b70d-fe6e5e9de205-prv.jpg"),
-        .init(id: "elon-musk", name: "Elon Musk", organization: "xAI", summary: "xAI 创始人，推动 Grok 系列模型及大规模人工智能算力建设。", avatarURL: "https://pbs.twimg.com/profile_images/2053244804520427520/m8mdWZCG_normal.jpg", xUserID: "44196397", xScreenName: "elonmusk"),
-        .init(id: "liang-wenfeng", name: "梁文锋", organization: "DeepSeek", summary: "DeepSeek 创始人兼 CEO，专注高效训练、推理与开源大模型。", avatarURL: "https://x0.ifengimg.com/ucms/2025_07/6B3B6F2370B03F5951EE64319BC45032A833995D_size486_w975_h549.png"),
-        .init(id: "satya-nadella", name: "Satya Nadella", organization: "Microsoft", summary: "Microsoft 董事长兼 CEO，推动云计算与人工智能成为公司的核心战略。", avatarURL: "https://pbs.twimg.com/profile_images/1221837516816306177/_Ld4un5A_normal.jpg", xUserID: "20571756", xScreenName: "satyanadella"),
-        .init(id: "sundar-pichai", name: "Sundar Pichai", organization: "Google", summary: "Google 与 Alphabet CEO，领导 Gemini 等人工智能产品和基础设施发展。", avatarURL: "https://pbs.twimg.com/profile_images/2051799620062429184/AL8CoAUG_normal.jpg", xUserID: "14130366", xScreenName: "sundarpichai"),
-        .init(id: "mark-zuckerberg", name: "Mark Zuckerberg", organization: "Meta", summary: "Meta 创始人兼 CEO，推动开源大模型 Llama、智能眼镜与下一代计算平台。", avatarURL: "https://pbs.twimg.com/profile_images/77846223/profile_normal.jpg", xUserID: "20749410", xScreenName: "finkd")
-    ]
+struct PersonMilestone: Decodable, Hashable {
+    let year: String
+    let title: String
+}
 
-    static let politicalFigures: [SpecialPerson] = [
-        .init(id: "xi-jinping", name: "习近平", organization: "中国政治人物", summary: "关注中国政治、外交与公共政策相关动态。"),
-        .init(id: "donald-trump", name: "Donald Trump", organization: "美国政治人物", summary: "关注美国政治、外交与公共政策相关动态。")
-    ]
+struct PeopleVideosResponse: Decodable {
+    let success: Bool
+    let personID: String
+    let videos: [PersonVideo]
 
-    static let chineseEntrepreneurs: [SpecialPerson] = [
-        .init(id: "jack-ma", name: "马云", organization: "阿里巴巴创始人", summary: "关注商业创新、创业与数字经济相关动态。"),
-        .init(id: "lei-jun", name: "雷军", organization: "小米集团创始人", summary: "关注企业经营、消费品牌与智能制造相关动态。"),
-        .init(id: "robin-li", name: "李彦宏", organization: "百度创始人", summary: "关注企业战略、互联网与产业发展相关动态。"),
-        .init(id: "dong-mingzhu", name: "董明珠", organization: "格力电器董事长", summary: "关注企业管理、制造业与消费市场相关动态。")
-    ]
+    enum CodingKeys: String, CodingKey {
+        case success, videos
+        case personID = "person_id"
+    }
+}
 
-    static let historicalFigures: [SpecialPerson] = [
-        .init(id: "mao-zedong", name: "毛泽东", organization: "中国近现代历史人物", summary: "关注中国近现代史及相关历史讨论。"),
-        .init(id: "deng-xiaoping", name: "邓小平", organization: "中国近现代历史人物", summary: "关注改革开放及中国近现代史相关讨论。")
-    ]
+struct PersonVideo: Decodable, Identifiable, Hashable {
+    let id: Int64
+    let personID: String
+    let platform: String
+    let platformVideoID: String
+    let title: String
+    let titleZH: String
+    let description: String?
+    let channelName: String
+    let publishedAt: String?
+    let durationSeconds: Int
+    let coverURLValue: String
+    let canonicalURLValue: String
+    let relevanceScore: Double
+    let videoType: String
+    let isFeatured: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, platform, title, description
+        case titleZH = "title_zh"
+        case personID = "person_id"
+        case platformVideoID = "platform_video_id"
+        case channelName = "channel_name"
+        case publishedAt = "published_at"
+        case durationSeconds = "duration_seconds"
+        case coverURLValue = "cover_url"
+        case canonicalURLValue = "canonical_url"
+        case relevanceScore = "relevance_score"
+        case videoType = "video_type"
+        case isFeatured = "is_featured"
+    }
+
+    var coverURL: URL? { MediaURL.image(coverURLValue) ?? URL(string: coverURLValue) }
+    var canonicalURL: URL? { URL(string: canonicalURLValue) }
+    var displayTitle: String {
+        nonempty(titleZH) ?? title
+    }
+    var publishedDateLabel: String? {
+        guard let publishedAt,
+              let date = ISO8601DateFormatter().date(from: publishedAt) else { return nil }
+        return date.formatted(
+            .dateTime
+                .year()
+                .month()
+                .day()
+                .locale(Locale(identifier: "zh_CN"))
+        )
+    }
+    var durationLabel: String {
+        guard durationSeconds > 0 else { return "" }
+        let hours = durationSeconds / 3_600
+        let minutes = (durationSeconds % 3_600) / 60
+        let seconds = durationSeconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+struct PersonVideoSubtitlesResponse: Decodable {
+    let success: Bool
+    let videoID: Int64
+    let language: String
+    let status: String
+    let cues: [PersonVideoSubtitleCue]
+
+    enum CodingKeys: String, CodingKey {
+        case success, language, status, cues
+        case videoID = "video_id"
+    }
+}
+
+struct PersonVideoSubtitleCue: Decodable, Identifiable, Hashable {
+    let startMS: Int64
+    let endMS: Int64
+    let text: String
+
+    var id: Int64 { startMS }
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case startMS = "start_ms"
+        case endMS = "end_ms"
+    }
+}
+
+struct RelatedPerson: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let relationship: String
+    let avatarURLValue: String?
+    let avatarAssetName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, relationship
+        case avatarURLValue = "avatar_url"
+        case avatarAssetName = "avatar_asset_name"
+    }
+
+    func avatarURL(baseURL: URL) -> URL? {
+        guard let value = nonempty(avatarURLValue) else { return nil }
+        if let url = URL(string: value), url.scheme != nil {
+            return MediaURL.image(value) ?? url
+        }
+        return URL(string: value, relativeTo: baseURL)?.absoluteURL
+    }
 }
 
 private func nonempty(_ value: String?) -> String? {
-    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
     return trimmed
 }
 
 enum PeopleTopic: String, CaseIterable, Identifiable {
     case technology = "科技"
     case business = "商业"
-    case politics = "政治"
     case investment = "投资"
+    case politics = "政治"
     case history = "历史"
 
     var id: Self { self }
+
+    init?(apiValue: String) {
+        switch apiValue {
+        case "technology": self = .technology
+        case "business": self = .business
+        case "investment": self = .investment
+        case "politics": self = .politics
+        case "history": self = .history
+        default: return nil
+        }
+    }
 }

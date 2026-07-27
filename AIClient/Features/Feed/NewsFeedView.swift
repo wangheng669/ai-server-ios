@@ -37,6 +37,16 @@ private enum WeiboSection: String, CaseIterable, Identifiable {
     var title: String { self == .hot ? "热搜" : "关注" }
 }
 
+private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
+    let videoID: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        YouTubeWarmPlayerPool.shared.prewarm(videoID: videoID)
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+}
+
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @Binding private var hidesTabBar: Bool
@@ -54,6 +64,8 @@ struct NewsFeedView: View {
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
     @State private var preparedWebViews: [Int: WKWebView] = [:]
+    @State private var showsAllRSSSources = false
+    @State private var rssSourceSearch = ""
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -139,6 +151,9 @@ struct NewsFeedView: View {
             } else if opensYouTubeDetailPreview,
                       path.isEmpty,
                       let first = model.posts.first(where: \.isYouTube) {
+                if ProcessInfo.processInfo.arguments.contains("--youtube-prewarm-preview") {
+                    try? await Task.sleep(for: .seconds(10))
+                }
                 path = [first]
             } else if opensBilibiliDetailPreview,
                       path.isEmpty,
@@ -174,18 +189,25 @@ struct NewsFeedView: View {
     }
 
     private var sourceBar: some View {
-        HStack(spacing: 6) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(FeedSource.allCases) { source in sourceButton(source).id(source.id) }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(FeedSource.allCases) { source in
+                        sourceButton(source)
+                            .id(source.id)
                     }
-                    .padding(.leading, 10)
-                    .padding(.trailing, 4)
                 }
-                .onAppear { DispatchQueue.main.async { proxy.scrollTo(model.source.id, anchor: .center) } }
-                .onChange(of: model.source) { _, source in
-                    withAnimation(.snappy) { proxy.scrollTo(source.id, anchor: .center) }
+                .padding(.leading, 10)
+                .padding(.trailing, 4)
+            }
+            .onAppear {
+                DispatchQueue.main.async {
+                    proxy.scrollTo(model.source.id, anchor: .center)
+                }
+            }
+            .onChange(of: model.source) { _, source in
+                withAnimation(.snappy) {
+                    proxy.scrollTo(source.id, anchor: .center)
                 }
             }
         }
@@ -336,24 +358,19 @@ struct NewsFeedView: View {
     }
 
     private var weiboSectionSelector: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ForEach(WeiboSection.allCases) { section in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) { weiboSection = section }
                 } label: {
                     Text(section.title)
-                        .font(.system(size: 13.5, weight: weiboSection == section ? .semibold : .medium))
+                        .font(.system(size: 14, weight: weiboSection == section ? .semibold : .regular))
                         .foregroundStyle(weiboSection == section ? Color.primary : Color.secondary)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 30)
+                        .frame(height: 32)
                         .background(
                             weiboSection == section ? Color(uiColor: .systemBackground) : Color.clear,
                             in: Capsule()
-                        )
-                        .shadow(
-                            color: weiboSection == section ? .black.opacity(0.08) : .clear,
-                            radius: 3,
-                            y: 1
                         )
                 }
                 .buttonStyle(.plain)
@@ -361,9 +378,12 @@ struct NewsFeedView: View {
             }
         }
         .padding(3)
-        .frame(width: 180)
+        .frame(width: 190)
         .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-        .padding(.vertical, 8)
+        .overlay {
+            Capsule().stroke(Color.primary.opacity(0.035), lineWidth: 0.5)
+        }
+        .padding(.vertical, 9)
         .sensoryFeedback(.selection, trigger: weiboSection)
     }
 
@@ -373,11 +393,13 @@ struct NewsFeedView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(weiboFollowingModel.posts) { post in
-                            NewsCardView(post: post, onOpen: { path.append(post) })
+                            WeiboFollowingRow(post: post)
                                 .contentShape(Rectangle())
                                 .onTapGesture { path.append(post) }
                                 .task { await weiboFollowingModel.loadMoreIfNeeded(current: post) }
-                            Divider().opacity(0.6)
+                            Divider()
+                                .overlay(Color.primary.opacity(0.04))
+                                .padding(.leading, 56)
                         }
                         if weiboFollowingModel.isLoadingMore {
                             ProgressView().padding(20)
@@ -450,6 +472,16 @@ struct NewsFeedView: View {
                             isExpandedFlash: expandedFlashIDs.contains(post.id),
                             onOpen: { openPost(displayPost) }
                         )
+                            .background {
+                                if source == .youtube,
+                                   index == 0,
+                                   let videoID = displayPost.youtubeVideoID {
+                                    YouTubeFirstVideoPrewarmer(videoID: videoID)
+                                        .frame(width: 1, height: 1)
+                                        .opacity(0.01)
+                                        .allowsHitTesting(false)
+                                }
+                            }
                             .contentShape(Rectangle())
                             .modifier(ConditionalTapGestureModifier(isEnabled: !post.isXueqiu) {
                                 if post.isFlash {
@@ -602,30 +634,154 @@ struct NewsFeedView: View {
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
-        if source == .rss, model.selectedRSSFeedID != nil {
-            return model.selectedRSSPosts
+        if source == .rss {
+            let rssPosts: [Post]
+            if model.selectedRSSFeedID != nil {
+                rssPosts = model.selectedRSSPosts
+            } else {
+                rssPosts = posts.filter { !$0.hasDedicatedFeedTab }
+            }
+            return rssPosts
         }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
     }
 
+    private var rssQualityThreshold: Double { 6.0 }
+
     private var rssSourceFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 10) {
-                rssSourceButton(id: nil, name: "全部", avatarURL: nil)
-                ForEach(model.rssFeeds) { feed in
-                    rssSourceButton(
-                        id: feed.id,
-                        name: feed.name,
-                        avatarURL: feed.preferredAvatarURL,
-                        rejectsUpscaledImages: !feed.hasManagedAvatar
-                    )
-                }
-            }
+        rssSourcePickerTrigger
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+            .background(Color(uiColor: .systemBackground))
+            .sheet(isPresented: $showsAllRSSSources) {
+                NavigationStack {
+                    List {
+                        rssSourcePickerRow(id: nil, name: "全部 RSS", iconURL: nil)
+
+                        ForEach(filteredRSSFeeds) { feed in
+                            rssSourcePickerRow(
+                                id: feed.id,
+                                name: feed.name,
+                                iconURL: feed.iconURL
+                            )
+                        }
+                    }
+                    .listStyle(.plain)
+                    .navigationTitle("选择来源")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .searchable(
+                        text: $rssSourceSearch,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "搜索 RSS 来源"
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showsAllRSSSources = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .onDisappear { rssSourceSearch = "" }
+            }
+    }
+
+    private var filteredRSSFeeds: [RSSFeedSource] {
+        guard !rssSourceSearch.isEmpty else { return model.rssFeeds }
+        return model.rssFeeds.filter {
+            $0.name.localizedCaseInsensitiveContains(rssSourceSearch)
         }
-        .background(Color(uiColor: .systemBackground))
+    }
+
+    private var rssSourcePickerTrigger: some View {
+        let selectedFeed = model.rssFeeds.first { $0.id == model.selectedRSSFeedID }
+        return Button { showsAllRSSSources = true } label: {
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock")
+                    Text(model.selectedRSSFeedID == nil ? "最新发布 · 仅看 \(rssQualityThreshold.formatted(.number.precision(.fractionLength(1))))+" : "最新发布")
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+
+                Spacer(minLength: 12)
+
+                HStack(spacing: 6) {
+                    if let selectedFeed {
+                        AvatarView(
+                            url: selectedFeed.iconURL,
+                            name: selectedFeed.name,
+                            size: 22,
+                            rejectsUpscaledImages: true
+                        )
+                        Text(selectedFeed.name)
+                            .lineLimit(1)
+                    } else {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                        Text("来源")
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.blue)
+            }
+            .frame(height: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("选择 RSS 来源")
+        .accessibilityValue(selectedFeed?.name ?? "全部 RSS")
+    }
+
+    private func rssSourcePickerRow(
+        id: Int?,
+        name: String,
+        iconURL: URL?
+    ) -> some View {
+        let isSelected = model.selectedRSSFeedID == id
+        return Button {
+            Task { await model.selectRSSFeed(id) }
+            showsAllRSSSources = false
+        } label: {
+            HStack(spacing: 12) {
+                rssSourceIcon(url: iconURL, name: name, size: 30)
+
+                Text(name)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .frame(minHeight: 38)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("选择来源：\(name)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder private func rssSourceIcon(url: URL?, name: String, size: CGFloat) -> some View {
+        if let url {
+            AvatarView(url: url, name: name, size: size, rejectsUpscaledImages: true)
+        } else {
+            Circle()
+                .fill(Color(uiColor: .tertiarySystemFill))
+                .frame(width: size, height: size)
+                .overlay {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: size * 0.38, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+        }
     }
 
     private func rssSourceButton(
@@ -1851,6 +2007,86 @@ private extension FeedSource {
     }
 }
 
+private struct WeiboFollowingRow: View {
+    let post: Post
+
+    private var contentParts: (body: String, context: String?) {
+        let content = post.displayContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let separators = ["//@","// @"]
+        guard let match = separators.compactMap({ separator in
+            content.range(of: separator).map { ($0, separator) }
+        }).min(by: { $0.0.lowerBound < $1.0.lowerBound }) else {
+            return (content, nil)
+        }
+
+        let body = content[..<match.0.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        let context = content[match.0.lowerBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return (body.isEmpty ? "转发微博" : body, context.isEmpty ? nil : context)
+    }
+
+    private var visibleImages: [URL] {
+        Array(post.imageURLs.prefix(3))
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(post.authorName)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color.blue)
+                        .lineLimit(1)
+
+                    if let time = post.formattedTime {
+                        Text(time)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Text(contentParts.body)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.primary)
+                    .lineSpacing(4)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let context = contentParts.context {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Image(systemName: "arrow.2.squarepath")
+                            .font(.system(size: 11, weight: .medium))
+                        Text(context)
+                            .font(.system(size: 13.5))
+                            .lineLimit(2)
+                    }
+                    .foregroundStyle(.tertiary)
+                    .lineSpacing(2)
+                }
+
+                if !visibleImages.isEmpty {
+                    HStack(spacing: 5) {
+                        ForEach(visibleImages, id: \.self) { url in
+                            RemoteImage(url: url, height: 88, cornerRadius: 4)
+                                .aspectRatio(1.25, contentMode: .fill)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct NewsCardView: View {
     let post: Post
     var isFeaturedBilibili = false
@@ -2643,15 +2879,50 @@ private struct NewsCardView: View {
     }
 
     private var rssCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            PostAuthorHeader(post: post, compact: true)
-            if post.displayTitle != post.displayContent { Text(post.displayTitle).font(.body.weight(.semibold)).multilineTextAlignment(.leading) }
-            Text(post.displayContent).font(.system(size: 17, weight: .regular)).lineSpacing(2).lineLimit(14).multilineTextAlignment(.leading)
-            PostMediaGrid(post: post)
-            PostActionRow(post: post)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 25)
+                Text(post.authorName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.blue)
+                    .lineLimit(1)
+                if let time = post.formattedTime {
+                    Text("· \(time)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+                if let score = post.score, score > 0 {
+                    Text(score.formatted(.number.precision(.fractionLength(1))))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.08), in: Capsule())
+                }
+            }
+
+            Text(post.displayTitle)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineSpacing(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            if post.displayContent != post.displayTitle {
+                Text(post.displayContent)
+                    .font(.system(size: 14.5, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14).padding(.vertical, 12).contentShape(Rectangle())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
     }
 
     private var newYorkTimesCard: some View {

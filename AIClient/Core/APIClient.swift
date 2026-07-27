@@ -139,7 +139,8 @@ struct APIClient {
             .init(name: "include_zero_score", value: includesAllScores ? "true" : "false")
         ]
         if !includesAllScores {
-            queryItems.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
+            let minimumScore = source == .rss ? 6 : Post.minimumFeedScore
+            queryItems.append(.init(name: "final_score", value: String(minimumScore)))
         }
         if source == .x { queryItems.append(.init(name: "x_feed_view", value: "tracked")) }
         return queryItems

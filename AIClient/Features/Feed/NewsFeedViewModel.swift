@@ -360,7 +360,7 @@ final class NewsFeedViewModel: ObservableObject {
                 if source == .newYorkTimes {
                     return try await prefetchNewYorkTimesBodies(for: result)
                 }
-                return result
+                return source == .rss ? result.filter { !$0.hasDedicatedFeedTab } : result
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -414,7 +414,7 @@ final class NewsFeedViewModel: ObservableObject {
         case .zhihu: return post.sourceName == "知乎"
         case .truth: return post.sourceName == "Truth"
         case .xueqiu: return post.isXueqiu
-        case .rss: return post.isRSS
+        case .rss: return post.isRSS && !post.hasDedicatedFeedTab
         case .laozhong: return post.isRSS && post.tagNames.contains("老中")
         case .youtube: return post.isRSS && post.tagNames.contains("YouTube")
         case .flash: return post.isFlash
