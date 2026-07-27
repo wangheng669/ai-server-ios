@@ -14,6 +14,7 @@ private struct IndustryCompany: Identifiable {
     let id: String
     let name: String
     let role: String
+    let stageID: String?
 }
 
 private struct IndustryFacts {
@@ -94,7 +95,7 @@ private struct IndustryPanoramaService {
                     source: industry.scale.source.name,
                     sourceURL: industry.scale.source.url,
                     companies: industry.companies.map {
-                        IndustryCompany(id: $0.id, name: $0.name, role: $0.role)
+                        IndustryCompany(id: $0.id, name: $0.name, role: $0.role, stageID: $0.stageID)
                     }
                 )
             )
@@ -125,15 +126,15 @@ struct IndustryPanoramaView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 22) {
                 industryPicker
                 chainOverview(selectedChain)
             }
-            .padding(.top, 4)
+            .padding(.top, 8)
             .padding(.bottom, 104)
         }
         .scrollIndicators(.hidden)
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(Color(red: 0.975, green: 0.972, blue: 0.958))
         .task {
             guard let facts = try? await IndustryPanoramaService().facts(), !facts.isEmpty else { return }
             remoteFacts = facts
@@ -191,166 +192,90 @@ struct IndustryPanoramaView: View {
 
     private func chainOverview(_ chain: IndustryChain) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(chain.title)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(chain.color)
-                Text("产业链全景")
-                    .font(.system(size: 17, weight: .semibold))
-                Spacer()
-                Text("上游 → 下游")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.bottom, 15)
-
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("产业规模")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(chain.facts.scaleValue)
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(chain.color)
-                        Text(chain.facts.scaleMetric)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    if let sourceURL = chain.facts.sourceURL {
-                        Link(destination: sourceURL) {
-                            HStack(spacing: 3) {
-                                Text("\(chain.facts.period) · \(chain.facts.source)")
-                                Image(systemName: "arrow.up.right")
-                            }
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                        }
-                    } else {
-                        Text("\(chain.facts.period) · \(chain.facts.source)")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                Spacer(minLength: 6)
-                overviewMetric(value: "\(chain.stages.count)", label: "核心环节", icon: "square.grid.2x2.fill", color: chain.color)
-                    .frame(width: 86)
-            }
-            .padding(.bottom, 12)
-
-            Rectangle()
-                .fill(HoldingsPalette.divider)
-                .frame(height: 1)
+            scaleSection(chain)
 
             VStack(spacing: 0) {
                 ForEach(Array(chain.stages.enumerated()), id: \.element.id) { index, stage in
                     stageRow(
                         stage,
+                        companies: companies(for: stage, in: chain),
                         color: chain.color,
                         isFirst: index == 0,
                         isLast: index == chain.stages.count - 1
                     )
                 }
             }
-
-            HStack(spacing: 7) {
-                Text("关联")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                ForEach(chain.related, id: \.self) { item in
-                    Text(item)
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(chain.color.opacity(0.08), in: Capsule())
-                }
-            }
-            .padding(.top, 12)
-
-            companySection(chain)
         }
-        .padding(16)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
         .padding(.horizontal, 16)
         .animation(.easeOut(duration: 0.18), value: selectedID)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(chain.title)产业链全景")
     }
 
-    private func overviewMetric(value: String, label: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 30, height: 30)
-                .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(value)
-                    .font(.system(size: 15, weight: .bold))
-                Text(label)
-                    .font(.system(size: 9.5))
+    private func scaleSection(_ chain: IndustryChain) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\(chain.facts.period) 产业规模")
+                .font(.system(size: 17, weight: .semibold))
+
+            Text(chain.facts.scaleValue)
+                .font(.system(size: 48, weight: .medium, design: .serif))
+                .foregroundStyle(chain.color)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(chain.facts.scaleMetric)
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var overviewDivider: some View {
-        Rectangle()
-            .fill(HoldingsPalette.divider)
-            .frame(width: 1, height: 28)
-    }
-
-    private func companySection(_ chain: IndustryChain) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("知名企业")
-                    .font(.system(size: 15, weight: .bold))
                 Spacer()
-                Text("按产业链代表性展示")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.secondary)
-            }
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 8),
-                    GridItem(.flexible(), spacing: 8)
-                ],
-                spacing: 8
-            ) {
-                ForEach(chain.facts.companies) { company in
-                    HStack(spacing: 9) {
-                        Image(systemName: "building.2.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(chain.color)
-                            .frame(width: 30, height: 30)
-                            .background(chain.color.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(company.name)
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1)
-                            Text(company.role)
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 9)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-                    .accessibilityElement(children: .combine)
-                }
+                sourceLink(chain.facts)
             }
         }
-        .padding(.top, 16)
+        .padding(.horizontal, 4)
+        .padding(.bottom, 22)
+        .overlay(alignment: .bottomLeading) {
+            Capsule()
+                .fill(Color.orange.opacity(0.8))
+                .frame(width: 30, height: 3)
+        }
+    }
+
+    @ViewBuilder
+    private func sourceLink(_ facts: IndustryFacts) -> some View {
+        if let sourceURL = facts.sourceURL {
+            Link(destination: sourceURL) {
+                HStack(spacing: 4) {
+                    Text("来源：\(facts.source)")
+                    Image(systemName: "arrow.up.right")
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("来源：\(facts.source)")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func companies(for stage: IndustryStage, in chain: IndustryChain) -> [IndustryCompany] {
+        let exact = chain.facts.companies.filter { $0.stageID == stage.id }
+        if !exact.isEmpty { return exact }
+        guard chain.facts.companies.allSatisfy({ $0.stageID == nil }),
+              let stageIndex = chain.stages.firstIndex(where: { $0.id == stage.id })
+        else { return [] }
+        return chain.facts.companies.enumerated().compactMap { companyIndex, company in
+            let matchedIndex = chain.stages.firstIndex { candidate in
+                company.role.contains(candidate.title)
+                    || candidate.highlights.contains(where: { company.role.contains($0) || $0.contains(company.role) })
+            }
+            return (matchedIndex ?? min(companyIndex, chain.stages.count - 1)) == stageIndex ? company : nil
+        }
     }
 
     private func stageRow(
         _ stage: IndustryStage,
+        companies: [IndustryCompany],
         color: Color,
         isFirst: Bool,
         isLast: Bool
@@ -366,28 +291,20 @@ struct IndustryPanoramaView: View {
                     .overlay(Circle().stroke(color, lineWidth: 2))
                 Rectangle()
                     .fill(isLast ? Color.clear : color.opacity(0.7))
-                    .frame(width: 2, height: 82)
+                    .frame(width: 2, height: companies.isEmpty ? 94 : 142)
             }
             .frame(width: 16)
 
-            Image(systemName: stage.icon)
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 48, height: 48)
-                .background(color.opacity(0.10), in: Circle())
-                .padding(.top, 8)
-
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
+                    Text(stage.level)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(color, in: Circle())
+
                     Text(stage.title)
                         .font(.system(size: 16, weight: .bold))
-                    Spacer()
-                    Text(stage.level)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(color)
-                        .padding(.horizontal, 7)
-                        .frame(height: 22)
-                        .background(color.opacity(0.08), in: Capsule())
                 }
 
                 Text(stage.description)
@@ -409,12 +326,50 @@ struct IndustryPanoramaView: View {
                 Text("关联：\(stage.related)")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
+
+                if !companies.isEmpty {
+                    HStack(spacing: 10) {
+                        ForEach(companies) { company in
+                            companyAnchor(company, color: color)
+                        }
+                    }
+                    .padding(.top, 5)
+                }
             }
             .padding(.top, 8)
-            .padding(.bottom, isLast ? 2 : 8)
+            .padding(.bottom, isLast ? 4 : 14)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(stage.level)，\(stage.title)，\(stage.description)")
+    }
+
+    private func companyAnchor(_ company: IndustryCompany, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(companyMonogram(company.name))
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .frame(width: 34, height: 34)
+                .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(color.opacity(0.24)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(company.name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                Text(company.role)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func companyMonogram(_ name: String) -> String {
+        let latin: [String: String] = [
+            "比亚迪": "BYD", "宁德时代": "CATL", "上汽集团": "SAIC", "蔚来": "NIO"
+        ]
+        return latin[name] ?? String(name.prefix(2))
     }
 }
 
@@ -672,7 +627,7 @@ private extension IndustryChain {
 
     static func companies(_ values: [(String, String)]) -> [IndustryCompany] {
         values.map { name, role in
-            IndustryCompany(id: name, name: name, role: role)
+            IndustryCompany(id: name, name: name, role: role, stageID: nil)
         }
     }
 
