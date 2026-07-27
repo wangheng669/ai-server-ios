@@ -143,6 +143,30 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["group_similar"])
     }
 
+    func testWeiboFollowingImagesExcludeSinaPlaceholderArtwork() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":17,"source":"rss:17","images":[{"url":"https://h5.sinaimg.cn/upload/2015/09/25/3/timeline_card_small_video_default.png"},{"url":"https://h5.sinaimg.cn/upload/2015/09/25/3/timeline_card_small_web_default.png"},{"url":"https://tvax1.sinaimg.cn/mw2000/real-photo.jpg"}]}"#.utf8)
+        )
+
+        XCTAssertEqual(post.weiboFollowingImageURLs.count, 1)
+        let retained = try XCTUnwrap(post.weiboFollowingImageURLs.first)
+        let originalURL = URLComponents(url: retained, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "url" })?
+            .value
+        XCTAssertEqual(originalURL, "https://tvax1.sinaimg.cn/mw2000/real-photo.jpg")
+    }
+
+    func testWeiboFollowingImagesKeepMatchingFilenameFromUnrelatedHost() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":18,"source":"rss:18","images":[{"url":"https://example.com/timeline_card_small_video_default.png"}]}"#.utf8)
+        )
+
+        XCTAssertEqual(post.weiboFollowingImageURLs.count, 1)
+    }
+
     func testPlaybackStreamPathUsesAPIPrefix() throws {
         let url = try XCTUnwrap(APIClient.playbackURL(
             from: "/post/video-playback/stream?formatId=18",
