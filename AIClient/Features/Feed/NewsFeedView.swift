@@ -2070,10 +2070,14 @@ private struct WeiboFollowingRow: View {
                 }
 
                 if !visibleImages.isEmpty {
-                    HStack(spacing: 5) {
-                        ForEach(visibleImages, id: \.self) { url in
-                            RemoteImage(url: url, height: 88, cornerRadius: 4)
-                                .aspectRatio(1.25, contentMode: .fill)
+                    if visibleImages.count == 1, let url = visibleImages.first {
+                        WeiboFollowingSingleImage(post: post, url: url)
+                    } else {
+                        HStack(spacing: 5) {
+                            ForEach(visibleImages, id: \.self) { url in
+                                RemoteImage(url: url, height: 96, cornerRadius: 5, contentMode: .fill)
+                                    .frame(width: 96)
+                            }
                         }
                     }
                 }
@@ -2085,6 +2089,64 @@ private struct WeiboFollowingRow: View {
         .background(Color(uiColor: .systemBackground))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+private struct WeiboFollowingSingleImage: View {
+    let post: Post
+    let url: URL
+    @State private var loadedAspectRatio: CGFloat?
+
+    private var availableWidth: CGFloat {
+        max(UIScreen.main.bounds.width - 74, 240)
+    }
+
+    private var sourceAspectRatio: CGFloat? {
+        guard let image = post.images?.first(where: { MediaURL.image($0.url) == url }),
+              let width = image.width,
+              let height = image.height,
+              width > 0,
+              height > 0 else { return nil }
+        return CGFloat(width) / CGFloat(height)
+    }
+
+    private var aspectRatio: CGFloat {
+        loadedAspectRatio ?? sourceAspectRatio ?? 4 / 3
+    }
+
+    private var isLongImage: Bool {
+        aspectRatio < 0.6
+    }
+
+    private var imageSize: CGSize {
+        let safeRatio = min(max(aspectRatio, 0.2), 5)
+        if isLongImage {
+            return CGSize(width: availableWidth, height: 170)
+        }
+        if safeRatio < 1 {
+            let height = min(220, 180 / safeRatio)
+            return CGSize(width: height * safeRatio, height: height)
+        }
+        return CGSize(
+            width: availableWidth,
+            height: min(max(availableWidth / safeRatio, 120), 190)
+        )
+    }
+
+    var body: some View {
+        RemoteImage(
+            url: url,
+            height: imageSize.height,
+            cornerRadius: 5,
+            contentMode: isLongImage ? .fill : .fit
+        ) { image in
+            guard image.size.width > 0, image.size.height > 0 else { return }
+            loadedAspectRatio = image.size.width / image.size.height
+        }
+        .frame(width: imageSize.width)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 5))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("微博配图")
     }
 }
 
