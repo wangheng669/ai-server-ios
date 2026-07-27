@@ -30,7 +30,6 @@ struct PostDetailView: View {
     @State private var xCommentsError: String?
     @State private var xTranslations: [String: String] = [:]
     @State private var loadingXTranslationIDs: Set<String> = []
-    @State private var weiboImageAspectRatios: [URL: CGFloat] = [:]
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -321,17 +320,11 @@ struct PostDetailView: View {
                 }
 
                 ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
-                    RemoteImage(
+                    WeiboDetailImage(
                         url: url,
-                        height: weiboImageHeight(for: url),
-                        cornerRadius: 10,
-                        contentMode: .fit
-                    ) { image in
-                        guard image.size.height > 0 else { return }
-                        weiboImageAspectRatios[url] = image.size.width / image.size.height
-                    }
-                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-                    .accessibilityLabel("微博配图，第 \(index + 1) 张，共 \(post.weiboFollowingImageURLs.count) 张")
+                        index: index,
+                        count: post.weiboFollowingImageURLs.count
+                    )
                 }
 
                 if post.hasWeiboVideoReference, let link = post.linkURL {
@@ -366,12 +359,6 @@ struct PostDetailView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
-    }
-
-    private func weiboImageHeight(for url: URL) -> CGFloat {
-        let availableWidth = max(UIScreen.main.bounds.width - 32, 240)
-        guard let ratio = weiboImageAspectRatios[url], ratio > 0 else { return 280 }
-        return min(max(availableWidth / ratio, 160), 560)
     }
 
     private var rssSourceHeader: some View {
@@ -2403,6 +2390,53 @@ private enum RSSBookmarkStore {
             ids.remove(postID)
         }
         UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+}
+
+private struct WeiboDetailImage: View {
+    let url: URL
+    let index: Int
+    let count: Int
+    @State private var aspectRatio: CGFloat = 4 / 3
+    @State private var previewURL: URL?
+
+    private var availableWidth: CGFloat {
+        max(UIScreen.main.bounds.width - 32, 240)
+    }
+
+    private var imageSize: CGSize {
+        let safeRatio = min(max(aspectRatio, 0.2), 5)
+        if safeRatio < 0.8 {
+            let height: CGFloat = 440
+            return CGSize(width: min(max(height * safeRatio, 180), availableWidth), height: height)
+        }
+
+        let width = availableWidth
+        return CGSize(width: width, height: min(max(width / safeRatio, 120), 380))
+    }
+
+    var body: some View {
+        RemoteImage(
+            url: url,
+            height: imageSize.height,
+            cornerRadius: 8,
+            contentMode: .fit
+        ) { image in
+            guard image.size.width > 0, image.size.height > 0 else { return }
+            aspectRatio = image.size.width / image.size.height
+        }
+        .frame(width: imageSize.width)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { previewURL = url }
+        .accessibilityLabel("微博配图，第 \(index + 1) 张，共 \(count) 张")
+        .accessibilityHint("双击全屏查看")
+        .fullScreenCover(item: $previewURL) { ZoomableImageView(url: $0) }
     }
 }
 
