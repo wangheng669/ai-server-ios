@@ -10,6 +10,7 @@ final class PersonDetailStore {
     private(set) var isLoadingOwnPosts = false
     private(set) var isLoadingMoreOwnPosts = false
     private(set) var isLoadingDiscussions = false
+    private(set) var isLoadingRelatedVideos = false
     private(set) var ownPostsError: String?
     private(set) var ownPostsLoadMoreError: String?
     private(set) var discussionsError: String?
@@ -133,7 +134,9 @@ final class PersonDetailStore {
     }
 
     private func loadRelatedVideos(for person: SpecialPerson) async {
+        isLoadingRelatedVideos = true
         relatedVideosError = nil
+        defer { isLoadingRelatedVideos = false }
         do {
             relatedVideos = try await service.relatedVideos(personID: person.id)
         } catch is CancellationError {
