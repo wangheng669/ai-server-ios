@@ -228,6 +228,7 @@ private struct PersonDetailPage: View {
     let person: SpecialPerson
     @State private var store = PersonDetailStore()
     @State private var section = PersonDetailSection.posts
+    @State private var relatedSection = PersonRelatedSection.videos
     @State private var selectedPost: Post?
     @State private var selectedVideo: PersonVideo?
 
@@ -351,50 +352,113 @@ private struct PersonDetailPage: View {
     private var sectionContent: some View {
         if section == .profile {
             PersonProfileView(person: person)
-        } else if sectionIsLoading {
-            ProgressView(section == .posts ? "正在载入他的动态…" : "正在查找相关讨论…")
+        } else if section == .discussions {
+            relatedContent
+        } else if store.isLoadingOwnPosts {
+            ProgressView("正在载入他的动态…")
                 .frame(maxWidth: .infinity).padding(.top, 70)
-        } else if let error = sectionError {
+        } else if let error = store.ownPostsError {
             ContentUnavailableView("载入失败", systemImage: "wifi.exclamationmark", description: Text(error))
                 .padding(.top, 36)
+        } else if store.ownPosts.isEmpty {
+            ContentUnavailableView(
+                "暂无本人动态",
+                systemImage: "bubble.left",
+                description: Text("内容库里还没有收录他本人发布的帖子")
+            )
+            .padding(.top, 36)
         } else {
-            let posts = section == .posts ? store.ownPosts : store.discussions
-            if section == .discussions, !store.relatedVideos.isEmpty || !posts.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    if !store.relatedVideos.isEmpty {
-                        Text("相关视频")
-                            .font(.system(size: 20, weight: .bold))
-                            .padding(.horizontal, 20)
-                            .padding(.top, 17)
-                            .padding(.bottom, 10)
+            ForEach(store.ownPosts) { post in
+                let displayPost = store.postForDisplay(post)
+                PersonPostTimelineRow(post: displayPost, compact: false) { selectedPost = displayPost }
+                    .task { await store.translateXPostIfNeeded(post) }
+                    .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
+            }
+            ownPostsPaginationStatus
+        }
+    }
+
+    private var relatedContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            relatedSectionPicker
+
+            Group {
+                switch relatedSection {
+                case .videos:
+                    if store.isLoadingRelatedVideos {
+                        ProgressView("正在载入相关视频…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 54)
+                    } else if let error = store.relatedVideosError, store.relatedVideos.isEmpty {
+                        ContentUnavailableView(
+                            "载入失败",
+                            systemImage: "wifi.exclamationmark",
+                            description: Text(error)
+                        )
+                        .padding(.top, 30)
+                    } else if store.relatedVideos.isEmpty {
+                        ContentUnavailableView(
+                            "暂无相关视频",
+                            systemImage: "video",
+                            description: Text("内容库里暂时没有收录这位人物的相关视频")
+                        )
+                        .padding(.top, 30)
+                    } else {
                         ForEach(store.relatedVideos) { video in
-                            PersonVideoCard(video: video) {
-                                selectedVideo = video
-                            }
+                            PersonVideoCard(video: video) { selectedVideo = video }
                             Divider().padding(.leading, 20)
                         }
                     }
-                    if !posts.isEmpty {
-                        discussionContent(posts)
+                case .posts:
+                    if store.isLoadingDiscussions {
+                        ProgressView("正在查找相关动态…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 54)
+                    } else if let error = store.discussionsError, store.discussions.isEmpty {
+                        ContentUnavailableView(
+                            "载入失败",
+                            systemImage: "wifi.exclamationmark",
+                            description: Text(error)
+                        )
+                        .padding(.top, 30)
+                    } else if store.discussions.isEmpty {
+                        ContentUnavailableView(
+                            "暂无相关动态",
+                            systemImage: "bubble.left.and.bubble.right",
+                            description: Text("内容库里暂时没有提到这位人物的动态")
+                        )
+                        .padding(.top, 30)
+                    } else {
+                        discussionContent(store.discussions)
                     }
                 }
-            } else if posts.isEmpty {
-                ContentUnavailableView(
-                    section == .posts ? "暂无本人动态" : "暂无相关讨论",
-                    systemImage: section == .posts ? "bubble.left" : "bubble.left.and.bubble.right",
-                    description: Text(section == .posts ? "内容库里还没有收录他本人发布的帖子" : "内容库里暂时没有提到这位人物的讨论")
-                )
-                .padding(.top, 36)
-            } else {
-                ForEach(posts) { post in
-                    let displayPost = store.postForDisplay(post)
-                    PersonPostTimelineRow(post: displayPost, compact: false) { selectedPost = displayPost }
-                        .task { await store.translateXPostIfNeeded(post) }
-                        .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
-                }
-                ownPostsPaginationStatus
             }
         }
+    }
+
+    private var relatedSectionPicker: some View {
+        HStack(spacing: 4) {
+            ForEach(PersonRelatedSection.allCases) { item in
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { relatedSection = item }
+                } label: {
+                    Text(item.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(relatedSection == item ? Color.primary : Color.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .background(
+                            relatedSection == item ? Color(uiColor: .systemBackground) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 11))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
     }
 
     @ViewBuilder
@@ -417,18 +481,6 @@ private struct PersonDetailPage: View {
                 .frame(maxWidth: .infinity)
                 .padding(20)
         }
-    }
-
-    private var sectionIsLoading: Bool {
-        if section == .profile { return false }
-        return section == .posts ? store.isLoadingOwnPosts : store.isLoadingDiscussions
-    }
-
-    private var sectionError: String? {
-        if section == .profile { return nil }
-        if section == .posts { return store.ownPostsError }
-        if !store.relatedVideos.isEmpty || !store.discussions.isEmpty { return nil }
-        return store.discussionsError ?? store.relatedVideosError
     }
 
     private func discussionContent(_ posts: [Post]) -> some View {
@@ -817,6 +869,19 @@ private enum PersonDetailSection: String, CaseIterable, Identifiable {
         case .posts: "动态"
         case .discussions: "相关"
         case .profile: "简介"
+        }
+    }
+}
+
+private enum PersonRelatedSection: String, CaseIterable, Identifiable {
+    case videos
+    case posts
+
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .videos: "视频"
+        case .posts: "动态"
         }
     }
 }
