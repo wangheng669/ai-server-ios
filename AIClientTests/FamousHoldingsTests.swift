@@ -11,21 +11,39 @@ final class FamousHoldingsTests: XCTestCase {
                 "version": "2026-07-28",
                 "industries": [{
                   "id": "new-energy",
+                  "title": "新能源汽车",
+                  "subtitle": "电池 · 整车 · 补能",
+                  "icon": "car.side.fill",
                   "scale": {
                     "value": "1,286.6万辆",
                     "metric": "新能源汽车销量",
                     "period": "2024年",
+                    "growth": "+35.5% 同比",
                     "source": {
                       "name": "工业和信息化部",
                       "url": "https://www.miit.gov.cn/example"
                     }
                   },
+                  "history": [
+                    {"year": 2024, "value": 1286.6}
+                  ],
+                  "anchors": ["动力电池", "整车制造"],
+                  "chain": [
+                    {"id": "upstream", "level": "上游", "title": "材料", "items": ["锂矿"]},
+                    {"id": "midstream", "level": "中游", "title": "制造", "items": ["动力电池"]},
+                    {"id": "downstream", "level": "下游", "title": "服务", "items": ["充电桩"]}
+                  ],
                   "companies": [{
                     "id": "byd",
                     "name": "比亚迪",
                     "role": "整车与电池",
-                    "stage_id": "new-energy-2"
-                  }]
+                    "stage_id": "midstream",
+                    "ticker": "002594.SZ"
+                  }],
+                  "insights": [
+                    {"id": "sales", "title": "产销扩张", "detail": "产业规模保持扩张"}
+                  ],
+                  "provenance": ["工业和信息化部"]
                 }]
               }
             }
@@ -37,7 +55,8 @@ final class FamousHoldingsTests: XCTestCase {
         XCTAssertTrue(response.success)
         XCTAssertEqual(response.data.version, "2026-07-28")
         XCTAssertEqual(response.data.industries.first?.scale.metric, "新能源汽车销量")
-        XCTAssertEqual(response.data.industries.first?.companies.first?.stageID, "new-energy-2")
+        XCTAssertEqual(response.data.industries.first?.companies.first?.stageID, "midstream")
+        XCTAssertEqual(response.data.industries.first?.chain.count, 3)
     }
 
     func testDecodesFamousHoldingsContract() throws {
