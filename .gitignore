@@ -6,6 +6,7 @@ DerivedDataSim/
 .codex-derived-device/
 .codex-derived-sim/
 .codex/DerivedData-*/
+.codex/config.toml
 artifacts/device-derived/
 artifacts/test-derived/
 artifacts/device-build/
