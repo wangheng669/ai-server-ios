@@ -318,9 +318,7 @@ struct PostDetailView: View {
     }
 
     private var rssContentImageURLs: [URL] {
-        (post.images ?? [])
-            .filter { !$0.isKnownInlineAsset }
-            .compactMap { MediaURL.image($0.url) }
+        post.weiboFollowingImageURLs
     }
 
     private var xueqiuDetail: some View {
