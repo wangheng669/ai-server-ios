@@ -319,12 +319,23 @@ struct PostDetailView: View {
                         .textSelection(.enabled)
                 }
 
-                ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
-                    WeiboDetailImage(
-                        url: url,
-                        index: index,
-                        count: post.weiboFollowingImageURLs.count
-                    )
+                if post.weiboFollowingImageURLs.count == 1,
+                   let url = post.weiboFollowingImageURLs.first {
+                    WeiboDetailImage(url: url, index: 0, count: 1)
+                } else if !post.weiboFollowingImageURLs.isEmpty {
+                    LazyVGrid(
+                        columns: [.init(.flexible(), spacing: 6), .init(.flexible(), spacing: 6)],
+                        spacing: 6
+                    ) {
+                        ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
+                            WeiboDetailImage(
+                                url: url,
+                                index: index,
+                                count: post.weiboFollowingImageURLs.count,
+                                isCompact: true
+                            )
+                        }
+                    }
                 }
 
                 if post.hasWeiboVideoReference, let link = post.linkURL {
@@ -2397,6 +2408,7 @@ private struct WeiboDetailImage: View {
     let url: URL
     let index: Int
     let count: Int
+    var isCompact = false
     @State private var aspectRatio: CGFloat = 4 / 3
     @State private var previewURL: URL?
 
@@ -2404,34 +2416,48 @@ private struct WeiboDetailImage: View {
         max(UIScreen.main.bounds.width - 32, 240)
     }
 
-    private var imageSize: CGSize {
-        let safeRatio = min(max(aspectRatio, 0.2), 5)
-        if safeRatio < 0.8 {
-            let height: CGFloat = 440
-            return CGSize(width: min(max(height * safeRatio, 180), availableWidth), height: height)
-        }
+    private var isLongImage: Bool {
+        !isCompact && aspectRatio < 0.6
+    }
 
-        let width = availableWidth
-        return CGSize(width: width, height: min(max(width / safeRatio, 120), 380))
+    private var imageHeight: CGFloat {
+        if isCompact { return 172 }
+        let safeRatio = min(max(aspectRatio, 0.2), 5)
+        if isLongImage { return 360 }
+        return min(max(availableWidth / safeRatio, 120), 460)
     }
 
     var body: some View {
-        RemoteImage(
-            url: url,
-            height: imageSize.height,
-            cornerRadius: 8,
-            contentMode: .fit
-        ) { image in
-            guard image.size.width > 0, image.size.height > 0 else { return }
-            aspectRatio = image.size.width / image.size.height
+        ZStack(alignment: .bottom) {
+            RemoteImage(
+                url: url,
+                height: imageHeight,
+                cornerRadius: 8,
+                contentMode: (isLongImage || isCompact) ? .fill : .fit
+            ) { image in
+                guard image.size.width > 0, image.size.height > 0 else { return }
+                aspectRatio = image.size.width / image.size.height
+            }
+
+            if isLongImage {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    Text("长图 · 点击查看完整图片")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(.black.opacity(0.58))
+            }
         }
-        .frame(width: imageSize.width)
+        .frame(maxWidth: .infinity)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         }
-        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { previewURL = url }
         .accessibilityLabel("微博配图，第 \(index + 1) 张，共 \(count) 张")
