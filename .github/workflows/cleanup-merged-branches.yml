@@ -1,0 +1,36 @@
+name: Clean up merged task branches
+
+on:
+  schedule:
+    - cron: "20 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main with full history
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
+
+      - name: Delete task branches already merged into main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main '+refs/heads/codex/*:refs/remotes/origin/codex/*'
+
+          git for-each-ref --format='%(refname:short) %(objectname)' refs/remotes/origin/codex/ |
+          while read -r remote_branch branch_sha; do
+            [[ -n "$remote_branch" ]] || continue
+            branch="${remote_branch#origin/}"
+            if git merge-base --is-ancestor "$branch_sha" origin/main; then
+              git push \
+                --force-with-lease="refs/heads/$branch:$branch_sha" \
+                origin ":refs/heads/$branch"
+            fi
+          done

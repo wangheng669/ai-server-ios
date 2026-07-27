@@ -179,6 +179,19 @@ jobs:
             sleep $((attempt * 3))
           done
 
+      - name: Delete merged task branch
+        if: success()
+        env:
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main "$SOURCE_BRANCH"
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          git push \
+            --force-with-lease="refs/heads/$SOURCE_BRANCH:$SOURCE_SHA" \
+            origin ":refs/heads/$SOURCE_BRANCH"
+
       - name: Install the newly merged main
         if: steps.merge.outputs.already_merged == 'false'
         env:
