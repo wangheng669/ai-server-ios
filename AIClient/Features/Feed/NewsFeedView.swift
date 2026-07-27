@@ -2011,7 +2011,7 @@ private struct WeiboFollowingRow: View {
     let post: Post
 
     private var contentParts: (body: String, context: String?) {
-        let content = post.displayContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = post.weiboFollowingListContent.trimmingCharacters(in: .whitespacesAndNewlines)
         let separators = ["//@","// @"]
         guard let match = separators.compactMap({ separator in
             content.range(of: separator).map { ($0, separator) }

@@ -192,6 +192,18 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertFalse(unrelated.hasWeiboVideoReference)
     }
 
+    func testWeiboFollowingListPrefersCompleteSummaryOverTruncatedHTMLContent() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":22,"source":"rss:78","content":"【<a href=\"https://weibo.com\"><span>#中方...","title":"【#中方已救起47名越南船员#】越方感谢中方救援，搜救工作仍在进行中。"}"#.utf8)
+        )
+
+        XCTAssertEqual(
+            post.weiboFollowingListContent,
+            "【#中方已救起47名越南船员#】越方感谢中方救援，搜救工作仍在进行中。"
+        )
+    }
+
     func testPlaybackStreamPathUsesAPIPrefix() throws {
         let url = try XCTUnwrap(APIClient.playbackURL(
             from: "/post/video-playback/stream?formatId=18",
