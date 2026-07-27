@@ -2014,6 +2014,17 @@ final class YouTubeWarmPlayerPool: NSObject, WKScriptMessageHandler {
         webViews[key]?.evaluateJavaScript("beginPlayback()")
     }
 
+    func seek(
+        videoID: String,
+        instanceID: String,
+        options: YouTubePlayerOptions,
+        seconds: Double
+    ) {
+        let key = "\(videoID)::\(instanceID)::\(options.cacheKey)"
+        let safeSeconds = max(0, seconds)
+        webViews[key]?.evaluateJavaScript("player.seekTo(\(safeSeconds), true); beginPlayback()")
+    }
+
     private func playerView(
         videoID: String,
         instanceID: String,
