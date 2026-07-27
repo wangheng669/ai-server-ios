@@ -31,8 +31,8 @@ final class PeopleStore {
             if !serverTopics.isEmpty {
                 topics = serverTopics
             }
-            latestPosts = await service.latestPosts(for: payload.users.filter(\.hasOwnPostSource))
-            await translateLatestPostsIfNeeded()
+            let posts = await service.latestPosts(for: payload.users.filter(\.hasOwnPostSource))
+            latestPosts = await translatedLatestPosts(posts)
         } catch is CancellationError {
             return
         } catch {
@@ -44,28 +44,40 @@ final class PeopleStore {
         latestPosts[person.id]
     }
 
-    private func translateLatestPostsIfNeeded() async {
-        for (personID, post) in latestPosts {
-            guard post.needsXTranslation, let tweetID = post.xTweetID else { continue }
-            if let cached = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
-                latestPosts[personID] = post.replacingTranslation(with: cached)
-                continue
+    private func translatedLatestPosts(_ posts: [String: Post]) async -> [String: Post] {
+        let baseURL = baseURL
+        return await withTaskGroup(of: (String, Post).self, returning: [String: Post].self) { group in
+            for (personID, post) in posts {
+                group.addTask {
+                    guard post.needsXTranslation, let tweetID = post.xTweetID else {
+                        return (personID, post)
+                    }
+                    if let cached = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
+                        return (personID, post.replacingTranslation(with: cached))
+                    }
+                    do {
+                        let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
+                        guard !Task.isCancelled else { return (personID, post) }
+                        let translation = PersonDetailStore.presentedTranslation(
+                            result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                            original: post.originalDisplayContent
+                        )
+                        guard !translation.isEmpty, translation != post.originalDisplayContent else {
+                            return (personID, post)
+                        }
+                        PersonDetailStore.cacheXTranslation(translation, tweetID: tweetID)
+                        return (personID, post.replacingTranslation(with: translation))
+                    } catch {
+                        return (personID, post)
+                    }
+                }
             }
-            do {
-                let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
-                guard !Task.isCancelled else { return }
-                let translation = PersonDetailStore.presentedTranslation(
-                    result.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                    original: post.originalDisplayContent
-                )
-                guard !translation.isEmpty, translation != post.originalDisplayContent else { continue }
-                PersonDetailStore.cacheXTranslation(translation, tweetID: tweetID)
-                latestPosts[personID] = post.replacingTranslation(with: translation)
-            } catch is CancellationError {
-                return
-            } catch {
-                // Translation is best-effort. Keep the original latest update visible on failure.
+
+            var translated = posts
+            for await (personID, post) in group {
+                translated[personID] = post
             }
+            return translated
         }
     }
 }

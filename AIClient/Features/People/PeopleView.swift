@@ -147,6 +147,11 @@ private struct PersonActivityRow: View {
     let person: SpecialPerson
     let latestPost: Post?
 
+    private var activityText: String {
+        guard let latestPost, !latestPost.needsXTranslation else { return person.summary }
+        return latestPost.displayContent
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             AvatarView(
@@ -171,7 +176,7 @@ private struct PersonActivityRow: View {
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text(latestPost?.displayContent ?? person.summary)
+                Text(activityText)
                     .font(.system(size: 15))
                     .foregroundStyle(.primary)
                     .lineSpacing(3)
@@ -381,6 +386,7 @@ private struct PersonDetailPage: View {
     private var relatedContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             relatedSectionPicker
+                .zIndex(1)
 
             Group {
                 switch relatedSection {
@@ -433,6 +439,8 @@ private struct PersonDetailPage: View {
                     }
                 }
             }
+            .padding(.top, 24)
+            .zIndex(0)
         }
     }
 
@@ -450,6 +458,7 @@ private struct PersonDetailPage: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+        .background(Color(uiColor: .systemBackground))
     }
 
     @ViewBuilder
