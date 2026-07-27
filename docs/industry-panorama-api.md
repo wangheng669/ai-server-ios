@@ -1,6 +1,6 @@
 # 产业全景 API 契约
 
-产业规模、数据来源和代表企业由服务端维护，iOS 端通过公开只读接口加载，并保留同结构的内置兜底数据。
+产业选择器、规模、历史趋势、产业链、代表企业、产业观察和数据来源全部由服务端维护。iOS 端只负责渲染；请求失败时展示可重试错误状态，不保存业务数据副本。
 
 ## 查询接口
 
@@ -16,25 +16,42 @@
     "industries": [
       {
         "id": "new-energy",
+        "title": "新能源汽车",
+        "subtitle": "电池 · 整车 · 补能",
+        "icon": "car.side.fill",
         "scale": {
           "value": "1,286.6万辆",
           "metric": "新能源汽车销量",
           "period": "2024年",
+          "growth": "+35.5% 同比",
           "source": {
             "name": "工业和信息化部",
             "url": "https://www.miit.gov.cn/...",
             "published_at": "2025-01-21"
           }
         },
+        "anchors": ["动力电池", "电驱系统", "整车制造", "充换电服务"],
+        "chain": [
+          {
+            "id": "new-energy-upstream",
+            "level": "上游",
+            "title": "材料与核心零部件",
+            "items": ["锂矿", "正极材料", "负极材料"]
+          }
+        ],
         "companies": [
           {
             "id": "byd",
             "name": "比亚迪",
             "role": "整车与电池",
-            "stage_id": "new-energy-2",
+            "stage_id": "new-energy-midstream",
             "ticker": "002594.SZ"
           }
-        ]
+        ],
+        "insights": [
+          {"id": "sales", "title": "产销扩张", "detail": "新能源汽车渗透率持续提升。"}
+        ],
+        "provenance": ["工信部", "国家发展改革委", "公司公开资料"]
       }
     ]
   }
@@ -45,15 +62,20 @@
 
 - `data.version`
 - `industries[].id`
+- `industries[].title`
+- `industries[].subtitle`
+- `industries[].icon`（SF Symbols 名称）
 - `industries[].scale.value`
 - `industries[].scale.metric`
 - `industries[].scale.period`
 - `industries[].scale.source.name`
+- `industries[].anchors`
+- `industries[].chain`（固定为上游、中游、下游三组）
 - `industries[].companies[].id`
 - `industries[].companies[].name`
 - `industries[].companies[].role`
 
-`source.url`、`source.published_at`、`company.stage_id` 和 `company.ticker` 可选。未知字段必须允许客户端忽略，方便契约向后兼容。
+`history`、`scale.growth`、`source.url`、`source.published_at`、`company.monogram` 和 `company.ticker` 可选。`company.stage_id` 必须引用 `chain[].id`。未知字段必须允许客户端忽略，方便契约向后兼容。
 
 ## 服务端存储建议
 
@@ -65,7 +87,9 @@
 
 - `industries`：产业基础信息和展示顺序
 - `industry_scale_snapshots`：产业、指标、数值、周期、来源、发布时间
+- `industry_chain_groups`：上中下游分组、环节标签和展示顺序
 - `industry_companies`：企业、产业、链路环节、角色、证券代码和展示顺序
+- `industry_insights`：定性观察、依据和有效期
 
 规模数据必须保留原始字符串和口径，不能只存一个数值。不同产业可能使用销量、产量、营业收入、产值或规上企业数量，不应在服务端伪装成可直接横向比较的统一指标。
 
@@ -74,7 +98,7 @@
 - 响应头建议设置 `Cache-Control: public, max-age=3600`
 - `ETag` 使用配置文件内容哈希或 `data.version`
 - 数据更新时只追加或替换对应产业的规模快照，不修改历史来源
-- 客户端请求失败时继续展示内置兜底，不显示空状态
+- 客户端使用 HTTP 缓存协商获取最新版本；请求失败时显示可重试错误状态
 
 ## 校验规则
 
@@ -82,4 +106,5 @@
 - 每个产业恰好一个当前规模快照，且 `period`、`metric`、`source.name` 非空
 - 企业 `id` 在产业内唯一，展示企业建议 2–6 家
 - `source.url` 必须为 HTTPS
-- `stage_id` 存在时必须引用该产业的有效链路环节
+- 每个产业必须包含恰好三个产业链分组
+- `stage_id` 必须引用该产业的有效链路分组
