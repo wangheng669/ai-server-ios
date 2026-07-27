@@ -167,6 +167,31 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.weiboFollowingImageURLs.count, 1)
     }
 
+    func testWeiboRSSDetailRecognitionAndImportedMarkerCleanup() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":19,"source":"rss:19","post_link":"https://weibo.com/123/abc","content":"今天  真开心[裂开][图片]\n\n\n继续分享"}"#.utf8)
+        )
+
+        XCTAssertTrue(post.isWeiboRSS)
+        XCTAssertEqual(post.weiboDetailContent, "今天 真开心😵‍💫\n\n继续分享")
+    }
+
+    func testWeiboRSSRecognizesEmbeddedVideoButUnrelatedRSSDoesNot() throws {
+        let weibo = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":20,"source":"rss:20","post_link":"https://weibo.com/123/abc","content":"<video src='https://video.weibo.com/example'></video>"}"#.utf8)
+        )
+        let unrelated = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":21,"source":"rss:21","post_link":"https://example.com/article","content":"<video src='clip.mp4'></video>"}"#.utf8)
+        )
+
+        XCTAssertTrue(weibo.hasWeiboVideoReference)
+        XCTAssertFalse(unrelated.isWeiboRSS)
+        XCTAssertFalse(unrelated.hasWeiboVideoReference)
+    }
+
     func testPlaybackStreamPathUsesAPIPrefix() throws {
         let url = try XCTUnwrap(APIClient.playbackURL(
             from: "/post/video-playback/stream?formatId=18",

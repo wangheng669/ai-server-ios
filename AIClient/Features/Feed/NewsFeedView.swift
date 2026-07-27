@@ -2084,6 +2084,7 @@ private struct WeiboFollowingRow: View {
         .padding(.vertical, 14)
         .background(Color(uiColor: .systemBackground))
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 }
 
