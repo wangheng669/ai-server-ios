@@ -1,51 +1,51 @@
 # Industry Panorama Design QA
 
-- Source visual truth: `/Users/wangheng/.codex/generated_images/019fa440-c6fe-7a10-80cf-99530e4754e0/call_xsLW1zhwRSW4Kt8ure4xMxl8.png`
-- Implementation screenshot: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/screenshot_optimized_c9d303e2-3f21-4e53-af20-95ad57c51120.jpg`
-- Combined comparison: `/tmp/industry-panorama-comparison.jpg`
-- Viewport: iPhone 17 Pro Max simulator, portrait; screenshot 368 × 800 px
-- Source pixels: 852 × 1846; normalized to 369 × 800 for comparison
+- Source visual truth: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/codex-clipboard-83663614-790e-4a29-a001-5b81f78fceab.png`
+- Implementation screenshot: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/screenshot_optimized_3f51291c-5c14-4b9f-9d34-c4fd12802704.jpg`
+- Viewport: iPhone 17 Pro Max simulator, portrait
+- Source pixels: 852 × 1846, normalized to 369 × 800
 - Implementation pixels: 368 × 800
-- State: Data tab → Industry Panorama → New Energy Vehicle
+- State: Data → Industry Panorama → New Energy Vehicle, top of page
 
 ## Full-view comparison evidence
 
-The implementation preserves the selected design's light editorial surface, compact single industry selector, oversized green scale figure, thin amber divider, and connected vertical industry narrative. It intentionally omits the mock's historical trend chart and live quote strip because those values were not part of the verified API contract. Representative companies appear once, attached to the server-provided `stage_id`, instead of being repeated in a separate section.
+The revised implementation now matches the reference's principal composition: one compact industry selector; asymmetric scale block with large green serif value on the left and a four-point green area/line chart on the right; amber section rule; three connected upstream/midstream/downstream groups; company monograms embedded in the relevant groups; and an off-white editorial surface.
+
+The app's existing bottom tab bar remains visible because it is global product navigation. The reference omits that app-owned chrome. Unsupported quote prices and percentage changes were not copied from the concept; the implementation's footer uses real ticker codes from the API.
 
 ## Focused region comparison evidence
 
-The top scale region and first three visible chain stages were readable at native simulator resolution. The source link, segment chips, stage markers, connector line, and company anchors were checked directly. No raster assets or nonstandard logos are required; SF Symbols are used only for navigation/category controls and company marks are typographic monograms.
+- Scale block: the value/unit split, chart domain, axis labels, point markers, source attribution, and spacing were checked at native simulator density.
+- Chain block: three stage circles, continuous connector, stage headings, descriptions, chips, and company placement were checked directly.
+- Data integrity: chart points are 2021 `352.1`, 2022 `688.7`, 2023 `949.5`, and 2024 `1286.6` 万辆, each with an official source URL in the API.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: system Chinese UI type remains readable; the scale value uses a restrained serif display treatment consistent with the reference.
-- Spacing and layout rhythm: 16 pt page margins, single navigation row, open editorial scale block, and continuous chain spacing match the reference hierarchy without nested cards.
-- Colors and visual tokens: warm off-white background, dark text, emerald emphasis, pale green chips, and a restrained amber rule match the selected direction with accessible contrast.
-- Image quality and asset fidelity: no photographic or generated raster assets are required by this screen. Standard SF Symbols and text monograms remain sharp at device density.
-- Copy and content: scale, period, metric, source, industry stages, and companies are sourced from the API/fallback dataset. Unsupported trend and quote values from the concept image were not implemented.
+- Fonts and typography: system Chinese UI type plus a serif display value reproduce the reference hierarchy and remain readable.
+- Spacing and layout rhythm: 16 pt page margins, compact selector, asymmetric scale/chart region, and three-stage vertical rhythm align with the normalized source.
+- Colors and visual tokens: warm off-white, emerald, pale green chips, dark ink text, and the amber rule match the source.
+- Image quality and asset fidelity: no raster assets are required; native Swift Charts and SF Symbols remain sharp at device density.
+- Copy and content: visible values, historical points, stage relationships, company roles, and tickers come from the source-backed API or the identical offline fallback.
 
 ## Findings
 
 - No actionable P0, P1, or P2 fidelity issues remain.
-- Accepted constraint deviation: the concept's trend line and ticker prices were omitted to satisfy the user's requirement that all displayed data be real and source-backed.
-- Accepted data correction: company placement follows backend `stage_id` rather than the illustrative placement in the generated concept.
-
-## Interaction checks
-
-- Horizontal industry selector remains tappable and selected state is exposed to accessibility.
-- Source attribution is a tappable link when a URL is available.
-- Vertical page scrolling and the existing bottom navigation remain functional.
-- App built and launched successfully on the configured simulator.
-- Automated test suite: 109 passed, 0 failed, 0 skipped.
+- Accepted product constraint: global bottom navigation remains present.
+- Accepted data constraint: illustrative stock prices and percentage changes are replaced by verified ticker codes.
 
 ## Comparison history
 
-- Initial implementation check found fallback company ordering could temporarily place companies in the wrong stage before the remote response arrived.
-- Fix: fallback placement now matches company roles against stage titles/highlights; remote data continues to use the authoritative `stage_id`.
-- Post-fix evidence: simulator snapshot places 宁德时代 in 动力电池, 比亚迪 and 上汽集团 in 整车; the backend contract places 蔚来 in 充换电.
+- Pass 1 found a P1 mismatch: no historical chart, four small chain nodes, and a repeated company section.
+- Fix: added source-backed historical data, native chart, three grouped chain stages, embedded company anchors, and a single ticker strip.
+- Pass 2 found a P2 mismatch: the chart was compressed and rendered the year values as a continuous axis.
+- Fix: allocated explicit width to the scale value, changed years to categorical labels, and fixed the verified 200–1,400 万辆 domain.
+- Post-fix evidence: the current simulator screenshot shows the same left-value/right-chart structure and three-stage chain as the source.
 
-## Follow-up polish
+## Interaction and verification
 
-- P3: a verified historical series could later restore the compact trend chart without fabricating data.
+- Industry selection, vertical scrolling, source link, and bottom navigation remain functional.
+- Simulator build succeeded without warnings.
+- iOS test suite: 109 passed, 0 failed, 0 skipped.
+- Public API returned all four historical points and company `stage_id`/ticker metadata.
 
 final result: passed

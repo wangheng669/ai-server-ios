@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 private struct IndustryStage: Identifiable {
@@ -15,6 +16,31 @@ private struct IndustryCompany: Identifiable {
     let name: String
     let role: String
     let stageID: String?
+    let ticker: String?
+
+    init(id: String, name: String, role: String, stageID: String?, ticker: String? = nil) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.stageID = stageID
+        self.ticker = ticker
+    }
+}
+
+private struct IndustryHistoryPoint: Identifiable {
+    let year: Int
+    let value: Double
+    let sourceURL: URL?
+
+    var id: Int { year }
+}
+
+private struct IndustryStageGroup: Identifiable {
+    let level: String
+    let stages: [IndustryStage]
+    let companies: [IndustryCompany]
+
+    var id: String { level }
 }
 
 private struct IndustryFacts {
@@ -23,7 +49,26 @@ private struct IndustryFacts {
     let period: String
     let source: String
     let sourceURL: URL?
+    let history: [IndustryHistoryPoint]
     let companies: [IndustryCompany]
+
+    init(
+        scaleValue: String,
+        scaleMetric: String,
+        period: String,
+        source: String,
+        sourceURL: URL?,
+        history: [IndustryHistoryPoint] = [],
+        companies: [IndustryCompany]
+    ) {
+        self.scaleValue = scaleValue
+        self.scaleMetric = scaleMetric
+        self.period = period
+        self.source = source
+        self.sourceURL = sourceURL
+        self.history = history
+        self.companies = companies
+    }
 }
 
 struct IndustryPanoramaResponse: Decodable {
@@ -54,15 +99,28 @@ struct IndustryFactPayload: Decodable {
         let name: String
         let role: String
         let stageID: String?
+        let ticker: String?
 
         enum CodingKeys: String, CodingKey {
-            case id, name, role
+            case id, name, role, ticker
             case stageID = "stage_id"
+        }
+    }
+
+    struct HistoryPoint: Decodable {
+        let year: Int
+        let value: Double
+        let sourceURL: URL?
+
+        enum CodingKeys: String, CodingKey {
+            case year, value
+            case sourceURL = "source_url"
         }
     }
 
     let id: String
     let scale: Scale
+    let history: [HistoryPoint]?
     let companies: [Company]
 }
 
@@ -94,8 +152,17 @@ private struct IndustryPanoramaService {
                     period: industry.scale.period,
                     source: industry.scale.source.name,
                     sourceURL: industry.scale.source.url,
+                    history: (industry.history ?? []).map {
+                        IndustryHistoryPoint(year: $0.year, value: $0.value, sourceURL: $0.sourceURL)
+                    },
                     companies: industry.companies.map {
-                        IndustryCompany(id: $0.id, name: $0.name, role: $0.role, stageID: $0.stageID)
+                        IndustryCompany(
+                            id: $0.id,
+                            name: $0.name,
+                            role: $0.role,
+                            stageID: $0.stageID,
+                            ticker: $0.ticker
+                        )
                     }
                 )
             )
@@ -195,16 +262,18 @@ struct IndustryPanoramaView: View {
             scaleSection(chain)
 
             VStack(spacing: 0) {
-                ForEach(Array(chain.stages.enumerated()), id: \.element.id) { index, stage in
-                    stageRow(
-                        stage,
-                        companies: companies(for: stage, in: chain),
+                ForEach(Array(stageGroups(for: chain).enumerated()), id: \.element.id) { index, group in
+                    stageGroupRow(
+                        group,
                         color: chain.color,
                         isFirst: index == 0,
-                        isLast: index == chain.stages.count - 1
+                        isLast: index == stageGroups(for: chain).count - 1
                     )
                 }
             }
+
+            companyTickerStrip(chain)
+                .padding(.top, 12)
         }
         .padding(.horizontal, 16)
         .animation(.easeOut(duration: 0.18), value: selectedID)
@@ -213,15 +282,31 @@ struct IndustryPanoramaView: View {
     }
 
     private func scaleSection(_ chain: IndustryChain) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let parts = scaleValueParts(chain.facts.scaleValue)
+
+        return VStack(alignment: .leading, spacing: 14) {
             Text("\(chain.facts.period) 产业规模")
                 .font(.system(size: 17, weight: .semibold))
 
-            Text(chain.facts.scaleValue)
-                .font(.system(size: 48, weight: .medium, design: .serif))
-                .foregroundStyle(chain.color)
-                .minimumScaleFactor(0.72)
-                .lineLimit(1)
+            HStack(alignment: .bottom, spacing: 18) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(parts.value)
+                        .font(.system(size: 56, weight: .medium, design: .serif))
+                        .foregroundStyle(chain.color)
+                        .minimumScaleFactor(0.68)
+                        .lineLimit(1)
+
+                    Text(parts.unit)
+                        .font(.system(size: 15, weight: .medium))
+                }
+                .frame(width: 145, alignment: .leading)
+
+                if chain.facts.history.count >= 2 {
+                    historyChart(chain.facts.history, color: chain.color)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 112)
+                }
+            }
 
             HStack(alignment: .firstTextBaseline) {
                 Text(chain.facts.scaleMetric)
@@ -232,12 +317,72 @@ struct IndustryPanoramaView: View {
             }
         }
         .padding(.horizontal, 4)
-        .padding(.bottom, 22)
+        .padding(.bottom, 26)
         .overlay(alignment: .bottomLeading) {
             Capsule()
                 .fill(Color.orange.opacity(0.8))
                 .frame(width: 30, height: 3)
         }
+    }
+
+    private func historyChart(_ history: [IndustryHistoryPoint], color: Color) -> some View {
+        Chart(history) { point in
+            AreaMark(
+                x: .value("年份", String(point.year)),
+                y: .value("规模", point.value)
+            )
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [color.opacity(0.18), color.opacity(0.02)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+
+            LineMark(
+                x: .value("年份", String(point.year)),
+                y: .value("规模", point.value)
+            )
+            .foregroundStyle(color)
+            .lineStyle(StrokeStyle(lineWidth: 1.5))
+
+            PointMark(
+                x: .value("年份", String(point.year)),
+                y: .value("规模", point.value)
+            )
+            .foregroundStyle(color)
+            .symbolSize(24)
+        }
+        .chartXAxis {
+            AxisMarks(values: history.map { String($0.year) }) { value in
+                AxisValueLabel {
+                    if let year = value.as(String.self) {
+                        Text(year)
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .chartYScale(domain: 200...1_400)
+        .chartYAxis {
+            AxisMarks(position: .leading, values: [200, 600, 1_000, 1_400]) {
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2]))
+                    .foregroundStyle(Color.secondary.opacity(0.18))
+                AxisValueLabel()
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityLabel("历年\(history.first?.year ?? 0)至\(history.last?.year ?? 0)产业规模趋势")
+    }
+
+    private func scaleValueParts(_ value: String) -> (value: String, unit: String) {
+        let units = ["万亿元", "亿元", "亿块", "万辆", "万家", "家"]
+        for unit in units where value.hasSuffix(unit) {
+            return (String(value.dropLast(unit.count)), unit)
+        }
+        return (value, "")
     }
 
     @ViewBuilder
@@ -273,9 +418,25 @@ struct IndustryPanoramaView: View {
         }
     }
 
-    private func stageRow(
-        _ stage: IndustryStage,
-        companies: [IndustryCompany],
+    private func stageGroups(for chain: IndustryChain) -> [IndustryStageGroup] {
+        var levels: [String] = []
+        var grouped: [String: [IndustryStage]] = [:]
+        for stage in chain.stages {
+            if grouped[stage.level] == nil { levels.append(stage.level) }
+            grouped[stage.level, default: []].append(stage)
+        }
+        return levels.map { level in
+            let stages = grouped[level] ?? []
+            return IndustryStageGroup(
+                level: level,
+                stages: stages,
+                companies: stages.flatMap { companies(for: $0, in: chain) }
+            )
+        }
+    }
+
+    private func stageGroupRow(
+        _ group: IndustryStageGroup,
         color: Color,
         isFirst: Bool,
         isLast: Bool
@@ -286,61 +447,91 @@ struct IndustryPanoramaView: View {
                     .fill(isFirst ? Color.clear : color.opacity(0.7))
                     .frame(width: 2, height: 13)
                 Circle()
-                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                    .fill(Color(red: 0.975, green: 0.972, blue: 0.958))
                     .frame(width: 13, height: 13)
                     .overlay(Circle().stroke(color, lineWidth: 2))
                 Rectangle()
                     .fill(isLast ? Color.clear : color.opacity(0.7))
-                    .frame(width: 2, height: companies.isEmpty ? 94 : 142)
+                    .frame(width: 2, height: group.companies.isEmpty ? 124 : 172)
             }
             .frame(width: 16)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(stage.level)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(color, in: Circle())
+            HStack(alignment: .top, spacing: 12) {
+                Text(group.level)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(color, in: Circle())
 
-                    Text(stage.title)
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(group.stages.map(\.title).joined(separator: " · "))
                         .font(.system(size: 16, weight: .bold))
-                }
 
-                Text(stage.description)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    Text(group.stages.map(\.description).joined(separator: "；"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
 
-                HStack(spacing: 5) {
-                    ForEach(stage.highlights, id: \.self) { highlight in
-                        Text(highlight)
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(color)
-                            .padding(.horizontal, 7)
-                            .frame(height: 22)
-                            .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
-                    }
-                }
-
-                Text("关联：\(stage.related)")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
-
-                if !companies.isEmpty {
-                    HStack(spacing: 10) {
-                        ForEach(companies) { company in
-                            companyAnchor(company, color: color)
+                    HStack(spacing: 5) {
+                        ForEach(Array(Set(group.stages.flatMap(\.highlights))).sorted(), id: \.self) { highlight in
+                            Text(highlight)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(color)
+                                .padding(.horizontal, 8)
+                                .frame(height: 23)
+                                .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
                         }
                     }
-                    .padding(.top, 5)
+
+                    if !group.companies.isEmpty {
+                        HStack(spacing: 12) {
+                            ForEach(group.companies) { company in
+                                companyAnchor(company, color: color)
+                            }
+                        }
+                        .padding(.top, 5)
+                    }
                 }
             }
             .padding(.top, 8)
-            .padding(.bottom, isLast ? 4 : 14)
+            .padding(.bottom, isLast ? 6 : 16)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(stage.level)，\(stage.title)，\(stage.description)")
+        .accessibilityLabel(
+            "\(group.level)，\(group.stages.map(\.title).joined(separator: "、"))"
+        )
+    }
+
+    private func companyTickerStrip(_ chain: IndustryChain) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 0) {
+                ForEach(chain.facts.companies) { company in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 5) {
+                            Text(companyMonogram(company.name))
+                                .foregroundStyle(chain.color)
+                            Text(company.name)
+                        }
+                        .font(.system(size: 13, weight: .bold))
+
+                        Text(company.ticker ?? company.role)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minWidth: 112, alignment: .leading)
+                    .padding(.horizontal, 12)
+
+                    if company.id != chain.facts.companies.last?.id {
+                        Divider()
+                            .frame(height: 36)
+                    }
+                }
+            }
+            .padding(.vertical, 13)
+        }
+        .scrollIndicators(.hidden)
+        .background(Color.white.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func companyAnchor(_ company: IndustryCompany, color: Color) -> some View {
@@ -480,7 +671,9 @@ private extension IndustryChain {
         stageRelated: [String],
         related: [String]
     ) -> IndustryChain {
-        let levels = ["上游", "中游", "中游", "下游"]
+        let levels = id == "new-energy"
+            ? ["上游", "上游", "中游", "下游"]
+            : ["上游", "中游", "中游", "下游"]
         let stages = names.indices.map { index in
             IndustryStage(
                 id: "\(id)-\(index)",
@@ -512,6 +705,28 @@ private extension IndustryChain {
             period: "2024年",
             source: "工业和信息化部",
             sourceURL: URL(string: "https://www.miit.gov.cn/xwfb/bldhd/art/2025/art_303017acc5f44c95bf4c035c3345fb99.html"),
+            history: [
+                IndustryHistoryPoint(
+                    year: 2021,
+                    value: 352.1,
+                    sourceURL: URL(string: "https://english.www.gov.cn/archive/statistics/202201/12/content_WS61ded71ec6d09c94e48a38a5.html")
+                ),
+                IndustryHistoryPoint(
+                    year: 2022,
+                    value: 688.7,
+                    sourceURL: URL(string: "https://www.ndrc.gov.cn/fgsj/tjsj/cyfz/zzyfz/202301/t20230131_1348148.html")
+                ),
+                IndustryHistoryPoint(
+                    year: 2023,
+                    value: 949.5,
+                    sourceURL: URL(string: "https://www.miit.gov.cn/ztzl/rdzt/xxgyhqk/tjyd/zjlt/art/2025/art_3cfeca22303f408ebd82978701e71ff9.html")
+                ),
+                IndustryHistoryPoint(
+                    year: 2024,
+                    value: 1_286.6,
+                    sourceURL: URL(string: "https://www.miit.gov.cn/xwfb/bldhd/art/2025/art_303017acc5f44c95bf4c035c3345fb99.html")
+                )
+            ],
             companies: companies([
                 ("比亚迪", "整车与电池"),
                 ("宁德时代", "动力电池"),
