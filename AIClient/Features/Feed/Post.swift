@@ -353,6 +353,27 @@ struct Post: Decodable, Identifiable, Hashable {
                 filename != "timeline_card_small_web_default.png"
         }
     }
+    var isWeiboRSS: Bool {
+        guard isRSS else { return false }
+        let candidates = [postLink, meta?.rssArticleLink, meta?.rssFeedName, user?.userDesc]
+            .compactMap { $0?.lowercased() }
+        return candidates.contains { value in
+            value.contains("weibo.com") || value.contains("weibo.cn") || value.contains("/weibo/user/")
+        }
+    }
+    var weiboDetailContent: String {
+        displayContent
+            .replacingOccurrences(of: "[图片]", with: "")
+            .replacingOccurrences(of: "[裂开]", with: "😵‍💫")
+            .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    var hasWeiboVideoReference: Bool {
+        guard isWeiboRSS else { return false }
+        let raw = [content, text, summary, postLink].compactMap { $0 }.joined(separator: " ").lowercased()
+        return raw.contains("<video") || raw.contains("video.weibo.com") || raw.contains("微博视频")
+    }
     var htmlInlineAssetURLs: Set<URL> {
         guard isRSS, let content, !content.isEmpty else { return [] }
         let source = content as NSString

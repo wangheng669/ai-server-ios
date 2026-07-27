@@ -30,6 +30,7 @@ struct PostDetailView: View {
     @State private var xCommentsError: String?
     @State private var xTranslations: [String: String] = [:]
     @State private var loadingXTranslationIDs: Set<String> = []
+    @State private var weiboImageAspectRatios: [URL: CGFloat] = [:]
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -53,10 +54,11 @@ struct PostDetailView: View {
             else if post.sourceName == "知乎" { zhihuDetail }
             else if post.sourceName == "Truth" { truthDetail }
             else if post.isXueqiu { xueqiuDetail }
+            else if post.isWeiboRSS { weiboDetail }
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
-        .navigationTitle(post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情"))))
+        .navigationTitle(post.isWeiboRSS ? "微博" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar((["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube)
@@ -291,6 +293,85 @@ struct PostDetailView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var weiboDetail: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 12) {
+                    AvatarView(url: post.avatarURL, name: post.authorName, size: 44)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(post.authorName)
+                            .font(.headline)
+                        HStack(spacing: 5) {
+                            Text("来自微博")
+                            if let time = post.formattedTime { Text("· \(time)") }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                if !post.weiboDetailContent.isEmpty {
+                    Text(post.weiboDetailContent)
+                        .font(.body)
+                        .lineSpacing(6)
+                        .textSelection(.enabled)
+                }
+
+                ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
+                    RemoteImage(
+                        url: url,
+                        height: weiboImageHeight(for: url),
+                        cornerRadius: 10,
+                        contentMode: .fit
+                    ) { image in
+                        guard image.size.height > 0 else { return }
+                        weiboImageAspectRatios[url] = image.size.width / image.size.height
+                    }
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityLabel("微博配图，第 \(index + 1) 张，共 \(post.weiboFollowingImageURLs.count) 张")
+                }
+
+                if post.hasWeiboVideoReference, let link = post.linkURL {
+                    Button { openURL(link) } label: {
+                        Label("视频内容 · 在微博观看", systemImage: "play.rectangle.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if let link = post.linkURL {
+                    Divider()
+                    HStack(spacing: 10) {
+                        Button { openURL(link) } label: {
+                            Label("查看原微博", systemImage: "safari")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        ShareLink(item: link) {
+                            Label("分享", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 36)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private func weiboImageHeight(for url: URL) -> CGFloat {
+        let availableWidth = max(UIScreen.main.bounds.width - 32, 240)
+        guard let ratio = weiboImageAspectRatios[url], ratio > 0 else { return 280 }
+        return min(max(availableWidth / ratio, 160), 560)
     }
 
     private var rssSourceHeader: some View {
