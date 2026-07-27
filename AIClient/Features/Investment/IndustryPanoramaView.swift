@@ -10,6 +10,98 @@ private struct IndustryStage: Identifiable {
     let related: String
 }
 
+private struct IndustryCompany: Identifiable {
+    let id: String
+    let name: String
+    let role: String
+}
+
+private struct IndustryFacts {
+    let scaleValue: String
+    let scaleMetric: String
+    let period: String
+    let source: String
+    let sourceURL: URL?
+    let companies: [IndustryCompany]
+}
+
+struct IndustryPanoramaResponse: Decodable {
+    let success: Bool
+    let data: IndustryPanoramaData
+}
+
+struct IndustryPanoramaData: Decodable {
+    let version: String
+    let industries: [IndustryFactPayload]
+}
+
+struct IndustryFactPayload: Decodable {
+    struct Scale: Decodable {
+        struct Source: Decodable {
+            let name: String
+            let url: URL?
+        }
+
+        let value: String
+        let metric: String
+        let period: String
+        let source: Source
+    }
+
+    struct Company: Decodable {
+        let id: String
+        let name: String
+        let role: String
+        let stageID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, role
+            case stageID = "stage_id"
+        }
+    }
+
+    let id: String
+    let scale: Scale
+    let companies: [Company]
+}
+
+private struct IndustryPanoramaService {
+    let baseURL: URL
+    private let session: URLSession
+
+    init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession = .shared) {
+        self.baseURL = baseURL
+        self.session = session
+    }
+
+    func facts() async throws -> [String: IndustryFacts] {
+        let url = baseURL.appending(path: "api/v1/industries/panorama")
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let payload = try JSONDecoder().decode(IndustryPanoramaResponse.self, from: data)
+        guard payload.success else { throw URLError(.cannotParseResponse) }
+        return Dictionary(uniqueKeysWithValues: payload.data.industries.map { industry in
+            (
+                industry.id,
+                IndustryFacts(
+                    scaleValue: industry.scale.value,
+                    scaleMetric: industry.scale.metric,
+                    period: industry.scale.period,
+                    source: industry.scale.source.name,
+                    sourceURL: industry.scale.source.url,
+                    companies: industry.companies.map {
+                        IndustryCompany(id: $0.id, name: $0.name, role: $0.role)
+                    }
+                )
+            )
+        })
+    }
+}
+
 private struct IndustryChain: Identifiable {
     let id: String
     let title: String
@@ -18,13 +110,17 @@ private struct IndustryChain: Identifiable {
     let color: Color
     let stages: [IndustryStage]
     let related: [String]
+    let facts: IndustryFacts
 }
 
 struct IndustryPanoramaView: View {
     @State private var selectedID = IndustryChain.samples[0].id
+    @State private var remoteFacts: [String: IndustryFacts] = [:]
 
     private var selectedChain: IndustryChain {
-        IndustryChain.samples.first(where: { $0.id == selectedID }) ?? IndustryChain.samples[0]
+        let chain = IndustryChain.samples.first(where: { $0.id == selectedID }) ?? IndustryChain.samples[0]
+        guard let facts = remoteFacts[chain.id] else { return chain }
+        return chain.replacingFacts(with: facts)
     }
 
     var body: some View {
@@ -38,6 +134,10 @@ struct IndustryPanoramaView: View {
         }
         .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemGroupedBackground))
+        .task {
+            guard let facts = try? await IndustryPanoramaService().facts(), !facts.isEmpty else { return }
+            remoteFacts = facts
+        }
     }
 
     private var industryPicker: some View {
@@ -104,12 +204,38 @@ struct IndustryPanoramaView: View {
             }
             .padding(.bottom, 15)
 
-            HStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("产业规模")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(chain.facts.scaleValue)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(chain.color)
+                        Text(chain.facts.scaleMetric)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    if let sourceURL = chain.facts.sourceURL {
+                        Link(destination: sourceURL) {
+                            HStack(spacing: 3) {
+                                Text("\(chain.facts.period) · \(chain.facts.source)")
+                                Image(systemName: "arrow.up.right")
+                            }
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                        }
+                    } else {
+                        Text("\(chain.facts.period) · \(chain.facts.source)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer(minLength: 6)
                 overviewMetric(value: "\(chain.stages.count)", label: "核心环节", icon: "square.grid.2x2.fill", color: chain.color)
-                overviewDivider
-                overviewMetric(value: "\(chain.related.count)", label: "关联产业", icon: "link", color: chain.color)
-                overviewDivider
-                overviewMetric(value: "完整", label: "链路覆盖", icon: "arrow.up.right", color: chain.color)
+                    .frame(width: 86)
             }
             .padding(.bottom, 12)
 
@@ -141,6 +267,8 @@ struct IndustryPanoramaView: View {
                 }
             }
             .padding(.top, 12)
+
+            companySection(chain)
         }
         .padding(16)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
@@ -172,6 +300,53 @@ struct IndustryPanoramaView: View {
         Rectangle()
             .fill(HoldingsPalette.divider)
             .frame(width: 1, height: 28)
+    }
+
+    private func companySection(_ chain: IndustryChain) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("知名企业")
+                    .font(.system(size: 15, weight: .bold))
+                Spacer()
+                Text("按产业链代表性展示")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 8),
+                    GridItem(.flexible(), spacing: 8)
+                ],
+                spacing: 8
+            ) {
+                ForEach(chain.facts.companies) { company in
+                    HStack(spacing: 9) {
+                        Image(systemName: "building.2.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(chain.color)
+                            .frame(width: 30, height: 30)
+                            .background(chain.color.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(company.name)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                            Text(company.role)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+        .padding(.top, 16)
     }
 
     private func stageRow(
@@ -370,7 +545,147 @@ private extension IndustryChain {
             icon: icon,
             color: color,
             stages: stages,
-            related: related
+            related: related,
+            facts: facts[id] ?? facts["new-energy"]!
+        )
+    }
+
+    static let facts: [String: IndustryFacts] = [
+        "new-energy": IndustryFacts(
+            scaleValue: "1,286.6万辆",
+            scaleMetric: "新能源汽车销量",
+            period: "2024年",
+            source: "工业和信息化部",
+            sourceURL: URL(string: "https://www.miit.gov.cn/xwfb/bldhd/art/2025/art_303017acc5f44c95bf4c035c3345fb99.html"),
+            companies: companies([
+                ("比亚迪", "整车与电池"),
+                ("宁德时代", "动力电池"),
+                ("上汽集团", "整车制造"),
+                ("蔚来", "整车与换电")
+            ])
+        ),
+        "semiconductor": IndustryFacts(
+            scaleValue: "4,514亿块",
+            scaleMetric: "集成电路产量",
+            period: "2024年",
+            source: "国家统计局",
+            sourceURL: URL(string: "https://www.miit.gov.cn/jgsj/yxj/xxfb/art/2025/art_805e7edc1e5444e9b2008354600487aa.html"),
+            companies: companies([
+                ("中芯国际", "晶圆制造"),
+                ("海思", "芯片设计"),
+                ("北方华创", "半导体设备"),
+                ("长电科技", "封装测试")
+            ])
+        ),
+        "ai": IndustryFacts(
+            scaleValue: "近6,000亿元",
+            scaleMetric: "人工智能核心产业",
+            period: "2024年",
+            source: "中国互联网络信息中心",
+            sourceURL: URL(string: "https://www.miit.gov.cn/xwfb/mtbd/twbd/art/2025/art_e444c1d5f3df472f9824c777c41d89ae.html"),
+            companies: companies([
+                ("百度", "大模型与应用"),
+                ("阿里云", "云算力与模型"),
+                ("华为", "算力与大模型"),
+                ("科大讯飞", "语音与行业应用")
+            ])
+        ),
+        "solar": IndustryFacts(
+            scaleValue: "万亿元级",
+            scaleMetric: "光伏制造业产值",
+            period: "2024年",
+            source: "工业和信息化部",
+            sourceURL: URL(string: "https://www.miit.gov.cn/gyhxxhb/jgsj/dzxxs/dzjc/art/2025/art_da51f7f47c75477ea1fa6732155536db.html"),
+            companies: companies([
+                ("隆基绿能", "硅片与组件"),
+                ("通威股份", "硅料与电池片"),
+                ("阳光电源", "逆变器与储能"),
+                ("天合光能", "组件与系统")
+            ])
+        ),
+        "robot": IndustryFacts(
+            scaleValue: "2,379亿元",
+            scaleMetric: "机器人行业营收",
+            period: "2024年",
+            source: "商务部服务贸易指南",
+            sourceURL: URL(string: "https://tradeinservices.mofcom.gov.cn/article/lingyu/jsmyi/202510/179713.html"),
+            companies: companies([
+                ("新松机器人", "工业机器人"),
+                ("埃斯顿", "本体与伺服"),
+                ("汇川技术", "控制与驱动"),
+                ("优必选", "人形机器人")
+            ])
+        ),
+        "biomedicine": IndustryFacts(
+            scaleValue: "2.5万亿元",
+            scaleMetric: "医药制造业营收",
+            period: "2024年",
+            source: "国家统计局",
+            sourceURL: URL(string: "https://filedownload-ytb.stats.gov.cn/attachment/10-2024%E5%B9%B4%E5%8C%96%E5%AD%A6%E5%88%B6%E8%8D%AF%E8%A1%8C%E4%B8%9A%E7%BB%8F%E6%B5%8E%E8%BF%90%E8%A1%8C%E6%8A%A5%E5%91%8A.pdf"),
+            companies: companies([
+                ("恒瑞医药", "创新药"),
+                ("迈瑞医疗", "医疗器械"),
+                ("药明康德", "研发服务"),
+                ("国药集团", "流通与健康")
+            ])
+        ),
+        "aerospace": IndustryFacts(
+            scaleValue: "约1,200家",
+            scaleMetric: "规上航空航天企业",
+            period: "2023年末",
+            source: "第五次全国经济普查",
+            sourceURL: URL(string: "https://www.stats.gov.cn/sj/tjgb/jjpcgb/qgjpgb/202605/t20260508_1963635.html"),
+            companies: companies([
+                ("中国航天科技", "火箭与卫星"),
+                ("中国航空工业", "航空装备"),
+                ("中国商飞", "民用飞机"),
+                ("银河航天", "商业卫星")
+            ])
+        ),
+        "equipment": IndustryFacts(
+            scaleValue: "约1.45万家",
+            scaleMetric: "规上高端装备企业",
+            period: "2023年末",
+            source: "第五次全国经济普查",
+            sourceURL: URL(string: "https://www.stats.gov.cn/sj/tjgb/jjpcgb/qgjpgb/202605/t20260508_1963635.html"),
+            companies: companies([
+                ("三一重工", "工程机械"),
+                ("中国中车", "轨道装备"),
+                ("海天精工", "工业母机"),
+                ("汇川技术", "工业自动化")
+            ])
+        ),
+        "consumer": IndustryFacts(
+            scaleValue: "2.19万亿元",
+            scaleMetric: "规上食品制造业营收",
+            period: "2024年",
+            source: "国家统计局",
+            sourceURL: URL(string: "https://www.stats.gov.cn/sj/zxfb/202501/t20250127_1958485.html"),
+            companies: companies([
+                ("美的集团", "家电制造"),
+                ("海尔智家", "家电与渠道"),
+                ("伊利股份", "食品制造"),
+                ("安踏体育", "品牌与零售")
+            ])
+        )
+    ]
+
+    static func companies(_ values: [(String, String)]) -> [IndustryCompany] {
+        values.map { name, role in
+            IndustryCompany(id: name, name: name, role: role)
+        }
+    }
+
+    func replacingFacts(with facts: IndustryFacts) -> IndustryChain {
+        IndustryChain(
+            id: id,
+            title: title,
+            subtitle: subtitle,
+            icon: icon,
+            color: color,
+            stages: stages,
+            related: related,
+            facts: facts
         )
     }
 }
