@@ -93,20 +93,24 @@ final class PersonDetailStore {
         }
         loadingXTranslationIDs.insert(post.id)
         defer { loadingXTranslationIDs.remove(post.id) }
-        do {
-            let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
-            guard !Task.isCancelled else { return }
-            let value = Self.presentedTranslation(
-                result.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                original: post.originalDisplayContent
-            )
-            guard !value.isEmpty, value != post.originalDisplayContent else { return }
-            Self.cacheXTranslation(value, tweetID: tweetID)
-            xTranslations[post.id] = value
-        } catch is CancellationError {
-            return
-        } catch {
-            // Translation is best-effort. Keep the original post visible on failure.
+        for attempt in 0..<3 {
+            do {
+                let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
+                guard !Task.isCancelled else { return }
+                let value = Self.presentedTranslation(
+                    result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    original: post.originalDisplayContent
+                )
+                guard !value.isEmpty, value != post.originalDisplayContent else { return }
+                Self.cacheXTranslation(value, tweetID: tweetID)
+                xTranslations[post.id] = value
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                guard attempt < 2 else { return }
+                try? await Task.sleep(for: .milliseconds(500 * (attempt + 1)))
+            }
         }
     }
 
