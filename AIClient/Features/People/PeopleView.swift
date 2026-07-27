@@ -538,35 +538,44 @@ private struct PersonVideoDetailView: View {
     @State private var isFullscreen = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                player(instanceID: "detail-inline")
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    .background(Color.black)
+        VStack(spacing: 0) {
+            player(instanceID: "detail-inline")
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .frame(maxWidth: 320)
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(video.displayTitle)
-                        .font(.system(size: 24, weight: .bold))
-                        .lineSpacing(3)
-                    Text([video.channelName, video.publishedDateLabel, video.durationLabel]
-                        .compactMap { $0 }
-                        .filter { !$0.isEmpty }
-                        .joined(separator: " · "))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if let description = video.description, !description.isEmpty {
-                        Text(description)
-                            .font(.system(size: 15))
-                            .lineSpacing(4)
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(video.displayTitle)
+                            .font(.system(size: 24, weight: .bold))
+                            .lineSpacing(3)
+                        Text([video.channelName, video.publishedDateLabel, video.durationLabel]
+                            .compactMap { $0 }
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " · "))
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(5)
+                        if let description = video.description, !description.isEmpty {
+                            Text(description)
+                                .font(.system(size: 15))
+                                .lineSpacing(4)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(5)
+                        }
                     }
-                }
-                .padding(.horizontal, 18)
+                    .padding(.horizontal, 18)
 
-                subtitleSection
+                    subtitleSection
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 30)
             }
-            .padding(.bottom, 30)
         }
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
@@ -678,12 +687,30 @@ private struct PersonVideoDetailView: View {
                 ContentUnavailableView("暂无可用字幕", systemImage: "captions.bubble")
             } else {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(transcriptParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                        Text(paragraph)
-                            .font(.system(size: 16))
-                            .foregroundStyle(.primary)
-                            .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(cues) { cue in
+                        Button {
+                            seek(to: cue)
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(timeLabel(for: cue.startMS))
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(activeCue?.id == cue.id ? Color.accentColor : .secondary)
+                                    .frame(width: 46, alignment: .leading)
+                                Text(cue.text)
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 8)
+                            .background(
+                                activeCue?.id == cue.id ? Color.accentColor.opacity(0.1) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("跳转到 \(timeLabel(for: cue.startMS))，\(cue.text)")
                         Divider()
                     }
                 }
@@ -694,23 +721,6 @@ private struct PersonVideoDetailView: View {
 
     private var activeCue: PersonVideoSubtitleCue? {
         cue(at: currentMS)
-    }
-
-    private var transcriptParagraphs: [String] {
-        var paragraphs: [String] = []
-        var current = ""
-        for cue in cues {
-            let text = cue.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
-            current += text
-            let endsSentence = text.last.map { "。！？；?!".contains($0) } ?? false
-            if current.count >= 80 || (current.count >= 40 && endsSentence) {
-                paragraphs.append(current)
-                current = ""
-            }
-        }
-        if !current.isEmpty { paragraphs.append(current) }
-        return paragraphs
     }
 
     private func cue(at timestamp: Int64) -> PersonVideoSubtitleCue? {
@@ -734,6 +744,26 @@ private struct PersonVideoDetailView: View {
         let nextMS = Int64(seconds * 1_000)
         guard cue(at: nextMS)?.id != activeCue?.id else { return }
         currentMS = nextMS
+    }
+
+    private func seek(to cue: PersonVideoSubtitleCue) {
+        currentMS = cue.startMS
+        YouTubeWarmPlayerPool.shared.seek(
+            videoID: video.platformVideoID,
+            instanceID: "detail-inline",
+            options: .customSubtitles,
+            seconds: Double(cue.startMS) / 1_000
+        )
+    }
+
+    private func timeLabel(for milliseconds: Int64) -> String {
+        let totalSeconds = max(0, milliseconds / 1_000)
+        let hours = totalSeconds / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        let seconds = totalSeconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%02d:%02d", minutes, seconds)
     }
 
     private func loadSubtitles() async {
