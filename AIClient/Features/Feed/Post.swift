@@ -369,6 +369,17 @@ struct Post: Decodable, Identifiable, Hashable {
             .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    var weiboFollowingListContent: String {
+        let candidates = [htmlText(content), clean(title), clean(text), clean(summary)]
+            .compactMap { $0 }
+            .map {
+                $0.replacingOccurrences(of: "[图片]", with: "")
+                    .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+        return candidates.max(by: { $0.count < $1.count }) ?? displayContent
+    }
     var hasWeiboVideoReference: Bool {
         guard isWeiboRSS else { return false }
         let raw = [content, text, summary, postLink].compactMap { $0 }.joined(separator: " ").lowercased()
