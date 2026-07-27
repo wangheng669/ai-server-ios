@@ -678,8 +678,8 @@ private struct PersonVideoDetailView: View {
                 ContentUnavailableView("暂无可用字幕", systemImage: "captions.bubble")
             } else {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(cues) { cue in
-                        Text(cue.text)
+                    ForEach(Array(transcriptParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                        Text(paragraph)
                             .font(.system(size: 16))
                             .foregroundStyle(.primary)
                             .padding(.vertical, 8)
@@ -696,6 +696,23 @@ private struct PersonVideoDetailView: View {
         cue(at: currentMS)
     }
 
+    private var transcriptParagraphs: [String] {
+        var paragraphs: [String] = []
+        var current = ""
+        for cue in cues {
+            let text = cue.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            current += text
+            let endsSentence = text.last.map { "。！？；?!".contains($0) } ?? false
+            if current.count >= 80 || (current.count >= 40 && endsSentence) {
+                paragraphs.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { paragraphs.append(current) }
+        return paragraphs
+    }
+
     private func cue(at timestamp: Int64) -> PersonVideoSubtitleCue? {
         guard !cues.isEmpty else { return nil }
         var lower = 0
@@ -710,7 +727,7 @@ private struct PersonVideoDetailView: View {
         }
         guard lower > 0 else { return nil }
         let cue = cues[lower - 1]
-        return timestamp < cue.endMS + 600 ? cue : nil
+        return timestamp < cue.endMS ? cue : nil
     }
 
     private func updatePlaybackTime(_ seconds: Double) {
