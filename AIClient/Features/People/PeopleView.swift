@@ -437,26 +437,17 @@ private struct PersonDetailPage: View {
     }
 
     private var relatedSectionPicker: some View {
-        HStack(spacing: 4) {
+        Picker("相关内容", selection: $relatedSection) {
             ForEach(PersonRelatedSection.allCases) { item in
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) { relatedSection = item }
-                } label: {
-                    Text(item.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(relatedSection == item ? Color.primary : Color.secondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 34)
-                        .background(
-                            relatedSection == item ? Color(uiColor: .systemBackground) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
-                }
-                .buttonStyle(.plain)
+                Text(item.title).tag(item)
             }
         }
-        .padding(4)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 11))
+        .pickerStyle(.segmented)
+        .onChange(of: relatedSection) { _, newValue in
+            if newValue == .posts {
+                selectedVideo = nil
+            }
+        }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
     }

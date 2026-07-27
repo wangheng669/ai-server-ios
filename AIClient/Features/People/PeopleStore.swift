@@ -47,6 +47,10 @@ final class PeopleStore {
     private func translateLatestPostsIfNeeded() async {
         for (personID, post) in latestPosts {
             guard post.needsXTranslation, let tweetID = post.xTweetID else { continue }
+            if let cached = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
+                latestPosts[personID] = post.replacingTranslation(with: cached)
+                continue
+            }
             do {
                 let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
                 guard !Task.isCancelled else { return }
@@ -55,6 +59,7 @@ final class PeopleStore {
                     original: post.originalDisplayContent
                 )
                 guard !translation.isEmpty, translation != post.originalDisplayContent else { continue }
+                PersonDetailStore.cacheXTranslation(translation, tweetID: tweetID)
                 latestPosts[personID] = post.replacingTranslation(with: translation)
             } catch is CancellationError {
                 return
