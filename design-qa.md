@@ -42,3 +42,56 @@
 - 动态正文继续使用已有翻译结果；视频动态通过 `XFeedMediaView` 展示并播放。
 
 final result: passed
+
+# 产业全景页设计 QA
+
+- source visual truth path: `/Users/wangheng/.codex/generated_images/019fa440-c6fe-7a10-80cf-99530e4754e0/call_dOx5RfN7UD3A47xsQwtDpDEv.png`
+- implementation screenshot path: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/screenshot_optimized_00e8f3cc-cb2c-43ae-ad2e-e4262d842365.jpg`
+- combined comparison evidence: `/tmp/industry-qa.y3Ts8c/comparison.png`
+- viewport: iPhone 17 Pro Max 模拟器，应用截图 368 × 800，浅色模式，新能源汽车默认状态
+- density normalization: 设计稿 853 × 1844 缩放至 370 × 800；实现图保持 368 × 800；并排合成为 738 × 800
+
+## Full-view comparison evidence
+
+- 顶部频道导航和底部数据导航均与参考方向一致；用户要求移除的大标题、说明文字和装饰图标未出现在实现中。
+- 产业选择器紧接频道导航，新能源汽车选中态、绿色产业色和横向浏览结构与参考一致。
+- 核心内容保持“产业摘要 → 四段纵向链路 → 关联产业”的阅读顺序，且上游、中游、下游状态清晰。
+- 参考稿中的“市场关注度”“产业规模”等演示数据被替换为可由静态样本准确表达的核心环节、关联产业和链路覆盖，属于有意的数据真实性约束。
+
+## Focused region comparison evidence
+
+- 顶部区域：检查频道、产业选择器、选中态、摘要指标的对齐和间距；未见遮挡或截断。
+- 链路区域：检查时间线节点、图标、环节标题、层级胶囊和关键词标签；四个节点视觉连续，末端不会与关联产业区域相撞。
+- 底部区域：检查关联产业胶囊和应用底部导航；滚动内容预留了底栏空间。
+
+## Findings
+
+- P0：无。页面可加载，核心产业选择可点击，链路内容会随选择更新。
+- P1：无。主结构、信息层级和用户指定的去标题处理均已实现。
+- P2：无。实现针对真实 368 × 800 视口压缩了参考稿的卡片高度，但未改变主要内容顺序或隐藏持久导航。
+- P3：较小屏幕下说明文字比参考稿更紧凑；这是为了让四个链路环节形成完整首屏概览，详细内容仍可通过纵向滚动阅读。
+
+## Required fidelity surfaces
+
+- Fonts and typography：沿用系统中文字体与现有 App 字重；标题、正文、标签层级清楚，无异常换行或截断。
+- Spacing and layout rhythm：16pt 页面边距、22pt 主圆角、连续时间线和底栏避让一致；密度高于参考图但节奏稳定。
+- Colors and visual tokens：复用 `HoldingsPalette` 和系统分组背景；新能源汽车绿色只承担选中态和链路语义。
+- Image quality and asset fidelity：页面没有需要生成的位图资产；所有功能图标使用原生 SF Symbols，缩放清晰。
+- Copy and content：九条产业均有四段链路、说明、关键词和关联行业；未展示无法证实的行情或规模数据。
+
+## Comparison history
+
+1. 初始实现保留了参考方向的标题区；根据用户反馈删除大标题、说明和装饰图标。
+2. 首次原生截图显示横向产业选择和纵向链路布局稳定，无 P0–P2 问题。
+3. 点击产业入口后，语义快照确认标题、四段环节、层级和关联内容同步更新。
+
+## Implementation checklist
+
+- [x] 移除页面大标题与说明区
+- [x] 横向切换九个产业
+- [x] 展示四段连续上下游链路
+- [x] 使用真实可解释的静态信息
+- [x] 保留无障碍标签与选中态
+- [x] 通过模拟器构建和视觉对比
+
+final result: passed
