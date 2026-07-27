@@ -2,6 +2,114 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testDecodesPersonVideoChineseSubtitleTimeline() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "video_id": 42,
+              "language": "zh-Hans",
+              "status": "ready",
+              "cues": [
+                {"start_ms": 1200, "end_ms": 3400, "text": "欢迎来到创业课堂"}
+              ]
+            }
+            """.utf8
+        )
+
+        let payload = try JSONDecoder().decode(PersonVideoSubtitlesResponse.self, from: data)
+
+        XCTAssertEqual(payload.videoID, 42)
+        XCTAssertEqual(payload.status, "ready")
+        XCTAssertEqual(payload.cues.first?.text, "欢迎来到创业课堂")
+        XCTAssertEqual(payload.cues.first?.startMS, 1200)
+    }
+
+    func testDecodesRelatedPersonVideos() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "person_id": "1605",
+              "videos": [{
+                "id": 1,
+                "person_id": "1605",
+                "platform": "youtube",
+                "platform_video_id": "abc123",
+                "title": "Sam Altman Interview",
+                "title_zh": "山姆·奥特曼访谈",
+                "channel_name": "TED",
+                "published_at": "2026-07-26T12:00:00Z",
+                "duration_seconds": 768,
+                "cover_url": "https://i.ytimg.com/vi/abc123/hqdefault.jpg",
+                "canonical_url": "https://www.youtube.com/watch?v=abc123",
+                "relevance_score": 12,
+                "video_type": "interview",
+                "is_featured": true
+              }]
+            }
+            """.utf8
+        )
+
+        let payload = try JSONDecoder().decode(PeopleVideosResponse.self, from: data)
+
+        XCTAssertEqual(payload.personID, "1605")
+        XCTAssertEqual(payload.videos.first?.channelName, "TED")
+        XCTAssertEqual(payload.videos.first?.durationLabel, "12:48")
+        XCTAssertEqual(payload.videos.first?.platformVideoID, "abc123")
+        XCTAssertEqual(payload.videos.first?.displayTitle, "山姆·奥特曼访谈")
+        XCTAssertEqual(payload.videos.first?.publishedDateLabel, "2026年7月26日")
+    }
+
+    func testDecodesServerManagedPeopleDirectory() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "categories": [
+                {"id": "technology", "title": "科技", "sort_order": 10},
+                {"id": "investment", "title": "投资", "sort_order": 30}
+              ],
+              "users": [{
+                "user_id": "curated:peter-thiel",
+                "user_name": "Peter Thiel",
+                "user_desc": "科技投资人",
+                "organization_name": "Founders Fund 联合创始人",
+                "topic": "investment",
+                "discussion_keywords": ["Peter Thiel", "彼得·蒂尔"],
+                "focus_tags": ["投资", "创业"],
+                "roles": [{"organization": "Founders Fund", "title": "联合创始人"}],
+                "milestones": [{"year": "2005", "title": "创立 Founders Fund"}],
+                "related_people": [{
+                  "id": "curated:elon-musk",
+                  "name": "Elon Musk",
+                  "relationship": "合作伙伴",
+                  "avatar_url": "https://example.com/elon.jpg"
+                }],
+                "profile_updated_at": "2026年7月",
+                "has_own_post_source": false,
+                "today_count": 0,
+                "total_count": 0,
+                "last_post_time": null
+              }]
+            }
+            """.utf8
+        )
+
+        let payload = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data)
+
+        XCTAssertEqual(payload.categories?.compactMap(\.topic), [.technology, .investment])
+        XCTAssertEqual(payload.users.first?.topic, .investment)
+        XCTAssertEqual(payload.users.first?.organizationName, "Founders Fund 联合创始人")
+        XCTAssertEqual(payload.users.first?.discussionKeywords, ["Peter Thiel", "彼得·蒂尔"])
+        XCTAssertEqual(payload.users.first?.focusTags, ["投资", "创业"])
+        XCTAssertEqual(payload.users.first?.roles.first?.organization, "Founders Fund")
+        XCTAssertEqual(payload.users.first?.milestones.first?.year, "2005")
+        XCTAssertEqual(payload.users.first?.relatedPeople.first?.name, "Elon Musk")
+        XCTAssertEqual(payload.users.first?.profileUpdatedAt, "2026年7月")
+        XCTAssertEqual(payload.users.first?.hasOwnPostSource, false)
+    }
+
     func testDecodesXQuotedTweetForPersonPostCard() throws {
         let data = #"{"post":{"id":1,"source":"x","meta":{"quoted_tweet":{"id":"99","text":"Gemini who?","text_zh":"双子座是谁？","author":{"name":"Example","screenName":"example","profileImageUrl":"https://example.com/a.jpg"},"media":[{"type":"photo","url":"https://example.com/p.jpg","thumbnail_url":"https://example.com/t.jpg","width":1200,"height":800}]}}}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
@@ -28,7 +136,12 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testCuratedPersonWithoutAccountDoesNotRequestOwnPostFeed() {
-        let person = SpecialPerson.politicalFigures[0]
+        let person = SpecialPerson(
+            id: "xi-jinping",
+            name: "习近平",
+            organization: "中国政治人物",
+            summary: "关注中国政治、外交与公共政策相关动态。"
+        )
 
         XCTAssertTrue(person.isCurated)
         XCTAssertFalse(person.hasOwnPostSource)

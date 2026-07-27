@@ -6,12 +6,14 @@ import Observation
 final class PersonDetailStore {
     private(set) var ownPosts: [Post] = []
     private(set) var discussions: [Post] = []
+    private(set) var relatedVideos: [PersonVideo] = []
     private(set) var isLoadingOwnPosts = false
     private(set) var isLoadingMoreOwnPosts = false
     private(set) var isLoadingDiscussions = false
     private(set) var ownPostsError: String?
     private(set) var ownPostsLoadMoreError: String?
     private(set) var discussionsError: String?
+    private(set) var relatedVideosError: String?
     private(set) var canLoadMoreOwnPosts = true
     private(set) var xTranslations: [Int: String] = [:]
     private var loadingXTranslationIDs: Set<Int> = []
@@ -28,7 +30,8 @@ final class PersonDetailStore {
     func load(person: SpecialPerson) async {
         async let ownPostsLoad: Void = loadOwnPosts(for: person)
         async let discussionsLoad: Void = loadDiscussions(for: person)
-        _ = await (ownPostsLoad, discussionsLoad)
+        async let videosLoad: Void = loadRelatedVideos(for: person)
+        _ = await (ownPostsLoad, discussionsLoad, videosLoad)
     }
 
     private func loadOwnPosts(for person: SpecialPerson) async {
@@ -126,6 +129,17 @@ final class PersonDetailStore {
             return
         } catch {
             discussionsError = error.localizedDescription
+        }
+    }
+
+    private func loadRelatedVideos(for person: SpecialPerson) async {
+        relatedVideosError = nil
+        do {
+            relatedVideos = try await service.relatedVideos(personID: person.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            relatedVideosError = error.localizedDescription
         }
     }
 }

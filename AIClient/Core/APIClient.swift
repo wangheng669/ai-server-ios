@@ -48,17 +48,91 @@ struct APIClient {
     }
 
     func fetchRSSFeedPosts(feedID: Int, page: Int = 1, limit: Int = 20) async throws -> [Post] {
+        try await fetchRSSFeedPosts(
+            feedID: feedID,
+            page: page,
+            limit: limit,
+            includesAllScores: false
+        )
+    }
+
+    func fetchWeiboFollowingPosts(page: Int, limit: Int = 20) async throws -> [Post] {
+        let feeds = try await fetchRSSFeedDirectory(excludeSocial: false).filter(\.isWeiboFeed)
+        guard !feeds.isEmpty else { return [] }
+
+        return try await withThrowingTaskGroup(of: [Post].self) { group in
+            for feed in feeds {
+                group.addTask {
+                    var accumulated: [Post] = []
+                    for feedPage in 1...page {
+                        let batch = try await self.fetchRSSFeedPosts(
+                            feedID: feed.id,
+                            page: feedPage,
+                            limit: limit,
+                            includesAllScores: true
+                        )
+                        accumulated += batch
+                        if batch.count < limit { break }
+                    }
+                    return accumulated
+                }
+            }
+
+            var posts: [Post] = []
+            for try await result in group { posts += result }
+            var seen = Set<Int>()
+            let sorted = posts
+                .filter { post in
+                    guard let source = post.source, source.hasPrefix("rss:"),
+                          let feedID = Int(source.dropFirst(4)) else { return false }
+                    return feeds.contains { $0.id == feedID }
+                }
+                .sorted { ($0.articlePostAt ?? "") > ($1.articlePostAt ?? "") }
+                .filter { seen.insert($0.id).inserted }
+            let start = (page - 1) * limit
+            guard start < sorted.count else { return [] }
+            return Array(sorted.dropFirst(start).prefix(limit))
+        }
+    }
+
+    private func fetchRSSFeedDirectory(excludeSocial: Bool) async throws -> [RSSFeedSource] {
+        let pageSize = 20
+        var feeds: [RSSFeedSource] = []
+        for page in 1...10 {
+            var parts = URLComponents(url: baseURL.appending(path: "api/v1/rss/feeds"), resolvingAgainstBaseURL: false)
+            parts?.queryItems = [
+                .init(name: "page", value: String(page)),
+                .init(name: "exclude_social", value: excludeSocial ? "true" : "false")
+            ]
+            guard let url = parts?.url else { throw APIError.invalidURL }
+            let response: RSSFeedsResponse = try await get(url)
+            feeds += response.data.feeds.filter(\.isEnabled)
+            if response.data.feeds.count < pageSize { break }
+        }
+        var seen = Set<Int>()
+        return feeds.filter { seen.insert($0.id).inserted }
+    }
+
+    private func fetchRSSFeedPosts(
+        feedID: Int,
+        page: Int,
+        limit: Int,
+        includesAllScores: Bool
+    ) async throws -> [Post] {
         var parts = URLComponents(
             url: baseURL.appending(path: "api/v1/rss/feeds/\(feedID)/posts"),
             resolvingAgainstBaseURL: false
         )
-        parts?.queryItems = [
+        var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)),
             .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc"),
-            .init(name: "include_zero_score", value: "false"),
-            .init(name: "final_score", value: String(Post.minimumFeedScore))
+            .init(name: "include_zero_score", value: includesAllScores ? "true" : "false")
         ]
+        if !includesAllScores {
+            queryItems.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
+        }
+        parts?.queryItems = queryItems
         guard let url = parts?.url else { throw APIError.invalidURL }
         let response: RSSFeedPostsResponse = try await get(url)
         return response.data.posts
@@ -120,7 +194,8 @@ struct APIClient {
             .init(name: "include_zero_score", value: includesAllScores ? "true" : "false")
         ]
         if !includesAllScores {
-            queryItems.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
+            let minimumScore = source == .rss ? 6 : Post.minimumFeedScore
+            queryItems.append(.init(name: "final_score", value: String(minimumScore)))
         }
         if source == .x { queryItems.append(.init(name: "x_feed_view", value: "tracked")) }
         return queryItems

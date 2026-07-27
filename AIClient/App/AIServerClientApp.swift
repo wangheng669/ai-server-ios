@@ -1,7 +1,40 @@
 import SwiftUI
+import UIKit
+
+@MainActor
+final class AppOrientationController {
+    static let shared = AppOrientationController()
+    private(set) var supportedOrientations: UIInterfaceOrientationMask = .portrait
+
+    func setVideoFullscreen(_ isFullscreen: Bool) {
+        let orientations: UIInterfaceOrientationMask = isFullscreen
+            ? .landscape
+            : .portrait
+        guard supportedOrientations != orientations else { return }
+        supportedOrientations = orientations
+
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
+        }
+    }
+}
+
+final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        MainActor.assumeIsolated {
+            AppOrientationController.shared.supportedOrientations
+        }
+    }
+}
 
 @main
 struct AIServerClientApp: App {
+    @UIApplicationDelegateAdaptor(AIServerClientAppDelegate.self) private var appDelegate
+
     init() {
         URLCache.shared = URLCache(memoryCapacity: 48_000_000, diskCapacity: 240_000_000)
     }
@@ -16,7 +49,8 @@ private struct EditorialRootView: View {
     @State private var selectedTab: RootTab = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--person-detail-preview") {
+            ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--video-detail-preview") {
             return .people
         }
         if ProcessInfo.processInfo.arguments.contains("--market-preview") ||

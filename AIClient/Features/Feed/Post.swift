@@ -13,16 +13,36 @@ struct RSSFeedsResponse: Decodable {
 struct RSSFeedSource: Decodable, Identifiable, Equatable {
     let id: Int
     let name: String
+    let feedURL: String?
     let icon: String?
     let avatar: String?
     let updatedAt: String?
     let isEnabled: Bool
+    let foloMeta: FoloMeta?
+
+    struct FoloMeta: Decodable, Equatable {
+        let rawFeedURL: String?
+
+        enum CodingKeys: String, CodingKey {
+            case rawFeedURL = "raw_feed_url"
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, name, icon
+        case feedURL = "feed_url"
         case avatar = "avatar_url"
         case updatedAt = "updated_at"
         case isEnabled = "is_enabled"
+        case foloMeta = "folo_meta"
+    }
+
+    var isWeiboFeed: Bool {
+        [feedURL, foloMeta?.rawFeedURL]
+            .compactMap { $0?.lowercased() }
+            .contains { value in
+                value.range(of: #"(?:^|/)weibo/user/\d+(?:/|$)"#, options: .regularExpression) != nil
+            }
     }
 
     var iconURL: URL? {
@@ -309,7 +329,11 @@ struct Post: Decodable, Identifiable, Hashable {
         } || !(videos ?? []).isEmpty
     }
     var score: Double? { finalScore ?? weight }
-    var imageURLs: [URL] { (images ?? []).compactMap { MediaURL.image($0.url) } }
+    var imageURLs: [URL] {
+        (images ?? [])
+            .filter { !$0.isKnownInlineAsset }
+            .compactMap { MediaURL.image($0.url) }
+    }
     var htmlInlineAssetURLs: Set<URL> {
         guard isRSS, let content, !content.isEmpty else { return [] }
         let source = content as NSString
@@ -488,6 +512,9 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var isBilibili: Bool { sourceName == "B站" }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
+    var hasDedicatedFeedTab: Bool {
+        source == FeedSource.newYorkTimes.rawValue || source == "rss:79"
+    }
     var isYouTube: Bool {
         guard isRSS else { return false }
         if tagNames.contains("YouTube") { return true }
