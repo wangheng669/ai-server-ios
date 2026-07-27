@@ -539,15 +539,11 @@ private struct PersonVideoDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                player(instanceID: "detail-inline")
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    .frame(maxWidth: 320)
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                currentSubtitleBar
-            }
+            player(instanceID: "detail-inline")
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .frame(maxWidth: 320)
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal, 12)
             .padding(.top, 8)
             .padding(.bottom, 10)
@@ -668,57 +664,10 @@ private struct PersonVideoDetailView: View {
     }
 
     @ViewBuilder
-    private var currentSubtitleBar: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "captions.bubble.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 22)
-
-            if subtitleStatus == "loading" {
-                Text("正在载入中文字幕…")
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                ProgressView()
-                    .controlSize(.small)
-            } else if let cue = activeCue {
-                Text(timeLabel(for: cue.startMS))
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(cue.text)
-                    .font(.system(size: 15, weight: .medium))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text(cues.isEmpty ? "暂无可用字幕" : "播放视频，或点击下方字幕跳转")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .font(.system(size: 15))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(activeCue.map { "当前字幕，\($0.text)" } ?? "字幕提示")
-    }
-
-    @ViewBuilder
     private var subtitleSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("中文字幕")
-                    .font(.system(size: 20, weight: .bold))
-                Spacer()
-                if !cues.isEmpty {
-                    Text("点击字幕跳转")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Text("中文字幕")
+                .font(.system(size: 20, weight: .bold))
             if subtitleStatus == "loading" {
                 ProgressView("首次打开正在提取字幕…")
             } else if let subtitleError {
@@ -726,15 +675,19 @@ private struct PersonVideoDetailView: View {
             } else if cues.isEmpty {
                 ContentUnavailableView("暂无可用字幕", systemImage: "captions.bubble")
             } else {
+                if let activeCue {
+                    currentSubtitleCard(activeCue)
+                }
+
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(cues) { cue in
+                    ForEach(cues.filter { $0.id != activeCue?.id }) { cue in
                         Button {
                             seek(to: cue)
                         } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Text(timeLabel(for: cue.startMS))
                                     .font(.caption.monospacedDigit().weight(.semibold))
-                                    .foregroundStyle(activeCue?.id == cue.id ? Color.accentColor : .secondary)
+                                    .foregroundStyle(.secondary)
                                     .frame(width: 46, alignment: .leading)
                                 Text(cue.text)
                                     .font(.system(size: 16))
@@ -744,10 +697,6 @@ private struct PersonVideoDetailView: View {
                             }
                             .padding(.vertical, 10)
                             .padding(.horizontal, 8)
-                            .background(
-                                activeCue?.id == cue.id ? Color.accentColor.opacity(0.1) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 8)
-                            )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("跳转到 \(timeLabel(for: cue.startMS))，\(cue.text)")
@@ -757,6 +706,33 @@ private struct PersonVideoDetailView: View {
             }
         }
         .padding(.horizontal, 18)
+    }
+
+    private func currentSubtitleCard(_ cue: PersonVideoSubtitleCue) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 6, height: 6)
+                Text("正在播放 · \(timeLabel(for: cue.startMS))")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            Text(cue.text)
+                .font(.system(size: 16, weight: .medium))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.accentColor.opacity(0.2), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("正在播放，\(timeLabel(for: cue.startMS))，\(cue.text)")
     }
 
     private var activeCue: PersonVideoSubtitleCue? {
