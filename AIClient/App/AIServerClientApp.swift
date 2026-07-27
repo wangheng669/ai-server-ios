@@ -55,6 +55,7 @@ private struct EditorialRootView: View {
         }
         if ProcessInfo.processInfo.arguments.contains("--market-preview") ||
             ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--sentiment-preview") { return .investment }
         return .observation
@@ -79,7 +80,8 @@ private struct EditorialRootView: View {
 
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") { return nil }
+        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--industries-preview") { return nil }
         #endif
         return deploymentPreview ?? deploymentStore.snapshot
     }

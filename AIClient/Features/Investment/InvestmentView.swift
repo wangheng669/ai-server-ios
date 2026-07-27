@@ -4,6 +4,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
     case sentiment = "情绪"
     case holdings = "知名投资人"
+    case industries = "产业全景"
 
     var id: Self { self }
 }
@@ -20,6 +21,8 @@ struct InvestmentView: View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--holdings-preview") {
             _section = State(initialValue: .holdings)
+        } else if ProcessInfo.processInfo.arguments.contains("--industries-preview") {
+            _section = State(initialValue: .industries)
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") {
             _section = State(initialValue: .sentiment)
         } else {
@@ -53,6 +56,13 @@ struct InvestmentView: View {
                     if !holdingsShowsDetail {
                         InvestmentHeader(selection: $section, floatsOverContent: true)
                     }
+                }
+            case .industries:
+                VStack(spacing: 0) {
+                    if !showsDetail {
+                        InvestmentHeader(selection: $section, floatsOverContent: false)
+                    }
+                    IndustryPanoramaView()
                 }
             }
         }
