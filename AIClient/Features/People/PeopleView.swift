@@ -507,10 +507,75 @@ private struct PersonDetailPage: View {
             .padding(.horizontal, 20).padding(.top, 15).padding(.bottom, 7)
             ForEach(posts) { post in
                 let displayPost = store.postForDisplay(post)
-                PersonPostTimelineRow(post: displayPost, compact: true) { selectedPost = displayPost }
+                PersonRelatedPostRow(post: displayPost) { selectedPost = displayPost }
                     .task { await store.translateXPostIfNeeded(post) }
             }
         }
+    }
+}
+
+private struct PersonRelatedPostRow: View {
+    let post: Post
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(alignment: .top, spacing: 12) {
+                AvatarView(
+                    url: post.avatarURL,
+                    name: post.authorName,
+                    size: 42
+                )
+
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(post.authorName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if let handle = post.authorHandle {
+                            Text(handle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 6)
+                        Text(post.formattedTime ?? "")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if post.needsXTranslation {
+                        HStack(spacing: 7) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("正在翻译为中文…")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 42, alignment: .leading)
+                    } else {
+                        Text(post.displayContent)
+                            .font(.system(size: 15))
+                            .foregroundStyle(.primary)
+                            .lineSpacing(3)
+                            .lineLimit(6)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(post.needsXTranslation)
+        .accessibilityLabel("\(post.authorName)，\(post.needsXTranslation ? "正在翻译为中文" : post.displayContent)")
+
+        Divider()
+            .padding(.leading, 74)
     }
 }
 
