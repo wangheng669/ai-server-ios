@@ -1957,6 +1957,7 @@ private struct MarketIndexDetailView: View {
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
     private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
+    private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
     private var isIndex: Bool { store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true }
 
     var body: some View {
@@ -1967,6 +1968,7 @@ private struct MarketIndexDetailView: View {
                     detailHeader
                     MarketDetailChart(selectedRange: $selectedRange, symbol: symbol, store: store)
                     keyData
+                    if showsCompanyProfile { companyProfile }
                     MarketSummary(quote: quote)
                     if isIndex { componentStocks }
                     Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
@@ -1982,6 +1984,7 @@ private struct MarketIndexDetailView: View {
         .background(InteractivePopGestureEnabler())
         .task {
             if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+            if showsCompanyProfile, let quote { await store.loadCompanyLogo(symbol: quote.symbol, name: quote.name) }
         }
         .refreshable {
             await store.refresh(force: false)
@@ -2004,8 +2007,8 @@ private struct MarketIndexDetailView: View {
             .font(.system(size: 21, weight: .medium)).foregroundStyle(.primary)
 
             HStack(spacing: 10) {
-                if let constituent {
-                    CompanyLogo(quote: constituent.quote, path: constituent.logoPath)
+                if let quote, showsCompanyProfile {
+                    CompanyLogo(quote: quote, path: companyLogoPath)
                 } else {
                     Image(systemName: CoreDescriptor(symbol: symbol).icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(.blue)
                         .frame(width: 30, height: 30).background(Color.blue.opacity(0.10), in: Circle())
@@ -2066,6 +2069,30 @@ private struct MarketIndexDetailView: View {
                 GridRow { metric("成交量", quote?.volume, compact: true); metric("市值", quote?.marketCap, compact: true); metric("市盈率", quote?.pe); textMetric("状态", quote?.freshnessLabel ?? "更新中") }
             }
             .padding(12).marketCard(cornerRadius: 10)
+        }
+        .padding(.horizontal, 18)
+    }
+
+    private var showsCompanyProfile: Bool {
+        !isIndex && (constituent != nil || quote?.marketCap != nil || quote?.pe != nil)
+    }
+
+    private var companyProfile: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("公司资料").font(.system(size: 17, weight: .semibold))
+            HStack(alignment: .top, spacing: 12) {
+                if let quote { CompanyLogo(quote: quote, path: companyLogoPath) }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(quote?.name ?? symbol).font(.subheadline.weight(.semibold))
+                    Text("股票代码  \(quote?.displayCode ?? symbol)")
+                    Text("上市市场  \(companyMarketLabel(symbol))")
+                    if let marketCap = quote?.marketCap { Text("总市值  \(compactNumber(marketCap))") }
+                    if let pe = quote?.pe { Text("市盈率  \(number(pe, digits: 2))") }
+                }
+                .font(.footnote).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(14).marketCard(cornerRadius: 10)
         }
         .padding(.horizontal, 18)
     }
@@ -2215,7 +2242,8 @@ private struct MarketDetailChart: View {
                 } else {
                     MarketSessionLineChart(
                         points: points,
-                        regularColor: quoteTint(store.quote(symbol: symbol))
+                        regularColor: quoteTint(store.quote(symbol: symbol)),
+                        interval: chart?.interval
                     )
                         .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
@@ -2373,6 +2401,7 @@ private struct MarketLineChart: View {
 private struct MarketSessionLineChart: View {
     let points: [MarketChartPoint]
     let regularColor: Color
+    let interval: String?
 
     var body: some View {
         Canvas { context, size in
@@ -2384,11 +2413,9 @@ private struct MarketSessionLineChart: View {
             let low = sorted.map(\.close).min() ?? 0
             let high = sorted.map(\.close).max() ?? low
             let span = max(high - low, 0.000_001)
-            let timeSpan = Double(lastTimestamp - firstTimestamp)
-
             func canvasPoint(_ point: MarketChartPoint) -> CGPoint {
                 CGPoint(
-                    x: size.width * CGFloat(Double(point.timestamp - firstTimestamp) / timeSpan),
+                    x: size.width * marketChartXFraction(timestamp: point.timestamp, firstTimestamp: firstTimestamp, lastTimestamp: lastTimestamp),
                     y: size.height * (0.06 + CGFloat((high - point.close) / span) * 0.88)
                 )
             }
@@ -2409,9 +2436,7 @@ private struct MarketSessionLineChart: View {
 
             for point in sorted {
                 if let previous = segment.last {
-                    let changedSession = (previous.session ?? "regular") != (point.session ?? "regular")
-                    let hasGap = point.timestamp - previous.timestamp > 15 * 60 * 1000
-                    if changedSession || hasGap {
+                    if marketChartShouldSplitSegment(previous: previous, current: point, interval: interval) {
                         drawSegment()
                         segment = []
                     }
@@ -2497,18 +2522,28 @@ private struct AnimatedLineCanvas: View, Animatable {
 private struct VolumeBars: View {
     let points: [MarketChartPoint]
     var body: some View {
-        GeometryReader { proxy in
-            let maxVolume = points.compactMap(\.volume).max() ?? 1
-            HStack(alignment: .bottom, spacing: 1) {
-                ForEach(points.suffix(80)) { point in
-                    let rising = point.close >= point.open
-                    Rectangle().fill((rising ? MarketStyle.gain : MarketStyle.loss).opacity(0.68))
-                        .frame(maxWidth: .infinity).frame(height: max(2, proxy.size.height * CGFloat((point.volume ?? 0) / maxVolume)))
-                        .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
-                }
+        Canvas { context, size in
+            let sorted = points.sorted { $0.timestamp < $1.timestamp }
+            guard let firstTimestamp = sorted.first?.timestamp,
+                  let lastTimestamp = sorted.last?.timestamp,
+                  lastTimestamp > firstTimestamp else { return }
+            let maxVolume = max(sorted.compactMap(\.volume).max() ?? 0, 1)
+            let fractions = sorted.map {
+                marketChartXFraction(timestamp: $0.timestamp, firstTimestamp: firstTimestamp, lastTimestamp: lastTimestamp)
             }
-            .animation(MarketStyle.chartTransition, value: points)
+            let minimumGap = zip(fractions, fractions.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }.min() ?? 1
+            let barWidth = min(max(size.width * minimumGap * 0.72, 1), 8)
+
+            for (index, point) in sorted.enumerated() {
+                guard let volume = point.volume, volume > 0 else { continue }
+                let height = max(2, size.height * CGFloat(volume / maxVolume))
+                let x = marketVolumeBarX(fraction: fractions[index], width: size.width, barWidth: barWidth)
+                let rect = CGRect(x: x - barWidth / 2, y: size.height - height, width: barWidth, height: height)
+                let color = point.close >= point.open ? MarketStyle.gain : MarketStyle.loss
+                context.fill(Path(rect), with: .color(color.opacity(0.68)))
+            }
         }
+        .accessibilityHidden(true)
     }
 }
 
@@ -2706,6 +2741,14 @@ private func chartPoints(_ values: [Double], size: CGSize) -> [CGPoint] {
 }
 
 private func quoteTint(_ quote: MarketQuote?) -> Color { guard let quote else { return .secondary }; return quote.isUp ? MarketStyle.gain : MarketStyle.loss }
+private func companyMarketLabel(_ symbol: String) -> String {
+    if symbol.hasSuffix(".SS") { return "上海证券交易所" }
+    if symbol.hasSuffix(".SZ") { return "深圳证券交易所" }
+    if symbol.hasSuffix(".HK") { return "香港交易所" }
+    if symbol.hasSuffix(".T") { return "东京证券交易所" }
+    if symbol.hasSuffix(".KS") || symbol.hasSuffix(".KQ") { return "韩国证券市场" }
+    return "美国证券市场"
+}
 private func number(_ value: Double, digits: Int) -> String { value.formatted(.number.grouping(.automatic).precision(.fractionLength(digits))) }
 private func signed(_ value: Double, digits: Int) -> String { (value >= 0 ? "+" : "−") + number(abs(value), digits: digits) }
 private func compactNumber(_ value: Double) -> String { value.formatted(.number.notation(.compactName).precision(.fractionLength(1))) }

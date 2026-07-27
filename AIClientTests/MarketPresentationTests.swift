@@ -217,6 +217,26 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.maximum.apiLimit, 600)
     }
 
+    func testDailyChartPointsRemainInOneDrawableSegment() {
+        let previous = MarketChartPoint(timestamp: 1_000, open: 10, high: 11, low: 9, close: 10, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
+        let nextDay = MarketChartPoint(timestamp: 1_000 + 24 * 60 * 60 * 1_000, open: 11, high: 12, low: 10, close: 11, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
+
+        XCTAssertFalse(marketChartShouldSplitSegment(previous: previous, current: nextDay, interval: "1d"))
+        XCTAssertTrue(marketChartShouldSplitSegment(previous: previous, current: nextDay, interval: "1m"))
+    }
+
+    func testChartXFractionUsesTimestampScale() {
+        XCTAssertEqual(marketChartXFraction(timestamp: 1_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 0)
+        XCTAssertEqual(marketChartXFraction(timestamp: 2_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 0.25)
+        XCTAssertEqual(marketChartXFraction(timestamp: 5_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 1)
+    }
+
+    func testVolumeBarsRemainFullyInsideChartBounds() {
+        XCTAssertEqual(marketVolumeBarX(fraction: 0, width: 300, barWidth: 8), 4)
+        XCTAssertEqual(marketVolumeBarX(fraction: 0.5, width: 300, barWidth: 8), 150)
+        XCTAssertEqual(marketVolumeBarX(fraction: 1, width: 300, barWidth: 8), 296)
+    }
+
     func testAxisDigitsKeepSmallVIXMovesVisible() {
         XCTAssertEqual(marketAxisDigits(values: [15.77, 16.54]), 2)
         XCTAssertEqual(marketAxisDigits(values: [4_900, 4_950]), 0)

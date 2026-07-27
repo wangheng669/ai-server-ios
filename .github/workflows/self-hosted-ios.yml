@@ -10,16 +10,6 @@ on:
         description: Branch, tag, or commit SHA to build and install
         required: false
         type: string
-      install_target:
-        description: Mac that can currently reach the iPhone
-        required: false
-        default: auto
-        type: choice
-        options:
-          - auto
-          - home
-          - office
-
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('Install {0}', inputs.git_ref || github.ref_name) || github.event.head_commit.message }}
 
 concurrency:
@@ -34,8 +24,6 @@ permissions:
 jobs:
   build:
     name: Build on office Mac mini
-    outputs:
-      installer_label: ${{ steps.choose-installer.outputs.label }}
     runs-on:
       - self-hosted
       - macOS
@@ -55,16 +43,6 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh running 0.08 testing
 
-      - name: Choose iPhone installer
-        id: choose-installer
-        run: |
-          # The build job proves the office runner is online. A transient iPhone
-          # discovery failure does not prove that the home runner is online, and
-          # targeting an offline runner leaves the job queued indefinitely.
-          # Auto deployments therefore stay on the office runner, where the
-          # installation script can retry device discovery and fail explicitly.
-          echo "label=office-builder" >> "$GITHUB_OUTPUT"
-          echo "Auto install is pinned to the online office runner."
       - name: Run tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -101,64 +79,15 @@ jobs:
           test -d "$app_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
-      - name: Upload device app
-        uses: actions/upload-artifact@v7
-        with:
-          name: ios-device-app
-          path: ${{ runner.temp }}/AIServerClient.app.zip
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Report build completed
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh running 0.58 waiting-for-installer
-
-      - name: Report build failure
-        if: ${{ failure() }}
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh failed 0 build-failed
-
-  install:
-    name: Sign and install on selected iPhone host
-    needs: build
-    runs-on:
-      - self-hosted
-      - macOS
-      - ARM64
-      - ${{ inputs.install_target == 'office' && 'office-builder' || inputs.install_target == 'home' && 'home-installer' || needs.build.outputs.installer_label }}
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out installation script
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.git_ref || github.sha }}
-
-      - name: Report installer started
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh running 0.68 downloading
-
-      - name: Download device app
-        uses: actions/download-artifact@v8
-        with:
-          name: ios-device-app
-          path: ${{ runner.temp }}/ios-device-app
-
       - name: Report signing started
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh running 0.82 signing
 
-      - name: Extract, sign, and install
+      - name: Sign and install directly on office Mac mini
         env:
-          APP_ARCHIVE: ${{ runner.temp }}/ios-device-app/AIServerClient.app.zip
+          APP_ARCHIVE: ${{ runner.temp }}/AIServerClient.app.zip
           APP_PATH: ${{ runner.temp }}/signed-app/AIServerClient.app
           BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
@@ -167,15 +96,15 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/sign-and-install-ios.sh
 
-      - name: Report installation completed
+      - name: Report direct installation completed
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed
 
-      - name: Report installation failure
+      - name: Report build failure
         if: ${{ failure() }}
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh failed 0 install-failed
+        run: ./ci/report-ios-deployment.sh failed 0 build-failed

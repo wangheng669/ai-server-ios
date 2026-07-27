@@ -127,6 +127,22 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.posts.map(\.id), [1, 2])
     }
 
+    func testWeiboFollowingRequestUsesPlatformAggregateContract() {
+        let items = APIClient.weiboFollowingQueryItems(page: 3, limit: 20)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["source"], "rss")
+        XCTAssertEqual(query["rss_platform"], "weibo")
+        XCTAssertEqual(query["page"], "3")
+        XCTAssertEqual(query["limit"], "20")
+        XCTAssertEqual(query["sort"], "time_desc")
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+        XCTAssertNil(query["group_similar"])
+    }
+
     func testPlaybackStreamPathUsesAPIPrefix() throws {
         let url = try XCTUnwrap(APIClient.playbackURL(
             from: "/post/video-playback/stream?formatId=18",
