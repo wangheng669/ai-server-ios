@@ -2025,7 +2025,7 @@ private struct WeiboFollowingRow: View {
     }
 
     private var visibleImages: [URL] {
-        Array(post.imageURLs.prefix(3))
+        Array(post.weiboFollowingImageURLs.prefix(3))
     }
 
     var body: some View {

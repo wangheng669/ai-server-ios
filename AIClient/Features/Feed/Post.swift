@@ -334,6 +334,25 @@ struct Post: Decodable, Identifiable, Hashable {
             .filter { !$0.isKnownInlineAsset }
             .compactMap { MediaURL.image($0.url) }
     }
+    var weiboFollowingImageURLs: [URL] {
+        imageURLs.filter { url in
+            let sourceURL: URL
+            if url.path.hasSuffix("/image-proxy"),
+               let rawSource = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "url" })?
+                .value,
+               let proxiedSource = URL(string: rawSource) {
+                sourceURL = proxiedSource
+            } else {
+                sourceURL = url
+            }
+            guard sourceURL.host()?.lowercased() == "h5.sinaimg.cn" else { return true }
+            let filename = sourceURL.lastPathComponent.lowercased()
+            return filename != "timeline_card_small_video_default.png" &&
+                filename != "timeline_card_small_web_default.png"
+        }
+    }
     var htmlInlineAssetURLs: Set<URL> {
         guard isRSS, let content, !content.isEmpty else { return [] }
         let source = content as NSString
