@@ -552,7 +552,7 @@ private struct PersonVideoDetailView: View {
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(video.displayTitle)
                             .font(.system(size: 22, weight: .bold))
@@ -573,7 +573,35 @@ private struct PersonVideoDetailView: View {
                     }
                     .padding(.horizontal, 18)
 
-                    subtitleSection
+                    Text("中文字幕")
+                        .font(.system(size: 20, weight: .bold))
+                        .padding(.horizontal, 18)
+
+                    if subtitleStatus == "loading" {
+                        ProgressView("首次打开正在提取字幕…")
+                            .padding(.horizontal, 18)
+                    } else if let subtitleError {
+                        ContentUnavailableView(
+                            "字幕载入失败",
+                            systemImage: "captions.bubble",
+                            description: Text(subtitleError)
+                        )
+                        .padding(.horizontal, 18)
+                    } else if cues.isEmpty {
+                        ContentUnavailableView("暂无可用字幕", systemImage: "captions.bubble")
+                            .padding(.horizontal, 18)
+                    } else if let activeCue {
+                        Section {
+                            subtitleRows(excluding: activeCue.id)
+                        } header: {
+                            currentSubtitleCard(activeCue)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 8)
+                                .background(Color(uiColor: .systemBackground))
+                        }
+                    } else {
+                        subtitleRows(excluding: nil)
+                    }
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 30)
@@ -664,48 +692,31 @@ private struct PersonVideoDetailView: View {
     }
 
     @ViewBuilder
-    private var subtitleSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("中文字幕")
-                .font(.system(size: 20, weight: .bold))
-            if subtitleStatus == "loading" {
-                ProgressView("首次打开正在提取字幕…")
-            } else if let subtitleError {
-                ContentUnavailableView("字幕载入失败", systemImage: "captions.bubble", description: Text(subtitleError))
-            } else if cues.isEmpty {
-                ContentUnavailableView("暂无可用字幕", systemImage: "captions.bubble")
-            } else {
-                if let activeCue {
-                    currentSubtitleCard(activeCue)
+    private func subtitleRows(excluding cueID: PersonVideoSubtitleCue.ID?) -> some View {
+        ForEach(cues.filter { $0.id != cueID }) { cue in
+            Button {
+                seek(to: cue)
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(timeLabel(for: cue.startMS))
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 46, alignment: .leading)
+                    Text(cue.text)
+                        .font(.system(size: 16))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(cues.filter { $0.id != activeCue?.id }) { cue in
-                        Button {
-                            seek(to: cue)
-                        } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Text(timeLabel(for: cue.startMS))
-                                    .font(.caption.monospacedDigit().weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 46, alignment: .leading)
-                                Text(cue.text)
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(.primary)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 8)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("跳转到 \(timeLabel(for: cue.startMS))，\(cue.text)")
-                        Divider()
-                    }
-                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 8)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("跳转到 \(timeLabel(for: cue.startMS))，\(cue.text)")
+            .padding(.horizontal, 18)
+            Divider()
+                .padding(.horizontal, 18)
         }
-        .padding(.horizontal, 18)
     }
 
     private func currentSubtitleCard(_ cue: PersonVideoSubtitleCue) -> some View {
