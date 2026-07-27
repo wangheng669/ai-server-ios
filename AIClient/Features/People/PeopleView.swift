@@ -539,13 +539,19 @@ private struct PersonVideoDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            player(instanceID: "detail-inline")
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .frame(maxWidth: 320)
-                .background(Color.black)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            VStack(spacing: 8) {
+                player(instanceID: "detail-inline")
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .frame(maxWidth: 320)
+                    .background(Color.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                currentSubtitleBar
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .background(Color(uiColor: .systemBackground))
 
             Divider()
 
@@ -553,7 +559,7 @@ private struct PersonVideoDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(video.displayTitle)
-                            .font(.system(size: 24, weight: .bold))
+                            .font(.system(size: 22, weight: .bold))
                             .lineSpacing(3)
                         Text([video.channelName, video.publishedDateLabel, video.durationLabel]
                             .compactMap { $0 }
@@ -635,19 +641,6 @@ private struct PersonVideoDetailView: View {
                     updatePlaybackTime(seconds)
                 }
             )
-            if showsFullscreenButton, let cue = activeCue {
-                Text(cue.text)
-                    .font(.system(size: 17, weight: .semibold))
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 7))
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .allowsHitTesting(false)
-            }
             if showsFullscreenButton {
                 Button {
                     YouTubeWarmPlayerPool.shared.pause(
@@ -675,10 +668,57 @@ private struct PersonVideoDetailView: View {
     }
 
     @ViewBuilder
+    private var currentSubtitleBar: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "captions.bubble.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 22)
+
+            if subtitleStatus == "loading" {
+                Text("正在载入中文字幕…")
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                ProgressView()
+                    .controlSize(.small)
+            } else if let cue = activeCue {
+                Text(timeLabel(for: cue.startMS))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(cue.text)
+                    .font(.system(size: 15, weight: .medium))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(cues.isEmpty ? "暂无可用字幕" : "播放视频，或点击下方字幕跳转")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .font(.system(size: 15))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(activeCue.map { "当前字幕，\($0.text)" } ?? "字幕提示")
+    }
+
+    @ViewBuilder
     private var subtitleSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("中文字幕")
-                .font(.system(size: 20, weight: .bold))
+            HStack(alignment: .firstTextBaseline) {
+                Text("中文字幕")
+                    .font(.system(size: 20, weight: .bold))
+                Spacer()
+                if !cues.isEmpty {
+                    Text("点击字幕跳转")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             if subtitleStatus == "loading" {
                 ProgressView("首次打开正在提取字幕…")
             } else if let subtitleError {
