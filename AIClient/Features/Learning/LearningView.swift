@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LearningView: View {
     @Binding private var showsDetail: Bool
@@ -238,7 +239,7 @@ struct LearningView: View {
                     }
                     .buttonStyle(LearningPressStyle())
                     if topic.id != topics.last?.id {
-                        Divider().padding(.leading, 104)
+                        Divider().padding(.leading, 118)
                     }
                 }
             }
@@ -324,14 +325,7 @@ private struct LearningTopicRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(HoldingsPalette.purple.opacity(0.08))
-                .frame(width: 70, height: 58)
-                .overlay {
-                    Image(systemName: icon)
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(HoldingsPalette.purple.opacity(0.82))
-                }
+            LearningTopicThumbnail(topic: topic)
             VStack(alignment: .leading, spacing: 6) {
                 Text(topic.title)
                     .font(.system(size: 17, weight: .semibold))
@@ -353,6 +347,51 @@ private struct LearningTopicRow: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 13)
         .contentShape(Rectangle())
+    }
+}
+
+private struct LearningTopicThumbnail: View {
+    let topic: LearningTopic
+    @State private var image: UIImage?
+    @State private var finishedLoading = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                fallback
+                    .overlay {
+                        if !finishedLoading {
+                            ProgressView().controlSize(.mini)
+                        }
+                    }
+            }
+        }
+        .frame(width: 84, height: 58)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityHidden(true)
+        .task(id: topic.thumbnailURLValue) {
+            finishedLoading = false
+            let url = topic.mediaURL(topic.thumbnailURLValue)
+            image = await ImageLoader.load(
+                url,
+                targetSize: CGSize(width: 84, height: 58)
+            )
+            finishedLoading = true
+        }
+    }
+
+    private var fallback: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(HoldingsPalette.purple.opacity(0.08))
+            .overlay {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(HoldingsPalette.purple.opacity(0.82))
+            }
     }
 
     private var icon: String {
