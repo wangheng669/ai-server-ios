@@ -3,6 +3,7 @@
 set -euo pipefail
 
 target_branch="${1:-main}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 git rev-parse --show-toplevel >/dev/null
 
@@ -12,7 +13,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-git fetch --prune origin
+"$script_dir/git-fetch-origin.sh" --prune origin
 
 if ! git show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
   echo "Remote branch origin/$target_branch does not exist." >&2

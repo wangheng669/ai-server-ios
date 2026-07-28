@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_dir="${1:-$(git rev-parse --show-toplevel)}"
 cd "$repo_dir"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -23,7 +24,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 0
 fi
 
-git fetch --prune --no-tags origin
+"$script_dir/git-fetch-origin.sh" --prune --no-tags origin
 
 if ! git show-ref --verify --quiet refs/remotes/origin/main; then
   log "Skipped: origin/main is unavailable."
