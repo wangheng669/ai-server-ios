@@ -25,7 +25,11 @@ permissions:
 jobs:
   check:
     name: Check for a new main revision
-    runs-on: ubuntu-slim
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - office-builder
     outputs:
       should_upload: ${{ steps.decision.outputs.should_upload }}
     steps:
@@ -67,7 +71,11 @@ jobs:
     name: Test, archive, and upload
     needs: check
     if: needs.check.outputs.should_upload == 'true'
-    runs-on: macos-26
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - office-builder
     timeout-minutes: 45
 
     steps:
@@ -91,32 +99,21 @@ jobs:
           chmod 600 "$key_path"
           echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
-      - name: Select an available iPhone simulator
-        run: |
-          set -euo pipefail
-          simulator_udid="$(
-            xcrun simctl list devices available --json |
-              jq -r '
-                [.devices[][] | select(.isAvailable and .name == "iPhone 16e")][0].udid //
-                [.devices[][] | select(.isAvailable and (.name | startswith("iPhone")))][0].udid //
-                empty
-              '
-          )"
-          test -n "$simulator_udid"
-          echo "SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
-
       - name: Run tests
+        env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
         run: |
           set -o pipefail
           xcodebuild test \
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination 'platform=iOS Simulator,name=iPhone 16e' \
             -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Create App Store archive
         env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
@@ -136,6 +133,7 @@ jobs:
 
       - name: Upload archive to TestFlight
         env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
