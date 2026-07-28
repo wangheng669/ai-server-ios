@@ -221,6 +221,17 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 
     var isUp: Bool { percentValue >= 0 }
 
+    var hasActiveExtendedSessionQuote: Bool {
+        guard sessionPrice != nil else { return false }
+        if isNightSession == true { return true }
+        switch marketSession?.lowercased() {
+        case "pre", "premarket", "post", "after", "overnight":
+            return true
+        default:
+            return false
+        }
+    }
+
     var formattedSessionPercent: String? {
         sessionChangePercent.map { String(format: "%@%.2f%%", $0 >= 0 ? "+" : "−", abs($0)) }
     }

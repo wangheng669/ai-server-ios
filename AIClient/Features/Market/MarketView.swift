@@ -2047,7 +2047,7 @@ private struct MarketIndexDetailView: View {
                         .padding(.horizontal, 9).padding(.vertical, 6)
                         .background(MarketStyle.purple.opacity(0.08), in: Capsule())
                         .accessibilityLabel("期货夜盘，\(session.name)，\(number(session.price, digits: 2))，\(session.formattedPercent)")
-                    } else if quote?.isNightSession == true, let quote, let nightPrice = quote.sessionPrice {
+                    } else if let quote, quote.hasActiveExtendedSessionQuote, let nightPrice = quote.sessionPrice {
                         HStack(spacing: 7) {
                             Text("个股夜盘").fontWeight(.semibold)
                             Text(number(nightPrice, digits: 2)).fontWeight(.semibold).monospacedDigit()
@@ -2154,7 +2154,7 @@ private struct MarketIndexDetailView: View {
     }
 
     private var sessionText: String {
-        switch quote?.marketSession { case "regular": "交易中"; case "always-open": "24小时交易"; case "pre": "盘前"; case "post", "after": "盘后"; default: "已收盘" }
+        switch quote?.marketSession { case "regular": "交易中"; case "always-open": "24小时交易"; case "pre": "盘前"; case "post", "after": "盘后"; case "overnight": "夜盘"; default: "已收盘" }
     }
     private var isCrypto: Bool { symbol.hasPrefix("BINANCE:") }
     private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }

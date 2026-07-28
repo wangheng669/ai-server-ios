@@ -213,6 +213,13 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertTrue(quote.isNightSession == true)
     }
 
+    func testExtendedSessionDisplayFallsBackToMarketSession() throws {
+        let data = Data(#"{"symbol":"NVDA","name":"英伟达","price":196.51,"previousClose":206.84,"marketSession":"overnight","isNightSession":false,"sessionPrice":196.54,"sessionChangePercent":-4.98}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertTrue(quote.hasActiveExtendedSessionQuote)
+    }
+
     func testRealtimeUpdatePreservesConstituentNightTrend() throws {
         let responseData = Data(#"{"indexSymbol":"^NDX","label":"主要成分股","selectionBasis":"test","asOf":"2026-07-16","generatedAt":"2026-07-16T05:00:00Z","items":[{"rank":1,"weight":null,"logoPath":null,"quote":{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"isNightSession":true,"sessionPrice":212.49,"timestamp":1784174184000,"trend":[210,211],"nightTrend":[212.1,212.2,212.3]}}],"missingSymbols":[]}"#.utf8)
         let updateData = Data(#"{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","isNightSession":true,"sessionPrice":212.49,"sessionChangePercent":0.3257,"timestamp":1784174184396}"#.utf8)
