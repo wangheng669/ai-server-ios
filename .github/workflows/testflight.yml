@@ -76,7 +76,7 @@ jobs:
       - macOS
       - ARM64
       - office-builder
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Check out requested version
@@ -131,6 +131,12 @@ jobs:
             DEVELOPMENT_TEAM=9M7P4VLHY3 \
             CODE_SIGN_STYLE=Automatic
 
+      - name: Capture existing TestFlight builds
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: ruby ci/testflight-processing-notify.rb snapshot "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
+
       - name: Upload archive to TestFlight
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -146,6 +152,13 @@ jobs:
             -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Wait for App Store Connect processing and notify DingTalk
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ruby ci/testflight-processing-notify.rb wait "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
 
       - name: Remove authentication key
         if: ${{ always() }}

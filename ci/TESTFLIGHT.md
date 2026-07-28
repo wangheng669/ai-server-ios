@@ -4,6 +4,8 @@
 
 工作流每天北京时间 04:30 自动检查 `main`。仅当 `main` 相比上一次成功发布出现新提交时才启动构建和上传；没有新提交时会快速结束。也可以从 GitHub Actions 手动运行，手动运行始终会执行上传。Mac mini 离线时，任务会排队等待 `office-builder` 上线。
 
+上传完成后，工作流会继续查询 App Store Connect，直到新构建状态变为 `VALID`（界面显示“完成”）或处理失败。进入终态后，它会使用 `IOS_DEPLOYMENT_STATUS_API_KEY` 调用 AI Server 的受鉴权接口，由服务端现有企业钉钉机器人发送版本号、Build Number、完成时间和发布任务链接。默认最多等待 30 分钟。
+
 ## App Store Connect
 
 创建与 `com.wangheng.aiserverclient` 对应的 iOS App，并在“用户和访问 / 集成 / App Store Connect API”中创建团队 API Key。该 Key 需要有管理应用版本、签名和上传构建所需的权限。
