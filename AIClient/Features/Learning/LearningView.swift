@@ -3,6 +3,7 @@ import SwiftUI
 struct LearningView: View {
     @Binding private var showsDetail: Bool
     @State private var store = LearningStore()
+    @State private var repository = LearningContentRepository()
     @State private var path: [LearningTopic] = []
     @State private var selectedCategory = "股票"
     @State private var query = ""
@@ -32,7 +33,7 @@ struct LearningView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: LearningTopic.self) { topic in
-                LearningDetailView(topic: topic)
+                LearningDetailView(topic: topic, repository: repository)
             }
         }
         .task {
@@ -51,7 +52,18 @@ struct LearningView: View {
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty
         }
+        .task(id: prefetchKey) {
+            guard let catalog = store.catalog,
+                  let section = catalog.sections.first(where: { $0.name == selectedCategory }) else {
+                return
+            }
+            await repository.prefetch(section.topics.prefix(10))
+        }
         .onDisappear { showsDetail = false }
+    }
+
+    private var prefetchKey: String {
+        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)-\(selectedCategory)"
     }
 
     private func learningHome(_ catalog: LearningCatalog) -> some View {
