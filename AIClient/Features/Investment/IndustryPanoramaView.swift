@@ -139,47 +139,42 @@ struct IndustryPanoramaView: View {
 
     private var industryPicker: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 12) {
+            HStack(spacing: 30) {
                 ForEach(industries) { industry in
                     let selected = industry.id == selectedIndustry?.id
                     Button {
                         withAnimation(.easeOut(duration: 0.2)) { selectedID = industry.id }
                     } label: {
-                        VStack(spacing: 9) {
-                            Image(systemName: industry.icon)
-                                .font(.system(size: 25, weight: .semibold))
-                                .frame(height: 32)
+                        VStack(spacing: 11) {
                             Text(industry.title)
-                                .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                                .font(.system(size: 14, weight: selected ? .semibold : .regular))
                                 .lineLimit(1)
+                            Capsule()
+                                .fill(selected ? HoldingsPalette.green : .clear)
+                                .frame(width: 16, height: 2)
                         }
-                        .foregroundStyle(selected ? HoldingsPalette.green : .secondary)
-                        .frame(width: 82, height: 82)
-                        .background(
-                            selected ? HoldingsPalette.green.opacity(0.07) : .clear,
-                            in: RoundedRectangle(cornerRadius: 12)
-                        )
-                        .overlay {
-                            if selected {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(HoldingsPalette.green.opacity(0.22))
-                            }
-                        }
+                        .foregroundStyle(selected ? HoldingsPalette.green : HoldingsPalette.ink)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 9)
         }
         .scrollIndicators(.hidden)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(HoldingsPalette.line)
+                .frame(height: 1)
+        }
     }
 
     private func panorama(_ industry: IndustryPayload) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             scaleCard(industry)
-            anchorStrip(industry)
             chainCard(industry)
-            insightSection(industry)
             provenanceRow(industry)
         }
         .padding(.horizontal, 16)
@@ -189,9 +184,7 @@ struct IndustryPanoramaView: View {
     private func scaleCard(_ industry: IndustryPayload) -> some View {
         let parts = scaleValueParts(industry.scale.value)
         return VStack(alignment: .leading, spacing: 18) {
-            Label("产业规模", systemImage: "chart.xyaxis.line")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(HoldingsPalette.ink)
+            sectionHeading(number: "01", title: "产业规模")
 
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .bottom, spacing: 22) {
@@ -214,8 +207,6 @@ struct IndustryPanoramaView: View {
                 }
             }
 
-            Divider()
-
             HStack {
                 Text(industry.scale.metric)
                     .font(.system(size: 12, weight: .medium))
@@ -224,10 +215,8 @@ struct IndustryPanoramaView: View {
                 sourceLink(industry.scale.source)
             }
         }
-        .padding(18)
-        .background(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(HoldingsPalette.line))
-        .shadow(color: Color.black.opacity(0.025), radius: 12, y: 5)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 10)
     }
 
     private func scaleSummary(
@@ -247,12 +236,12 @@ struct IndustryPanoramaView: View {
                 Text(parts.unit)
                     .font(.system(size: 15, weight: .semibold))
                 if let growth = industry.scale.growth {
-                    Text(growth)
+                    Label(growth, systemImage: "arrow.up.right")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(HoldingsPalette.green)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
-                        .background(HoldingsPalette.green.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(HoldingsPalette.green.opacity(0.28)))
                 }
             }
         }
@@ -313,13 +302,12 @@ struct IndustryPanoramaView: View {
 
     private func chainCard(_ industry: IndustryPayload) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Label("产业链全景", systemImage: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 17, weight: .bold))
-                Spacer()
-                Text("企业映射")
-                    .font(.system(size: 11, weight: .medium))
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                sectionHeading(number: "02", title: "产业链全景")
+                Text("垂直整合分工明确，协同驱动产业价值链跃升")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
 
             VStack(spacing: 0) {
@@ -333,9 +321,12 @@ struct IndustryPanoramaView: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(HoldingsPalette.line))
+        .padding(.top, 18)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(HoldingsPalette.line)
+                .frame(height: 1)
+        }
     }
 
     private func chainRow(
@@ -558,6 +549,17 @@ struct IndustryPanoramaView: View {
 
     private func chainColor(_ index: Int) -> Color {
         [Color(red: 0.74, green: 0.34, blue: 0.07), HoldingsPalette.green, HoldingsPalette.blue][index % 3]
+    }
+
+    private func sectionHeading(number: String, title: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Text(number)
+                .font(.system(size: 31, weight: .medium, design: .serif))
+                .foregroundStyle(HoldingsPalette.green)
+            Text(title)
+                .font(.system(size: 20, weight: .bold, design: .serif))
+                .foregroundStyle(HoldingsPalette.ink)
+        }
     }
 
 }
