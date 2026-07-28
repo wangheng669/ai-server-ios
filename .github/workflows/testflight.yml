@@ -1,6 +1,9 @@
 name: Upload iOS app to TestFlight
 
 on:
+  schedule:
+    # GitHub cron uses UTC. 20:30 UTC is 04:30 the next day in Asia/Shanghai.
+    - cron: "30 20 * * *"
   workflow_dispatch:
     inputs:
       git_ref:
@@ -16,16 +19,55 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
+  check:
+    name: Check for a new main revision
+    runs-on: ubuntu-slim
+    outputs:
+      should_upload: ${{ steps.decision.outputs.should_upload }}
+    steps:
+      - name: Decide whether an upload is needed
+        id: decision
+        uses: actions/github-script@v8
+        with:
+          script: |
+            if (context.eventName !== "schedule") {
+              core.setOutput("should_upload", "true");
+              return;
+            }
+
+            const workflow = await github.rest.actions.getWorkflow({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "testflight.yml",
+            });
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflow.data.id,
+              branch: context.ref.replace("refs/heads/", ""),
+              status: "success",
+              per_page: 10,
+            });
+            const previousUpload = runs.data.workflow_runs.find(
+              (run) => run.id !== context.runId
+            );
+            const shouldUpload = previousUpload?.head_sha !== context.sha;
+            core.info(
+              shouldUpload
+                ? `Uploading new revision ${context.sha}.`
+                : `Skipping ${context.sha}; it was already uploaded successfully.`
+            );
+            core.setOutput("should_upload", String(shouldUpload));
+
   upload:
     name: Test, archive, and upload
-    runs-on:
-      - self-hosted
-      - macOS
-      - ARM64
-      - office-builder
+    needs: check
+    if: needs.check.outputs.should_upload == 'true'
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -49,21 +91,32 @@ jobs:
           chmod 600 "$key_path"
           echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
+      - name: Select an available iPhone simulator
+        run: |
+          set -euo pipefail
+          simulator_udid="$(
+            xcrun simctl list devices available --json |
+              jq -r '
+                [.devices[][] | select(.isAvailable and .name == "iPhone 16e")][0].udid //
+                [.devices[][] | select(.isAvailable and (.name | startswith("iPhone")))][0].udid //
+                empty
+              '
+          )"
+          test -n "$simulator_udid"
+          echo "SIMULATOR_UDID=$simulator_udid" >> "$GITHUB_ENV"
+
       - name: Run tests
-        env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
         run: |
           set -o pipefail
           xcodebuild test \
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \
-            -destination 'platform=iOS Simulator,name=iPhone 16e' \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Create App Store archive
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
@@ -83,7 +136,6 @@ jobs:
 
       - name: Upload archive to TestFlight
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
