@@ -2,6 +2,32 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testPersonArticleDecoding() throws {
+        let data = Data(
+            """
+            {
+              "id": 9,
+              "person_id": "1605",
+              "source_name": "Sam Altman Blog",
+              "source_url": "https://blog.samaltman.com",
+              "title": "Reflections",
+              "title_zh": "",
+              "summary": "A retrospective.",
+              "canonical_url": "https://blog.samaltman.com/reflections",
+              "published_at": "2025-01-06T00:00:00Z",
+              "reading_minutes": 8,
+              "language": "en"
+            }
+            """.utf8
+        )
+
+        let article = try JSONDecoder().decode(PersonArticle.self, from: data)
+        XCTAssertEqual(article.personID, "1605")
+        XCTAssertEqual(article.displayTitle, "Reflections")
+        XCTAssertEqual(article.readingMinutes, 8)
+        XCTAssertEqual(article.canonicalURL?.host, "blog.samaltman.com")
+    }
+
     func testDecodesPersonVideoChineseSubtitleTimeline() throws {
         let data = Data(
             """

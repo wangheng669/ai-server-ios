@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-enum RootTab: Hashable { case observation, investment, people }
+enum RootTab: Hashable { case observation, investment, learning, people }
 
 private enum FlashFilter: String, CaseIterable, Identifiable {
     case all, important, ai, market, policy
