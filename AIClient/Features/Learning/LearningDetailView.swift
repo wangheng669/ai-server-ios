@@ -4,35 +4,32 @@ import SwiftUI
 
 struct LearningDetailView: View {
     let topic: LearningTopic
+    let repository: LearningContentRepository
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @State private var store = LearningDetailStore()
 
     var body: some View {
         VStack(spacing: 0) {
             detailBar
             Divider().opacity(0.5)
-            Group {
-                if let loaded = store.topic, let detail = loaded.detail {
-                    LearningArticleView(topic: loaded, detail: detail)
-                } else if store.isLoading {
-                    ProgressView("正在读取缓存课程…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ContentUnavailableView {
-                        Label("内容载入失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(store.errorMessage ?? "请稍后重试")
-                    } actions: {
-                        Button("重试") { Task { await store.load(id: topic.id) } }
-                        Button("查看来源") { openURL(topic.url) }
-                    }
+            if let loaded = repository.topic(id: topic.id), let detail = loaded.detail {
+                LearningArticleView(topic: loaded, detail: detail)
+            } else if let errorMessage = repository.errorMessages[topic.id] {
+                ContentUnavailableView {
+                    Label("内容载入失败", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(errorMessage)
+                } actions: {
+                    Button("重试") { Task { await repository.load(id: topic.id) } }
+                    Button("查看来源") { openURL(topic.url) }
                 }
+            } else {
+                LearningDetailPlaceholder(topic: topic)
             }
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.load(id: topic.id) }
+        .task { await repository.load(id: topic.id) }
     }
 
     private var detailBar: some View {
@@ -56,6 +53,42 @@ struct LearningDetailView: View {
         }
         .padding(.horizontal, 6)
         .frame(height: 50)
+    }
+}
+
+private struct LearningDetailPlaceholder: View {
+    let topic: LearningTopic
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                Text(topic.title)
+                    .font(.system(size: 34, weight: .bold))
+                    .tracking(-0.5)
+                    .padding(.bottom, 10)
+                if !topic.summary.isEmpty {
+                    Text(topic.summary)
+                        .font(.system(size: 17))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(6)
+                        .padding(.bottom, 24)
+                }
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.bottom, 24)
+                ForEach(0..<4, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.secondary.opacity(0.12))
+                        .frame(height: index == 0 ? 28 : 18)
+                        .frame(maxWidth: index.isMultiple(of: 2) ? .infinity : 260)
+                        .padding(.bottom, 16)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityLabel("正在读取课程内容")
     }
 }
 
