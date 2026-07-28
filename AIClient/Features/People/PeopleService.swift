@@ -88,6 +88,21 @@ struct PeopleService {
         return payload.articles
     }
 
+    func article(id: Int64) async throws -> PersonArticle {
+        let url = baseURL
+            .appending(path: "api/v1/people/articles")
+            .appending(path: String(id))
+        var request = URLRequest(url: url, timeoutInterval: 180)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PeopleServiceError.invalidResponse
+        }
+        let payload = try JSONDecoder().decode(PersonArticleDetailResponse.self, from: data)
+        guard payload.success else { throw PeopleServiceError.invalidResponse }
+        return payload.article
+    }
+
     func subtitles(videoID: Int64) async throws -> PersonVideoSubtitlesResponse {
         let url = baseURL
             .appending(path: "api/v1/people/videos")

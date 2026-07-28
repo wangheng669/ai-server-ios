@@ -183,6 +183,11 @@ struct PeopleArticlesResponse: Decodable {
     }
 }
 
+struct PersonArticleDetailResponse: Decodable {
+    let success: Bool
+    let article: PersonArticle
+}
+
 struct PersonArticle: Decodable, Identifiable, Hashable {
     let id: Int64
     let personID: String
@@ -191,23 +196,30 @@ struct PersonArticle: Decodable, Identifiable, Hashable {
     let title: String
     let titleZH: String
     let summary: String
+    let summaryZH: String?
+    let content: String?
+    let contentZH: String?
     let canonicalURLValue: String
     let publishedAt: String?
     let readingMinutes: Int
     let language: String
 
     enum CodingKeys: String, CodingKey {
-        case id, title, summary, language
+        case id, title, summary, content, language
         case personID = "person_id"
         case sourceName = "source_name"
         case sourceURLValue = "source_url"
         case titleZH = "title_zh"
+        case summaryZH = "summary_zh"
+        case contentZH = "content_zh"
         case canonicalURLValue = "canonical_url"
         case publishedAt = "published_at"
         case readingMinutes = "reading_minutes"
     }
 
     var displayTitle: String { nonempty(titleZH) ?? title }
+    var displaySummary: String { nonempty(summaryZH) ?? summary }
+    var displayContent: String { nonempty(contentZH) ?? nonempty(content) ?? "" }
     var canonicalURL: URL? { URL(string: canonicalURLValue) }
     var publishedDateLabel: String? {
         guard let publishedAt,
