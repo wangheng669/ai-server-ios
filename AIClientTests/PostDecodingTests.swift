@@ -118,6 +118,7 @@ final class PostDecodingTests: XCTestCase {
                 "user_id": "curated:peter-thiel",
                 "user_name": "Peter Thiel",
                 "user_desc": "科技投资人",
+                "x_screen_name": "peterthiel",
                 "organization_name": "Founders Fund 联合创始人",
                 "topic": "investment",
                 "discussion_keywords": ["Peter Thiel", "彼得·蒂尔"],
@@ -152,6 +153,8 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(payload.users.first?.relatedPeople.first?.name, "Elon Musk")
         XCTAssertEqual(payload.users.first?.profileUpdatedAt, "2026年7月")
         XCTAssertEqual(payload.users.first?.hasOwnPostSource, false)
+        XCTAssertEqual(payload.users.first?.xHandle, "@peterthiel")
+        XCTAssertEqual(payload.users.first?.xProfileURL?.absoluteString, "https://x.com/peterthiel")
     }
 
     func testDecodesXQuotedTweetForPersonPostCard() throws {

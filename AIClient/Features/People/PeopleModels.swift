@@ -28,6 +28,8 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     let todayCount: Int
     let totalCount: Int
     let lastPostTime: String?
+    let xUserID: String?
+    let xScreenName: String?
     private let topicValue: String?
     private let organizationNameValue: String?
     private let avatarAssetNameValue: String?
@@ -44,10 +46,21 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var isCurated: Bool { userID.hasPrefix("curated:") }
     var isIndustryPerson: Bool { topic == .technology }
     var hasOwnPostSource: Bool { hasOwnPostSourceValue ?? !isCurated }
-    var hasXSource: Bool { hasOwnPostSource && userID.allSatisfy(\.isNumber) }
+    var hasXSource: Bool { nonempty(xScreenName) != nil }
     var isOrganizationAccount: Bool { false }
     var name: String { nonempty(userName) ?? nonempty(userScreenName) ?? "未知用户" }
-    var handle: String? { nonempty(userScreenName).map { $0.hasPrefix("@") ? $0 : "@\($0)" } }
+    var xHandle: String? {
+        nonempty(xScreenName).map { $0.hasPrefix("@") ? $0 : "@\($0)" }
+    }
+    var handle: String? {
+        xHandle ?? nonempty(userScreenName).map { $0.hasPrefix("@") ? $0 : "@\($0)" }
+    }
+    var xProfileURL: URL? {
+        guard let screenName = nonempty(xScreenName)?.trimmingCharacters(in: CharacterSet(charactersIn: "@")) else {
+            return nil
+        }
+        return URL(string: "https://x.com")?.appending(path: screenName)
+    }
     var secondaryLabel: String? { isCurated ? nonempty(userScreenName) : handle }
     var organizationName: String? {
         nonempty(organizationNameValue) ?? (isCurated ? nonempty(userScreenName) : nil)
@@ -93,6 +106,8 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         case todayCount = "today_count"
         case totalCount = "total_count"
         case lastPostTime = "last_post_time"
+        case xUserID = "x_user_id"
+        case xScreenName = "x_screen_name"
         case topicValue = "topic"
         case organizationNameValue = "organization_name"
         case avatarAssetNameValue = "avatar_asset_name"
@@ -123,6 +138,8 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         todayCount = 0
         totalCount = 0
         lastPostTime = nil
+        self.xUserID = xUserID
+        self.xScreenName = xScreenName
         topicValue = nil
         organizationNameValue = organization
         avatarAssetNameValue = nil
