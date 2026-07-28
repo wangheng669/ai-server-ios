@@ -266,8 +266,7 @@ struct APIClient {
     }
 
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
-        guard let previewURL = Self.articlePreviewURL(for: url, baseURL: baseURL) else { throw APIError.invalidURL }
-        let response: ArticlePreviewResponse = try await get(previewURL)
+        let response = try await fetchArticlePreview(url: url)
         if let article = NewYorkTimesArticleParser.extract(from: response.data.content) { return article }
         let paragraphs = response.data.textContent
             .components(separatedBy: "\n\n")
@@ -276,6 +275,11 @@ struct APIClient {
             .map(NewYorkTimesArticleBlock.paragraph)
         guard !paragraphs.isEmpty else { throw APIError.decoding(NYTimesArticleError.bodyMissing) }
         return NewYorkTimesArticle(blocks: paragraphs)
+    }
+
+    func fetchArticlePreview(url: URL) async throws -> ArticlePreviewResponse {
+        guard let previewURL = Self.articlePreviewURL(for: url, baseURL: baseURL) else { throw APIError.invalidURL }
+        return try await get(previewURL)
     }
 
     static func articlePreviewURL(for articleURL: URL, baseURL: URL) -> URL? {
@@ -461,11 +465,20 @@ enum NewYorkTimesArticleParser {
 
 private enum NYTimesArticleError: Error { case bodyMissing }
 
-private struct ArticlePreviewResponse: Decodable {
+struct ArticlePreviewResponse: Decodable {
     let data: Payload
     struct Payload: Decodable {
+        let title: String
         let content: String
         let textContent: String
+        let titleZH: String
+        let textContentZH: String
+
+        enum CodingKeys: String, CodingKey {
+            case title, content, textContent
+            case titleZH = "titleZh"
+            case textContentZH = "textContentZh"
+        }
     }
 }
 

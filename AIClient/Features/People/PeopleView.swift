@@ -1,4 +1,5 @@
 import SwiftUI
+import Translation
 import UIKit
 
 struct PeopleView: View {
@@ -237,6 +238,7 @@ private struct PersonDetailPage: View {
     @State private var relatedSection = PersonRelatedSection.videos
     @State private var selectedPost: Post?
     @State private var selectedVideo: PersonVideo?
+    @State private var selectedArticle: PersonArticle?
 
     var body: some View {
         ScrollView {
@@ -270,6 +272,13 @@ private struct PersonDetailPage: View {
         .navigationDestination(item: $selectedPost) { post in PostDetailView(post: post) }
         .navigationDestination(item: $selectedVideo) { video in
             PersonVideoDetailView(video: video)
+        }
+        .navigationDestination(item: $selectedArticle) { article in
+            if #available(iOS 18.0, *) {
+                PersonArticleDetailView(article: article)
+            } else {
+                PersonArticleCompatibilityView(article: article)
+            }
         }
         .task(id: person.id) {
             await store.load(person: person)
@@ -434,7 +443,7 @@ private struct PersonDetailPage: View {
             .padding(.top, 30)
         } else {
             ForEach(store.articles) { article in
-                PersonArticleCard(article: article)
+                PersonArticleCard(article: article) { selectedArticle = article }
                 Divider().padding(.leading, 20)
             }
         }
@@ -1023,21 +1032,16 @@ private enum PersonRelatedSection: String, CaseIterable, Identifiable {
 
 private struct PersonArticleCard: View {
     let article: PersonArticle
-    @Environment(\.openURL) private var openURL
+    let onOpen: () -> Void
 
     var body: some View {
-        Button {
-            if let url = article.canonicalURL { openURL(url) }
-        } label: {
+        Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "doc.text")
                         .font(.system(size: 18))
                         .foregroundStyle(.secondary)
-                    Text(article.displayTitle)
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
+                    articleTitle
                 }
 
                 Text(metadata)
@@ -1063,7 +1067,7 @@ private struct PersonArticleCard: View {
                             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                     }
                     Spacer()
-                    Label("阅读文章", systemImage: "arrow.up.right")
+                    Label("阅读文章", systemImage: "chevron.right")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
                 }
@@ -1073,7 +1077,23 @@ private struct PersonArticleCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityHint("在浏览器中打开原文")
+        .accessibilityHint("在应用内打开中文文章")
+    }
+
+    @ViewBuilder
+    private var articleTitle: some View {
+        if article.language == "zh" || !article.titleZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Text(article.displayTitle)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+        } else if #available(iOS 18.0, *) {
+            PersonArticleTranslatedTitle(article: article)
+        } else {
+            Text("中文标题需要 iOS 18 或更高版本")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var metadata: String {
@@ -1085,6 +1105,234 @@ private struct PersonArticleCard: View {
         .compactMap { $0 }
         .joined(separator: " · ")
     }
+}
+
+@available(iOS 18.0, *)
+private struct PersonArticleTranslatedTitle: View {
+    let article: PersonArticle
+    @State private var title = "正在翻译标题…"
+    @State private var configuration: TranslationSession.Configuration?
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 20, weight: .bold))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
+            .task(id: article.id) {
+                configuration = .init(source: nil, target: Locale.Language(identifier: "zh-Hans"))
+            }
+            .translationTask(configuration) { session in
+                do {
+                    title = try await session.translate(article.title).targetText
+                } catch is CancellationError {
+                    return
+                } catch {
+                    title = "标题翻译失败"
+                }
+            }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct PersonArticleDetailView: View {
+    let article: PersonArticle
+    @Environment(\.openURL) private var openURL
+    @State private var state = PersonArticleDetailState.loading
+    @State private var translationConfiguration: TranslationSession.Configuration?
+
+    var body: some View {
+        Group {
+            switch state {
+            case .loading:
+                ProgressView("正在加载并翻译文章…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .failed(let message):
+                ContentUnavailableView {
+                    Label("文章加载失败", systemImage: "doc.text.magnifyingglass")
+                } description: {
+                    Text(message)
+                } actions: {
+                    if let url = article.canonicalURL {
+                        Button("打开原文") { openURL(url) }
+                    }
+                }
+            case .loaded(let content):
+                articleBody(content)
+            }
+        }
+        .navigationTitle(article.sourceName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .task(id: article.id) { await load() }
+        .translationTask(translationConfiguration) { session in
+            await translate(using: session)
+        }
+    }
+
+    private func articleBody(_ content: PersonArticleDetailContent) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                Text(content.title)
+                    .font(.system(size: 30, weight: .bold, design: .serif))
+                    .lineSpacing(4)
+
+                Text(metadata)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                if content.isTranslating {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("正在翻译标题和正文…")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
+
+                ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                    Text(paragraph)
+                        .font(.system(size: 18, design: .serif))
+                        .lineSpacing(7)
+                        .textSelection(.enabled)
+                }
+
+                if let url = article.canonicalURL {
+                    Button { openURL(url) } label: {
+                        Label("打开原文", systemImage: "safari")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 8)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+        }
+    }
+
+    private var metadata: String {
+        [
+            article.publishedDateLabel,
+            article.sourceName,
+            article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟阅读" : nil
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+    }
+
+    private func load() async {
+        guard let url = article.canonicalURL else {
+            state = .failed("文章地址无效")
+            return
+        }
+        state = .loading
+        do {
+            let preview = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchArticlePreview(url: url).data
+            guard !Task.isCancelled else { return }
+            let previewTitle = preview.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let originalTitle = previewTitle.isEmpty ? article.title : previewTitle
+            let originalText = preview.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            let translatedTitle = preview.titleZH.trimmingCharacters(in: .whitespacesAndNewlines)
+            let translatedText = preview.textContentZH.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !originalText.isEmpty || !translatedText.isEmpty else {
+                state = .failed("暂时无法读取这篇文章的正文")
+                return
+            }
+
+            if !translatedTitle.isEmpty, !translatedText.isEmpty {
+                state = .loaded(.init(
+                    title: translatedTitle,
+                    paragraphs: Self.paragraphs(from: translatedText),
+                    originalTitle: originalTitle,
+                    originalParagraphs: Self.paragraphs(from: originalText),
+                    isTranslating: false
+                ))
+            } else if article.language == "zh" {
+                state = .loaded(.init(
+                    title: originalTitle,
+                    paragraphs: Self.paragraphs(from: originalText),
+                    originalTitle: originalTitle,
+                    originalParagraphs: Self.paragraphs(from: originalText),
+                    isTranslating: false
+                ))
+            } else {
+                state = .loaded(.init(
+                    title: translatedTitle.isEmpty ? article.displayTitle : translatedTitle,
+                    paragraphs: translatedText.isEmpty ? Self.paragraphs(from: originalText) : Self.paragraphs(from: translatedText),
+                    originalTitle: originalTitle,
+                    originalParagraphs: Self.paragraphs(from: originalText),
+                    isTranslating: true
+                ))
+                translationConfiguration = .init(source: nil, target: Locale.Language(identifier: "zh-Hans"))
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    private func translate(using session: TranslationSession) async {
+        guard case .loaded(let content) = state, content.isTranslating else { return }
+        do {
+            let translatedTitle = try await session.translate(content.originalTitle).targetText
+            var translatedParagraphs: [String] = []
+            for paragraph in content.originalParagraphs {
+                guard !Task.isCancelled else { return }
+                translatedParagraphs.append(try await session.translate(paragraph).targetText)
+            }
+            state = .loaded(.init(
+                title: translatedTitle,
+                paragraphs: translatedParagraphs,
+                originalTitle: content.originalTitle,
+                originalParagraphs: content.originalParagraphs,
+                isTranslating: false
+            ))
+        } catch is CancellationError {
+            return
+        } catch {
+            state = .failed("中文翻译失败：\(error.localizedDescription)")
+        }
+    }
+
+    private static func paragraphs(from text: String) -> [String] {
+        text
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private struct PersonArticleCompatibilityView: View {
+    let article: PersonArticle
+
+    var body: some View {
+        ContentUnavailableView(
+            "需要更新系统",
+            systemImage: "translate",
+            description: Text("应用内文章翻译需要 iOS 18 或更高版本。")
+        )
+        .navigationTitle(article.sourceName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+    }
+}
+
+private struct PersonArticleDetailContent {
+    let title: String
+    let paragraphs: [String]
+    let originalTitle: String
+    let originalParagraphs: [String]
+    let isTranslating: Bool
+}
+
+private enum PersonArticleDetailState {
+    case loading
+    case loaded(PersonArticleDetailContent)
+    case failed(String)
 }
 
 private struct PersonPostTimelineRow: View {
