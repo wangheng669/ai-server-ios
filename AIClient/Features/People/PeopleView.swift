@@ -1038,8 +1038,6 @@ private enum PersonRelatedSection: String, CaseIterable, Identifiable {
 private struct PersonArticleCard: View {
     let article: PersonArticle
     let onOpen: () -> Void
-    @State private var translatedTitle: String?
-    @State private var translatedSummary: String?
 
     var body: some View {
         Button(action: onOpen) {
@@ -1066,15 +1064,15 @@ private struct PersonArticleCard: View {
                     }
                 }
 
-                Text(cardTitle)
+                Text(article.displayTitle)
                     .font(.system(size: 21, weight: .bold))
                     .foregroundStyle(.primary)
                     .lineSpacing(2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if !article.summary.isEmpty {
-                    Text(cardSummary)
+                if !article.displaySummary.isEmpty {
+                    Text(article.displaySummary)
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
                         .lineSpacing(4)
@@ -1104,39 +1102,6 @@ private struct PersonArticleCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("在应用内打开中文文章")
-        .task(id: article.id) { await translateCardIfNeeded() }
-    }
-
-    private var cardTitle: String {
-        if article.language == "zh" || !article.titleZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return article.displayTitle
-        }
-        return translatedTitle ?? "正在翻译标题…"
-    }
-
-    private var cardSummary: String {
-        article.language == "zh" ? article.summary : translatedSummary ?? "正在翻译摘要…"
-    }
-
-    private func translateCardIfNeeded() async {
-        guard article.language != "zh" else { return }
-        do {
-            async let title = article.titleZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? PersonArticleTranslationService.shared.translate(article.title)
-                : article.titleZH
-            async let summary = article.summary.isEmpty
-                ? ""
-                : PersonArticleTranslationService.shared.translate(article.summary)
-            let values = try await (title, summary)
-            guard !Task.isCancelled else { return }
-            translatedTitle = values.0
-            translatedSummary = values.1
-        } catch is CancellationError {
-            return
-        } catch {
-            translatedTitle = article.displayTitle
-            translatedSummary = article.summary
-        }
     }
 
     private var readingLabel: String {
@@ -1147,17 +1112,17 @@ private struct PersonArticleCard: View {
 private struct PersonArticleDetailView: View {
     let article: PersonArticle
     @Environment(\.openURL) private var openURL
-    @State private var state = PersonArticleDetailState.loading
+    @State private var loadedArticle: PersonArticle?
+    @State private var errorMessage: String?
 
     var body: some View {
         Group {
-            switch state {
-            case .loading:
+            if let loadedArticle {
+                articleBody(loadedArticle)
+            } else if let errorMessage {
+                failureView(errorMessage)
+            } else {
                 loadingView
-            case .failed(let message):
-                failureView(message)
-            case .loaded(let content):
-                articleBody(content)
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -1180,66 +1145,36 @@ private struct PersonArticleDetailView: View {
     }
 
     private var loadingView: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Capsule()
-                .fill(Color.secondary.opacity(0.12))
-                .frame(width: 110, height: 24)
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.secondary.opacity(0.12))
-                .frame(height: 34)
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.secondary.opacity(0.08))
-                .frame(width: 240, height: 24)
-            Divider()
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("正在准备中文文章")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("正在载入中文正文")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func failureView(_ message: String) -> some View {
-        VStack(spacing: 18) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 72, height: 72)
-                .background(Color.accentColor.opacity(0.1), in: Circle())
-            VStack(spacing: 7) {
-                Text("这篇文章暂时没准备好")
-                    .font(.system(size: 21, weight: .bold))
-                Text(message)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            VStack(spacing: 10) {
-                Button {
-                    Task { await load() }
-                } label: {
-                    Label("重新加载", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-
-                if let url = article.canonicalURL {
-                    Button { openURL(url) } label: {
-                        Text("查看英文原文").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        }
-        .padding(28)
-        .frame(maxWidth: 420)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func articleBody(_ content: PersonArticleDetailContent) -> some View {
+    private func failureView(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(Color.accentColor)
+            Text("中文正文暂时无法载入")
+                .font(.system(size: 20, weight: .bold))
+            Text(message)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("重新加载") {
+                Task { await load() }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func articleBody(_ article: PersonArticle) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -1248,7 +1183,7 @@ private struct PersonArticleDetailView: View {
                         .tracking(1.1)
                         .foregroundStyle(Color.accentColor)
 
-                    Text(content.title)
+                    Text(article.displayTitle)
                         .font(.system(size: 32, weight: .bold, design: .serif))
                         .lineSpacing(5)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1263,24 +1198,13 @@ private struct PersonArticleDetailView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
 
-                    if content.isTranslating {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("正在完成中文翻译")
-                        }
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.accentColor.opacity(0.08), in: Capsule())
-                    }
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 18)
                 .padding(.bottom, 26)
 
                 VStack(alignment: .leading, spacing: 24) {
-                    ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                    ForEach(Array(Self.paragraphs(from: article.displayContent).enumerated()), id: \.offset) { index, paragraph in
                         Text(paragraph)
                             .font(.system(size: index == 0 ? 19 : 18, weight: index == 0 ? .medium : .regular, design: .serif))
                             .foregroundStyle(Color.primary.opacity(0.9))
@@ -1317,108 +1241,15 @@ private struct PersonArticleDetailView: View {
     }
 
     private func load() async {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--article-detail-preview") {
-            state = .loaded(.init(
-                title: "Sora 更新：让创作与版权更好地共存",
-                paragraphs: [
-                    "我们一直在快速了解人们如何使用 Sora，也持续听取用户、版权所有者以及其他相关群体的反馈。产品真正进入现实世界后，我们终于能用真实行为，而不只是理论来改进它。",
-                    "接下来，我们会为权利持有者提供更细致的角色控制方式，让他们可以明确决定角色如何被使用。同时，我们也会探索更合理的商业模式，让创作者、权利持有者和用户都能从新的创作方式中受益。",
-                    "这仍然是一个需要持续迭代的过程。我们会做出正确的决定，也难免会犯错，但会认真听取反馈并快速修正。"
-                ],
-                originalTitle: article.title,
-                originalParagraphs: [],
-                isTranslating: false
-            ))
-            return
-        }
-        #endif
-        guard let url = article.canonicalURL else {
-            state = .failed("文章地址无效")
-            return
-        }
-        state = .loading
+        errorMessage = nil
         do {
-            let preview = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchArticlePreview(url: url).data
+            let value = try await PeopleService().article(id: article.id)
             guard !Task.isCancelled else { return }
-            let previewTitle = preview.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let originalTitle = previewTitle.isEmpty ? article.title : previewTitle
-            let originalText = preview.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
-            let translatedTitle = preview.titleZH.trimmingCharacters(in: .whitespacesAndNewlines)
-            let translatedText = preview.textContentZH.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !originalText.isEmpty || !translatedText.isEmpty else {
-                state = .failed("暂时无法读取这篇文章的正文")
-                return
-            }
-
-            if !translatedTitle.isEmpty, !translatedText.isEmpty {
-                state = .loaded(.init(
-                    title: translatedTitle,
-                    paragraphs: Self.paragraphs(from: translatedText),
-                    originalTitle: originalTitle,
-                    originalParagraphs: Self.paragraphs(from: originalText),
-                    isTranslating: false
-                ))
-            } else if article.language == "zh" {
-                state = .loaded(.init(
-                    title: originalTitle,
-                    paragraphs: Self.paragraphs(from: originalText),
-                    originalTitle: originalTitle,
-                    originalParagraphs: Self.paragraphs(from: originalText),
-                    isTranslating: false
-                ))
-            } else {
-                let originalParagraphs = Self.paragraphs(from: originalText)
-                state = .loaded(.init(
-                    title: translatedTitle.isEmpty ? "正在翻译标题…" : translatedTitle,
-                    paragraphs: translatedText.isEmpty ? ["正在翻译正文…"] : Self.paragraphs(from: translatedText),
-                    originalTitle: originalTitle,
-                    originalParagraphs: originalParagraphs,
-                    isTranslating: true
-                ))
-                await translate(
-                    title: translatedTitle.isEmpty ? originalTitle : nil,
-                    paragraphs: translatedText.isEmpty ? originalParagraphs : nil
-                )
-            }
+            loadedArticle = value
         } catch is CancellationError {
             return
         } catch {
-            state = .failed(error.localizedDescription)
-        }
-    }
-
-    private func translate(title: String?, paragraphs: [String]?) async {
-        guard case .loaded(let content) = state else { return }
-        do {
-            let translatedTitle: String
-            if let title {
-                translatedTitle = try await PersonArticleTranslationService.shared.translate(title)
-            } else {
-                translatedTitle = content.title
-            }
-            var translatedParagraphs = content.paragraphs
-            if let paragraphs {
-                translatedParagraphs = []
-                for paragraph in paragraphs {
-                    guard !Task.isCancelled else { return }
-                    translatedParagraphs.append(
-                        try await PersonArticleTranslationService.shared.translate(paragraph)
-                    )
-                }
-            }
-            state = .loaded(.init(
-                title: translatedTitle,
-                paragraphs: translatedParagraphs,
-                originalTitle: content.originalTitle,
-                originalParagraphs: content.originalParagraphs,
-                isTranslating: false
-            ))
-        } catch is CancellationError {
-            return
-        } catch {
-            state = .failed("中文翻译失败：\(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -1428,20 +1259,6 @@ private struct PersonArticleDetailView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
-}
-
-private struct PersonArticleDetailContent {
-    let title: String
-    let paragraphs: [String]
-    let originalTitle: String
-    let originalParagraphs: [String]
-    let isTranslating: Bool
-}
-
-private enum PersonArticleDetailState {
-    case loading
-    case loaded(PersonArticleDetailContent)
-    case failed(String)
 }
 
 private struct PersonPostTimelineRow: View {
