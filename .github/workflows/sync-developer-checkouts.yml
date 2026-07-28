@@ -1,0 +1,49 @@
+name: Sync developer Macs to main
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-developer-macs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-office-mac-mini:
+    name: Sync office Mac mini
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - office-builder
+    timeout-minutes: 10
+    steps:
+      - name: Check out synchronization tools
+        uses: actions/checkout@v7
+
+      - name: Safely synchronize the primary checkout
+        run: |
+          ./ci/automatic-main-sync.sh \
+            /Users/wangheng/Desktop/ai_server_ios
+
+  sync-home-macbook-air:
+    name: Sync home MacBook Air
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - home-installer
+    timeout-minutes: 10
+    steps:
+      - name: Check out synchronization tools
+        uses: actions/checkout@v7
+
+      - name: Safely synchronize the primary checkout
+        run: |
+          ./ci/automatic-main-sync.sh \
+            /Users/wangheng/Desktop/ai_server_ios
