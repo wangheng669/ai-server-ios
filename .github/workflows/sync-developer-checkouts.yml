@@ -25,12 +25,9 @@ jobs:
       - office-builder
     timeout-minutes: 10
     steps:
-      - name: Check out synchronization tools
-        uses: actions/checkout@v7
-
       - name: Safely synchronize the primary checkout
         run: |
-          ./ci/automatic-main-sync.sh \
+          /Users/wangheng/Desktop/ai_server_ios/ci/automatic-main-sync.sh \
             /Users/wangheng/Desktop/ai_server_ios
 
   sync-home-macbook-air:
@@ -42,10 +39,7 @@ jobs:
       - home-installer
     timeout-minutes: 10
     steps:
-      - name: Check out synchronization tools
-        uses: actions/checkout@v7
-
       - name: Safely synchronize the primary checkout
         run: |
-          ./ci/automatic-main-sync.sh \
+          /Users/wangheng/Desktop/ai-server-ios/ci/automatic-main-sync.sh \
             /Users/wangheng/Desktop/ai-server-ios
