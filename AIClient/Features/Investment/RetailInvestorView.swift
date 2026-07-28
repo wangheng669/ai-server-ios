@@ -16,18 +16,23 @@ struct RetailInvestorView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     header
                     marketPicker
                     if let message = store.errorMessage {
                         errorBanner(message)
                     }
                     marketTemperatureCard
+                    marketBreadthOverview
+                    if selectedMarket == .china {
+                        sectorHighlights
+                    }
                     investorMoodCard
+                    methodologyNote
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 2)
-                .padding(.bottom, 28)
+                .padding(.top, 6)
+                .padding(.bottom, 36)
             }
             .background(Color(uiColor: .systemBackground))
             .refreshable {
@@ -50,83 +55,98 @@ struct RetailInvestorView: View {
         let snapshot = store.snapshot(for: selectedMarket)
         let temperature = snapshot?.score
         let progress = CGFloat(min(max(temperature ?? 0, 0), 100) / 100)
-        let breadth = selectedBreadth
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(temperature.map { String(Int($0.rounded())) } ?? "—")
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                        .contentTransition(.numericText())
-                    Text("°")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+        let accent = temperatureColor(temperature)
+        return VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Text("\(selectedMarket.title)综合温度")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                if store.isLoading {
+                    ProgressView().controlSize(.mini)
+                } else if let fetchedAt = snapshot?.fetchedAt {
+                    Text(RetailSentimentFormat.shortTime(fetchedAt))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.tertiary)
                 }
-                .fixedSize(horizontal: true, vertical: false)
-                .layoutPriority(2)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(snapshot?.label.nonEmpty ?? "等待数据")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(temperatureColor(temperature))
-                    Text("\(selectedMarket.title)市场温度")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
-                temperatureMetric(snapshot?.primaryTitle ?? "估值", value: snapshot?.primaryValue)
-                Divider().frame(height: 34)
-                temperatureMetric(snapshot?.secondaryTitle ?? "情绪", value: snapshot?.secondaryValue)
             }
 
-            VStack(spacing: 5) {
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
+                Text(temperature.map { String(Int($0.rounded())) } ?? "—")
+                    .font(.system(size: 70, weight: .bold, design: .rounded))
+                    .tracking(-3)
+                    .contentTransition(.numericText())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(snapshot?.label.nonEmpty ?? "等待数据")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(accent)
+                    Text("/ 100")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+
+            Text(temperatureNarrative(temperature))
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 6) {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule()
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(red: 0.20, green: 0.55, blue: 1), .yellow, .orange, .red],
+                                    colors: [.blue, .cyan, .yellow, .orange, .red],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                             )
-                            .frame(height: 8)
+                            .opacity(0.82)
+                            .frame(height: 6)
                         Circle()
                             .fill(Color(uiColor: .systemBackground))
-                            .overlay(Circle().stroke(Color.primary.opacity(0.3), lineWidth: 1))
-                            .frame(width: 14, height: 14)
-                            .offset(x: max(0, min(proxy.size.width - 14, progress * proxy.size.width - 7)))
+                            .overlay(Circle().stroke(accent, lineWidth: 2))
+                            .shadow(color: accent.opacity(0.24), radius: 4)
+                            .frame(width: 16, height: 16)
+                            .offset(x: max(0, min(proxy.size.width - 16, progress * proxy.size.width - 8)))
                     }
                     .frame(maxHeight: .infinity)
                 }
-                .frame(height: 14)
+                .frame(height: 16)
                 HStack {
-                    Text("冷静")
+                    Text("极冷")
                     Spacer()
                     Text("中性")
                     Spacer()
-                    Text("过热")
+                    Text("极热")
                 }
-                .font(.system(size: 9.5, weight: .medium))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
             }
 
-            Divider()
-            HStack(spacing: 14) {
-                compactBreadthMetric("涨", value: breadth.up, color: .red)
-                compactBreadthMetric("跌", value: breadth.down, color: .green)
-                compactBreadthMetric("平", value: breadth.flat, color: .secondary)
-                Spacer()
-                Text("估值 + 情绪等权")
-                if let fetchedAt = snapshot?.fetchedAt {
-                    Text("·")
-                    Text(RetailSentimentFormat.shortTime(fetchedAt))
-                }
+            HStack(spacing: 0) {
+                sentimentFactor(
+                    title: snapshot?.primaryTitle ?? "估值温度",
+                    value: snapshot?.primaryValue,
+                    icon: "chart.line.uptrend.xyaxis",
+                    tint: .blue
+                )
+                Divider().frame(height: 42)
+                sentimentFactor(
+                    title: snapshot?.secondaryTitle ?? "情绪温度",
+                    value: snapshot?.secondaryValue,
+                    icon: "person.2.wave.2.fill",
+                    tint: HoldingsPalette.purple
+                )
             }
-            .font(.system(size: 10.5, weight: .medium))
-            .foregroundStyle(.secondary)
+
+            Label("估值与市场广度等权", systemImage: "equal.circle")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.vertical, 4)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedMarket.title)市场情绪 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
     }
@@ -149,22 +169,86 @@ struct RetailInvestorView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("市场情绪")
-                    .font(.system(size: 23, weight: .bold))
-            }
-            Spacer()
-            if store.isLoading {
-                ProgressView().controlSize(.small)
-            } else if let updatedAt = store.dashboard?.ashareOverview?.fetchedAt {
-                Text(RetailSentimentFormat.shortTime(updatedAt))
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text("市场情绪")
+                .font(.system(size: 25, weight: .bold))
+            Text("估值、广度与投资者行为")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 2)
-        .padding(.vertical, 3)
+        .padding(.bottom, 2)
+    }
+
+    private var marketBreadthOverview: some View {
+        let breadth = selectedBreadth
+        return VStack(alignment: .leading, spacing: 14) {
+            Divider()
+            HStack {
+                Text(selectedMarket == .china ? "市场广度" : "核心成分")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                Text("样本 \(breadth.total)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { proxy in
+                HStack(spacing: 3) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.red.opacity(0.78))
+                        .frame(width: proxy.size.width * breadth.upRatio)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.gray.opacity(0.32))
+                        .frame(width: proxy.size.width * breadth.flatRatio)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.green.opacity(0.78))
+                }
+            }
+            .frame(height: 10)
+
+            HStack(spacing: 0) {
+                breadthSummary("上涨", value: breadth.up, color: .red)
+                breadthSummary("平盘", value: breadth.flat, color: .secondary)
+                breadthSummary("下跌", value: breadth.down, color: .green)
+            }
+        }
+    }
+
+    private var sectorHighlights: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+            HStack {
+                Text("领涨方向")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                Text("实时板块热度")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            if store.sectors.isEmpty {
+                placeholder("正在整理领涨板块")
+            } else {
+                ForEach(Array(store.sectors.prefix(3).enumerated()), id: \.element.id) { index, sector in
+                    HStack(spacing: 12) {
+                        Text(String(index + 1))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 18)
+                        Text(sector.name)
+                            .font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                        Text(RetailSentimentFormat.percent(sector.percentValue))
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(sector.percentValue >= 0 ? Color.red : Color.green)
+                    }
+                    .padding(.vertical, 6)
+                    if index < min(store.sectors.count, 3) - 1 {
+                        Divider().padding(.leading, 30)
+                    }
+                }
+            }
+        }
     }
 
     private var marketBreadthCard: some View {
@@ -313,12 +397,13 @@ struct RetailInvestorView: View {
     }
 
     private var investorMoodCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
             HStack {
-                Text("散户观察")
-                    .font(.system(size: 17, weight: .bold))
+                Text("投资者样本")
+                    .font(.system(size: 16, weight: .bold))
                 Spacer()
-                Text("观点不计入温度")
+                Text("仅供观察")
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -356,7 +441,6 @@ struct RetailInvestorView: View {
                 }
             }
         }
-        .padding(.top, 6)
     }
 
     private func investorMoodSummary(_ items: [InvestorMoodItem]) -> some View {
@@ -435,10 +519,50 @@ struct RetailInvestorView: View {
     }
 
     private var methodologyNote: some View {
-        Label("人物观点仅作观察样本，不计入市场情绪分数。", systemImage: "checkmark.shield.fill")
-            .font(.system(size: 11.5))
-            .foregroundStyle(.secondary)
+        Label("温度由估值和市场广度等权合成，人物观点不参与评分。", systemImage: "checkmark.shield.fill")
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
+    }
+
+    private func sentimentFactor(title: String, value: Double?, icon: String, tint: Color) -> some View {
+        VStack(alignment: .center, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            Text(value.map { String(Int($0.rounded())) } ?? "—")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func breadthSummary(_ title: String, value: Int, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value.formatted())
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func temperatureNarrative(_ value: Double?) -> String {
+        guard let value else { return "正在汇总最新市场信号" }
+        switch value {
+        case ..<10: return "风险偏好极低，市场处于深度冷静区"
+        case ..<30: return "资金偏谨慎，机会与风险开始重新定价"
+        case ..<70: return "多空力量相对均衡，市场情绪保持中性"
+        case ..<90: return "风险偏好升温，需留意交易拥挤"
+        default: return "情绪明显过热，波动风险正在累积"
+        }
     }
 
     private func sectionTitle(_ title: String, icon: String) -> some View {
@@ -1068,6 +1192,7 @@ private struct SentimentBreadth {
     var total: Int { up + down + flat }
     var weightedAdvancerShare: Double { (Double(up) + Double(flat) / 2) / Double(max(total, 1)) }
     var upRatio: CGFloat { CGFloat(up) / CGFloat(max(total, 1)) }
+    var flatRatio: CGFloat { CGFloat(flat) / CGFloat(max(total, 1)) }
     var downRatio: CGFloat { CGFloat(down) / CGFloat(max(total, 1)) }
 }
 
@@ -1092,7 +1217,14 @@ private enum RetailSentimentFormat {
 
     static func shortTime(_ value: String) -> String {
         guard let date = isoDate(value) else { return value }
-        return date.formatted(.dateTime.month().day().hour().minute())
+        return date.formatted(
+            .dateTime
+                .locale(Locale(identifier: "zh_CN"))
+                .month(.abbreviated)
+                .day()
+                .hour()
+                .minute()
+        )
     }
 
     static func relativeTime(_ value: String?) -> String {
