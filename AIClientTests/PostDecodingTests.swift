@@ -28,6 +28,24 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(article.canonicalURL?.host, "blog.samaltman.com")
     }
 
+    func testPersonArticleTranslationPreservesProductNames() {
+        XCTAssertEqual(
+            PersonArticleTranslationService.preserveProductNames(
+                in: "姐姐 更新 #1 来自开放人工智能",
+                original: "Sora update #1 from OpenAI"
+            ),
+            "Sora 更新 #1 来自OpenAI"
+        )
+    }
+
+    func testPersonArticleTranslationSplitsLongContent() {
+        let chunks = PersonArticleTranslationService.chunks(
+            from: "First paragraph\nSecond paragraph",
+            maximumCharacters: 18
+        )
+        XCTAssertEqual(chunks, ["First paragraph", "Second paragraph"])
+    }
+
     func testDecodesPersonVideoChineseSubtitleTimeline() throws {
         let data = Data(
             """

@@ -1,5 +1,4 @@
 import SwiftUI
-import Translation
 import UIKit
 
 struct PeopleView: View {
@@ -274,11 +273,7 @@ private struct PersonDetailPage: View {
             PersonVideoDetailView(video: video)
         }
         .navigationDestination(item: $selectedArticle) { article in
-            if #available(iOS 18.0, *) {
-                PersonArticleDetailView(article: article)
-            } else {
-                PersonArticleCompatibilityView(article: article)
-            }
+            PersonArticleDetailView(article: article)
         }
         .task(id: person.id) {
             await store.load(person: person)
@@ -1033,6 +1028,8 @@ private enum PersonRelatedSection: String, CaseIterable, Identifiable {
 private struct PersonArticleCard: View {
     let article: PersonArticle
     let onOpen: () -> Void
+    @State private var translatedTitle: String?
+    @State private var translatedSummary: String?
 
     var body: some View {
         Button(action: onOpen) {
@@ -1041,7 +1038,10 @@ private struct PersonArticleCard: View {
                     Image(systemName: "doc.text")
                         .font(.system(size: 18))
                         .foregroundStyle(.secondary)
-                    articleTitle
+                    Text(cardTitle)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
                 }
 
                 Text(metadata)
@@ -1049,7 +1049,7 @@ private struct PersonArticleCard: View {
                     .foregroundStyle(.secondary)
 
                 if !article.summary.isEmpty {
-                    Text(article.summary)
+                    Text(cardSummary)
                         .font(.system(size: 16))
                         .foregroundStyle(.primary)
                         .lineSpacing(3)
@@ -1078,21 +1078,38 @@ private struct PersonArticleCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("在应用内打开中文文章")
+        .task(id: article.id) { await translateCardIfNeeded() }
     }
 
-    @ViewBuilder
-    private var articleTitle: some View {
+    private var cardTitle: String {
         if article.language == "zh" || !article.titleZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            Text(article.displayTitle)
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.leading)
-        } else if #available(iOS 18.0, *) {
-            PersonArticleTranslatedTitle(article: article)
-        } else {
-            Text("中文标题需要 iOS 18 或更高版本")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.secondary)
+            return article.displayTitle
+        }
+        return translatedTitle ?? "正在翻译标题…"
+    }
+
+    private var cardSummary: String {
+        article.language == "zh" ? article.summary : translatedSummary ?? "正在翻译摘要…"
+    }
+
+    private func translateCardIfNeeded() async {
+        guard article.language != "zh" else { return }
+        do {
+            async let title = article.titleZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? PersonArticleTranslationService.shared.translate(article.title)
+                : article.titleZH
+            async let summary = article.summary.isEmpty
+                ? ""
+                : PersonArticleTranslationService.shared.translate(article.summary)
+            let values = try await (title, summary)
+            guard !Task.isCancelled else { return }
+            translatedTitle = values.0
+            translatedSummary = values.1
+        } catch is CancellationError {
+            return
+        } catch {
+            translatedTitle = article.displayTitle
+            translatedSummary = article.summary
         }
     }
 
@@ -1107,38 +1124,10 @@ private struct PersonArticleCard: View {
     }
 }
 
-@available(iOS 18.0, *)
-private struct PersonArticleTranslatedTitle: View {
-    let article: PersonArticle
-    @State private var title = "正在翻译标题…"
-    @State private var configuration: TranslationSession.Configuration?
-
-    var body: some View {
-        Text(title)
-            .font(.system(size: 20, weight: .bold))
-            .foregroundStyle(.primary)
-            .multilineTextAlignment(.leading)
-            .task(id: article.id) {
-                configuration = .init(source: nil, target: Locale.Language(identifier: "zh-Hans"))
-            }
-            .translationTask(configuration) { session in
-                do {
-                    title = try await session.translate(article.title).targetText
-                } catch is CancellationError {
-                    return
-                } catch {
-                    title = "标题翻译失败"
-                }
-            }
-    }
-}
-
-@available(iOS 18.0, *)
 private struct PersonArticleDetailView: View {
     let article: PersonArticle
     @Environment(\.openURL) private var openURL
     @State private var state = PersonArticleDetailState.loading
-    @State private var translationConfiguration: TranslationSession.Configuration?
 
     var body: some View {
         Group {
@@ -1164,9 +1153,6 @@ private struct PersonArticleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .task(id: article.id) { await load() }
-        .translationTask(translationConfiguration) { session in
-            await translate(using: session)
-        }
     }
 
     private func articleBody(_ content: PersonArticleDetailContent) -> some View {
@@ -1259,14 +1245,18 @@ private struct PersonArticleDetailView: View {
                     isTranslating: false
                 ))
             } else {
+                let originalParagraphs = Self.paragraphs(from: originalText)
                 state = .loaded(.init(
-                    title: translatedTitle.isEmpty ? article.displayTitle : translatedTitle,
-                    paragraphs: translatedText.isEmpty ? Self.paragraphs(from: originalText) : Self.paragraphs(from: translatedText),
+                    title: translatedTitle.isEmpty ? "正在翻译标题…" : translatedTitle,
+                    paragraphs: translatedText.isEmpty ? ["正在翻译正文…"] : Self.paragraphs(from: translatedText),
                     originalTitle: originalTitle,
-                    originalParagraphs: Self.paragraphs(from: originalText),
+                    originalParagraphs: originalParagraphs,
                     isTranslating: true
                 ))
-                translationConfiguration = .init(source: nil, target: Locale.Language(identifier: "zh-Hans"))
+                await translate(
+                    title: translatedTitle.isEmpty ? originalTitle : nil,
+                    paragraphs: translatedText.isEmpty ? originalParagraphs : nil
+                )
             }
         } catch is CancellationError {
             return
@@ -1275,14 +1265,24 @@ private struct PersonArticleDetailView: View {
         }
     }
 
-    private func translate(using session: TranslationSession) async {
-        guard case .loaded(let content) = state, content.isTranslating else { return }
+    private func translate(title: String?, paragraphs: [String]?) async {
+        guard case .loaded(let content) = state else { return }
         do {
-            let translatedTitle = try await session.translate(content.originalTitle).targetText
-            var translatedParagraphs: [String] = []
-            for paragraph in content.originalParagraphs {
-                guard !Task.isCancelled else { return }
-                translatedParagraphs.append(try await session.translate(paragraph).targetText)
+            let translatedTitle: String
+            if let title {
+                translatedTitle = try await PersonArticleTranslationService.shared.translate(title)
+            } else {
+                translatedTitle = content.title
+            }
+            var translatedParagraphs = content.paragraphs
+            if let paragraphs {
+                translatedParagraphs = []
+                for paragraph in paragraphs {
+                    guard !Task.isCancelled else { return }
+                    translatedParagraphs.append(
+                        try await PersonArticleTranslationService.shared.translate(paragraph)
+                    )
+                }
             }
             state = .loaded(.init(
                 title: translatedTitle,
@@ -1303,21 +1303,6 @@ private struct PersonArticleDetailView: View {
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-    }
-}
-
-private struct PersonArticleCompatibilityView: View {
-    let article: PersonArticle
-
-    var body: some View {
-        ContentUnavailableView(
-            "需要更新系统",
-            systemImage: "translate",
-            description: Text("应用内文章翻译需要 iOS 18 或更高版本。")
-        )
-        .navigationTitle(article.sourceName)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
     }
 }
 

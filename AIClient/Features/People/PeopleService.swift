@@ -122,6 +122,112 @@ struct PeopleService {
     }
 }
 
+actor PersonArticleTranslationService {
+    static let shared = PersonArticleTranslationService()
+
+    private let endpoint = URL(string: "https://translate.googleapis.com/translate_a/single")!
+    private let session: URLSession
+    private var memoryCache: [String: String] = [:]
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func translate(_ text: String) async throws -> String {
+        let source = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else { return "" }
+        if source.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) {
+            return source
+        }
+        if let cached = memoryCache[source] { return cached }
+
+        let chunks = Self.chunks(from: source, maximumCharacters: 1_800)
+        var translatedChunks: [String] = []
+        for chunk in chunks {
+            guard !Task.isCancelled else { throw CancellationError() }
+            translatedChunks.append(try await translateChunk(chunk))
+        }
+        let translated = Self.preserveProductNames(
+            in: translatedChunks.joined(separator: "\n"),
+            original: source
+        )
+        memoryCache[source] = translated
+        return translated
+    }
+
+    private func translateChunk(_ text: String) async throws -> String {
+        var request = URLRequest(url: endpoint, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        var form = URLComponents()
+        form.queryItems = [
+            .init(name: "client", value: "gtx"),
+            .init(name: "sl", value: "auto"),
+            .init(name: "tl", value: "zh-CN"),
+            .init(name: "dt", value: "t"),
+            .init(name: "q", value: text)
+        ]
+        request.httpBody = form.percentEncodedQuery?.data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PeopleServiceError.invalidResponse
+        }
+        guard let payload = try JSONSerialization.jsonObject(with: data) as? [Any],
+              let segments = payload.first as? [Any] else {
+            throw PeopleServiceError.invalidResponse
+        }
+        let translated = segments.compactMap { segment -> String? in
+            guard let values = segment as? [Any], let value = values.first as? String else { return nil }
+            return value
+        }.joined()
+        guard !translated.isEmpty else { throw PeopleServiceError.invalidResponse }
+        return translated
+    }
+
+    nonisolated static func chunks(from text: String, maximumCharacters: Int) -> [String] {
+        guard text.count > maximumCharacters else { return [text] }
+        var chunks: [String] = []
+        var current = ""
+        let paragraphs = text.components(separatedBy: "\n")
+        for paragraph in paragraphs {
+            if current.count + paragraph.count + 1 <= maximumCharacters {
+                current += current.isEmpty ? paragraph : "\n" + paragraph
+                continue
+            }
+            if !current.isEmpty {
+                chunks.append(current)
+                current = ""
+            }
+            var remainder = paragraph
+            while remainder.count > maximumCharacters {
+                let split = remainder.index(remainder.startIndex, offsetBy: maximumCharacters)
+                chunks.append(String(remainder[..<split]))
+                remainder = String(remainder[split...])
+            }
+            current = remainder
+        }
+        if !current.isEmpty { chunks.append(current) }
+        return chunks
+    }
+
+    nonisolated static func preserveProductNames(in translation: String, original: String) -> String {
+        var result = translation
+        let protectedTerms: [(term: String, mistranslations: [String])] = [
+            ("OpenAI", ["开放人工智能", "开放AI"]),
+            ("ChatGPT", ["聊天GPT"]),
+            ("Sora", ["索拉", "姐姐"]),
+            ("GPT", ["生成式预训练变换器"])
+        ]
+        for item in protectedTerms where original.localizedCaseInsensitiveContains(item.term) {
+            for mistranslation in item.mistranslations {
+                result = result.replacingOccurrences(of: mistranslation, with: item.term)
+            }
+        }
+        return result
+    }
+}
+
 enum PeopleServiceError: LocalizedError {
     case invalidURL
     case invalidResponse
