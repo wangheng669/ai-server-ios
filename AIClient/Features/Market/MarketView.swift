@@ -2219,7 +2219,7 @@ private struct MarketDetailChart: View {
 
     private var chart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
     private var points: [MarketChartPoint] {
-        (chart?.candles ?? []).sorted { $0.timestamp < $1.timestamp }
+        marketChartDisplayPoints(chart?.candles ?? []).sorted { $0.timestamp < $1.timestamp }
     }
     private var values: [Double] {
         let bounds = points.flatMap { [$0.low, $0.high].compactMap { $0 } }
@@ -2542,7 +2542,7 @@ private struct VolumeBars: View {
             guard let firstTimestamp = sorted.first?.timestamp,
                   let lastTimestamp = sorted.last?.timestamp,
                   lastTimestamp > firstTimestamp else { return }
-            let maxVolume = max(sorted.compactMap(\.volume).max() ?? 0, 1)
+            let maxVolume = marketChartVolumeCeiling(sorted)
             let fractions = sorted.map {
                 marketChartXFraction(timestamp: $0.timestamp, firstTimestamp: firstTimestamp, lastTimestamp: lastTimestamp)
             }
@@ -2551,7 +2551,7 @@ private struct VolumeBars: View {
 
             for (index, point) in sorted.enumerated() {
                 guard let volume = point.volume, volume > 0 else { continue }
-                let height = max(2, size.height * CGFloat(volume / maxVolume))
+                let height = max(2, size.height * CGFloat(min(volume, maxVolume) / maxVolume))
                 let x = marketVolumeBarX(fraction: fractions[index], width: size.width, barWidth: barWidth)
                 let rect = CGRect(x: x - barWidth / 2, y: size.height - height, width: barWidth, height: height)
                 let color = point.close >= point.open ? MarketStyle.gain : MarketStyle.loss
