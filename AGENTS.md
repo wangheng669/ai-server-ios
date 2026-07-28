@@ -1,6 +1,6 @@
 # 两台 Mac 的 Codex 协作规则
 
-本仓库以 GitHub 的 `main` 分支作为两台 Mac 之间唯一的稳定代码源。开发任务通过 `codex/<简短任务名>` 分支提交，由 Mac mini 上的中央 AI 合并流程串行整合到 `main`。Mac mini 负责构建；iPhone 已连接 Mac mini 且本机签名有效时，优先由 Mac mini 直接签名并安装，只有本地直装条件不满足时才回退到 GitHub Actions 的跨机器安装流程。
+本仓库以 GitHub 的 `main` 分支作为两台 Mac 之间唯一的稳定代码源。两台 Mac 的主项目目录必须长期保持在 `main`；开发任务默认放在 `~/.codex/worktrees` 下的独立 Git worktree，并通过唯一的 `codex/<简短任务名>` 分支提交。Mac mini 上的中央 AI 合并流程串行整合到 `main`。Mac mini 负责构建；iPhone 已连接 Mac mini 且本机签名有效时，优先由 Mac mini 直接签名并安装，只有本地直装条件不满足时才回退到 GitHub Actions 的跨机器安装流程。
 
 ## AI Server 服务器
 
@@ -12,10 +12,20 @@
 ## 开始任务
 
 1. 先运行 `git status --short`。
-2. 如果工作区干净，运行 `./ci/safe-sync.sh main`，再从最新 `main` 创建唯一的 `codex/<简短任务名>` 分支继续开发。
-3. 如果工作区有改动，视为当前未完成任务；不要自动拉取、切换分支或覆盖文件，先理解并继续现有工作。
-4. 两台 Mac 同时开发时，尽量修改不同页面或模块，避免同时编辑项目配置文件。
-5. 分支名应能区分任务；不要让两台 Mac 共用同一个任务分支。
+2. 如果当前目录是主项目目录且工作区干净，运行 `./ci/safe-sync.sh main`，使主项目目录保持在最新 `main`。
+3. 从最新 `main` 为任务创建独立 worktree；默认放在 `~/.codex/worktrees/ai_server_ios/<任务名>`，并在该 worktree 中创建唯一的 `codex/<简短任务名>` 分支。不要在主项目目录中切换到任务分支。
+4. 如果当前目录已经是某个任务 worktree，则理解并继续该任务，不要重复创建 worktree。
+5. 如果任何相关工作区有改动，视为当前未完成任务；不要自动拉取、切换分支、删除 worktree 或覆盖文件。
+6. 两台 Mac 同时开发时，尽量修改不同页面或模块，避免同时编辑项目配置文件。
+7. 分支名应能区分任务；不要让两台 Mac 共用同一个任务分支，必要时加入 `macmini` 或 `macbookair` 后缀。
+
+## 自动同步与清理
+
+- GitHub 的 `Sync developer Macs to main` 工作流在每次 `main` 更新后通知两台 Mac 的自托管 Runner（Mac mini 使用 `office-builder`，MacBook Air 使用 `home-installer`）。Mac 在线时立即同步，离线任务等待该 Mac 的 Runner 上线后执行。
+- 每台 Mac 每天 03:10 的本地任务作为 GitHub 事件之外的低频兜底；Codex 在开始新任务时也必须先安全同步。用户不需要手动执行同步脚本。
+- 后台任务只有在工作区干净时才会操作。当前任务分支尚未进入 `origin/main`、存在未提交内容、`main` 出现分叉或处于未知分支时，必须保持原状。
+- 确认任务分支已经进入 `origin/main` 后，后台任务可以把旧式主项目工作区安全切回 `main`；随后快进同步 `main`、清理远程跟踪引用，并删除已经合并且干净的 Codex worktree 和本地 `codex/*` 分支。
+- 后台同步只是一层兜底。Codex 完成任务后仍须等待中央合并结果，并确认远程 `main` 已更新。
 
 ## 用户说“完成并同步”或“提交并同步”
 
@@ -26,7 +36,8 @@
 3. 推送当前任务分支。中央 AI 合并流程会在 Mac mini 上依次合并到最新 `main`；无冲突时直接合并，有冲突时由 Codex 语义化解决。
 4. 等待 `AI merge task branch into main` 完成。只有完整测试通过后才会更新 `main`，随后自动触发真机安装。
 5. 如果中央 AI 无法可靠解决冲突或测试失败，`main` 保持不变，停止并向用户说明具体冲突。
-6. 不要在另一台机器的工作区不干净时强制同步；另一台 Codex 会在下次开始任务时安全同步 `main`。
+6. 合并完成后，如果当前任务位于独立 worktree 且工作区干净，允许删除该 worktree 和本地已合并分支；主项目目录继续保持在 `main`。
+7. 不要在另一台机器的工作区不干净时强制同步；另一台电脑的后台任务或 Codex 会在安全条件满足时同步 `main`。
 
 ## 用户说“安装到真机”
 
