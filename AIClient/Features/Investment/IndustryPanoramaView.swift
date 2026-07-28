@@ -106,6 +106,7 @@ private struct IndustryPanoramaService {
 struct IndustryPanoramaView: View {
     @State private var industries: [IndustryPayload] = []
     @State private var selectedID: String?
+    @State private var selectedStageID: String?
     @State private var isLoading = true
     @State private var loadError = false
 
@@ -115,7 +116,7 @@ struct IndustryPanoramaView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 0) {
                 if !industries.isEmpty {
                     industryPicker
                 }
@@ -128,42 +129,69 @@ struct IndustryPanoramaView: View {
                     errorState
                 }
             }
-            .padding(.top, 10)
-            .padding(.bottom, 104)
+            .padding(.bottom, 112)
         }
         .scrollIndicators(.hidden)
         .background(HoldingsPalette.paper)
         .task { await load() }
         .refreshable { await load() }
+        .onChange(of: selectedID) { _, _ in
+            selectedStageID = nil
+        }
     }
 
     private var industryPicker: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 30) {
-                ForEach(industries) { industry in
-                    let selected = industry.id == selectedIndustry?.id
-                    Button {
-                        withAnimation(.easeOut(duration: 0.2)) { selectedID = industry.id }
-                    } label: {
-                        VStack(spacing: 11) {
-                            Text(industry.title)
-                                .font(.system(size: 14, weight: selected ? .semibold : .regular))
-                                .lineLimit(1)
-                            Capsule()
-                                .fill(selected ? HoldingsPalette.green : .clear)
-                                .frame(width: 16, height: 2)
-                        }
-                        .foregroundStyle(selected ? HoldingsPalette.green : HoldingsPalette.ink)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
+        VStack(spacing: 0) {
+            HStack {
+                Text("重点产业")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let selectedIndex = industries.firstIndex(where: { $0.id == selectedIndustry?.id }) {
+                    Text("\(selectedIndex + 1) / \(industries.count)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 18)
             .padding(.top, 12)
-            .padding(.bottom, 9)
+            .padding(.bottom, 6)
+
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 26) {
+                        ForEach(industries) { industry in
+                            let selected = industry.id == selectedIndustry?.id
+                            Button {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    selectedID = industry.id
+                                    proxy.scrollTo(industry.id, anchor: .center)
+                                }
+                            } label: {
+                                VStack(spacing: 9) {
+                                    Text(industry.title)
+                                        .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                                        .lineLimit(1)
+                                    Capsule()
+                                        .fill(selected ? HoldingsPalette.green : .clear)
+                                        .frame(width: 18, height: 2)
+                                }
+                                .foregroundStyle(selected ? HoldingsPalette.green : HoldingsPalette.ink.opacity(0.76))
+                                .contentShape(Rectangle())
+                            }
+                            .id(industry.id)
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 4)
+                    .padding(.bottom, 10)
+                }
+                .scrollIndicators(.hidden)
+            }
         }
-        .scrollIndicators(.hidden)
+        .background(HoldingsPalette.paper)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(HoldingsPalette.line)
@@ -172,335 +200,426 @@ struct IndustryPanoramaView: View {
     }
 
     private func panorama(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            scaleCard(industry)
-            chainCard(industry)
-            provenanceRow(industry)
+        VStack(alignment: .leading, spacing: 28) {
+            industryIntroduction(industry)
+            scaleSection(industry)
+            chainSection(industry)
+            companySection(industry)
+            if !industry.insights.isEmpty {
+                insightSection(industry)
+            }
+            provenanceSection(industry)
         }
         .padding(.horizontal, 16)
+        .padding(.top, 22)
         .animation(.easeOut(duration: 0.18), value: industry.id)
     }
 
-    private func scaleCard(_ industry: IndustryPayload) -> some View {
+    private func industryIntroduction(_ industry: IndustryPayload) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Text(industry.title)
+                    .font(.system(size: 27, weight: .bold, design: .serif))
+                    .foregroundStyle(HoldingsPalette.ink)
+                Text(industry.scale.period)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(HoldingsPalette.green)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(HoldingsPalette.green.opacity(0.08), in: Capsule())
+            }
+
+            Text(industry.subtitle)
+                .font(.system(size: 14))
+                .foregroundStyle(HoldingsPalette.ink.opacity(0.68))
+                .lineSpacing(4)
+
+            if !industry.anchors.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(industry.anchors.enumerated()), id: \.offset) { index, anchor in
+                            Label(anchor, systemImage: anchorIcon(index))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(HoldingsPalette.ink.opacity(0.8))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.white.opacity(0.7), in: Capsule())
+                                .overlay(Capsule().stroke(HoldingsPalette.line))
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
+
+    private func scaleSection(_ industry: IndustryPayload) -> some View {
         let parts = scaleValueParts(industry.scale.value)
-        return VStack(alignment: .leading, spacing: 14) {
-            sectionHeading(number: "01", title: "产业规模")
+        let history = industry.history ?? []
 
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 13) {
-                    Text(industry.scale.metric)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(HoldingsPalette.ink)
-                    scaleSummary(parts: parts, industry: industry)
+        return sectionContainer(number: "01", title: "规模与趋势") {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(industry.scale.metric)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(HoldingsPalette.ink.opacity(0.72))
+                        Spacer()
+                        sourceLink(industry.scale.source)
+                    }
 
-                    if let insight = industry.insights.first {
-                        researchNote(insight)
+                    HStack(alignment: .lastTextBaseline, spacing: 8) {
+                        Text(parts.value)
+                            .font(.system(size: 46, weight: .semibold, design: .serif))
+                            .foregroundStyle(HoldingsPalette.green)
+                            .minimumScaleFactor(0.62)
+                            .lineLimit(1)
+                        if !parts.unit.isEmpty {
+                            Text(parts.unit)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(HoldingsPalette.ink)
+                                .padding(.bottom, 5)
+                        }
+                        Spacer(minLength: 4)
+                        if let growth = industry.scale.growth {
+                            Label(growth, systemImage: growth.contains("-") ? "arrow.down.right" : "arrow.up.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(growth.contains("-") ? Color.red : HoldingsPalette.green)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 6)
+                                .background(
+                                    (growth.contains("-") ? Color.red : HoldingsPalette.green).opacity(0.07),
+                                    in: Capsule()
+                                )
+                        }
                     }
                 }
-                .frame(width: 128, alignment: .leading)
 
-                if let history = industry.history, history.count >= 2 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("\(industry.scale.metric)（\(parts.unit)）")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.secondary)
+                if history.count >= 2 {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("历史变化")
+                                .font(.system(size: 12, weight: .semibold))
+                            Spacer()
+                            Text("\(String(history.first?.year ?? 0))–\(String(history.last?.year ?? 0))")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
                         historyChart(history)
-                            .frame(height: 166)
+                            .frame(height: 176)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+                } else {
+                    HStack(spacing: 9) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .foregroundStyle(HoldingsPalette.green)
+                        Text("该指标暂无连续可比历史序列，当前仅展示权威机构已发布的最新值。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(3)
+                    }
+                    .padding(12)
+                    .background(HoldingsPalette.green.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
-
-            sourceLink(industry.scale.source)
+            .padding(16)
+            .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 15))
+            .overlay(RoundedRectangle(cornerRadius: 15).stroke(HoldingsPalette.line))
         }
-        .padding(.horizontal, 2)
-        .padding(.vertical, 10)
-    }
-
-    private func scaleSummary(
-        parts: (value: String, unit: String),
-        industry: IndustryPayload
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(industry.scale.period)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(parts.value)
-                .font(.system(size: 43, weight: .medium, design: .serif))
-                .foregroundStyle(HoldingsPalette.green)
-                .minimumScaleFactor(0.65)
-                .lineLimit(1)
-            HStack(alignment: .firstTextBaseline, spacing: 9) {
-                Text(parts.unit)
-                    .font(.system(size: 15, weight: .semibold))
-                if let growth = industry.scale.growth {
-                    Label(growth, systemImage: "arrow.up.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(HoldingsPalette.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(HoldingsPalette.green.opacity(0.28)))
-                }
-            }
-        }
-    }
-
-    private func researchNote(_ insight: IndustryPayload.Insight) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label("研究观点", systemImage: "star.fill")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(HoldingsPalette.ink)
-            Text(insight.detail)
-                .font(.system(size: 8.5))
-                .foregroundStyle(HoldingsPalette.ink.opacity(0.82))
-                .lineLimit(4)
-                .lineSpacing(2)
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(red: 0.79, green: 0.72, blue: 0.56).opacity(0.45)))
     }
 
     private func historyChart(_ history: [IndustryPayload.HistoryPoint]) -> some View {
         Chart(history) { point in
-            AreaMark(x: .value("年份", String(point.year)), y: .value("规模", point.value))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [HoldingsPalette.green.opacity(0.2), HoldingsPalette.green.opacity(0.01)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+            AreaMark(
+                x: .value("年份", String(point.year)),
+                y: .value("规模", point.value)
+            )
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [HoldingsPalette.green.opacity(0.2), HoldingsPalette.green.opacity(0.015)],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
-            LineMark(x: .value("年份", String(point.year)), y: .value("规模", point.value))
-                .foregroundStyle(HoldingsPalette.green)
-                .lineStyle(StrokeStyle(lineWidth: 1.7))
-            PointMark(x: .value("年份", String(point.year)), y: .value("规模", point.value))
-                .foregroundStyle(HoldingsPalette.green)
-                .symbolSize(28)
-                .annotation(position: .top, spacing: 3) {
-                    Text(point.value.formatted(.number.precision(.fractionLength(0...1))))
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(HoldingsPalette.ink)
-                }
+            )
+
+            LineMark(
+                x: .value("年份", String(point.year)),
+                y: .value("规模", point.value)
+            )
+            .foregroundStyle(HoldingsPalette.green)
+            .lineStyle(StrokeStyle(lineWidth: 2))
+
+            PointMark(
+                x: .value("年份", String(point.year)),
+                y: .value("规模", point.value)
+            )
+            .foregroundStyle(HoldingsPalette.green)
+            .symbolSize(34)
+            .annotation(position: .top, spacing: 5) {
+                Text(point.value.formatted(.number.precision(.fractionLength(0...1))))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(HoldingsPalette.ink)
+            }
         }
         .chartXAxis {
             AxisMarks(values: history.map { String($0.year) }) {
-                AxisValueLabel().font(.system(size: 9)).foregroundStyle(.secondary)
-            }
-        }
-        .chartYAxis(.hidden)
-    }
-
-    private func anchorStrip(_ industry: IndustryPayload) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-            ForEach(Array(industry.anchors.enumerated()), id: \.offset) { index, anchor in
-                HStack(spacing: 8) {
-                    Image(systemName: anchorIcon(index))
-                        .foregroundStyle(HoldingsPalette.green)
-                        .frame(width: 24)
-                    Text(anchor)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(HoldingsPalette.ink)
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .frame(height: 42)
-                .background(Color.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 11))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 11)
-                        .stroke(HoldingsPalette.line)
-                    }
-            }
-        }
-    }
-
-    private func chainCard(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                sectionHeading(number: "02", title: "产业链全景")
-                Text("垂直整合分工明确，协同驱动产业价值链跃升")
-                    .font(.system(size: 11))
+                AxisGridLine().foregroundStyle(HoldingsPalette.line)
+                AxisValueLabel()
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            HStack(alignment: .top, spacing: 8) {
-                ForEach(Array(industry.chain.enumerated()), id: \.element.id) { index, group in
-                    chainColumn(
-                        group,
-                        companies: industry.companies.filter { $0.stageID == group.id },
-                        index: index
-                    )
-
-                    if index < industry.chain.count - 1 {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(chainColor(index + 1))
-                            .padding(.top, 18)
-                            .frame(width: 12)
-                    }
-                }
             }
         }
-        .padding(.top, 18)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(HoldingsPalette.line)
-                .frame(height: 1)
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) {
+                AxisGridLine().foregroundStyle(HoldingsPalette.line)
+                AxisValueLabel()
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
-    private func chainColumn(
+    private func chainSection(_ industry: IndustryPayload) -> some View {
+        sectionContainer(number: "02", title: "产业链全景") {
+            VStack(spacing: 12) {
+                ForEach(Array(industry.chain.enumerated()), id: \.element.id) { index, group in
+                    chainStage(group, companyCount: industry.companies.filter { $0.stageID == group.id }.count, index: index)
+                }
+            }
+        }
+    }
+
+    private func chainStage(
         _ group: IndustryPayload.ChainGroup,
-        companies: [IndustryPayload.Company],
+        companyCount: Int,
         index: Int
     ) -> some View {
         let color = chainColor(index)
-        return VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(group.level)
                     .font(.system(size: 16, weight: .bold, design: .serif))
-                    .foregroundStyle(color)
-                Text(group.title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(HoldingsPalette.ink)
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
-            .overlay(alignment: .topTrailing) {
-                Circle()
-                    .fill(color.opacity(0.55))
-                    .frame(width: 5, height: 5)
-                    .padding(.top, 10)
+                    .foregroundStyle(.white)
+                    .frame(width: 54, height: 34)
+                    .background(color, in: Capsule())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(group.title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(HoldingsPalette.ink)
+                    Text("\(group.items.count) 个关键环节 · \(companyCount) 家代表企业")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(String(format: "%02d", index + 1))
+                    .font(.system(size: 18, weight: .medium, design: .serif))
+                    .foregroundStyle(color.opacity(0.45))
             }
 
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 94), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(Array(group.items.enumerated()), id: \.offset) { itemIndex, item in
-                    HStack(spacing: 5) {
+                    HStack(spacing: 7) {
                         Image(systemName: chainItemIcon(index: index, itemIndex: itemIndex))
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 20, height: 20)
-                            .background(color, in: Circle())
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(color)
+                            .frame(width: 22, height: 22)
+                            .background(color.opacity(0.09), in: Circle())
                         Text(item)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(HoldingsPalette.ink)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(HoldingsPalette.ink.opacity(0.82))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                            .minimumScaleFactor(0.85)
                         Spacer(minLength: 0)
                     }
-                    .frame(height: 20)
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(HoldingsPalette.line)
-                            .frame(height: 0.5)
-                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 36)
+                    .background(Color.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(HoldingsPalette.line))
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 122, alignment: .top)
-
-            Text("关键任务：\(stageMission(index))")
-                .font(.system(size: 8.5))
-                .foregroundStyle(HoldingsPalette.ink.opacity(0.76))
-                .lineLimit(3)
-                .lineSpacing(2)
-                .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text("代表企业")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                if companies.isEmpty {
-                    Text("数据更新中")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(companies) { company in
-                        compactCompany(company, color: color)
-                    }
-                }
-            }
-            .padding(8)
-            .frame(maxWidth: .infinity, minHeight: 98, alignment: .topLeading)
-            .background(Color.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(0.2)))
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(15)
+        .background(color.opacity(0.035), in: RoundedRectangle(cornerRadius: 15))
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(color.opacity(0.16)))
     }
 
-    private func compactCompany(_ company: IndustryPayload.Company, color: Color) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Text(company.monogram ?? String(company.name.prefix(2)))
-                .font(.system(size: 9, weight: .bold, design: .serif))
-                .foregroundStyle(color)
-                .frame(width: 28, height: 28)
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(color.opacity(0.3)))
+    private func companySection(_ industry: IndustryPayload) -> some View {
+        let filteredCompanies = selectedStageID.map { stageID in
+            industry.companies.filter { $0.stageID == stageID }
+        } ?? industry.companies
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(company.name)
-                    .font(.system(size: 9, weight: .bold))
-                    .lineLimit(1)
-                if let ticker = company.ticker {
-                    Text(ticker)
-                        .font(.system(size: 7, design: .monospaced))
-                        .foregroundStyle(.secondary)
+        return sectionContainer(number: "03", title: "代表企业") {
+            VStack(alignment: .leading, spacing: 14) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 18) {
+                        stageFilterButton(title: "全部", id: nil, count: industry.companies.count)
+                        ForEach(industry.chain) { group in
+                            stageFilterButton(
+                                title: group.level,
+                                id: group.id,
+                                count: industry.companies.filter { $0.stageID == group.id }.count
+                            )
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .scrollIndicators(.hidden)
+
+                LazyVStack(spacing: 10) {
+                    ForEach(filteredCompanies) { company in
+                        companyRow(company, industry: industry)
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func stageFilterButton(title: String, id: String?, count: Int) -> some View {
+        let selected = selectedStageID == id
+        return Button {
+            withAnimation(.easeOut(duration: 0.18)) {
+                selectedStageID = id
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(selected ? HoldingsPalette.green.opacity(0.75) : Color.secondary.opacity(0.55))
+            }
+            .font(.system(size: 13, weight: selected ? .semibold : .regular))
+            .foregroundStyle(selected ? HoldingsPalette.green : HoldingsPalette.ink.opacity(0.7))
+            .padding(.bottom, 7)
+            .overlay(alignment: .bottom) {
+                Capsule()
+                    .fill(selected ? HoldingsPalette.green : .clear)
+                    .frame(height: 2)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func companyRow(_ company: IndustryPayload.Company, industry: IndustryPayload) -> some View {
+        let stageIndex = industry.chain.firstIndex(where: { $0.id == company.stageID }) ?? 0
+        let stage = industry.chain.first(where: { $0.id == company.stageID })
+        let color = chainColor(stageIndex)
+
+        return HStack(spacing: 12) {
+            Text(company.monogram ?? String(company.name.prefix(2)))
+                .font(.system(size: 13, weight: .bold, design: .serif))
+                .foregroundStyle(color)
+                .frame(width: 46, height: 46)
+                .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 11))
+                .overlay(RoundedRectangle(cornerRadius: 11).stroke(color.opacity(0.2)))
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Text(company.name)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(HoldingsPalette.ink)
+                    if let ticker = company.ticker {
+                        Text(ticker)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(HoldingsPalette.line, in: Capsule())
+                    }
+                }
+                Text(company.role)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            if let stage {
+                Text(stage.level)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(color.opacity(0.07), in: Capsule())
+            }
+        }
+        .padding(13)
+        .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(HoldingsPalette.line))
     }
 
     private func insightSection(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("产业观察", systemImage: "eye")
-                .font(.system(size: 16, weight: .bold))
+        sectionContainer(number: "04", title: "研究观察") {
+            VStack(spacing: 10) {
+                ForEach(Array(industry.insights.enumerated()), id: \.element.id) { index, insight in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: insightIcon(index))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(chainColor(index))
+                            .frame(width: 34, height: 34)
+                            .background(chainColor(index).opacity(0.08), in: Circle())
 
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(Array(industry.insights.enumerated()), id: \.element.id) { index, insight in
-                        insightCard(insight, index: index)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(insight.title)
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(HoldingsPalette.ink)
+                            Text(insight.detail)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(3)
+                        }
+                        Spacer(minLength: 0)
                     }
+                    .padding(14)
+                    .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 13))
+                    .overlay(RoundedRectangle(cornerRadius: 13).stroke(HoldingsPalette.line))
                 }
             }
-            .scrollIndicators(.hidden)
         }
     }
 
-    private func insightCard(_ insight: IndustryPayload.Insight, index: Int) -> some View {
-        let color = chainColor(index)
-        return VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: insightIcon(index))
-                .foregroundStyle(color)
-            Text(insight.title)
-                .font(.system(size: 13, weight: .bold))
-            Text(insight.detail)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(4)
+    private func provenanceSection(_ industry: IndustryPayload) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("数据口径与来源", systemImage: "checkmark.shield")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(HoldingsPalette.ink)
+
+            ForEach(Array(industry.provenance.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle()
+                        .fill(HoldingsPalette.green)
+                        .frame(width: 4, height: 4)
+                        .padding(.top, 6)
+                    Text(item)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(3)
+                }
+            }
         }
-        .frame(width: 185, alignment: .topLeading)
-        .frame(minHeight: 108, alignment: .topLeading)
-        .padding(12)
-        .background(color.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.12)))
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.52), in: RoundedRectangle(cornerRadius: 13))
     }
 
-    private func provenanceRow(_ industry: IndustryPayload) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: "checkmark.shield")
-            Text("数据口径与来源")
-                .fontWeight(.semibold)
-            Text(industry.provenance.joined(separator: " / "))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .bold))
+    private func sectionContainer<Content: View>(
+        number: String,
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                Text(number)
+                    .font(.system(size: 24, weight: .medium, design: .serif))
+                    .foregroundStyle(HoldingsPalette.green)
+                Text(title)
+                    .font(.system(size: 19, weight: .bold, design: .serif))
+                    .foregroundStyle(HoldingsPalette.ink)
+            }
+            content()
         }
-        .font(.system(size: 11))
-        .padding(14)
-        .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 11))
     }
 
     @ViewBuilder
@@ -510,10 +629,12 @@ struct IndustryPanoramaView: View {
                 Label(source.name, systemImage: "arrow.up.right")
                     .labelStyle(.titleAndIcon)
             }
-            .font(.system(size: 10))
+            .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.secondary)
         } else {
-            Text(source.name).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(source.name)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -562,53 +683,34 @@ struct IndustryPanoramaView: View {
     }
 
     private func scaleValueParts(_ value: String) -> (value: String, unit: String) {
-        for unit in ["万亿元", "亿元", "亿块", "万辆", "万家", "家"] where value.hasSuffix(unit) {
+        for unit in ["万亿元", "亿元", "亿块", "万辆", "万家", "万架", "万台", "万颗", "次", "家"]
+        where value.hasSuffix(unit) {
             return (String(value.dropLast(unit.count)), unit)
         }
         return (value, "")
     }
 
     private func anchorIcon(_ index: Int) -> String {
-        ["battery.100percent", "gearshape.2", "car.side", "bolt.car"][index % 4]
+        ["scope", "point.3.connected.trianglepath.dotted", "building.2", "chart.line.uptrend.xyaxis"][index % 4]
     }
 
     private func insightIcon(_ index: Int) -> String {
-        ["chart.bar.xaxis", "leaf.circle", "bolt.car.circle"][index % 3]
+        ["chart.bar.xaxis", "scope", "shield.checkered"][index % 3]
     }
 
     private func chainItemIcon(index: Int, itemIndex: Int) -> String {
         let icons = [
-            ["mountain.2.fill", "square.grid.3x3.fill", "rectangle.stack.fill", "drop.fill", "square.split.2x1.fill", "bolt.fill"],
-            ["battery.100percent", "cpu.fill", "thermometer.medium", "gearshape.fill", "car.side.fill"],
-            ["fuelpump.fill", "building.2.fill", "bolt.batteryblock.fill", "network", "wrench.and.screwdriver.fill"]
+            ["cube.fill", "circle.grid.2x2.fill", "shippingbox.fill", "drop.fill", "square.stack.3d.up.fill", "bolt.fill"],
+            ["gearshape.2.fill", "cpu.fill", "square.3.layers.3d", "wrench.and.screwdriver.fill", "building.2.fill"],
+            ["network", "antenna.radiowaves.left.and.right", "server.rack", "chart.xyaxis.line", "person.2.fill"]
         ]
         let group = icons[index % icons.count]
         return group[itemIndex % group.count]
     }
 
-    private func stageMission(_ index: Int) -> String {
-        [
-            "保障资源与材料供给，构建高性能与成本优势。",
-            "提升集成效率与制造能力，打造核心产品力。",
-            "完善补能网络与能源服务，提升用户体验。"
-        ][index % 3]
-    }
-
     private func chainColor(_ index: Int) -> Color {
-        [Color(red: 0.74, green: 0.34, blue: 0.07), HoldingsPalette.green, HoldingsPalette.blue][index % 3]
+        [Color(red: 0.72, green: 0.34, blue: 0.08), HoldingsPalette.green, HoldingsPalette.blue][index % 3]
     }
-
-    private func sectionHeading(number: String, title: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            Text(number)
-                .font(.system(size: 31, weight: .medium, design: .serif))
-                .foregroundStyle(HoldingsPalette.green)
-            Text(title)
-                .font(.system(size: 20, weight: .bold, design: .serif))
-                .foregroundStyle(HoldingsPalette.ink)
-        }
-    }
-
 }
 
 private extension HoldingsPalette {
