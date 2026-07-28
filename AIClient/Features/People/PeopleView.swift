@@ -1097,7 +1097,7 @@ private struct PersonArticleRow: View {
                 }
 
                 if featured {
-                    PersonPortraitView(
+                    AvatarView(
                         url: portraitURL,
                         name: personName,
                         size: 84,
