@@ -2,50 +2,53 @@ import XCTest
 @testable import AIServerClient
 
 final class LearningServiceTests: XCTestCase {
-    func testParsesAllSectionsAndTopics() throws {
-        let html = """
-        <div class="topic-layout">
-          <h2 class="topic-layout__main-title main-title-color">股票</h2>
-          <ul class="resize-box">
-            <li><a href="https://www.futunn.com/learn/detail-pe" class="wiki-topic-item">
-              <h3 class="wiki-topic-item__wiki-title">什么是市盈率？</h3>
-              <p class="wiki-topic-item__wiki-intro">衡量上市公司估值的指标</p>
-            </a></li>
-          </ul>
-        </div>
-        <div class="topic-layout">
-          <h2 class="topic-layout__main-title main-title-color">基金</h2>
-          <ul class="resize-box">
-            <li><a href="https://www.futunn.com/learn/detail-index-fund" class="wiki-topic-item">
-              <h3 class="wiki-topic-item__wiki-title">什么是指数基金？</h3>
-              <p class="wiki-topic-item__wiki-intro">跟踪指数的基金产品</p>
-            </a></li>
-          </ul>
-        </div>
-        """
-
-        let catalog = LearningService.parseCatalog(html)
-
-        XCTAssertEqual(catalog.sections.map(\.name), ["股票", "基金"])
-        XCTAssertEqual(catalog.topicCount, 2)
-        XCTAssertEqual(catalog.sections[0].topics[0].title, "什么是市盈率？")
-        XCTAssertEqual(catalog.sections[0].topics[0].category, "股票")
-        XCTAssertEqual(catalog.sections[1].topics[0].summary, "跟踪指数的基金产品")
+    func testDecodesCachedCatalogContract() throws {
+        let data = Data(
+            """
+            {
+              "data": {
+                "source": "https://www.futunn.com/learn/wiki",
+                "fetched_at": "2026-07-28T06:00:00Z",
+                "sections": [{
+                  "id": "56",
+                  "name": "股票",
+                  "topics": [{
+                    "id": "49127",
+                    "lesson_id": "220217121",
+                    "title": "什么是市盈率？",
+                    "summary": "估值指标",
+                    "category": "股票",
+                    "source_url": "https://www.futunn.com/learn/detail-pe",
+                    "thumbnail_url": "/api/v1/learning/media/cover.jpg",
+                    "has_video": true
+                  }]
+                }]
+              }
+            }
+            """.utf8
+        )
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let response = try decoder.decode(LearningCatalogResponse.self, from: data)
+        XCTAssertEqual(response.data.topicCount, 1)
+        XCTAssertEqual(response.data.sections[0].topics[0].id, "49127")
+        XCTAssertEqual(response.data.sections[0].topics[0].hasVideo, true)
     }
 
-    func testIgnoresLinksOutsideFutu() {
-        let html = """
-        <div class="topic-layout">
-          <h2 class="topic-layout__main-title">股票</h2>
-          <ul class="resize-box">
-            <li><a href="https://example.com/learn/detail" class="wiki-topic-item">
-              <h3 class="wiki-topic-item__wiki-title">外部内容</h3>
-              <p class="wiki-topic-item__wiki-intro">不应载入</p>
-            </a></li>
-          </ul>
-        </div>
-        """
-
-        XCTAssertTrue(LearningService.parseCatalog(html).sections.isEmpty)
+    func testResolvesCachedMediaAgainstServer() throws {
+        let topic = try JSONDecoder().decode(
+            LearningTopic.self,
+            from: Data(
+                """
+                {
+                  "id":"1","lesson_id":"2","title":"标题","summary":"",
+                  "category":"股票","source_url":"https://www.futunn.com/learn/detail",
+                  "thumbnail_url":"/api/v1/learning/media/a.jpg","has_video":false
+                }
+                """.utf8
+            )
+        )
+        let url = topic.mediaURL(topic.thumbnailURLValue, baseURL: URL(string: "https://api.example.com")!)
+        XCTAssertEqual(url?.absoluteString, "https://api.example.com/api/v1/learning/media/a.jpg")
     }
 }
