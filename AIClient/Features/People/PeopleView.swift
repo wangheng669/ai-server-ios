@@ -33,6 +33,7 @@ struct PeopleView: View {
             await store.load()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
+                ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--video-detail-preview") {
                 selectedPerson = store.people.first { $0.name == "Sam Altman" }
             }
@@ -278,6 +279,11 @@ private struct PersonDetailPage: View {
         .task(id: person.id) {
             await store.load(person: person)
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--article-detail-preview"),
+               let article = store.articles.dropFirst().first ?? store.articles.first {
+                ownContentSection = .articles
+                selectedArticle = article
+            }
             if ProcessInfo.processInfo.arguments.contains("--video-detail-preview"),
                let video = store.relatedVideos.first {
                 section = .discussions
@@ -437,10 +443,14 @@ private struct PersonDetailPage: View {
             )
             .padding(.top, 30)
         } else {
-            ForEach(store.articles) { article in
-                PersonArticleCard(article: article) { selectedArticle = article }
-                Divider().padding(.leading, 20)
+            LazyVStack(spacing: 12) {
+                ForEach(store.articles) { article in
+                    PersonArticleCard(article: article) { selectedArticle = article }
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, 28)
         }
     }
 
@@ -1033,47 +1043,63 @@ private struct PersonArticleCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 18))
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    Text(article.sourceName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                    Circle()
+                        .fill(Color.secondary.opacity(0.35))
+                        .frame(width: 3, height: 3)
+                    Text(article.publishedDateLabel ?? "日期未知")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Text(cardTitle)
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 8)
+                    if article.language != "zh" {
+                        Text("中译")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(Color.secondary.opacity(0.08), in: Capsule())
+                    }
                 }
 
-                Text(metadata)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                Text(cardTitle)
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineSpacing(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 if !article.summary.isEmpty {
                     Text(cardSummary)
-                        .font(.system(size: 16))
-                        .foregroundStyle(.primary)
-                        .lineSpacing(3)
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(4)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
                 }
 
                 HStack {
-                    if article.language != "zh" {
-                        Text("原文为英文")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                    }
+                    Label(readingLabel, systemImage: "clock")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
                     Spacer()
-                    Label("阅读文章", systemImage: "chevron.right")
-                        .font(.system(size: 15, weight: .semibold))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: 30, height: 30)
+                        .background(Color.accentColor.opacity(0.1), in: Circle())
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(18)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color.primary.opacity(0.045), lineWidth: 1)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1113,14 +1139,8 @@ private struct PersonArticleCard: View {
         }
     }
 
-    private var metadata: String {
-        [
-            article.publishedDateLabel,
-            article.sourceName,
-            article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟阅读" : nil
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
+    private var readingLabel: String {
+        article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟" : "短篇"
     }
 }
 
@@ -1133,82 +1153,186 @@ private struct PersonArticleDetailView: View {
         Group {
             switch state {
             case .loading:
-                ProgressView("正在加载并翻译文章…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                loadingView
             case .failed(let message):
-                ContentUnavailableView {
-                    Label("文章加载失败", systemImage: "doc.text.magnifyingglass")
-                } description: {
-                    Text(message)
-                } actions: {
-                    if let url = article.canonicalURL {
-                        Button("打开原文") { openURL(url) }
-                    }
-                }
+                failureView(message)
             case .loaded(let content):
                 articleBody(content)
             }
         }
-        .navigationTitle(article.sourceName)
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if let url = article.canonicalURL {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    Button { openURL(url) } label: {
+                        Image(systemName: "safari")
+                    }
+                }
+            }
+        }
         .task(id: article.id) { await load() }
+    }
+
+    private var loadingView: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.12))
+                .frame(width: 110, height: 24)
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.12))
+                .frame(height: 34)
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.08))
+                .frame(width: 240, height: 24)
+            Divider()
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("正在准备中文文章")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func failureView(_ message: String) -> some View {
+        VStack(spacing: 18) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 72, height: 72)
+                .background(Color.accentColor.opacity(0.1), in: Circle())
+            VStack(spacing: 7) {
+                Text("这篇文章暂时没准备好")
+                    .font(.system(size: 21, weight: .bold))
+                Text(message)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            VStack(spacing: 10) {
+                Button {
+                    Task { await load() }
+                } label: {
+                    Label("重新加载", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                if let url = article.canonicalURL {
+                    Button { openURL(url) } label: {
+                        Text("查看英文原文").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func articleBody(_ content: PersonArticleDetailContent) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                Text(content.title)
-                    .font(.system(size: 30, weight: .bold, design: .serif))
-                    .lineSpacing(4)
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(article.sourceName.uppercased())
+                        .font(.system(size: 12, weight: .bold))
+                        .tracking(1.1)
+                        .foregroundStyle(Color.accentColor)
 
-                Text(metadata)
+                    Text(content.title)
+                        .font(.system(size: 32, weight: .bold, design: .serif))
+                        .lineSpacing(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 8) {
+                        if let date = article.publishedDateLabel { Text(date) }
+                        if article.readingMinutes > 0 {
+                            Circle().fill(Color.secondary.opacity(0.4)).frame(width: 3, height: 3)
+                            Text("\(article.readingMinutes) 分钟阅读")
+                        }
+                    }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
 
-                Divider()
-
-                if content.isTranslating {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("正在翻译标题和正文…")
+                    if content.isTranslating {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("正在完成中文翻译")
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.accentColor.opacity(0.08), in: Capsule())
                     }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
                 }
+                .padding(.horizontal, 22)
+                .padding(.top, 18)
+                .padding(.bottom, 26)
 
-                ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                    Text(paragraph)
-                        .font(.system(size: 18, design: .serif))
-                        .lineSpacing(7)
-                        .textSelection(.enabled)
-                }
-
-                if let url = article.canonicalURL {
-                    Button { openURL(url) } label: {
-                        Label("打开原文", systemImage: "safari")
-                            .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 24) {
+                    ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                        Text(paragraph)
+                            .font(.system(size: index == 0 ? 19 : 18, weight: index == 0 ? .medium : .regular, design: .serif))
+                            .foregroundStyle(Color.primary.opacity(0.9))
+                            .lineSpacing(8)
+                            .textSelection(.enabled)
                     }
-                    .buttonStyle(.bordered)
-                    .padding(.top, 8)
+
+                    if let url = article.canonicalURL {
+                        Divider().padding(.top, 8)
+                        Button { openURL(url) } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("英文原文")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Text(article.sourceName)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                            }
+                            .foregroundStyle(.primary)
+                            .padding(16)
+                            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 26)
+                .background(Color(uiColor: .systemBackground))
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
         }
     }
 
-    private var metadata: String {
-        [
-            article.publishedDateLabel,
-            article.sourceName,
-            article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟阅读" : nil
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
-    }
-
     private func load() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--article-detail-preview") {
+            state = .loaded(.init(
+                title: "Sora 更新：让创作与版权更好地共存",
+                paragraphs: [
+                    "我们一直在快速了解人们如何使用 Sora，也持续听取用户、版权所有者以及其他相关群体的反馈。产品真正进入现实世界后，我们终于能用真实行为，而不只是理论来改进它。",
+                    "接下来，我们会为权利持有者提供更细致的角色控制方式，让他们可以明确决定角色如何被使用。同时，我们也会探索更合理的商业模式，让创作者、权利持有者和用户都能从新的创作方式中受益。",
+                    "这仍然是一个需要持续迭代的过程。我们会做出正确的决定，也难免会犯错，但会认真听取反馈并快速修正。"
+                ],
+                originalTitle: article.title,
+                originalParagraphs: [],
+                isTranslating: false
+            ))
+            return
+        }
+        #endif
         guard let url = article.canonicalURL else {
             state = .failed("文章地址无效")
             return

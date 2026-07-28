@@ -212,7 +212,9 @@ struct PersonArticle: Decodable, Identifiable, Hashable {
     var publishedDateLabel: String? {
         guard let publishedAt,
               let date = ISO8601DateFormatter().date(from: publishedAt) else { return nil }
-        return date.formatted(.dateTime.year().month().day())
+        return date.formatted(
+            .dateTime.year().month().day().locale(Locale(identifier: "zh_CN"))
+        )
     }
 }
 

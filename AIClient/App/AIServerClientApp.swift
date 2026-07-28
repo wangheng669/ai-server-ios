@@ -50,6 +50,7 @@ private struct EditorialRootView: View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
             ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--video-detail-preview") {
             return .people
         }
