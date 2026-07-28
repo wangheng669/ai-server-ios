@@ -7,14 +7,17 @@ final class PersonDetailStore {
     private(set) var ownPosts: [Post] = []
     private(set) var discussions: [Post] = []
     private(set) var relatedVideos: [PersonVideo] = []
+    private(set) var articles: [PersonArticle] = []
     private(set) var isLoadingOwnPosts = false
     private(set) var isLoadingMoreOwnPosts = false
     private(set) var isLoadingDiscussions = false
     private(set) var isLoadingRelatedVideos = false
+    private(set) var isLoadingArticles = false
     private(set) var ownPostsError: String?
     private(set) var ownPostsLoadMoreError: String?
     private(set) var discussionsError: String?
     private(set) var relatedVideosError: String?
+    private(set) var articlesError: String?
     private(set) var canLoadMoreOwnPosts = true
     private(set) var xTranslations: [Int: String] = [:]
     private var loadingXTranslationIDs: Set<Int> = []
@@ -32,7 +35,22 @@ final class PersonDetailStore {
         async let ownPostsLoad: Void = loadOwnPosts(for: person)
         async let discussionsLoad: Void = loadDiscussions(for: person)
         async let videosLoad: Void = loadRelatedVideos(for: person)
-        _ = await (ownPostsLoad, discussionsLoad, videosLoad)
+        async let articlesLoad: Void = loadArticles(for: person)
+        _ = await (ownPostsLoad, discussionsLoad, videosLoad, articlesLoad)
+    }
+
+    private func loadArticles(for person: SpecialPerson) async {
+        isLoadingArticles = true
+        articlesError = nil
+        defer { isLoadingArticles = false }
+        do {
+            articles = try await service.articles(personID: person.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            articles = []
+            articlesError = error.localizedDescription
+        }
     }
 
     private func loadOwnPosts(for person: SpecialPerson) async {

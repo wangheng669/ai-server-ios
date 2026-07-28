@@ -233,6 +233,7 @@ private struct PersonDetailPage: View {
     let person: SpecialPerson
     @State private var store = PersonDetailStore()
     @State private var section = PersonDetailSection.posts
+    @State private var ownContentSection = PersonOwnContentSection.posts
     @State private var relatedSection = PersonRelatedSection.videos
     @State private var selectedPost: Post?
     @State private var selectedVideo: PersonVideo?
@@ -359,7 +360,39 @@ private struct PersonDetailPage: View {
             PersonProfileView(person: person)
         } else if section == .discussions {
             relatedContent
-        } else if store.isLoadingOwnPosts {
+        } else if hasArticleSection {
+            ownContent
+        } else {
+            ownPostsContent
+        }
+    }
+
+    private var hasArticleSection: Bool {
+        !store.articles.isEmpty
+    }
+
+    private var ownContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Picker("本人内容", selection: $ownContentSection) {
+                ForEach(PersonOwnContentSection.allCases) { item in
+                    Text(item.title).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+
+            if ownContentSection == .articles {
+                articlesContent
+            } else {
+                ownPostsContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var ownPostsContent: some View {
+        if store.isLoadingOwnPosts {
             ProgressView("正在载入他的动态…")
                 .frame(maxWidth: .infinity).padding(.top, 70)
         } else if let error = store.ownPostsError {
@@ -380,6 +413,30 @@ private struct PersonDetailPage: View {
                     .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
             }
             ownPostsPaginationStatus
+        }
+    }
+
+    @ViewBuilder
+    private var articlesContent: some View {
+        if store.isLoadingArticles {
+            ProgressView("正在载入文章…")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 54)
+        } else if let error = store.articlesError, store.articles.isEmpty {
+            ContentUnavailableView("载入失败", systemImage: "wifi.exclamationmark", description: Text(error))
+                .padding(.top, 30)
+        } else if store.articles.isEmpty {
+            ContentUnavailableView(
+                "暂无文章",
+                systemImage: "doc.text",
+                description: Text("内容库里暂时没有收录这位人物的文章")
+            )
+            .padding(.top, 30)
+        } else {
+            ForEach(store.articles) { article in
+                PersonArticleCard(article: article)
+                Divider().padding(.leading, 20)
+            }
         }
     }
 
@@ -938,6 +995,19 @@ private enum PersonDetailSection: String, CaseIterable, Identifiable {
     }
 }
 
+private enum PersonOwnContentSection: String, CaseIterable, Identifiable {
+    case posts
+    case articles
+
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .posts: "动态"
+        case .articles: "文章"
+        }
+    }
+}
+
 private enum PersonRelatedSection: String, CaseIterable, Identifiable {
     case videos
     case posts
@@ -948,6 +1018,72 @@ private enum PersonRelatedSection: String, CaseIterable, Identifiable {
         case .videos: "视频"
         case .posts: "动态"
         }
+    }
+}
+
+private struct PersonArticleCard: View {
+    let article: PersonArticle
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button {
+            if let url = article.canonicalURL { openURL(url) }
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.secondary)
+                    Text(article.displayTitle)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Text(metadata)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+
+                if !article.summary.isEmpty {
+                    Text(article.summary)
+                        .font(.system(size: 16))
+                        .foregroundStyle(.primary)
+                        .lineSpacing(3)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                }
+
+                HStack {
+                    if article.language != "zh" {
+                        Text("原文为英文")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    Spacer()
+                    Label("阅读文章", systemImage: "arrow.up.right")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("在浏览器中打开原文")
+    }
+
+    private var metadata: String {
+        [
+            article.publishedDateLabel,
+            article.sourceName,
+            article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟阅读" : nil
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
     }
 }
 

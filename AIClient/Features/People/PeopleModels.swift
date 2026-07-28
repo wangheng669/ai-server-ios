@@ -172,6 +172,50 @@ struct PersonMilestone: Decodable, Hashable {
     let title: String
 }
 
+struct PeopleArticlesResponse: Decodable {
+    let success: Bool
+    let personID: String
+    let articles: [PersonArticle]
+
+    enum CodingKeys: String, CodingKey {
+        case success, articles
+        case personID = "person_id"
+    }
+}
+
+struct PersonArticle: Decodable, Identifiable, Hashable {
+    let id: Int64
+    let personID: String
+    let sourceName: String
+    let sourceURLValue: String
+    let title: String
+    let titleZH: String
+    let summary: String
+    let canonicalURLValue: String
+    let publishedAt: String?
+    let readingMinutes: Int
+    let language: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, summary, language
+        case personID = "person_id"
+        case sourceName = "source_name"
+        case sourceURLValue = "source_url"
+        case titleZH = "title_zh"
+        case canonicalURLValue = "canonical_url"
+        case publishedAt = "published_at"
+        case readingMinutes = "reading_minutes"
+    }
+
+    var displayTitle: String { nonempty(titleZH) ?? title }
+    var canonicalURL: URL? { URL(string: canonicalURLValue) }
+    var publishedDateLabel: String? {
+        guard let publishedAt,
+              let date = ISO8601DateFormatter().date(from: publishedAt) else { return nil }
+        return date.formatted(.dateTime.year().month().day())
+    }
+}
+
 struct PeopleVideosResponse: Decodable {
     let success: Bool
     let personID: String

@@ -74,6 +74,20 @@ struct PeopleService {
         return payload.videos
     }
 
+    func articles(personID: String) async throws -> [PersonArticle] {
+        let url = baseURL
+            .appending(path: "api/v1/people")
+            .appending(path: personID)
+            .appending(path: "articles")
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PeopleServiceError.invalidResponse
+        }
+        let payload = try JSONDecoder().decode(PeopleArticlesResponse.self, from: data)
+        guard payload.success else { throw PeopleServiceError.invalidResponse }
+        return payload.articles
+    }
+
     func subtitles(videoID: Int64) async throws -> PersonVideoSubtitlesResponse {
         let url = baseURL
             .appending(path: "api/v1/people/videos")

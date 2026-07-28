@@ -58,6 +58,9 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--sentiment-preview") { return .investment }
+        if ProcessInfo.processInfo.arguments.contains("--learning-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-video-preview") { return .learning }
         return .observation
         #else
         .observation
@@ -66,6 +69,7 @@ private struct EditorialRootView: View {
     @State private var marketShowsDetail = false
     @State private var feedShowsDetail = false
     @State private var peopleShowsDetail = false
+    @State private var learningShowsDetail = false
     @State private var feedHidesTabBar = false
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
@@ -90,6 +94,7 @@ private struct EditorialRootView: View {
         switch selectedTab {
         case .observation: feedHidesTabBar || feedShowsDetail
         case .investment: marketShowsDetail
+        case .learning: learningShowsDetail
         case .people: peopleShowsDetail
         }
     }
@@ -101,6 +106,10 @@ private struct EditorialRootView: View {
             }
             tabContent(.investment) {
                 InvestmentView(showsDetail: $marketShowsDetail)
+            }
+            if selectedTab == .learning {
+                LearningView(showsDetail: $learningShowsDetail)
+                    .zIndex(10)
             }
             tabContent(.people) {
                 PeopleView(store: peopleStore, showsDetail: $peopleShowsDetail)
@@ -159,6 +168,7 @@ private struct RootNavigationBar: View {
         HStack(spacing: 0) {
             item(.observation, title: "观点", icon: "list.bullet.rectangle")
             item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
+            item(.learning, title: "学习", icon: "graduationcap")
             item(.people, title: "人物", icon: "person")
         }
         .frame(height: 50)
