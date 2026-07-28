@@ -2109,8 +2109,7 @@ private struct MarketIndexDetailView: View {
 
     private var formattedNetIncome: String {
         guard let financials, let netIncome = financials.netIncomeTTM else { return "—" }
-        let currency = financials.currency.isEmpty ? "" : " \(financials.currency)"
-        return compactNumber(netIncome) + currency
+        return marketFinancialAmount(netIncome, currency: financials.currency)
     }
 
     private func metric(_ title: String, _ value: Double?, _ color: Color = .primary, compact: Bool = false, suffix: String = "") -> some View {
@@ -2768,6 +2767,36 @@ private func companyMarketLabel(_ symbol: String) -> String {
 private func number(_ value: Double, digits: Int) -> String { value.formatted(.number.grouping(.automatic).precision(.fractionLength(digits))) }
 private func signed(_ value: Double, digits: Int) -> String { (value >= 0 ? "+" : "−") + number(abs(value), digits: digits) }
 private func compactNumber(_ value: Double) -> String { value.formatted(.number.notation(.compactName).precision(.fractionLength(1))) }
+
+func marketFinancialAmount(_ value: Double, currency: String) -> String {
+    let magnitude = abs(value)
+    let divisor: Double
+    let unit: String
+    if magnitude >= 100_000_000 {
+        divisor = 100_000_000
+        unit = "亿"
+    } else if magnitude >= 10_000 {
+        divisor = 10_000
+        unit = "万"
+    } else {
+        divisor = 1
+        unit = ""
+    }
+    let scaled = value / divisor
+    let number = scaled.formatted(.number.precision(.fractionLength(0...1)))
+    let currencyLabel = switch currency.uppercased() {
+    case "USD": "美元"
+    case "CNY", "RMB": "元"
+    case "HKD": "港元"
+    case "JPY": "日元"
+    case "KRW": "韩元"
+    case "EUR": "欧元"
+    case "GBP": "英镑"
+    case "": ""
+    default: currency.uppercased()
+    }
+    return "\(number) \(unit)\(currencyLabel)".trimmingCharacters(in: .whitespaces)
+}
 private func marketTimestamp(_ timestamp: Int64) -> String {
     marketShortTimestamp(timestamp)
 }

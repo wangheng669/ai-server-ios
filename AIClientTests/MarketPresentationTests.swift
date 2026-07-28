@@ -14,6 +14,12 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.fiscalYear, "2025")
     }
 
+    func testFormatsCompanyNetIncomeWithChineseUnits() {
+        XCTAssertEqual(marketFinancialAmount(159_600_000_000, currency: "USD"), "1,596 亿美元")
+        XCTAssertEqual(marketFinancialAmount(12_340_000_000, currency: "CNY"), "123.4 亿元")
+        XCTAssertEqual(marketFinancialAmount(-850_000_000, currency: "HKD"), "-8.5 亿港元")
+    }
+
     func testDecodesHongKongValuationHistory() throws {
         let data = Data(#"{"date":["2026-07-22","2026-07-23"],"pe":[13.79,13.97],"close":[25635.28,25950.93]}"#.utf8)
         let history = try JSONDecoder().decode(MarketHKValuationHistory.self, from: data)
