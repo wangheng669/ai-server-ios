@@ -51,7 +51,24 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var organizationName: String? {
         nonempty(organizationNameValue) ?? (isCurated ? nonempty(userScreenName) : nil)
     }
-    var avatarAssetName: String? { nonempty(avatarAssetNameValue) }
+    var avatarAssetName: String? {
+        nonempty(avatarAssetNameValue) ?? curatedPortraitAssetName
+    }
+
+    private var curatedPortraitAssetName: String? {
+        switch name.lowercased() {
+        case "sam altman":
+            return "SamAltmanPortrait"
+        case "dario amodei":
+            return "DarioAmodeiPortrait"
+        case "demis hassabis":
+            return "DemisHassabisPortrait"
+        case "jensen huang", "黄仁勋", "黃仁勳":
+            return "JensenHuangPortrait"
+        default:
+            return nil
+        }
+    }
     var discussionKeywords: [String] {
         guard let keywords = discussionKeywordsValue?.filter({
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
