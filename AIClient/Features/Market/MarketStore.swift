@@ -11,6 +11,8 @@ final class MarketStore {
     private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
     private(set) var constituentErrors: [String: String] = [:]
     private(set) var companyLogoPaths: [String: String] = [:]
+    private(set) var companyFinancials: [String: MarketCompanyFinancials] = [:]
+    private(set) var companyFinancialErrors: [String: String] = [:]
     private(set) var isLoading = false
     private(set) var isRetrying = false
     private(set) var errorMessage: String?
@@ -25,6 +27,7 @@ final class MarketStore {
     private var loadedCache = false
     private var realtimeQuotes: [String: MarketQuote] = [:]
     private var loadingTrendFallbacks: Set<String> = []
+    private var loadingCompanyFinancials: Set<String> = []
     private var pendingRealtimeUpdates: [String: MarketQuoteUpdate] = [:]
     private var realtimeFlushTask: Task<Void, Never>?
     private var isRefreshing = false
@@ -274,6 +277,21 @@ final class MarketStore {
         guard companyLogoPaths[symbol] == nil else { return }
         if let path = try? await service.companyLogo(symbol: symbol, name: name) {
             companyLogoPaths[symbol] = path
+        }
+    }
+
+    func loadCompanyFinancials(symbol: String, force: Bool = false) async {
+        if !force, companyFinancials[symbol] != nil { return }
+        guard !loadingCompanyFinancials.contains(symbol) else { return }
+        loadingCompanyFinancials.insert(symbol)
+        companyFinancialErrors[symbol] = nil
+        defer { loadingCompanyFinancials.remove(symbol) }
+        do {
+            companyFinancials[symbol] = try await service.companyFinancials(symbol: symbol)
+        } catch is CancellationError {
+            return
+        } catch {
+            companyFinancialErrors[symbol] = error.localizedDescription
         }
     }
 
