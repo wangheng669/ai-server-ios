@@ -259,11 +259,16 @@ private struct PersonDetailPage: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    if let handle = person.handle {
+                    if let url = person.xProfileURL {
+                        Link(destination: url) {
+                            Label("在 X 中打开", systemImage: "arrow.up.right.square")
+                        }
+                    }
+                    if let handle = person.xHandle ?? person.handle {
                         Button {
                             UIPasteboard.general.string = handle
                         } label: {
-                            Label("复制账号", systemImage: "doc.on.doc")
+                            Label(person.xHandle == nil ? "复制账号" : "复制 X 账号", systemImage: "doc.on.doc")
                         }
                     }
                 } label: {
@@ -329,6 +334,18 @@ private struct PersonDetailPage: View {
                     Text("\(person.topic.rawValue) · \(person.focusTags.first ?? "人物")")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Color.accentColor)
+                    if let handle = person.xHandle, let url = person.xProfileURL {
+                        Link(destination: url) {
+                            HStack(spacing: 4) {
+                                Text("X · \(handle)")
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel("在 X 中打开 \(handle)")
+                    }
                 }
             }
 
