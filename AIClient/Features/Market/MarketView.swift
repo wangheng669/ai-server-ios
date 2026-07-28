@@ -1958,6 +1958,7 @@ private struct MarketIndexDetailView: View {
     private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
+    private var financials: MarketCompanyFinancials? { store.companyFinancials[symbol] }
     private var isIndex: Bool { store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true }
 
     var body: some View {
@@ -1984,11 +1985,16 @@ private struct MarketIndexDetailView: View {
         .background(InteractivePopGestureEnabler())
         .task {
             if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
-            if showsCompanyProfile, let quote { await store.loadCompanyLogo(symbol: quote.symbol, name: quote.name) }
+            if showsCompanyProfile, let quote {
+                async let logo: Void = store.loadCompanyLogo(symbol: quote.symbol, name: quote.name)
+                async let companyFinancials: Void = store.loadCompanyFinancials(symbol: quote.symbol)
+                _ = await (logo, companyFinancials)
+            }
         }
         .refreshable {
             await store.refresh(force: false)
             if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+            if showsCompanyProfile { await store.loadCompanyFinancials(symbol: symbol, force: true) }
             await store.loadChart(symbol: symbol, range: selectedRange, force: true)
         }
     }
@@ -2088,6 +2094,10 @@ private struct MarketIndexDetailView: View {
                     Text("上市市场  \(companyMarketLabel(symbol))")
                     if let marketCap = quote?.marketCap { Text("总市值  \(compactNumber(marketCap))") }
                     if let pe = quote?.pe { Text("市盈率  \(number(pe, digits: 2))") }
+                    Text("归母净利润（TTM）  \(formattedNetIncome)")
+                    if let fiscalYear = financials?.fiscalYear, !fiscalYear.isEmpty {
+                        Text("财报基准  FY\(fiscalYear)")
+                    }
                 }
                 .font(.footnote).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
@@ -2095,6 +2105,12 @@ private struct MarketIndexDetailView: View {
             .padding(14).marketCard(cornerRadius: 10)
         }
         .padding(.horizontal, 18)
+    }
+
+    private var formattedNetIncome: String {
+        guard let financials, let netIncome = financials.netIncomeTTM else { return "—" }
+        let currency = financials.currency.isEmpty ? "" : " \(financials.currency)"
+        return compactNumber(netIncome) + currency
     }
 
     private func metric(_ title: String, _ value: Double?, _ color: Color = .primary, compact: Bool = false, suffix: String = "") -> some View {

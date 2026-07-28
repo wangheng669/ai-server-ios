@@ -2,6 +2,18 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesCompanyNetIncomeTTM() throws {
+        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","netIncomeTTM":122575000000,"currency":"USD","period":"TTM","fiscalYear":"2025","dataSource":"TradingView Scanner"}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketCompanyFinancialsResponse.self, from: data)
+
+        XCTAssertEqual(response.data.symbol, "AAPL")
+        XCTAssertEqual(response.data.netIncomeTTM, 122_575_000_000)
+        XCTAssertEqual(response.data.currency, "USD")
+        XCTAssertEqual(response.data.period, "TTM")
+        XCTAssertEqual(response.data.fiscalYear, "2025")
+    }
+
     func testDecodesHongKongValuationHistory() throws {
         let data = Data(#"{"date":["2026-07-22","2026-07-23"],"pe":[13.79,13.97],"close":[25635.28,25950.93]}"#.utf8)
         let history = try JSONDecoder().decode(MarketHKValuationHistory.self, from: data)

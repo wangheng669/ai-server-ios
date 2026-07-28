@@ -156,6 +156,19 @@ struct MarketCompanyLogo: Decodable {
     let url: String
 }
 
+struct MarketCompanyFinancialsResponse: Decodable {
+    let data: MarketCompanyFinancials
+}
+
+struct MarketCompanyFinancials: Decodable {
+    let symbol: String
+    let netIncomeTTM: Double?
+    let currency: String
+    let period: String
+    let fiscalYear: String?
+    let dataSource: String
+}
+
 struct MarketDashboardFreshness: Codable {
     let latestQuoteAt: String?
     let latestTimestamp: Int64?
