@@ -72,6 +72,8 @@ while IFS= read -r worktree_path; do
 
   worktree_branch="$(git -C "$worktree_path" branch --show-current 2>/dev/null || true)"
   [[ "$worktree_branch" == codex/* ]] || continue
+  [[ "$(git config --get "branch.$worktree_branch.remote" 2>/dev/null || true)" == origin ]] ||
+    continue
   git merge-base --is-ancestor "$worktree_branch" origin/main 2>/dev/null || continue
   [[ -z "$(git -C "$worktree_path" status --porcelain 2>/dev/null)" ]] || continue
 
@@ -83,6 +85,8 @@ git worktree prune
 
 while IFS= read -r branch; do
   [[ -n "$branch" ]] || continue
+  [[ "$(git config --get "branch.$branch.remote" 2>/dev/null || true)" == origin ]] ||
+    continue
   if git branch -d "$branch" >/dev/null; then
     log "Deleted merged local branch $branch."
   fi

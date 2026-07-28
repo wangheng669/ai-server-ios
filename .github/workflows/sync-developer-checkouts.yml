@@ -11,7 +11,9 @@ permissions:
 
 concurrency:
   group: sync-developer-macs-${{ github.ref }}
-  cancel-in-progress: true
+  # A slow or temporarily disconnected Mac must finish its bounded sync instead
+  # of being cancelled every time another task reaches main.
+  cancel-in-progress: false
 
 jobs:
   sync-office-mac-mini:
