@@ -1,68 +1,6 @@
 import SwiftUI
 import UIKit
 
-private struct PersonPortraitView: View {
-    let url: URL?
-    let name: String
-    let size: CGFloat
-    var assetName: String? = nil
-    var isVerified = false
-
-    private var portraitSize: CGFloat { size - max(4, size * 0.08) }
-    private var ringWidth: CGFloat { max(1, size * 0.018) }
-    private var badgeSize: CGFloat { max(14, size * 0.25) }
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.accentColor.opacity(0.88),
-                            Color.accentColor.opacity(0.28),
-                            Color.secondary.opacity(0.12)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            Circle()
-                .fill(Color(uiColor: .systemBackground))
-                .padding(ringWidth)
-
-            AvatarView(
-                url: url,
-                name: name,
-                size: portraitSize,
-                assetName: assetName
-            )
-            .overlay {
-                Circle()
-                    .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
-            }
-        }
-        .frame(width: size, height: size)
-        .shadow(color: Color.black.opacity(0.08), radius: size * 0.08, y: size * 0.035)
-        .overlay(alignment: .bottomTrailing) {
-            if isVerified {
-                Image(systemName: "checkmark")
-                    .font(.system(size: badgeSize * 0.48, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: badgeSize, height: badgeSize)
-                    .background(Color.accentColor, in: Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(Color(uiColor: .systemBackground), lineWidth: max(2, size * 0.035))
-                    }
-                    .accessibilityHidden(true)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(isVerified ? "\(name)，已验证人物" : name)
-    }
-}
-
 struct PeopleView: View {
     @Binding private var showsDetail: Bool
     private let store: PeopleStore
@@ -184,12 +122,11 @@ struct PeopleView: View {
             ForEach(filteredPeople.prefix(4)) { person in
                 Button { selectedPerson = person } label: {
                     VStack(spacing: 10) {
-                        PersonPortraitView(
+                        AvatarView(
                             url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
                             name: person.name,
                             size: 68,
-                            assetName: person.avatarAssetName,
-                            isVerified: person.hasOwnPostSource
+                            assetName: person.avatarAssetName
                         )
                         Text(person.name)
                             .font(.system(size: 14, weight: .semibold))
@@ -218,12 +155,11 @@ private struct PersonActivityRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            PersonPortraitView(
+            AvatarView(
                 url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
                 name: person.name,
                 size: 50,
-                assetName: person.avatarAssetName,
-                isVerified: person.hasOwnPostSource
+                assetName: person.avatarAssetName
             )
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -360,12 +296,11 @@ private struct PersonDetailPage: View {
     private var personHeader: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 16) {
-                PersonPortraitView(
+                AvatarView(
                     url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
                     name: person.name,
                     size: 82,
-                    assetName: person.avatarAssetName,
-                    isVerified: person.hasOwnPostSource
+                    assetName: person.avatarAssetName
                 )
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
@@ -1459,7 +1394,7 @@ private struct PersonProfileView: View {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(person.relatedPeople.prefix(3)) { related in
                             VStack(spacing: 6) {
-                                PersonPortraitView(
+                                AvatarView(
                                     url: related.avatarURL(baseURL: ServerConfiguration.currentURL),
                                     name: related.name,
                                     size: 46,
