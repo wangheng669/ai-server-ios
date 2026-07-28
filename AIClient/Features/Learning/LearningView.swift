@@ -172,37 +172,36 @@ struct LearningView: View {
     }
 
     private func categoryPicker(_ sections: [LearningSection]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(sections) { section in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.16)) {
-                            selectedCategory = section.name
-                        }
-                    } label: {
-                        VStack(spacing: 10) {
-                            Image(systemName: categoryIcon(section.name))
-                                .font(.system(size: 22, weight: .medium))
-                            Text(section.name)
-                                .font(.system(size: 14, weight: .medium))
-                        }
-                        .foregroundStyle(
-                            selectedCategory == section.name ? HoldingsPalette.purple : Color.secondary
-                        )
-                        .frame(width: 74, height: 78)
-                        .background(
-                            selectedCategory == section.name
-                                ? HoldingsPalette.purple.opacity(0.09)
-                                : Color(uiColor: .secondarySystemBackground),
-                            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        )
+        HStack(spacing: 8) {
+            ForEach(sections) { section in
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        selectedCategory = section.name
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedCategory == section.name ? .isSelected : [])
+                } label: {
+                    VStack(spacing: 10) {
+                        Image(systemName: categoryIcon(section.name))
+                            .font(.system(size: 22, weight: .medium))
+                        Text(section.name)
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundStyle(
+                        selectedCategory == section.name ? HoldingsPalette.purple : Color.secondary
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 78)
+                    .background(
+                        selectedCategory == section.name
+                            ? HoldingsPalette.purple.opacity(0.09)
+                            : Color(uiColor: .secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedCategory == section.name ? .isSelected : [])
             }
-            .padding(.horizontal, 20)
         }
+        .padding(.horizontal, 20)
         .padding(.top, 20)
     }
 
