@@ -256,6 +256,35 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketChartXFraction(timestamp: 5_000, firstTimestamp: 1_000, lastTimestamp: 5_000), 1)
     }
 
+    func testIntradayChartCompressesLongMissingSessionGap() {
+        let minute = Int64(60 * 1_000)
+        let fractions = marketChartXFractions(
+            timestamps: [0, minute, 482 * minute],
+            interval: "1m"
+        )
+
+        XCTAssertEqual(fractions[0], 0)
+        XCTAssertEqual(fractions[1], 1.0 / 6.0, accuracy: 0.0001)
+        XCTAssertEqual(fractions[2], 1)
+    }
+
+    func testDailyChartKeepsCalendarTimeScale() {
+        let day = Int64(24 * 60 * 60 * 1_000)
+        let fractions = marketChartXFractions(timestamps: [0, day, 3 * day], interval: "1d")
+
+        XCTAssertEqual(fractions[1], 1.0 / 3.0, accuracy: 0.0001)
+    }
+
+    func testSingleOvernightBoundaryPointDoesNotClaimNightCoverage() {
+        let points = [
+            MarketChartPoint(timestamp: 1, open: 10, high: 10, low: 10, close: 10, volume: 1, state: "confirmed", source: "tradingview", session: "post"),
+            MarketChartPoint(timestamp: 2, open: 10, high: 10, low: 10, close: 10, volume: 1, state: "confirmed", source: "tradingview", session: "overnight"),
+            MarketChartPoint(timestamp: 3, open: 10, high: 10, low: 10, close: 10, volume: 1, state: "confirmed", source: "tradingview", session: "pre")
+        ]
+
+        XCTAssertEqual(marketChartExtendedSessionLabel(points), "含盘前盘后")
+    }
+
     func testVolumeBarsRemainFullyInsideChartBounds() {
         XCTAssertEqual(marketVolumeBarX(fraction: 0, width: 300, barWidth: 8), 4)
         XCTAssertEqual(marketVolumeBarX(fraction: 0.5, width: 300, barWidth: 8), 150)

@@ -2262,7 +2262,7 @@ private struct MarketDetailChart: View {
                     )
                         .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
-                    ChartInspectionOverlay(points: points, selected: $inspectedPoint)
+                    ChartInspectionOverlay(points: points, interval: chart?.interval, selected: $inspectedPoint)
                 }
             }
             .frame(height: 184)
@@ -2281,7 +2281,7 @@ private struct MarketDetailChart: View {
             .font(.caption2).foregroundStyle(.secondary).padding(.leading, 48).padding(.trailing, 5)
             Group {
                 if hasVolume {
-                    VolumeBars(points: points).frame(height: 25).padding(.leading, 48)
+                    VolumeBars(points: points, interval: chart?.interval).frame(height: 25).padding(.leading, 48)
                 } else {
                     Color.clear.frame(height: 25)
                 }
@@ -2315,7 +2315,7 @@ private struct MarketDetailChart: View {
     private var chartCaption: String {
         let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
         let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
-        let sessionText = points.contains { $0.session.map { $0 != "regular" && $0 != "closed" } == true } ? " · 含夜盘" : ""
+        let sessionText = marketChartExtendedSessionLabel(points).map { " · \($0)" } ?? ""
         return hasVolume ? "\(dated)\(sessionText) · 成交量" : "\(dated)\(sessionText)"
     }
     private var coverageMessage: String? {
@@ -2346,22 +2346,24 @@ private struct MarketDetailChart: View {
 
 private struct ChartInspectionOverlay: View {
     let points: [MarketChartPoint]
+    let interval: String?
     @Binding var selected: MarketChartPoint?
 
     var body: some View {
         GeometryReader { proxy in
             let leftInset: CGFloat = 48
             let usableWidth = max(proxy.size.width - leftInset, 1)
+            let fractions = marketChartXFractions(timestamps: points.map(\.timestamp), interval: interval)
             ZStack(alignment: .leading) {
                 if let selected, let index = points.firstIndex(where: { $0.id == selected.id }) {
-                    let x = leftInset + usableWidth * CGFloat(index) / CGFloat(max(points.count - 1, 1))
+                    let x = leftInset + usableWidth * fractions[index]
                     Rectangle().fill(Color.secondary.opacity(0.35)).frame(width: 1).offset(x: x)
                 }
                 Color.clear.contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                         guard !points.isEmpty else { return }
                         let fraction = min(max((value.location.x - leftInset) / usableWidth, 0), 1)
-                        let index = Int((fraction * CGFloat(points.count - 1)).rounded())
+                        let index = fractions.enumerated().min { abs($0.element - fraction) < abs($1.element - fraction) }?.offset ?? 0
                         selected = points[index]
                     })
             }
@@ -2421,16 +2423,15 @@ private struct MarketSessionLineChart: View {
     var body: some View {
         Canvas { context, size in
             let sorted = points.sorted { $0.timestamp < $1.timestamp }
-            guard sorted.count > 1,
-                  let firstTimestamp = sorted.first?.timestamp,
-                  let lastTimestamp = sorted.last?.timestamp,
-                  lastTimestamp > firstTimestamp else { return }
+            guard sorted.count > 1 else { return }
+            let fractions = marketChartXFractions(timestamps: sorted.map(\.timestamp), interval: interval)
+            let fractionByTimestamp = Dictionary(uniqueKeysWithValues: zip(sorted.map(\.timestamp), fractions))
             let low = sorted.map(\.close).min() ?? 0
             let high = sorted.map(\.close).max() ?? low
             let span = max(high - low, 0.000_001)
             func canvasPoint(_ point: MarketChartPoint) -> CGPoint {
                 CGPoint(
-                    x: size.width * marketChartXFraction(timestamp: point.timestamp, firstTimestamp: firstTimestamp, lastTimestamp: lastTimestamp),
+                    x: size.width * (fractionByTimestamp[point.timestamp] ?? 0),
                     y: size.height * (0.06 + CGFloat((high - point.close) / span) * 0.88)
                 )
             }
@@ -2536,16 +2537,13 @@ private struct AnimatedLineCanvas: View, Animatable {
 
 private struct VolumeBars: View {
     let points: [MarketChartPoint]
+    let interval: String?
     var body: some View {
         Canvas { context, size in
             let sorted = points.sorted { $0.timestamp < $1.timestamp }
-            guard let firstTimestamp = sorted.first?.timestamp,
-                  let lastTimestamp = sorted.last?.timestamp,
-                  lastTimestamp > firstTimestamp else { return }
+            guard sorted.count > 1 else { return }
             let maxVolume = marketChartVolumeCeiling(sorted)
-            let fractions = sorted.map {
-                marketChartXFraction(timestamp: $0.timestamp, firstTimestamp: firstTimestamp, lastTimestamp: lastTimestamp)
-            }
+            let fractions = marketChartXFractions(timestamps: sorted.map(\.timestamp), interval: interval)
             let minimumGap = zip(fractions, fractions.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }.min() ?? 1
             let barWidth = min(max(size.width * minimumGap * 0.72, 1), 8)
 

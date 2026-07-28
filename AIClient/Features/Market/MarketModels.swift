@@ -710,6 +710,17 @@ func marketChartVolumeCeiling(_ points: [MarketChartPoint]) -> Double {
     return max(values[index], 1)
 }
 
+func marketChartExtendedSessionLabel(_ points: [MarketChartPoint]) -> String? {
+    let sessions = points.compactMap { $0.session?.lowercased() }
+    if sessions.filter({ $0 == "overnight" }).count > 1 {
+        return "含夜盘"
+    }
+    if sessions.contains(where: { $0 == "pre" || $0 == "post" || $0 == "after" }) {
+        return "含盘前盘后"
+    }
+    return nil
+}
+
 func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketChartPoint, interval: String?) -> Bool {
     let changedSession = (previous.session ?? "regular") != (current.session ?? "regular")
     let hasIntradayGap = interval == "1m" && current.timestamp - previous.timestamp > 15 * 60 * 1000
@@ -719,6 +730,19 @@ func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketCh
 func marketChartXFraction(timestamp: Int64, firstTimestamp: Int64, lastTimestamp: Int64) -> CGFloat {
     guard lastTimestamp > firstTimestamp else { return 0 }
     return min(max(CGFloat(Double(timestamp - firstTimestamp) / Double(lastTimestamp - firstTimestamp)), 0), 1)
+}
+
+func marketChartXFractions(timestamps: [Int64], interval: String?) -> [CGFloat] {
+    guard timestamps.count > 1 else { return timestamps.map { _ in 0 } }
+    let maximumIntradayGap = Int64(5 * 60 * 1_000)
+    var positions = [Double](repeating: 0, count: timestamps.count)
+    for index in 1..<timestamps.count {
+        let elapsed = max(timestamps[index] - timestamps[index - 1], 0)
+        let displayedElapsed = interval == "1m" ? min(elapsed, maximumIntradayGap) : elapsed
+        positions[index] = positions[index - 1] + Double(displayedElapsed)
+    }
+    guard let total = positions.last, total > 0 else { return positions.map { _ in 0 } }
+    return positions.map { CGFloat($0 / total) }
 }
 
 func marketVolumeBarX(fraction: CGFloat, width: CGFloat, barWidth: CGFloat) -> CGFloat {
