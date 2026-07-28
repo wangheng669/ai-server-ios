@@ -255,6 +255,30 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketVolumeBarX(fraction: 1, width: 300, barWidth: 8), 296)
     }
 
+    func testChartDropsProvisionalExtendedQuoteSnapshots() throws {
+        let data = Data(#"""
+        [
+          {"timestamp":1,"open":206.93,"high":206.93,"low":206.93,"close":206.93,"volume":114836805,"state":"provisional","source":"tradingview","session":"pre"},
+          {"timestamp":2,"open":207,"high":208,"low":206,"close":207.5,"volume":120000,"state":"confirmed","source":"eastmoney","session":"regular"},
+          {"timestamp":3,"open":196.54,"high":196.54,"low":196.54,"close":196.54,"volume":154353698,"state":"provisional","source":"tradingview","session":"overnight"}
+        ]
+        """#.utf8)
+        let points = try JSONDecoder().decode([MarketChartPoint].self, from: data)
+
+        XCTAssertEqual(marketChartDisplayPoints(points).map(\.timestamp), [2])
+    }
+
+    func testVolumeScaleUsesRobustPercentileCeiling() throws {
+        let rows = (1...20).map { index in
+            #"{"timestamp":\#(index),"open":10,"high":11,"low":9,"close":10,"volume":\#(index * 100),"state":"confirmed","source":"test","session":"regular"}"#
+        } + [
+            #"{"timestamp":21,"open":10,"high":11,"low":9,"close":10,"volume":999999999,"state":"confirmed","source":"test","session":"regular"}"#
+        ]
+        let points = try JSONDecoder().decode([MarketChartPoint].self, from: Data("[\(rows.joined(separator: ","))]".utf8))
+
+        XCTAssertEqual(marketChartVolumeCeiling(points), 2_000)
+    }
+
     func testAxisDigitsKeepSmallVIXMovesVisible() {
         XCTAssertEqual(marketAxisDigits(values: [15.77, 16.54]), 2)
         XCTAssertEqual(marketAxisDigits(values: [4_900, 4_950]), 0)

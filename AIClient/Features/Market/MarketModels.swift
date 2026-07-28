@@ -677,6 +677,28 @@ struct MarketChartPoint: Decodable, Identifiable, Equatable {
     var displayValue: Double? { close }
 }
 
+func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint] {
+    points.filter { point in
+        guard point.state != "invalid" else { return false }
+        let session = point.session ?? "regular"
+        let isExtended = session != "regular" && session != "closed"
+        if isExtended && point.state == "provisional" {
+            return false
+        }
+        if point.state == "provisional" && point.source.localizedCaseInsensitiveContains("tradingview") {
+            return false
+        }
+        return true
+    }
+}
+
+func marketChartVolumeCeiling(_ points: [MarketChartPoint]) -> Double {
+    let values = points.compactMap(\.volume).filter { $0 > 0 && $0.isFinite }.sorted()
+    guard !values.isEmpty else { return 1 }
+    let index = Int((Double(values.count - 1) * 0.95).rounded(.down))
+    return max(values[index], 1)
+}
+
 func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketChartPoint, interval: String?) -> Bool {
     let changedSession = (previous.session ?? "regular") != (current.session ?? "regular")
     let hasIntradayGap = interval == "1m" && current.timestamp - previous.timestamp > 15 * 60 * 1000
