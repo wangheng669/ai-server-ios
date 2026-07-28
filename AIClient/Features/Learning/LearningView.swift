@@ -262,7 +262,7 @@ struct LearningView: View {
         switch category {
         case "股票": "chart.line.uptrend.xyaxis"
         case "基金": "chart.pie"
-        case "期货": "candlestick"
+        case "期货": "chart.bar.xaxis"
         case "期权": "point.3.connected.trianglepath.dotted"
         default: "globe.asia.australia"
         }
