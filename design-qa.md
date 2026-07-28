@@ -1,51 +1,68 @@
 # Industry Panorama Design QA
 
-- Source visual truth: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/codex-clipboard-83663614-790e-4a29-a001-5b81f78fceab.png`
-- Implementation screenshot: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/screenshot_optimized_3f51291c-5c14-4b9f-9d34-c4fd12802704.jpg`
-- Viewport: iPhone 17 Pro Max simulator, portrait
-- Source pixels: 852 × 1846, normalized to 369 × 800
+- Source visual truth: `/Users/wangheng/.codex/generated_images/019fa440-c6fe-7a10-80cf-99530e4754e0/call_X76cpvLRQknkR6xME1S7JfpF.png`
+- Implementation screenshot: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/screenshot_optimized_7ad91f0c-53bc-47a5-abf8-8a0132b90082.jpg`
+- Lower-page screenshot: `/var/folders/hy/lx7mb0353670bfxg43qd3pmw0000gn/T/screenshot_optimized_207c6062-99d1-48fd-9fa8-d005ca2341a5.jpg`
+- Combined comparison: `/tmp/industry-panorama-design-qa.png`
+- Viewport: iPhone 17 Pro Max simulator, screenshot normalized to 368 × 800 px
+- Source pixels: 853 × 1844; normalized to a 368 × 800 top crop
 - Implementation pixels: 368 × 800
-- State: Data → Industry Panorama → New Energy Vehicle, top of page
+- State: Data → Industry Panorama → New Energy Vehicle
 
-## Full-view comparison evidence
+## Full-view comparison
 
-The revised implementation now matches the reference's principal composition: one compact industry selector; asymmetric scale block with large green serif value on the left and a four-point green area/line chart on the right; amber section rule; three connected upstream/midstream/downstream groups; company monograms embedded in the relevant groups; and an off-white editorial surface.
+The implementation preserves the source visual system: warm ivory canvas, cobalt active navigation, forest-green scale data, four-year area chart, restrained hairlines, chain-stage semantic colors, company monograms, and source provenance.
 
-The app's existing bottom tab bar remains visible because it is global product navigation. The reference omits that app-owned chrome. Unsupported quote prices and percentage changes were not copied from the concept; the implementation's footer uses real ticker codes from the API.
+The narrow iPhone layout intentionally changes the source’s compressed three-column chain into a connected vertical flow. This is a responsive correction: it preserves all content while restoring readable type and usable company cards.
 
-## Focused region comparison evidence
+## Focused region comparison
 
-- Scale block: the value/unit split, chart domain, axis labels, point markers, source attribution, and spacing were checked at native simulator density.
-- Chain block: three stage circles, continuous connector, stage headings, descriptions, chips, and company placement were checked directly.
-- Data integrity: chart points are 2021 `352.1`, 2022 `688.7`, 2023 `949.5`, and 2024 `1286.6` 万辆, each with an official source URL in the API.
-
-## Required fidelity surfaces
-
-- Fonts and typography: system Chinese UI type plus a serif display value reproduce the reference hierarchy and remain readable.
-- Spacing and layout rhythm: 16 pt page margins, compact selector, asymmetric scale/chart region, and three-stage vertical rhythm align with the normalized source.
-- Colors and visual tokens: warm off-white, emerald, pale green chips, dark ink text, and the amber rule match the source.
-- Image quality and asset fidelity: no raster assets are required; native Swift Charts and SF Symbols remain sharp at device density.
-- Copy and content: visible values, historical points, stage relationships, company roles, and tickers come from the source-backed API or the identical offline fallback.
-
-## Findings
-
-- No actionable P0, P1, or P2 fidelity issues remain.
-- Accepted product constraint: global bottom navigation remains present.
-- Accepted data constraint: illustrative stock prices and percentage changes are replaced by verified ticker codes.
+- Scale panel: hierarchy, value, chart, growth badge, source, and spacing match the source direction. The implementation uses a slightly larger value and card height for the real device width.
+- Industry anchors: converted from one compressed row to a 2 × 2 grid so labels remain readable.
+- Chain and company mapping: converted from narrow columns to a vertical connected flow. Stage titles, taxonomy, tickers, and company roles are all visible at normal reading sizes.
+- Insight cards and provenance: preserved below the chain; insight cards scroll horizontally instead of compressing three paragraphs.
 
 ## Comparison history
 
-- Pass 1 found a P1 mismatch: no historical chart, four small chain nodes, and a repeated company section.
-- Fix: added source-backed historical data, native chart, three grouped chain stages, embedded company anchors, and a single ticker strip.
-- Pass 2 found a P2 mismatch: the chart was compressed and rendered the year values as a continuous axis.
-- Fix: allocated explicit width to the scale value, changed years to categorical labels, and fixed the verified 200–1,400 万辆 domain.
-- Post-fix evidence: the current simulator screenshot shows the same left-value/right-chart structure and three-stage chain as the source.
+### Iteration 1 — blocked
 
-## Interaction and verification
+- P1: Three-column chain compressed labels and companies into unreadably small cards.
+- P1: Company cards had uneven heights and appeared detached from their chain stages.
+- P2: Anchor and insight rows used text below comfortable iPhone reading size.
+- P2: The source’s editorial hierarchy collapsed into a dense spreadsheet-like block.
 
-- Industry selection, vertical scrolling, source link, and bottom navigation remain functional.
-- Simulator build succeeded without warnings.
-- iOS test suite: 109 passed, 0 failed, 0 skipped.
-- Public API returned all four historical points and company `stage_id`/ticker metadata.
+### Fixes made
+
+- Rebuilt the chain as a vertical upstream → midstream → downstream flow with a continuous connector.
+- Embedded responsive one- or two-column company cards inside their owning stage.
+- Increased navigation, metric, company, ticker, and supporting-text sizes.
+- Reworked anchors into a 2 × 2 grid and insights into full-size horizontal cards.
+- Added more stable card spacing, border opacity, and subtle elevation.
+
+### Iteration 2 — passed
+
+Post-fix screenshots show readable typography, consistent company cards, clear chain ownership, no horizontal page overflow, working vertical scrolling, and persistent bottom navigation. The remaining difference from the source is the intentional narrow-screen chain adaptation.
+
+## Required fidelity surfaces
+
+- Fonts and typography: passed. System serif numerals and system UI text preserve the source hierarchy; no critical text is below the intended reading size.
+- Spacing and layout rhythm: passed. Section spacing, card padding, radii, and vertical flow are consistent.
+- Colors and visual tokens: passed. Warm paper, green data, blue navigation, amber/green/blue chain semantics, and subtle borders are preserved.
+- Image quality and assets: passed. The screen contains no required raster imagery; SF Symbols are used consistently for standard UI icons.
+- Copy and content: passed. All scale, history, chain, company, insight, and provenance content comes from the server response.
+
+## Interaction checks
+
+- Industry panorama navigation: passed
+- Server-backed data load: passed
+- Main vertical scrolling: passed
+- Horizontal industry selector: passed
+- Horizontal insight cards: passed
+- Source link remains interactive
+
+## Follow-up polish
+
+- P3: The industry selector intentionally reveals a clipped next item as a horizontal-scroll affordance.
+- P3: The generated source fits more content in one frame than is comfortable at the tested device width.
 
 final result: passed

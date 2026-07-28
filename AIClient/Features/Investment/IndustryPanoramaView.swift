@@ -115,7 +115,7 @@ struct IndustryPanoramaView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 18) {
                 if !industries.isEmpty {
                     industryPicker
                 }
@@ -128,7 +128,7 @@ struct IndustryPanoramaView: View {
                     errorState
                 }
             }
-            .padding(.top, 6)
+            .padding(.top, 10)
             .padding(.bottom, 104)
         }
         .scrollIndicators(.hidden)
@@ -139,22 +139,22 @@ struct IndustryPanoramaView: View {
 
     private var industryPicker: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 ForEach(industries) { industry in
                     let selected = industry.id == selectedIndustry?.id
                     Button {
                         withAnimation(.easeOut(duration: 0.2)) { selectedID = industry.id }
                     } label: {
-                        VStack(spacing: 7) {
+                        VStack(spacing: 9) {
                             Image(systemName: industry.icon)
-                                .font(.system(size: 22, weight: .semibold))
-                                .frame(height: 30)
+                                .font(.system(size: 25, weight: .semibold))
+                                .frame(height: 32)
                             Text(industry.title)
-                                .font(.system(size: 11, weight: selected ? .semibold : .medium))
+                                .font(.system(size: 12, weight: selected ? .semibold : .medium))
                                 .lineLimit(1)
                         }
                         .foregroundStyle(selected ? HoldingsPalette.green : .secondary)
-                        .frame(width: 72, height: 72)
+                        .frame(width: 82, height: 82)
                         .background(
                             selected ? HoldingsPalette.green.opacity(0.07) : .clear,
                             in: RoundedRectangle(cornerRadius: 12)
@@ -169,73 +169,93 @@ struct IndustryPanoramaView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 18)
         }
         .scrollIndicators(.hidden)
     }
 
     private func panorama(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             scaleCard(industry)
             anchorStrip(industry)
             chainCard(industry)
             insightSection(industry)
             provenanceRow(industry)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .animation(.easeOut(duration: 0.18), value: industry.id)
     }
 
     private func scaleCard(_ industry: IndustryPayload) -> some View {
         let parts = scaleValueParts(industry.scale.value)
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 18) {
             Label("产业规模", systemImage: "chart.xyaxis.line")
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(HoldingsPalette.ink)
 
-            HStack(alignment: .bottom, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(industry.scale.period)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text(parts.value)
-                        .font(.system(size: 43, weight: .medium, design: .serif))
-                        .foregroundStyle(HoldingsPalette.green)
-                        .minimumScaleFactor(0.65)
-                        .lineLimit(1)
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(parts.unit)
-                            .font(.system(size: 14, weight: .semibold))
-                        if let growth = industry.scale.growth {
-                            Text(growth)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(HoldingsPalette.green)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 4)
-                                .background(HoldingsPalette.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                        }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .bottom, spacing: 22) {
+                    scaleSummary(parts: parts, industry: industry)
+                        .frame(width: 148, alignment: .leading)
+
+                    if let history = industry.history, history.count >= 2 {
+                        historyChart(history)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 142)
                     }
                 }
-                .frame(width: 130, alignment: .leading)
 
-                if let history = industry.history, history.count >= 2 {
-                    historyChart(history)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 132)
+                VStack(alignment: .leading, spacing: 16) {
+                    scaleSummary(parts: parts, industry: industry)
+                    if let history = industry.history, history.count >= 2 {
+                        historyChart(history)
+                            .frame(height: 150)
+                    }
                 }
             }
 
+            Divider()
+
             HStack {
                 Text(industry.scale.metric)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 sourceLink(industry.scale.source)
             }
         }
-        .padding(16)
-        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(HoldingsPalette.line))
+        .padding(18)
+        .background(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(HoldingsPalette.line))
+        .shadow(color: Color.black.opacity(0.025), radius: 12, y: 5)
+    }
+
+    private func scaleSummary(
+        parts: (value: String, unit: String),
+        industry: IndustryPayload
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(industry.scale.period)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(parts.value)
+                .font(.system(size: 48, weight: .medium, design: .serif))
+                .foregroundStyle(HoldingsPalette.green)
+                .minimumScaleFactor(0.65)
+                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                Text(parts.unit)
+                    .font(.system(size: 15, weight: .semibold))
+                if let growth = industry.scale.growth {
+                    Text(growth)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(HoldingsPalette.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(HoldingsPalette.green.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+        }
     }
 
     private func historyChart(_ history: [IndustryPayload.HistoryPoint]) -> some View {
@@ -256,39 +276,43 @@ struct IndustryPanoramaView: View {
                 .symbolSize(28)
                 .annotation(position: .top, spacing: 3) {
                     Text(point.value.formatted(.number.precision(.fractionLength(0...1))))
-                        .font(.system(size: 8, weight: .medium))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(HoldingsPalette.ink)
                 }
         }
         .chartXAxis {
             AxisMarks(values: history.map { String($0.year) }) {
-                AxisValueLabel().font(.system(size: 8)).foregroundStyle(.secondary)
+                AxisValueLabel().font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }
         .chartYAxis(.hidden)
     }
 
     private func anchorStrip(_ industry: IndustryPayload) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 0) {
-                ForEach(Array(industry.anchors.enumerated()), id: \.offset) { index, anchor in
-                    Label(anchor, systemImage: anchorIcon(index))
-                        .font(.system(size: 11, weight: .semibold))
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+            ForEach(Array(industry.anchors.enumerated()), id: \.offset) { index, anchor in
+                HStack(spacing: 8) {
+                    Image(systemName: anchorIcon(index))
+                        .foregroundStyle(HoldingsPalette.green)
+                        .frame(width: 24)
+                    Text(anchor)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(HoldingsPalette.ink)
-                        .padding(.horizontal, 12)
-                    if index != industry.anchors.indices.last {
-                        Divider().frame(height: 20)
-                    }
+                    Spacer()
                 }
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(Color.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 11))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11)
+                        .stroke(HoldingsPalette.line)
+                    }
             }
-            .padding(.vertical, 12)
         }
-        .scrollIndicators(.hidden)
-        .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func chainCard(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Label("产业链全景", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 17, weight: .bold))
@@ -298,76 +322,113 @@ struct IndustryPanoramaView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(alignment: .top, spacing: 7) {
+            VStack(spacing: 0) {
                 ForEach(Array(industry.chain.enumerated()), id: \.element.id) { index, group in
-                    chainColumn(group, companies: industry.companies.filter { $0.stageID == group.id }, index: index)
+                    chainRow(
+                        group,
+                        companies: industry.companies.filter { $0.stageID == group.id },
+                        index: index,
+                        isLast: index == industry.chain.count - 1
+                    )
                 }
             }
         }
-        .padding(14)
-        .background(Color.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(HoldingsPalette.line))
+        .padding(16)
+        .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(HoldingsPalette.line))
     }
 
-    private func chainColumn(
+    private func chainRow(
         _ group: IndustryPayload.ChainGroup,
         companies: [IndustryPayload.Company],
-        index: Int
+        index: Int,
+        isLast: Bool
     ) -> some View {
         let color = chainColor(index)
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("\(group.level) · \(group.title)")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(color)
-                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                .padding(.horizontal, 9)
-                .background(color.opacity(0.07), in: arrowShape(index))
+        return HStack(alignment: .top, spacing: 14) {
+            VStack(spacing: 0) {
+                Text(group.level)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(color, in: Circle())
+                if !isLast {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.55), chainColor(index + 1).opacity(0.45)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 2)
+                        .frame(minHeight: 190)
+                }
+            }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(group.items.enumerated()), id: \.offset) { itemIndex, item in
-                    Label(item, systemImage: stageIcon(index, itemIndex))
-                        .font(.system(size: 10, weight: .medium))
+            VStack(alignment: .leading, spacing: 13) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(group.title)
+                        .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(HoldingsPalette.ink)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 7)
-                    if itemIndex != group.items.indices.last {
-                        Divider()
+                    Text(group.items.joined(separator: "  ·  "))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(color.opacity(0.055), in: RoundedRectangle(cornerRadius: 13))
+                .overlay(RoundedRectangle(cornerRadius: 13).stroke(color.opacity(0.16)))
+
+                if companies.isEmpty {
+                    Text("代表企业数据更新中")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                } else {
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: min(companies.count, 2)),
+                        spacing: 10
+                    ) {
+                        ForEach(companies) { company in
+                            companyCard(company, color: color)
+                        }
                     }
                 }
             }
-            .padding(.horizontal, 8)
-            .background(color.opacity(0.025), in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(color.opacity(0.18)))
-
-            ForEach(companies) { company in
-                companyCard(company, color: color)
-            }
+            .padding(.bottom, isLast ? 0 : 18)
         }
-        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private func companyCard(_ company: IndustryPayload.Company, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .top, spacing: 10) {
             Text(company.monogram ?? String(company.name.prefix(2)))
-                .font(.system(size: 13, weight: .bold, design: .serif))
+                .font(.system(size: 12, weight: .bold, design: .serif))
                 .foregroundStyle(color)
-            Text(company.name)
-                .font(.system(size: 11, weight: .bold))
-                .lineLimit(1)
-            if let ticker = company.ticker {
-                Text(ticker)
-                    .font(.system(size: 8, design: .monospaced))
+                .frame(width: 44, height: 44)
+                .background(color.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.18)))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(company.name)
+                    .font(.system(size: 13, weight: .bold))
+                    .lineLimit(1)
+                if let ticker = company.ticker {
+                    Text(ticker)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Text(company.role)
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            Text(company.role)
-                .font(.system(size: 8))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
-        .background(Color.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(color.opacity(0.18)))
+        .padding(10)
+        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.16)))
     }
 
     private func insightSection(_ industry: IndustryPayload) -> some View {
@@ -375,25 +436,34 @@ struct IndustryPanoramaView: View {
             Label("产业观察", systemImage: "eye")
                 .font(.system(size: 16, weight: .bold))
 
-            HStack(alignment: .top, spacing: 8) {
-                ForEach(Array(industry.insights.enumerated()), id: \.element.id) { index, insight in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Image(systemName: insightIcon(index))
-                            .foregroundStyle(chainColor(index))
-                        Text(insight.title)
-                            .font(.system(size: 11, weight: .bold))
-                        Text(insight.detail)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(Array(industry.insights.enumerated()), id: \.element.id) { index, insight in
+                        insightCard(insight, index: index)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
-                    .padding(10)
-                    .background(chainColor(index).opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(chainColor(index).opacity(0.12)))
                 }
             }
+            .scrollIndicators(.hidden)
         }
+    }
+
+    private func insightCard(_ insight: IndustryPayload.Insight, index: Int) -> some View {
+        let color = chainColor(index)
+        return VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: insightIcon(index))
+                .foregroundStyle(color)
+            Text(insight.title)
+                .font(.system(size: 13, weight: .bold))
+            Text(insight.detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(4)
+        }
+        .frame(width: 185, alignment: .topLeading)
+        .frame(minHeight: 108, alignment: .topLeading)
+        .padding(12)
+        .background(color.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.12)))
     }
 
     private func provenanceRow(_ industry: IndustryPayload) -> some View {
@@ -408,8 +478,8 @@ struct IndustryPanoramaView: View {
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .bold))
         }
-        .font(.system(size: 10))
-        .padding(13)
+        .font(.system(size: 11))
+        .padding(14)
         .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 11))
     }
 
@@ -420,10 +490,10 @@ struct IndustryPanoramaView: View {
                 Label(source.name, systemImage: "arrow.up.right")
                     .labelStyle(.titleAndIcon)
             }
-            .font(.system(size: 9))
+            .font(.system(size: 10))
             .foregroundStyle(.secondary)
         } else {
-            Text(source.name).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(source.name).font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
 
@@ -482,15 +552,6 @@ struct IndustryPanoramaView: View {
         ["battery.100percent", "gearshape.2", "car.side", "bolt.car"][index % 4]
     }
 
-    private func stageIcon(_ column: Int, _ row: Int) -> String {
-        let icons = [
-            ["mountain.2", "circle.hexagongrid", "drop", "square.grid.3x3"],
-            ["battery.100percent", "gearshape.2", "thermometer.medium", "car.side"],
-            ["bolt.car", "building.2", "bolt", "wrench.and.screwdriver"]
-        ]
-        return icons[column % icons.count][row % icons[column % icons.count].count]
-    }
-
     private func insightIcon(_ index: Int) -> String {
         ["chart.bar.xaxis", "leaf.circle", "bolt.car.circle"][index % 3]
     }
@@ -499,9 +560,6 @@ struct IndustryPanoramaView: View {
         [Color(red: 0.74, green: 0.34, blue: 0.07), HoldingsPalette.green, HoldingsPalette.blue][index % 3]
     }
 
-    private func arrowShape(_ index: Int) -> some InsettableShape {
-        RoundedRectangle(cornerRadius: 9)
-    }
 }
 
 private extension HoldingsPalette {
