@@ -661,7 +661,16 @@ private struct PersonPhotoCard: View {
         VStack(alignment: .leading, spacing: 9) {
             Group {
                 if let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
-                    RemoteImage(url: url, height: 132, cornerRadius: 14)
+                    RemoteImage(
+                        url: url,
+                        height: 132,
+                        cornerRadius: 14,
+                        contentMode: .fit
+                    )
+                    .background(
+                        Color(uiColor: .secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 14)
+                    )
                 } else {
                     RoundedRectangle(cornerRadius: 14)
                         .fill(Color.secondary.opacity(0.1))
