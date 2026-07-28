@@ -338,7 +338,10 @@ private struct PersonDetailPage: View {
             PersonVideoDetailView(video: video)
         }
         .navigationDestination(item: $selectedArticle) { article in
-            PersonArticleDetailView(article: article)
+            PersonArticleDetailView(
+                articles: store.articles,
+                initialArticleID: article.id
+            )
         }
         .task(id: person.id) {
             await store.load(person: person)
@@ -508,13 +511,38 @@ private struct PersonDetailPage: View {
             )
             .padding(.top, 30)
         } else {
-            LazyVStack(spacing: 12) {
-                ForEach(store.articles) { article in
-                    PersonArticleCard(article: article) { selectedArticle = article }
+            LazyVStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("文章 \(store.articles.count)")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Label("最新", systemImage: "chevron.down")
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 14)
+
+                ForEach(Array(store.articles.enumerated()), id: \.element.id) { index, article in
+                    PersonArticleRow(
+                        article: article,
+                        featured: index == 0,
+                        portraitURL: person.avatarURL(baseURL: ServerConfiguration.currentURL),
+                        portraitAssetName: person.avatarAssetName,
+                        personName: person.name
+                    ) {
+                        selectedArticle = article
+                    }
+
+                    if index < store.articles.count - 1 {
+                        Divider()
+                            .padding(.leading, 20)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
             .padding(.bottom, 28)
         }
     }
@@ -1100,97 +1128,118 @@ private enum PersonRelatedSection: String, CaseIterable, Identifiable {
     }
 }
 
-private struct PersonArticleCard: View {
+private struct PersonArticleRow: View {
     let article: PersonArticle
+    let featured: Bool
+    let portraitURL: URL?
+    let portraitAssetName: String?
+    let personName: String
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 8) {
-                    Text(article.sourceName)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .lineLimit(1)
-                    Circle()
-                        .fill(Color.secondary.opacity(0.35))
-                        .frame(width: 3, height: 3)
-                    Text(article.publishedDateLabel ?? "日期未知")
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(listTitle)
+                        .font(.system(size: featured ? 20 : 18, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineSpacing(2)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    if !article.displaySummary.isEmpty {
+                        Text(article.displaySummary)
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.primary.opacity(0.72))
+                            .lineSpacing(3)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+
+                    Text(metadataLabel)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    if article.language != "zh" {
-                        Text("中译")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .background(Color.secondary.opacity(0.08), in: Capsule())
-                    }
                 }
 
-                Text(article.displayTitle)
-                    .font(.system(size: 21, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .lineSpacing(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if !article.displaySummary.isEmpty {
-                    Text(article.displaySummary)
-                        .font(.system(size: 15))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(4)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                }
-
-                HStack {
-                    Label(readingLabel, systemImage: "clock")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 30, height: 30)
-                        .background(Color.accentColor.opacity(0.1), in: Circle())
+                if featured {
+                    PersonPortraitView(
+                        url: portraitURL,
+                        name: personName,
+                        size: 84,
+                        assetName: portraitAssetName
+                    )
                 }
             }
-            .padding(18)
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color.primary.opacity(0.045), lineWidth: 1)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, featured ? 18 : 15)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityHint("在应用内打开中文文章")
     }
 
-    private var readingLabel: String {
-        article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟" : "短篇"
+    private var metadataLabel: String {
+        [
+            article.sourceName,
+            article.publishedDateLabel,
+            article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟" : nil
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+    }
+
+    private var listTitle: String {
+        let title = article.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title == "-" || title.isEmpty ? "\(personName) 最新文章" : title
     }
 }
 
 private struct PersonArticleDetailView: View {
-    let article: PersonArticle
+    let articles: [PersonArticle]
+    let initialArticleID: PersonArticle.ID
     @Environment(\.openURL) private var openURL
+    @State private var currentIndex: Int
     @State private var loadedArticle: PersonArticle?
     @State private var errorMessage: String?
+    @State private var horizontalOffset: CGFloat = 0
+
+    init(articles: [PersonArticle], initialArticleID: PersonArticle.ID) {
+        self.articles = articles
+        self.initialArticleID = initialArticleID
+        _currentIndex = State(
+            initialValue: articles.firstIndex { $0.id == initialArticleID } ?? 0
+        )
+    }
+
+    private var article: PersonArticle {
+        guard articles.indices.contains(currentIndex) else {
+            return articles.first!
+        }
+        return articles[currentIndex]
+    }
 
     var body: some View {
-        Group {
-            if let loadedArticle {
-                articleBody(loadedArticle)
-            } else if let errorMessage {
-                failureView(errorMessage)
-            } else {
-                loadingView
+        ZStack(alignment: .leading) {
+            if canAdvance {
+                Color.accentColor
+                    .opacity(0.72)
+                    .frame(width: 5)
+                    .accessibilityHidden(true)
             }
+
+            Group {
+                if let loadedArticle {
+                    articleBody(loadedArticle)
+                } else if let errorMessage {
+                    failureView(errorMessage)
+                } else {
+                    loadingView
+                }
+            }
+            .offset(x: horizontalOffset)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(Color(uiColor: .systemBackground))
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -1206,7 +1255,12 @@ private struct PersonArticleDetailView: View {
                 }
             }
         }
-        .task(id: article.id) { await load() }
+        .simultaneousGesture(pageGesture)
+        .task(id: article.id) {
+            loadedArticle = nil
+            errorMessage = nil
+            await load()
+        }
     }
 
     private var loadingView: some View {
@@ -1240,15 +1294,16 @@ private struct PersonArticleDetailView: View {
     }
 
     private func articleBody(_ article: PersonArticle) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(article.sourceName.uppercased())
                         .font(.system(size: 12, weight: .bold))
                         .tracking(1.1)
                         .foregroundStyle(Color.accentColor)
 
-                    Text(article.displayTitle)
+                    Text(displayTitle(for: article))
                         .font(.system(size: 32, weight: .bold, design: .serif))
                         .lineSpacing(5)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1259,6 +1314,8 @@ private struct PersonArticleDetailView: View {
                             Circle().fill(Color.secondary.opacity(0.4)).frame(width: 3, height: 3)
                             Text("\(article.readingMinutes) 分钟阅读")
                         }
+                        Circle().fill(Color.secondary.opacity(0.4)).frame(width: 3, height: 3)
+                        Text("\(currentIndex + 1) / \(articles.count)")
                     }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -1302,8 +1359,74 @@ private struct PersonArticleDetailView: View {
                 .padding(.vertical, 26)
                 .background(Color(uiColor: .systemBackground))
             }
+            }
+
+            articlePager
         }
     }
+
+    private var articlePager: some View {
+        HStack(spacing: 12) {
+            if canGoBack {
+                Text("向左滑 · 上一篇")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity)
+            }
+
+            if canAdvance {
+                HStack(spacing: 5) {
+                    Text("向右滑 · 下一篇")
+                    Image(systemName: "arrow.right")
+                }
+                .foregroundStyle(Color.accentColor)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 20)
+        .frame(minHeight: 48)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider() }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var pageGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.35 else {
+                    return
+                }
+                let translation = value.translation.width
+                if (translation > 0 && canAdvance) || (translation < 0 && canGoBack) {
+                    horizontalOffset = translation * 0.22
+                }
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let isHorizontal = abs(horizontal) > abs(value.translation.height) * 1.35
+                let targetIndex: Int?
+                if isHorizontal, horizontal > 72, canAdvance {
+                    targetIndex = currentIndex + 1
+                } else if isHorizontal, horizontal < -72, canGoBack {
+                    targetIndex = currentIndex - 1
+                } else {
+                    targetIndex = nil
+                }
+
+                withAnimation(.snappy(duration: 0.28)) {
+                    horizontalOffset = 0
+                    if let targetIndex {
+                        currentIndex = targetIndex
+                    }
+                }
+            }
+    }
+
+    private var canAdvance: Bool { currentIndex < articles.count - 1 }
+    private var canGoBack: Bool { currentIndex > 0 }
 
     private func load() async {
         errorMessage = nil
@@ -1323,6 +1446,22 @@ private struct PersonArticleDetailView: View {
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private func displayTitle(for article: PersonArticle) -> String {
+        let title = article.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard title == "-" || title.isEmpty else { return title }
+        guard let firstParagraph = Self.paragraphs(from: article.displayContent).first else {
+            return "未命名文章"
+        }
+        let sentence = firstParagraph
+            .components(separatedBy: CharacterSet(charactersIn: "。！？"))
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let sentence, !sentence.isEmpty {
+            return sentence
+        }
+        return "未命名文章"
     }
 }
 

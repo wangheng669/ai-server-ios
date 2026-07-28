@@ -68,3 +68,72 @@ The final combined comparison shows the same primary composition, hierarchy, sta
 - P3: The final industry label remains partially clipped to communicate horizontal scrolling.
 
 final result: passed
+
+---
+
+# Person Article Redesign — Design QA
+
+final result: passed
+
+## Evidence
+
+- Source visual truth:
+  - `/Users/wangheng/.codex/generated_images/019fa79e-004e-7822-be54-43d00b34dc45/call_UnMX9QJlw6LIVp9OnIZPVm7S.png`
+  - `/Users/wangheng/.codex/generated_images/019fa79e-004e-7822-be54-43d00b34dc45/call_rCyahXzjgQNDChsVRLEPyKG7.png`
+- Implementation captures:
+  - `artifacts/person-article-redesign/list-implementation.jpg`
+  - `artifacts/person-article-redesign/detail-implementation.jpg`
+- Combined comparisons:
+  - `artifacts/person-article-redesign/list-comparison.png`
+  - `artifacts/person-article-redesign/detail-comparison.png`
+- Target viewport: iPhone 16e Simulator, 369 × 800 rendered pixels.
+- Source dimensions: 853 × 1844 pixels. For equal-size visual comparison, sources were normalized to 369 × 800.
+- State:
+  - Person page, “文章” selected, live Sam Altman article data.
+  - Article detail, article 2 of 30, translated Chinese body loaded.
+
+## Full-view comparison
+
+The implementation keeps the existing product’s person header, navigation hierarchy, colors, typography, segmented control, and bottom tab bar. The article area now follows the selected direction: a continuous, compact native list instead of isolated oversized cards. The detail page matches the selected clean reading direction, with source, title, metadata, Chinese body, page count, and persistent swipe guidance.
+
+The generated list reference contains invented per-article artwork and summaries that are not present in the production API. The implementation intentionally uses the real person portrait only for the featured item and does not fabricate article imagery or copy. This is an accepted data-fidelity constraint rather than unresolved design drift.
+
+## Focused comparison
+
+Focused comparison was performed on:
+
+- Person header to segmented control: hierarchy, spacing, selected colors, and existing product identity are preserved.
+- First three article rows: titles and metadata align to the selected compact information hierarchy; placeholder source title `-` is normalized to readable Chinese.
+- Detail header and first paragraphs: typography, line length, metadata, and page count remain readable at the real simulator width.
+- Bottom reading affordance: swipe directions stay visible without covering article text.
+
+## Required fidelity surfaces
+
+- Fonts and typography: system iOS fonts retained; article list uses 18–20 pt bold titles and 12–15 pt metadata/body; detail uses 18–19 pt Chinese reading text with expanded line spacing. No truncation is visible in the tested state.
+- Spacing and layout rhythm: person header remains unchanged; article cards were replaced by 15–18 pt row padding and lightweight dividers; the detail footer remains inside the safe reading area.
+- Colors and visual tokens: existing system background, secondary gray, accent blue, and native materials are preserved.
+- Image quality and asset fidelity: the real server/person asset is used with the existing portrait component; no placeholder illustrations or fabricated thumbnails were introduced.
+- Copy and content: article titles and content use server-provided Chinese fields. Placeholder titles are normalized; translation badges and translation loading controls are absent.
+
+## Interaction verification
+
+- Right swipe: article 2/30 advanced to article 3/30.
+- Left swipe: article 3/30 returned to article 2/30.
+- Vertical article scrolling remained available.
+- Navigation, Share, and source/Safari actions remain present.
+- XCTest result: 119 passed, 0 failed, 0 skipped.
+
+## Comparison history
+
+1. Initial implementation capture:
+   - P1: Xcode reused build products across worktrees, intermittently showing the old article-card UI.
+   - Fix: assigned a task-specific DerivedData path and rebuilt from the task worktree.
+   - Post-fix evidence: the final implementation captures show the continuous article list and page-swipe detail.
+2. Initial list capture:
+   - P2: source title `-` appeared as a broken title.
+   - Fix: normalize placeholder list titles to a Chinese fallback; detail derives a title from the translated first sentence when needed.
+   - Post-fix evidence: the final list capture shows `Sam Altman 最新文章`.
+
+## Follow-up polish
+
+- If the backend later supplies article-specific thumbnails and nonempty summaries, the list row already has room to add those without changing navigation or gesture behavior.
