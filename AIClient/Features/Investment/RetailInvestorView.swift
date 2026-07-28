@@ -30,8 +30,13 @@ struct RetailInvestorView: View {
                 .padding(.bottom, 28)
             }
             .background(Color(uiColor: .systemBackground))
-            .refreshable { await store.load(force: true) }
+            .refreshable {
+                async let overview: Void = store.load(force: true)
+                async let details: Void = store.loadDetails(for: selectedMarket, force: true)
+                _ = await (overview, details)
+            }
             .task { await store.load() }
+            .task(id: selectedMarket) { await store.loadDetails(for: selectedMarket) }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: InvestorMoodRoute.self) { route in
                 InvestorMoodWebView(route: route)
@@ -750,6 +755,8 @@ private final class RetailSentimentStore {
     private(set) var errorMessage: String?
     private let service: MarketService
     private var loaded = false
+    private var loadedMarkets: Set<SentimentMarket> = []
+    private var loadingMarkets: Set<SentimentMarket> = []
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -894,10 +901,6 @@ private final class RetailSentimentStore {
         async let dashboardRequest = service.dashboard(refresh: force)
         async let moodRequest = service.investorMood()
         async let temperatureRequest = service.aShareTemperature()
-        async let hongKongRequest = service.indexConstituents(symbol: "^HSI")
-        async let unitedStatesRequest = service.indexConstituents(symbol: "^GSPC")
-        async let hongKongValuationRequest = service.hongKongValuationHistory()
-        async let unitedStatesValuationRequest = service.unitedStatesValuationHistory()
         do {
             dashboard = try await dashboardRequest
             loaded = true
@@ -921,8 +924,30 @@ private final class RetailSentimentStore {
         } catch {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
+    }
+
+    func loadDetails(for market: SentimentMarket, force: Bool = false) async {
+        guard market != .china else { return }
+        if loadedMarkets.contains(market), !force { return }
+        guard loadingMarkets.insert(market).inserted else { return }
+        defer { loadingMarkets.remove(market) }
+
+        switch market {
+        case .china:
+            return
+        case .hongKong:
+            await loadHongKongDetails()
+        case .unitedStates:
+            await loadUnitedStatesDetails()
+        }
+        loadedMarkets.insert(market)
+    }
+
+    private func loadHongKongDetails() async {
+        async let constituentsRequest = service.indexConstituents(symbol: "^HSI")
+        async let valuationRequest = service.hongKongValuationHistory()
         do {
-            hongKongConstituents = try await hongKongRequest
+            hongKongConstituents = try await constituentsRequest
         } catch is CancellationError {
             return
         } catch {
@@ -943,14 +968,19 @@ private final class RetailSentimentStore {
             }
         }
         do {
-            hongKongValuationHistory = try await hongKongValuationRequest
+            hongKongValuationHistory = try await valuationRequest
         } catch is CancellationError {
             return
         } catch {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
+    }
+
+    private func loadUnitedStatesDetails() async {
+        async let constituentsRequest = service.indexConstituents(symbol: "^GSPC")
+        async let valuationRequest = service.unitedStatesValuationHistory()
         do {
-            unitedStatesConstituents = try await unitedStatesRequest
+            unitedStatesConstituents = try await constituentsRequest
         } catch is CancellationError {
             return
         } catch {
@@ -971,7 +1001,7 @@ private final class RetailSentimentStore {
             }
         }
         do {
-            unitedStatesValuationHistory = try await unitedStatesValuationRequest
+            unitedStatesValuationHistory = try await valuationRequest
         } catch is CancellationError {
             return
         } catch {
