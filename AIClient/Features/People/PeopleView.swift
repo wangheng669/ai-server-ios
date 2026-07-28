@@ -239,11 +239,15 @@ private struct PersonDetailPage: View {
     @State private var selectedPost: Post?
     @State private var selectedVideo: PersonVideo?
     @State private var selectedArticle: PersonArticle?
+    @State private var selectedPhoto: PersonPhoto?
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 personHeader
+                if !person.photos.isEmpty {
+                    PersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
+                }
                 sectionPicker
                 sectionContent
             }
@@ -278,6 +282,9 @@ private struct PersonDetailPage: View {
                 articles: store.articles,
                 initialArticleID: article.id
             )
+        }
+        .sheet(item: $selectedPhoto) { photo in
+            PersonPhotoViewer(photo: photo)
         }
         .task(id: person.id) {
             await store.load(person: person)
@@ -608,6 +615,118 @@ private struct PersonDetailPage: View {
                 let displayPost = store.postForDisplay(post)
                 PersonRelatedPostRow(post: displayPost) { selectedPost = displayPost }
                     .task { await store.translateXPostIfNeeded(post) }
+            }
+        }
+    }
+}
+
+private struct PersonPhotoGallery: View {
+    let photos: [PersonPhoto]
+    let onSelect: (PersonPhoto) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("人物影像")
+                    .font(.system(size: 20, weight: .bold))
+                Spacer()
+                Text("\(photos.count) 张")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 12) {
+                    ForEach(photos) { photo in
+                        Button { onSelect(photo) } label: {
+                            PersonPhotoCard(photo: photo)
+                        }
+                        .buttonStyle(PeoplePressStyle())
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(.top, 2)
+        .padding(.bottom, 20)
+    }
+}
+
+private struct PersonPhotoCard: View {
+    let photo: PersonPhoto
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Group {
+                if let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
+                    RemoteImage(url: url, height: 132, cornerRadius: 14)
+                } else {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.secondary.opacity(0.1))
+                        .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
+                }
+            }
+            .frame(width: 210, height: 132)
+            .clipped()
+
+            Text(photo.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text([photo.date, photo.source].compactMap { $0 }.joined(separator: " · "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 210, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct PersonPhotoViewer: View {
+    let photo: PersonPhoto
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
+                        RemoteImage(url: url, height: 430, cornerRadius: 0, contentMode: .fit)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(photo.title)
+                            .font(.title2.bold())
+                        if let caption = photo.caption {
+                            Text(caption)
+                                .font(.body)
+                                .lineSpacing(4)
+                        }
+                        Text([photo.date, photo.author, photo.license].compactMap { $0 }.joined(separator: " · "))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        if let sourceURL = photo.sourceURL {
+                            Link(destination: sourceURL) {
+                                Label("查看来源：\(photo.source)", systemImage: "arrow.up.right.square")
+                                    .font(.subheadline.weight(.medium))
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 28)
+                }
+            }
+            .navigationTitle("人物影像")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
             }
         }
     }

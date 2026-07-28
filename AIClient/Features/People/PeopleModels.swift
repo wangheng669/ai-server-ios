@@ -37,6 +37,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     private let rolesValue: [PersonRole]?
     private let milestonesValue: [PersonMilestone]?
     private let relatedPeopleValue: [RelatedPerson]?
+    private let photosValue: [PersonPhoto]?
     private let profileUpdatedAtValue: String?
 
     var id: String { userID }
@@ -70,6 +71,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     }
     var milestones: [PersonMilestone] { milestonesValue ?? [] }
     var relatedPeople: [RelatedPerson] { relatedPeopleValue ?? [] }
+    var photos: [PersonPhoto] { photosValue ?? [] }
     var profileUpdatedAt: String? { nonempty(profileUpdatedAtValue) }
     var summary: String {
         if let description = nonempty(userDescription),
@@ -100,6 +102,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         case rolesValue = "roles"
         case milestonesValue = "milestones"
         case relatedPeopleValue = "related_people"
+        case photosValue = "photos"
         case profileUpdatedAtValue = "profile_updated_at"
     }
 
@@ -129,6 +132,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         rolesValue = nil
         milestonesValue = nil
         relatedPeopleValue = nil
+        photosValue = nil
         profileUpdatedAtValue = nil
     }
 
@@ -347,6 +351,33 @@ struct RelatedPerson: Decodable, Identifiable, Hashable {
         }
         return URL(string: value, relativeTo: baseURL)?.absoluteURL
     }
+}
+
+struct PersonPhoto: Decodable, Identifiable, Hashable {
+    let id: String
+    let imageURLValue: String
+    let title: String
+    let caption: String?
+    let date: String?
+    let source: String
+    let sourceURLValue: String
+    let author: String?
+    let license: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, caption, date, source, author, license
+        case imageURLValue = "image_url"
+        case sourceURLValue = "source_url"
+    }
+
+    func imageURL(baseURL: URL) -> URL? {
+        if let url = URL(string: imageURLValue), url.scheme != nil {
+            return MediaURL.image(imageURLValue) ?? url
+        }
+        return URL(string: imageURLValue, relativeTo: baseURL)?.absoluteURL
+    }
+
+    var sourceURL: URL? { URL(string: sourceURLValue) }
 }
 
 private func nonempty(_ value: String?) -> String? {
