@@ -46,4 +46,4 @@ jobs:
       - name: Safely synchronize the primary checkout
         run: |
           ./ci/automatic-main-sync.sh \
-            /Users/wangheng/Desktop/ai_server_ios
+            /Users/wangheng/Desktop/ai-server-ios
