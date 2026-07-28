@@ -128,6 +128,7 @@ actor PersonArticleTranslationService {
     private let endpoint = URL(string: "https://translate.googleapis.com/translate_a/single")!
     private let session: URLSession
     private var memoryCache: [String: String] = [:]
+    private var nextRequestAt = Date.distantPast
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -145,6 +146,7 @@ actor PersonArticleTranslationService {
         var translatedChunks: [String] = []
         for chunk in chunks {
             guard !Task.isCancelled else { throw CancellationError() }
+            await reserveRequestSlot()
             translatedChunks.append(try await translateChunk(chunk))
         }
         let translated = Self.preserveProductNames(
@@ -155,34 +157,55 @@ actor PersonArticleTranslationService {
         return translated
     }
 
-    private func translateChunk(_ text: String) async throws -> String {
-        var request = URLRequest(url: endpoint, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        var form = URLComponents()
-        form.queryItems = [
-            .init(name: "client", value: "gtx"),
-            .init(name: "sl", value: "auto"),
-            .init(name: "tl", value: "zh-CN"),
-            .init(name: "dt", value: "t"),
-            .init(name: "q", value: text)
-        ]
-        request.httpBody = form.percentEncodedQuery?.data(using: .utf8)
+    private func reserveRequestSlot() async {
+        let now = Date()
+        let scheduled = max(now, nextRequestAt)
+        nextRequestAt = scheduled.addingTimeInterval(0.4)
+        let delay = scheduled.timeIntervalSince(now)
+        if delay > 0 {
+            try? await Task.sleep(for: .seconds(delay))
+        }
+    }
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw PeopleServiceError.invalidResponse
+    private func translateChunk(_ text: String) async throws -> String {
+        for attempt in 0..<3 {
+            var request = URLRequest(url: endpoint, timeoutInterval: 30)
+            request.httpMethod = "POST"
+            request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            var form = URLComponents()
+            form.queryItems = [
+                .init(name: "client", value: "gtx"),
+                .init(name: "sl", value: "auto"),
+                .init(name: "tl", value: "zh-CN"),
+                .init(name: "dt", value: "t"),
+                .init(name: "q", value: text)
+            ]
+            request.httpBody = form.percentEncodedQuery?.data(using: .utf8)
+
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw PeopleServiceError.invalidResponse
+            }
+            if http.statusCode == 429 || (500..<600).contains(http.statusCode) {
+                guard attempt < 2 else { throw PeopleServiceError.invalidResponse }
+                try await Task.sleep(for: .milliseconds(700 * (attempt + 1)))
+                continue
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw PeopleServiceError.invalidResponse
+            }
+            guard let payload = try JSONSerialization.jsonObject(with: data) as? [Any],
+                  let segments = payload.first as? [Any] else {
+                throw PeopleServiceError.invalidResponse
+            }
+            let translated = segments.compactMap { segment -> String? in
+                guard let values = segment as? [Any], let value = values.first as? String else { return nil }
+                return value
+            }.joined()
+            guard !translated.isEmpty else { throw PeopleServiceError.invalidResponse }
+            return translated
         }
-        guard let payload = try JSONSerialization.jsonObject(with: data) as? [Any],
-              let segments = payload.first as? [Any] else {
-            throw PeopleServiceError.invalidResponse
-        }
-        let translated = segments.compactMap { segment -> String? in
-            guard let values = segment as? [Any], let value = values.first as? String else { return nil }
-            return value
-        }.joined()
-        guard !translated.isEmpty else { throw PeopleServiceError.invalidResponse }
-        return translated
+        throw PeopleServiceError.invalidResponse
     }
 
     nonisolated static func chunks(from text: String, maximumCharacters: Int) -> [String] {
