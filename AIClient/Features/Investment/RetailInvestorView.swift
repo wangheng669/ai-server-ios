@@ -17,7 +17,6 @@ struct RetailInvestorView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    header
                     marketPicker
                     if let message = store.errorMessage {
                         errorBanner(message)
@@ -59,79 +58,47 @@ struct RetailInvestorView: View {
         let temperature = snapshot?.score
         let progress = CGFloat(min(max(temperature ?? 0, 0), 100) / 100)
         let accent = temperatureColor(temperature)
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 16) {
             HStack {
-                HStack(spacing: 7) {
-                    Text(snapshot?.label.nonEmpty ?? "等待数据")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(accent)
-                    Text("综合温度")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
+                Text("\(selectedMarket.title)市场")
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if store.isLoading {
                     ProgressView().controlSize(.mini)
                 } else if let fetchedAt = snapshot?.fetchedAt {
                     Text(RetailSentimentFormat.shortTime(fetchedAt))
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
             }
 
-            HStack(alignment: .center, spacing: 18) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text(temperature.map { String(Int($0.rounded())) } ?? "—")
-                            .font(.system(size: 46, weight: .bold, design: .rounded))
-                            .tracking(-1.5)
-                            .contentTransition(.numericText())
-                        Text("/100")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(temperatureNarrative(temperature))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                Text(temperature.map { String(Int($0.rounded())) } ?? "—")
+                    .font(.system(size: 48, weight: .semibold, design: .rounded))
+                    .tracking(-2)
+                    .contentTransition(.numericText())
+                Text(snapshot?.label.nonEmpty ?? "等待数据")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(accent)
                 Spacer()
-                HStack(spacing: 18) {
-                    compactFactor(
-                        title: snapshot?.primaryTitle ?? "估值",
-                        value: snapshot?.primaryValue,
-                        tint: .blue
-                    )
-                    compactFactor(
-                        title: snapshot?.secondaryTitle ?? "情绪",
-                        value: snapshot?.secondaryValue,
-                        tint: HoldingsPalette.purple
-                    )
-                }
             }
 
-            VStack(spacing: 6) {
+            Text(temperatureNarrative(temperature))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 7) {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.blue, .cyan, .yellow, .orange, .red],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .opacity(0.72)
-                            .frame(height: 5)
-                        Circle()
-                            .fill(Color(uiColor: .systemBackground))
-                            .overlay(Circle().stroke(accent, lineWidth: 2))
-                            .frame(width: 13, height: 13)
-                            .offset(x: max(0, min(proxy.size.width - 13, progress * proxy.size.width - 6.5)))
+                            .fill(Color(uiColor: .tertiarySystemFill))
+                        Capsule()
+                            .fill(accent)
+                            .frame(width: max(8, proxy.size.width * progress))
                     }
-                    .frame(maxHeight: .infinity)
                 }
-                .frame(height: 13)
+                .frame(height: 6)
                 HStack {
                     Text("冷静")
                     Spacer()
@@ -143,19 +110,29 @@ struct RetailInvestorView: View {
                 .foregroundStyle(.tertiary)
             }
 
-            HStack(spacing: 6) {
-                Image(systemName: "equal.circle")
-                Text("估值与市场广度等权")
-                Spacer()
-                Text(selectedMarket.title)
-                    .foregroundStyle(.secondary)
+            Divider()
+
+            HStack(spacing: 0) {
+                snapshotMetric(
+                    title: snapshot?.primaryTitle ?? "估值温度",
+                    value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—",
+                    tint: .blue
+                )
+                snapshotMetric(
+                    title: snapshot?.secondaryTitle ?? "情绪温度",
+                    value: snapshot?.secondaryValue.map { String(Int($0.rounded())) } ?? "—",
+                    tint: HoldingsPalette.purple
+                )
+                snapshotMetric(
+                    title: "上涨占比",
+                    value: String(format: "%.0f%%", selectedBreadth.upRatio * 100),
+                    tint: .red
+                )
             }
-            .font(.system(size: 10.5, weight: .medium))
-            .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 18)
         .background(Color(uiColor: .systemBackground))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedMarket.title)市场情绪 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
@@ -169,7 +146,7 @@ struct RetailInvestorView: View {
                         selectedMarket = market
                     }
                 } label: {
-                    VStack(spacing: 9) {
+                    VStack(spacing: 8) {
                         Text(market.title)
                             .font(.system(size: 14, weight: selectedMarket == market ? .semibold : .regular))
                             .foregroundStyle(selectedMarket == market ? Color.primary : Color.secondary)
@@ -184,6 +161,7 @@ struct RetailInvestorView: View {
             }
         }
         .padding(.horizontal, 8)
+        .padding(.top, 4)
         .background(Color(uiColor: .systemBackground))
         .accessibilityLabel("选择市场情绪")
     }
@@ -195,24 +173,9 @@ struct RetailInvestorView: View {
         return store.constituentBreadth(for: selectedMarket)
     }
 
-    private var header: some View {
-        HStack(alignment: .center) {
-            Text("市场情绪")
-                .font(.system(size: 24, weight: .bold))
-            Spacer()
-            Image(systemName: "waveform.path.ecg")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(HoldingsPalette.purple)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 14)
-        .background(Color(uiColor: .systemBackground))
-    }
-
     private var marketBreadthOverview: some View {
         let breadth = selectedBreadth
-        return VStack(alignment: .leading, spacing: 13) {
+        return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text(selectedMarket == .china ? "市场广度" : "核心成分")
                     .font(.system(size: 16, weight: .bold))
@@ -237,9 +200,9 @@ struct RetailInvestorView: View {
             .frame(height: 10)
 
             HStack(spacing: 0) {
-                breadthSummary("上涨", value: breadth.up, color: .red)
-                breadthSummary("平盘", value: breadth.flat, color: .secondary)
-                breadthSummary("下跌", value: breadth.down, color: .green)
+                compactBreadthSummary("上涨", value: breadth.up, color: .red)
+                compactBreadthSummary("平盘", value: breadth.flat, color: .secondary)
+                compactBreadthSummary("下跌", value: breadth.down, color: .green)
             }
         }
         .padding(16)
@@ -265,8 +228,16 @@ struct RetailInvestorView: View {
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundStyle(.tertiary)
                             .frame(width: 18)
-                        Text(sector.name)
-                            .font(.system(size: 14, weight: .semibold))
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(sector.name)
+                                .font(.system(size: 14, weight: .semibold))
+                            Capsule()
+                                .fill(Color.red.opacity(0.6))
+                                .frame(
+                                    width: max(14, min(54, abs(sector.percentValue) * 22)),
+                                    height: 3
+                                )
+                        }
                         Spacer()
                         Text(RetailSentimentFormat.percent(sector.percentValue))
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -562,16 +533,17 @@ struct RetailInvestorView: View {
             .frame(height: 8)
     }
 
-    private func compactFactor(title: String, value: Double?, tint: Color) -> some View {
-        VStack(alignment: .trailing, spacing: 3) {
-            Text(value.map { String(Int($0.rounded())) } ?? "—")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
+    private func snapshotMetric(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .foregroundStyle(tint)
             Text(title)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sentimentFactor(title: String, value: Double?, icon: String, tint: Color) -> some View {
@@ -590,13 +562,13 @@ struct RetailInvestorView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func breadthSummary(_ title: String, value: Int, color: Color) -> some View {
-        VStack(spacing: 4) {
+    private func compactBreadthSummary(_ title: String, value: Int, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(value.formatted())
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(color)
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
