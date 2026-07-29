@@ -192,8 +192,50 @@ jobs:
             --force-with-lease="refs/heads/$SOURCE_BRANCH:$SOURCE_SHA" \
             origin ":refs/heads/$SOURCE_BRANCH"
 
-      - name: Install the newly merged main
+      - name: Build app for local iPhone installation
         if: steps.merge.outputs.already_merged == 'false'
+        env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: |
+          set -euo pipefail
+          ./ci/report-ios-deployment.sh running 0.72 building-device-app || true
+          xcodebuild build \
+            -project AIServerClient.xcodeproj \
+            -scheme AIServerClient \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/AIServerClient-AIMergeDevice" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+          app_path="$RUNNER_TEMP/AIServerClient-AIMergeDevice/Build/Products/Debug-iphoneos/AIServerClient.app"
+          test -d "$app_path"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
+
+      - name: Install directly from office Mac mini
+        id: local_install
+        if: steps.merge.outputs.already_merged == 'false'
+        continue-on-error: true
+        env:
+          APP_ARCHIVE: ${{ runner.temp }}/AIServerClient.app.zip
+          APP_PATH: ${{ runner.temp }}/signed-app/AIServerClient.app
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/sign-and-install-ios.sh
+
+      - name: Report local installation completed
+        if: steps.local_install.outcome == 'success'
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
+
+      - name: Fall back to remote installation workflow
+        if: steps.local_install.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -1,20 +1,17 @@
 name: Build on Mac mini and install on iPhone
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       git_ref:
         description: Branch, tag, or commit SHA to build and install
         required: false
         type: string
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('Install {0}', inputs.git_ref || github.ref_name) || github.event.head_commit.message }}
+run-name: Install ${{ inputs.git_ref || github.ref_name }}
 
 concurrency:
-  # All automatic and manual device deployments share one latest-wins queue.
-  # A newer main push cancels any older build or install before deploying.
+  # Manual fallback deployments share one latest-wins queue.
+  # A newer request cancels any older build or install before deploying.
   group: ios-device-latest
   cancel-in-progress: true
 
