@@ -303,6 +303,26 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testFlashCategorySelectionIsSentToDedicatedLoader() async {
+        var categories: [String?] = []
+        let model = NewsFeedViewModel(
+            source: .flash,
+            fetchPosts: { _, _, _ in [] },
+            fetchFlashPosts: { _, _, category in
+                categories.append(category)
+                return []
+            }
+        )
+
+        await model.refresh()
+        await model.selectFlashCategory("company")
+
+        XCTAssertEqual(categories.count, 2)
+        XCTAssertNil(categories[0])
+        XCTAssertEqual(categories[1], "company")
+    }
+
+    @MainActor
     func testXRequestsLargerPageAndKeepsPagingAfterPartialResult() async throws {
         var requests: [(page: Int, limit: Int)] = []
         let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
@@ -468,7 +488,7 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     func testDecodesAndMapsFlashItem() throws {
-        let json = #"{"success":true,"data":{"items":[{"id":"f1","time":"18:00","text":"快讯正文","source":"flash:jin10","isImportant":false,"finalScore":7.4}],"hasMore":false}}"#.data(using: .utf8)!
+        let json = #"{"success":true,"data":{"items":[{"id":"f1","time":"18:00","text":"快讯正文","source":"flash:jin10","category":"company","isImportant":false,"finalScore":7.4}],"hasMore":false}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(FlashResponse.self, from: json)
         let post = Post.flash(try XCTUnwrap(response.data.items.first))
 
@@ -476,6 +496,17 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.authorName, "金十数据")
         XCTAssertEqual(post.score, 7.4)
         XCTAssertEqual(post.tagNames, ["重要"])
+        XCTAssertEqual(post.meta?.flashCategory, "company")
+    }
+
+    func testFlashCategoryQueryUsesServerFilter() {
+        let items = APIClient.flashQueryItems(page: 2, limit: 20, category: "tech")
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["offset"], "20")
+        XCTAssertEqual(query["category"], "tech")
     }
 
     func testFlashScoreOverridesLegacyImportantFlag() throws {
@@ -505,6 +536,24 @@ final class FeedAdapterTests: XCTestCase {
         let model = NewsFeedViewModel(source: .flash) { _, _, _ in [] }
 
         XCTAssertTrue(model.matchesCurrentSource(post))
+    }
+
+    @MainActor
+    func testFilteredFlashChannelRejectsRealtimeItemsWithoutMatchingServerCategory() async throws {
+        let company = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":101,"source":"flash","content":"公司快讯","meta":{"flashCategory":"company"}}"#.utf8)
+        )
+        let tech = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":102,"source":"flash","content":"科技快讯","meta":{"flashCategory":"tech"}}"#.utf8)
+        )
+        let model = NewsFeedViewModel(source: .flash) { _, _, _ in [] }
+
+        await model.selectFlashCategory("company")
+
+        XCTAssertTrue(model.matchesCurrentSource(company))
+        XCTAssertFalse(model.matchesCurrentSource(tech))
     }
 
     func testXImageUsesServerProxy() throws {

@@ -163,6 +163,7 @@ struct FlashResponse: Decodable {
 
 struct FlashItem: Decodable {
     let id, time, text, source, linkURL, avatarURL: String?
+    let category: String?
     let isImportant: Bool?
     let finalScore: Double?
     let similarityGroupId: Int64?
@@ -171,7 +172,7 @@ struct FlashItem: Decodable {
     let platformCount: Int?
     let platforms: [String]?
     enum CodingKeys: String, CodingKey {
-        case id, time, text, source, isImportant, finalScore
+        case id, time, text, source, category, isImportant, finalScore
         case similarityGroupId, similarityScore, similarCount, platformCount, platforms
         case linkURL = "linkUrl"
         case avatarURL = "avatarUrl"
@@ -805,6 +806,7 @@ struct Post: Decodable, Identifiable, Hashable {
             postTags: isImportant ? [.init(id: 0, name: "重要")] : [],
             images: [], videos: [], feedRank: nil,
             meta: .flash(
+                category: item.category,
                 similarityGroupId: item.similarityGroupId,
                 similarityScore: item.similarityScore,
                 similarCount: item.similarCount,
@@ -848,6 +850,7 @@ struct PostMeta: Decodable, Hashable {
     let zhihuAnswerCommentCount: Int?
     let rssFeedName: String?
     let rssArticleLink: String?
+    let flashCategory: String?
     let flashSimilarityGroupId: Int64?
     let flashSimilarityScore: Double?
     let flashSimilarCount: Int?
@@ -870,10 +873,11 @@ struct PostMeta: Decodable, Hashable {
         case zhihuAnswerCommentCount = "zhihu_answer_comment_count"
         case rssFeedName = "rss_feed_name"
         case rssArticleLink = "rss_article_link"
-        case flashSimilarityGroupId, flashSimilarityScore, flashSimilarCount, flashPlatformCount, flashPlatforms
+        case flashCategory, flashSimilarityGroupId, flashSimilarityScore, flashSimilarCount, flashPlatformCount, flashPlatforms
     }
 
     static func flash(
+        category: String?,
         similarityGroupId: Int64?,
         similarityScore: Double?,
         similarCount: Int?,
@@ -887,6 +891,7 @@ struct PostMeta: Decodable, Hashable {
             zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
             zhihuAnswerVoteupCount: nil, zhihuAnswerCommentCount: nil,
             rssFeedName: nil, rssArticleLink: nil,
+            flashCategory: category,
             flashSimilarityGroupId: similarityGroupId,
             flashSimilarityScore: similarityScore,
             flashSimilarCount: similarCount,
