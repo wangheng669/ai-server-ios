@@ -51,4 +51,18 @@ final class LearningServiceTests: XCTestCase {
         let url = topic.mediaURL(topic.thumbnailURLValue, baseURL: URL(string: "https://api.example.com")!)
         XCTAssertEqual(url?.absoluteString, "https://api.example.com/api/v1/learning/media/a.jpg")
     }
+
+    func testFeaturedBooksHaveUniqueIDsAndCompleteDetails() {
+        let books = KnowledgeBook.featured
+        XCTAssertGreaterThanOrEqual(books.count, 5)
+        XCTAssertEqual(Set(books.map(\.id)).count, books.count)
+        XCTAssertTrue(books.allSatisfy {
+            !$0.title.isEmpty &&
+                !$0.author.isEmpty &&
+                !$0.summary.isEmpty &&
+                !$0.recommendation.isEmpty &&
+                !$0.suitableFor.isEmpty &&
+                !$0.keyIdeas.isEmpty
+        })
+    }
 }
