@@ -34,7 +34,7 @@ struct RetailInvestorView: View {
                 }
                 .padding(.bottom, 36)
             }
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(Color(uiColor: .systemBackground))
             .refreshable {
                 async let overview: Void = store.load(force: true)
                 async let details: Void = store.loadDetails(for: selectedMarket, force: true)
@@ -55,7 +55,7 @@ struct RetailInvestorView: View {
         let snapshot = store.snapshot(for: selectedMarket)
         let temperature = snapshot?.score
         let accent = temperatureColor(temperature)
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("市场温度")
                     .font(.system(size: 17, weight: .bold))
@@ -68,6 +68,9 @@ struct RetailInvestorView: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 12)
 
             HStack(spacing: 18) {
                 MarketTemperatureGauge(value: temperature ?? 0, accent: accent)
@@ -102,16 +105,13 @@ struct RetailInvestorView: View {
                     )
                 }
             }
-            .padding(14)
-            .background(
-                Color(uiColor: .systemBackground),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 18)
 
+            Divider()
             marketBreadthOverview
         }
-        .padding(16)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(Color(uiColor: .systemBackground))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedMarket.title)市场情绪 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
     }
@@ -183,8 +183,9 @@ struct RetailInvestorView: View {
         .padding(4)
         .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .background(Color(uiColor: .systemBackground))
         .accessibilityLabel("选择市场情绪")
     }
 
@@ -227,11 +228,10 @@ struct RetailInvestorView: View {
                 compactBreadthSummary("下跌", value: breadth.down, color: .green)
             }
         }
-        .padding(14)
-        .background(
-            Color(uiColor: .systemBackground),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 18)
+        .background(Color(uiColor: .systemBackground))
     }
 
     private var sectorHighlights: some View {
