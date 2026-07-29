@@ -95,6 +95,8 @@ struct PeopleView: View {
                 systemImage: "person.2",
                 description: Text("这一分类暂时还没有收录人物")
             )
+        } else if topic == .history {
+            HistoricalPeopleGallery(people: people) { selectedPerson = $0 }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -199,6 +201,221 @@ private struct PersonActivityRow: View {
     }
 }
 
+private struct HistoricalPeopleGallery: View {
+    let people: [SpecialPerson]
+    let onSelect: (SpecialPerson) -> Void
+
+    private var featuredPerson: SpecialPerson { people[0] }
+
+    private var keyMilestones: [(person: SpecialPerson, milestone: PersonMilestone)] {
+        people.prefix(2).compactMap { person in
+            let preferredYear: String? = switch person.userID {
+            case "curated:mao-zedong": "1949"
+            case "curated:deng-xiaoping": "1978"
+            default: nil
+            }
+            let milestone = preferredYear.flatMap { year in
+                person.milestones.first { $0.year == year }
+            } ?? person.milestones.first
+            return milestone.map { (person, $0) }
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("历史人物")
+                        .font(.system(size: 28, weight: .bold))
+                    Text("影像、事件与时代")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 14)
+
+                historicalHero(featuredPerson)
+
+                sectionHeader("人物档案")
+                    .padding(.top, 22)
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ],
+                    spacing: 12
+                ) {
+                    ForEach(people) { person in
+                        Button { onSelect(person) } label: {
+                            HistoricalPersonCard(person: person)
+                        }
+                        .buttonStyle(PeoplePressStyle())
+                    }
+                }
+                .padding(.horizontal, 20)
+
+                if !keyMilestones.isEmpty {
+                    sectionHeader("关键节点")
+                        .padding(.top, 22)
+                    HistoricalMilestoneStrip(items: keyMilestones)
+                        .padding(.horizontal, 20)
+                }
+            }
+            .padding(.bottom, 104)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func historicalHero(_ person: SpecialPerson) -> some View {
+        Button { onSelect(person) } label: {
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let photo = person.photos.first,
+                       let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
+                        RemoteImage(url: url, height: 226, cornerRadius: 18, contentMode: .fill)
+                    } else {
+                        AvatarView(
+                            url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
+                            name: person.name,
+                            size: 350,
+                            assetName: person.avatarAssetName,
+                            cornerRadius: 18
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 226)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.78)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    if let photo = person.photos.first {
+                        Text([photo.date, photo.title].compactMap { $0 }.joined(separator: " · "))
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    Text(person.name)
+                        .font(.system(size: 27, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(18)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(PeoplePressStyle())
+        .padding(.horizontal, 20)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 20, weight: .bold))
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 11)
+    }
+}
+
+private struct HistoricalPersonCard: View {
+    let person: SpecialPerson
+
+    private var lifespan: String? {
+        switch person.userID {
+        case "curated:mao-zedong": "1893–1976"
+        case "curated:deng-xiaoping": "1904–1997"
+        default: nil
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            AvatarView(
+                url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
+                name: person.name,
+                size: 180,
+                assetName: person.avatarAssetName,
+                cornerRadius: 18
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 224)
+            .scaleEffect(1.04)
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.86)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(person.name)
+                    .font(.system(size: 20, weight: .bold))
+                if let lifespan {
+                    Text(lifespan)
+                        .font(.system(size: 13, weight: .medium))
+                }
+                Text(person.roles.first?.title ?? person.summary)
+                    .font(.system(size: 12))
+                    .lineLimit(2)
+                    .lineSpacing(2)
+            }
+            .foregroundStyle(.white)
+            .padding(14)
+        }
+        .frame(height: 224)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct HistoricalMilestoneStrip: View {
+    let items: [(person: SpecialPerson, milestone: PersonMilestone)]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.milestone.year)
+                        .font(.system(size: 25, weight: .bold, design: .serif))
+                    Text(shortTitle(item.milestone.title))
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    Text(item.person.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+
+                if index < items.count - 1 {
+                    Divider()
+                        .frame(height: 62)
+                }
+            }
+        }
+        .padding(.vertical, 14)
+        .background(
+            Color(uiColor: .secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+    }
+
+    private func shortTitle(_ title: String) -> String {
+        title
+            .replacingOccurrences(of: "中华人民共和国成立", with: "新中国成立")
+            .replacingOccurrences(of: "推动改革开放历史进程", with: "改革开放")
+    }
+}
+
 private struct PeopleLoadingTimeline: View {
     var body: some View {
         ScrollView {
@@ -240,13 +457,18 @@ private struct PeopleLoadingTimeline: View {
 private struct PersonDetailPage: View {
     let person: SpecialPerson
     @State private var store = PersonDetailStore()
-    @State private var section = PersonDetailSection.posts
+    @State private var section: PersonDetailSection
     @State private var ownContentSection = PersonOwnContentSection.posts
     @State private var relatedSection = PersonRelatedSection.videos
     @State private var selectedPost: Post?
     @State private var selectedVideo: PersonVideo?
     @State private var selectedArticle: PersonArticle?
     @State private var selectedPhoto: PersonPhoto?
+
+    init(person: SpecialPerson) {
+        self.person = person
+        _section = State(initialValue: person.topic == .history ? .profile : .posts)
+    }
 
     var body: some View {
         ScrollView {
@@ -380,12 +602,12 @@ private struct PersonDetailPage: View {
 
     private var sectionPicker: some View {
         HStack(spacing: 0) {
-            ForEach(PersonDetailSection.allCases) { item in
+            ForEach(detailSections) { item in
                 Button {
                     withAnimation(.snappy(duration: 0.2)) { section = item }
                 } label: {
                     VStack(spacing: 11) {
-                        Text(item.title)
+                        Text(sectionTitle(item))
                             .font(.system(size: 16, weight: section == item ? .semibold : .regular))
                             .foregroundStyle(section == item ? Color.accentColor : Color.secondary)
                         Capsule().fill(section == item ? Color.accentColor : Color.clear).frame(width: 42, height: 3)
@@ -396,6 +618,15 @@ private struct PersonDetailPage: View {
             }
         }
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var detailSections: [PersonDetailSection] {
+        person.topic == .history ? [.profile, .discussions] : PersonDetailSection.allCases
+    }
+
+    private func sectionTitle(_ item: PersonDetailSection) -> String {
+        if person.topic == .history, item == .profile { return "生平" }
+        return item.title
     }
 
     @ViewBuilder
@@ -1676,7 +1907,7 @@ private struct PersonProfileView: View {
                     .foregroundStyle(.primary)
             }
 
-            profileSection("当前身份") {
+            profileSection(person.topic == .history ? "主要职务" : "当前身份") {
                 VStack(spacing: 0) {
                     ForEach(Array(person.roles.enumerated()), id: \.offset) { index, role in
                         HStack {
@@ -1691,7 +1922,7 @@ private struct PersonProfileView: View {
                 }
             }
 
-            profileSection("关注领域") {
+            profileSection(person.topic == .history ? "历史主题" : "关注领域") {
                 HStack(spacing: 8) {
                     ForEach(person.focusTags, id: \.self) { tag in
                         Text(tag)
@@ -1704,9 +1935,9 @@ private struct PersonProfileView: View {
             }
 
             if !person.milestones.isEmpty {
-                profileSection("重要经历") {
+                profileSection(person.topic == .history ? "生平时间线" : "重要经历") {
                     VStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(person.milestones.enumerated()), id: \.offset) { _, milestone in
+                        ForEach(Array(presentedMilestones.enumerated()), id: \.offset) { _, milestone in
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Circle().fill(Color.accentColor).frame(width: 8, height: 8)
                                 Text(milestone.year)
@@ -1753,6 +1984,13 @@ private struct PersonProfileView: View {
                     .padding(.top, 4)
                     .padding(.bottom, 28)
             }
+        }
+    }
+
+    private var presentedMilestones: [PersonMilestone] {
+        guard person.topic == .history else { return person.milestones }
+        return person.milestones.sorted {
+            (Int($0.year) ?? .max) < (Int($1.year) ?? .max)
         }
     }
 
