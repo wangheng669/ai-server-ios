@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 struct LearningCatalog: Decodable, Equatable {
     let source: String
@@ -89,6 +90,61 @@ struct LearningBlock: Decodable, Hashable, Identifiable {
 
 struct LearningCatalogResponse: Decodable { let data: LearningCatalog }
 struct LearningTopicResponse: Decodable { let data: LearningTopic }
+
+@MainActor
+@Observable
+final class LearningProgressStore {
+    private(set) var completedAt: [String: Date]
+
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let storageKey: String
+
+    init(
+        defaults: UserDefaults = .standard,
+        storageKey: String = "learning.completedTopics.v1"
+    ) {
+        self.defaults = defaults
+        self.storageKey = storageKey
+        if let stored = defaults.dictionary(forKey: storageKey) as? [String: TimeInterval] {
+            completedAt = stored.mapValues(Date.init(timeIntervalSince1970:))
+        } else {
+            completedAt = [:]
+        }
+    }
+
+    func isCompleted(_ topicID: String) -> Bool {
+        completedAt[topicID] != nil
+    }
+
+    func completedCount(in topics: [LearningTopic]) -> Int {
+        topics.reduce(into: 0) { count, topic in
+            if isCompleted(topic.id) { count += 1 }
+        }
+    }
+
+    func markCompleted(_ topicID: String, at date: Date = .now) {
+        completedAt[topicID] = date
+        persist()
+    }
+
+    func studyDays(inWeekContaining date: Date = .now, calendar: Calendar = .current) -> Set<Int> {
+        guard let interval = calendar.dateInterval(of: .weekOfYear, for: date) else { return [] }
+        return Set(
+            completedAt.values.compactMap { completedDate in
+                guard interval.contains(completedDate) else { return nil }
+                let weekday = calendar.component(.weekday, from: completedDate)
+                return (weekday + 5) % 7
+            }
+        )
+    }
+
+    private func persist() {
+        defaults.set(
+            completedAt.mapValues(\.timeIntervalSince1970),
+            forKey: storageKey
+        )
+    }
+}
 
 struct LearningBookshelf: Decodable, Equatable {
     let source: String
