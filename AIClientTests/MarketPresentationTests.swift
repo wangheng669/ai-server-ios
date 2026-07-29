@@ -28,6 +28,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(history.pe.last, 13.97)
     }
 
+    func testDecodesBackendValuationHistoryContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_valuation_history_v1","market":"united-states","date":[],"pe":[28.85,25.43],"source":"multpl","fetchedAt":"2026-07-29T10:00:00Z","cached":true,"stale":false}}"#.utf8)
+        let response = try JSONDecoder().decode(MarketValuationHistoryResponse.self, from: data)
+
+        XCTAssertEqual(response.data.dataContract, "market_valuation_history_v1")
+        XCTAssertEqual(response.data.market, "united-states")
+        XCTAssertEqual(response.data.pe, [28.85, 25.43])
+        XCTAssertEqual(response.data.source, "multpl")
+        XCTAssertTrue(response.data.cached)
+        XCTAssertFalse(response.data.stale)
+    }
+
     func testParsesSP500PEHistoryTable() {
         let html = #"""
         <table id="datatable">

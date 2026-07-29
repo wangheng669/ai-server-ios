@@ -30,6 +30,8 @@ struct InvestmentView: View {
     @State private var section: InvestmentSection
     @State private var marketShowsDetail = false
     @State private var holdingsShowsDetail = false
+    @State private var marketStore = MarketStore()
+    @State private var sentimentStore = RetailSentimentStore()
     @State private var holdingsStore = FamousHoldingsStore()
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
@@ -59,14 +61,18 @@ struct InvestmentView: View {
                     if !marketShowsDetail {
                         InvestmentHeader(selection: $section)
                     }
-                    MarketView(showsDetail: $marketShowsDetail)
+                    MarketView(store: marketStore, showsDetail: $marketShowsDetail)
                 }
             case .sentiment:
                 VStack(spacing: 0) {
                     if !showsDetail {
                         InvestmentHeader(selection: $section)
                     }
-                    RetailInvestorView(showsDetail: $showsDetail)
+                    RetailInvestorView(
+                        store: sentimentStore,
+                        marketStore: marketStore,
+                        showsDetail: $showsDetail
+                    )
                 }
             case .holdings:
                 VStack(spacing: 0) {

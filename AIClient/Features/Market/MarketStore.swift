@@ -107,7 +107,7 @@ final class MarketStore {
         chartErrors[key] = nil
         defer { loadingCharts.remove(key) }
         do {
-            let value = try await service.chart(symbol: symbol, range: range)
+            let value = try await service.chart(symbol: symbol, range: range, refresh: force)
             charts[key] = value
             if marketChartNeedsRetry(value) {
                 scheduleChartRetry(symbol: symbol, range: range, key: key)
@@ -157,7 +157,7 @@ final class MarketStore {
         guard loadingConstituentSymbols.insert(symbol).inserted else { return }
         defer { loadingConstituentSymbols.remove(symbol) }
         do {
-            let value = try await service.indexConstituents(symbol: symbol)
+            let value = try await service.indexConstituents(symbol: symbol, refresh: force)
             indexConstituents[symbol] = value
             constituentErrors[symbol] = nil
             scheduleConstituentRetryIfNeeded(symbol: symbol, pendingSymbols: value.symbolsPendingRefresh)
@@ -416,6 +416,7 @@ struct ChartKey: Hashable {
 
 private enum MarketSnapshotCache {
     private static let key = "market.dashboard.cache.v1"
+    private static let maximumDisplayAge: TimeInterval = 24 * 60 * 60
 
     struct Snapshot: Codable {
         let dashboard: MarketDashboard
@@ -424,9 +425,13 @@ private enum MarketSnapshotCache {
 
     static func load() -> Snapshot? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) { return snapshot }
+        if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
+            return Date().timeIntervalSince(snapshot.savedAt) <= maximumDisplayAge ? snapshot : nil
+        }
         guard let dashboard = try? JSONDecoder().decode(MarketDashboard.self, from: data) else { return nil }
-        return Snapshot(dashboard: dashboard, savedAt: marketISODate(dashboard.generatedAt) ?? .distantPast)
+        let savedAt = marketISODate(dashboard.generatedAt) ?? .distantPast
+        guard Date().timeIntervalSince(savedAt) <= maximumDisplayAge else { return nil }
+        return Snapshot(dashboard: dashboard, savedAt: savedAt)
     }
 
     static func save(_ dashboard: MarketDashboard, at date: Date) {
