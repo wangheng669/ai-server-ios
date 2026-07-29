@@ -45,6 +45,29 @@ mkdir -p "$install_root"
 ditto -x -k "$APP_ARCHIVE" "$install_root"
 test -d "$APP_PATH"
 
+install_log=$(mktemp "$RUNNER_TEMP/device-install.XXXXXX")
+
+install_app_with_connectivity_retry() {
+  local candidate_app=$1
+  local max_attempts=${IOS_INSTALL_ATTEMPTS:-6}
+  local retry_seconds=${IOS_INSTALL_RETRY_SECONDS:-5}
+  : > "$install_log"
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if xcrun devicectl device install app --device "$DEVICE_UDID" "$candidate_app" 2>&1 | tee -a "$install_log"; then
+      return 0
+    fi
+    if ! grep -Eq "CoreDeviceError error 4016|not able to fulfill the requested usage assertion" "$install_log"; then
+      return 1
+    fi
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      echo "Trusted iPhone connection dropped during install; retrying ($attempt/$max_attempts)..."
+      sleep "$retry_seconds"
+    fi
+  done
+  return 1
+}
+
 expected_application_id="$TEAM_ID.$BUNDLE_ID"
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 selected_profile=""
@@ -96,9 +119,28 @@ while IFS= read -r profile; do
 done < <(find "${profile_roots[@]}" -type f -name '*.mobileprovision' -print 2>/dev/null)
 
 if [[ -z "$selected_profile" ]]; then
-  echo "No current provisioning profile matches $BUNDLE_ID and device $DEVICE_UDID." >&2
-  echo "Open the project in Xcode and run it once on the iPhone to refresh free signing." >&2
-  exit 1
+  echo "No cached provisioning profile matches this iPhone; asking Xcode to refresh automatic signing."
+  refreshed_derived_data="$RUNNER_TEMP/AIServerClient-RefreshedSigning"
+  xcodebuild build \
+    -project AIServerClient.xcodeproj \
+    -scheme AIServerClient \
+    -configuration Debug \
+    -destination "id=$DEVICE_UDID" \
+    -derivedDataPath "$refreshed_derived_data" \
+    -allowProvisioningUpdates \
+    -allowProvisioningDeviceRegistration \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
+    CODE_SIGN_STYLE=Automatic
+
+  refreshed_app="$refreshed_derived_data/Build/Products/Debug-iphoneos/AIServerClient.app"
+  test -d "$refreshed_app"
+  codesign --verify --deep --strict --verbose=2 "$refreshed_app"
+  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+    ./ci/report-ios-deployment.sh running 0.92 installing || true
+  fi
+  install_app_with_connectivity_retry "$refreshed_app"
+  echo "Installed $BUNDLE_ID on $DEVICE_UDID using Xcode-refreshed automatic signing."
+  exit 0
 fi
 
 security cms -D -i "$selected_profile" > "$decoded_profile" 2>/dev/null
@@ -143,29 +185,7 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
   ./ci/report-ios-deployment.sh running 0.92 installing || true
 fi
-install_log=$(mktemp "$RUNNER_TEMP/device-install.XXXXXX")
 installation_description="profile valid until $selected_expiration"
-
-install_app_with_connectivity_retry() {
-  local candidate_app=$1
-  local max_attempts=${IOS_INSTALL_ATTEMPTS:-6}
-  local retry_seconds=${IOS_INSTALL_RETRY_SECONDS:-5}
-  : > "$install_log"
-
-  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-    if xcrun devicectl device install app --device "$DEVICE_UDID" "$candidate_app" 2>&1 | tee -a "$install_log"; then
-      return 0
-    fi
-    if ! grep -Eq "CoreDeviceError error 4016|not able to fulfill the requested usage assertion" "$install_log"; then
-      return 1
-    fi
-    if [[ "$attempt" -lt "$max_attempts" ]]; then
-      echo "Trusted iPhone connection dropped during install; retrying ($attempt/$max_attempts)..."
-      sleep "$retry_seconds"
-    fi
-  done
-  return 1
-}
 
 if ! install_app_with_connectivity_retry "$APP_PATH"; then
   if ! grep -Fq "identity used to sign the executable is no longer valid" "$install_log"; then
