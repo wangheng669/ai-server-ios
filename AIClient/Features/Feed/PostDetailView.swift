@@ -30,6 +30,7 @@ struct PostDetailView: View {
     @State private var xCommentsError: String?
     @State private var xTranslations: [String: String] = [:]
     @State private var loadingXTranslationIDs: Set<String> = []
+    @State private var weiboImageSelection: WeiboImageSelection?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -65,10 +66,18 @@ struct PostDetailView: View {
         .fullScreenCover(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
         }
+        .fullScreenCover(item: $weiboImageSelection) { selection in
+            WeiboImageGallery(
+                urls: post.weiboFollowingImageURLs,
+                initialIndex: selection.index
+            )
+        }
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
         // navigation pop recognizer on this screen prevents a scrub from popping
         // the detail view; the visible back button remains available.
-        .background(InteractivePopGestureEnabler(isEnabled: !post.isBilibili))
+        .background(InteractivePopGestureEnabler(
+            isEnabled: !post.isBilibili && weiboImageSelection == nil
+        ))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if post.isWeiboRSS {
                 weiboBottomBar
@@ -356,7 +365,14 @@ struct PostDetailView: View {
 
                         if post.weiboFollowingImageURLs.count == 1,
                            let url = post.weiboFollowingImageURLs.first {
-                            WeiboDetailImage(url: url, index: 0, count: 1)
+                            WeiboDetailImage(
+                                url: url,
+                                index: 0,
+                                count: 1,
+                                initialAspectRatio: post.weiboImageAspectRatio(for: url)
+                            ) {
+                                weiboImageSelection = .init(index: 0)
+                            }
                         } else if !post.weiboFollowingImageURLs.isEmpty {
                             LazyVGrid(columns: weiboImageColumns, spacing: 4) {
                                 ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
@@ -365,8 +381,11 @@ struct PostDetailView: View {
                                         index: index,
                                         count: post.weiboFollowingImageURLs.count,
                                         isCompact: true,
-                                        compactHeight: weiboGridImageHeight
-                                    )
+                                        compactHeight: weiboGridImageHeight,
+                                        initialAspectRatio: post.weiboImageAspectRatio(for: url)
+                                    ) {
+                                        weiboImageSelection = .init(index: index)
+                                    }
                                 }
                             }
                         }
@@ -2735,17 +2754,27 @@ private extension NSString {
     }
 }
 
+private struct WeiboImageSelection: Identifiable {
+    let index: Int
+    var id: Int { index }
+}
+
 private struct WeiboDetailImage: View {
     let url: URL
     let index: Int
     let count: Int
     var isCompact = false
     var compactHeight: CGFloat = 172
-    @State private var aspectRatio: CGFloat = 4 / 3
-    @State private var previewURL: URL?
+    var initialAspectRatio: CGFloat?
+    let onOpen: () -> Void
+    @State private var loadedAspectRatio: CGFloat?
 
     private var availableWidth: CGFloat {
         max(UIScreen.main.bounds.width - 32, 240)
+    }
+
+    private var aspectRatio: CGFloat {
+        loadedAspectRatio ?? initialAspectRatio ?? 4 / 3
     }
 
     private var isLongImage: Bool {
@@ -2755,8 +2784,8 @@ private struct WeiboDetailImage: View {
     private var imageHeight: CGFloat {
         if isCompact { return compactHeight }
         let safeRatio = min(max(aspectRatio, 0.2), 5)
-        if isLongImage { return 360 }
-        return min(max(availableWidth / safeRatio, 120), 460)
+        if isLongImage { return min(availableWidth / safeRatio, 420) }
+        return min(max(availableWidth / safeRatio, 100), 520)
     }
 
     var body: some View {
@@ -2768,7 +2797,7 @@ private struct WeiboDetailImage: View {
                 contentMode: (isLongImage || isCompact) ? .fill : .fit
             ) { image in
                 guard image.size.width > 0, image.size.height > 0 else { return }
-                aspectRatio = image.size.width / image.size.height
+                loadedAspectRatio = image.size.width / image.size.height
             }
 
             if isLongImage {
@@ -2791,10 +2820,119 @@ private struct WeiboDetailImage: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         }
         .contentShape(Rectangle())
-        .onTapGesture { previewURL = url }
+        .onTapGesture(perform: onOpen)
         .accessibilityLabel("微博配图，第 \(index + 1) 张，共 \(count) 张")
-        .accessibilityHint("双击全屏查看")
-        .fullScreenCover(item: $previewURL) { ZoomableImageView(url: $0) }
+        .accessibilityHint(count > 1 ? "双击全屏查看并左右滑动切换" : "双击全屏查看")
+    }
+}
+
+private struct WeiboImageGallery: View {
+    let urls: [URL]
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedIndex: Int
+
+    init(urls: [URL], initialIndex: Int) {
+        self.urls = urls
+        _selectedIndex = State(initialValue: min(max(initialIndex, 0), max(urls.count - 1, 0)))
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            TabView(selection: $selectedIndex) {
+                ForEach(urls.indices, id: \.self) { index in
+                    WeiboGalleryImagePage(url: urls[index])
+                        .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(.black.opacity(0.52), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关闭图片")
+
+                Spacer()
+
+                if urls.count > 1 {
+                    Text("\(selectedIndex + 1) / \(urls.count)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                        .background(.black.opacity(0.52), in: Capsule())
+                        .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(urls.count) 张")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+        }
+        .statusBarHidden()
+        .interactiveDismissDisabled()
+    }
+}
+
+private struct WeiboGalleryImagePage: View {
+    let url: URL
+    @State private var image: UIImage?
+    @State private var scale: CGFloat = 1
+    @State private var settledScale: CGFloat = 1
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .scaleEffect(scale)
+                    .gesture(magnificationGesture)
+                    .onTapGesture(count: 2) { toggleZoom() }
+            } else {
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .task(id: url) {
+            image = await ImageLoader.load(url)
+            resetZoom()
+        }
+        .accessibilityLabel("微博图片")
+        .accessibilityHint("左右滑动切换图片，双击放大")
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                scale = min(max(settledScale * value.magnification, 1), 5)
+            }
+            .onEnded { _ in
+                settledScale = scale
+            }
+    }
+
+    private func toggleZoom() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            if scale > 1 {
+                resetZoom()
+            } else {
+                scale = 2
+                settledScale = 2
+            }
+        }
+    }
+
+    private func resetZoom() {
+        scale = 1
+        settledScale = 1
     }
 }
 

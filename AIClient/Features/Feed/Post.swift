@@ -358,6 +358,14 @@ struct Post: Decodable, Identifiable, Hashable {
                 filename != "timeline_card_small_web_default.png"
         }
     }
+    func weiboImageAspectRatio(for url: URL) -> CGFloat? {
+        guard let image = (images ?? []).first(where: { MediaURL.image($0.url) == url }),
+              let width = image.width,
+              let height = image.height,
+              width > 0,
+              height > 0 else { return nil }
+        return CGFloat(width) / CGFloat(height)
+    }
     var isWeiboRSS: Bool {
         guard isRSS else { return false }
         let candidates = [postLink, meta?.rssArticleLink, meta?.rssFeedName, user?.userDesc]
