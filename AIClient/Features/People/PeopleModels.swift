@@ -374,6 +374,129 @@ struct RelatedPerson: Decodable, Identifiable, Hashable {
     }
 }
 
+struct PeopleRelationshipLens: Identifiable, Equatable {
+    let title: String
+    let memberCount: Int
+
+    var id: String { title }
+}
+
+enum PeopleRelationshipPlanner {
+    static func lenses(for people: [SpecialPerson], limit: Int = 6) -> [PeopleRelationshipLens] {
+        let counts = Dictionary(grouping: people) { primaryOrganization(for: $0) }
+            .mapValues(\.count)
+        return counts
+            .map { PeopleRelationshipLens(title: $0.key, memberCount: $0.value) }
+            .sorted {
+                if $0.memberCount != $1.memberCount {
+                    return $0.memberCount > $1.memberCount
+                }
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+            .prefix(max(0, limit))
+            .map { $0 }
+    }
+
+    static func visiblePeople(
+        topicPeople: [SpecialPerson],
+        allPeople: [SpecialPerson],
+        focusedPersonID: String?,
+        organization: String?,
+        limit: Int = 8
+    ) -> [SpecialPerson] {
+        guard limit > 0 else { return [] }
+        let peopleByID = allPeople.reduce(into: [String: SpecialPerson]()) { result, person in
+            result[person.id] = person
+        }
+
+        if let focusedPersonID, let focused = peopleByID[focusedPersonID] {
+            var result: [SpecialPerson] = []
+            var seen = Set([focused.id])
+
+            func append(_ person: SpecialPerson?) {
+                guard let person, seen.insert(person.id).inserted else { return }
+                result.append(person)
+            }
+
+            for related in focused.relatedPeople {
+                append(peopleByID[related.id])
+            }
+            for person in allPeople where person.relatedPeople.contains(where: { $0.id == focused.id }) {
+                append(person)
+            }
+            for person in topicPeople where primaryOrganization(for: person) == primaryOrganization(for: focused) {
+                append(person)
+            }
+            for person in ranked(topicPeople) {
+                append(person)
+            }
+            return Array(result.prefix(limit))
+        }
+
+        let candidates: [SpecialPerson]
+        if let organization {
+            candidates = ranked(
+                topicPeople.filter { primaryOrganization(for: $0) == organization }
+            )
+        } else {
+            candidates = ranked(topicPeople)
+        }
+        return Array(candidates.prefix(limit))
+    }
+
+    static func relationshipLabel(from center: SpecialPerson, to other: SpecialPerson) -> String {
+        if let relation = center.relatedPeople.first(where: { $0.id == other.id })?.relationship {
+            return relation
+        }
+        if let relation = other.relatedPeople.first(where: { $0.id == center.id })?.relationship {
+            return relation
+        }
+        let organization = primaryOrganization(for: center)
+        if organization == primaryOrganization(for: other) {
+            return "同属\(organization)"
+        }
+        return "同属\(center.topic.rawValue)领域"
+    }
+
+    static func primaryOrganization(for person: SpecialPerson) -> String {
+        let raw = person.roles.first?.organization
+            ?? person.organizationName
+            ?? person.focusTags.first
+            ?? person.topic.rawValue
+        return compactOrganizationName(raw, fallback: person.topic.rawValue)
+    }
+
+    private static func ranked(_ people: [SpecialPerson]) -> [SpecialPerson] {
+        people.sorted {
+            let lhs = ($0.relatedPeople.count, $0.todayCount, $0.totalCount)
+            let rhs = ($1.relatedPeople.count, $1.todayCount, $1.totalCount)
+            if lhs.0 != rhs.0 { return lhs.0 > rhs.0 }
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            if lhs.2 != rhs.2 { return lhs.2 > rhs.2 }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private static func compactOrganizationName(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return fallback }
+        let roleMarkers = [
+            "联合创始人", "创始人", "董事长", "首席", "CEO", "总裁",
+            "负责人", "政治人物", "历史人物", "投资作者", "内容作者"
+        ]
+        let cut = roleMarkers
+            .compactMap { trimmed.range(of: $0)?.lowerBound }
+            .min()
+        let compact = cut.map {
+            String(trimmed[..<$0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let compact, !compact.isEmpty {
+            return compact
+        }
+        return trimmed
+    }
+}
+
 struct PersonPhoto: Decodable, Identifiable, Hashable {
     let id: String
     let imageURLValue: String

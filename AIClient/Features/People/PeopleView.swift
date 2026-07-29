@@ -6,7 +6,6 @@ struct PeopleView: View {
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
     @State private var selectedTopic = PeopleTopic.technology
-    @State private var listScrollPersonID: SpecialPerson.ID?
 
     init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
         self.store = store
@@ -96,61 +95,483 @@ struct PeopleView: View {
                 systemImage: "person.2",
                 description: Text("这一分类暂时还没有收录人物")
             )
-        } else if topic == .history {
-            HistoricalPeopleGallery(people: people) { selectedPerson = $0 }
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    featuredPeople(people)
-                    Text("最新动态")
-                        .font(.system(size: 22, weight: .bold))
-                        .padding(.horizontal, 20)
-                        .padding(.top, 24)
-                        .padding(.bottom, 8)
-                    ForEach(people) { person in
-                        Button { selectedPerson = person } label: {
-                            PersonActivityRow(person: person, latestPost: store.latestPost(for: person))
-                        }
-                        .buttonStyle(PeoplePressStyle())
-                        if person.id != people.last?.id {
-                            Divider().padding(.leading, 84)
-                        }
-                    }
-                }
-                .scrollTargetLayout()
-                .padding(.bottom, 20)
-            }
-            .scrollPosition(id: $listScrollPersonID, anchor: .top)
-            .scrollIndicators(.hidden)
-            .refreshable { await store.load(force: true) }
-            .onChange(of: selectedTopic) { _, _ in listScrollPersonID = nil }
+            PeopleRelationshipExplorer(
+                topic: topic,
+                people: people,
+                allPeople: store.people,
+                baseURL: store.baseURL,
+                latestPost: { store.latestPost(for: $0) },
+                onOpenPerson: { selectedPerson = $0 },
+                onRefresh: { await store.load(force: true) }
+            )
+            .id(topic)
+        }
+    }
+}
+
+private struct PeopleRelationshipExplorer: View {
+    let topic: PeopleTopic
+    let people: [SpecialPerson]
+    let allPeople: [SpecialPerson]
+    let baseURL: URL
+    let latestPost: (SpecialPerson) -> Post?
+    let onOpenPerson: (SpecialPerson) -> Void
+    let onRefresh: () async -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var focusedPersonID: String?
+    @State private var selectedOrganization: String?
+    @State private var showsList = false
+    @State private var searchText = ""
+
+    private var focusedPerson: SpecialPerson? {
+        focusedPersonID.flatMap { id in allPeople.first { $0.id == id } }
+    }
+
+    private var lenses: [PeopleRelationshipLens] {
+        PeopleRelationshipPlanner.lenses(for: people)
+    }
+
+    private var visiblePeople: [SpecialPerson] {
+        PeopleRelationshipPlanner.visiblePeople(
+            topicPeople: people,
+            allPeople: allPeople,
+            focusedPersonID: focusedPersonID,
+            organization: selectedOrganization
+        )
+    }
+
+    private var filteredListPeople: [SpecialPerson] {
+        let source = selectedOrganization.map { organization in
+            people.filter { PeopleRelationshipPlanner.primaryOrganization(for: $0) == organization }
+        } ?? people
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return source }
+        return source.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+                ($0.organizationName?.localizedCaseInsensitiveContains(query) ?? false) ||
+                $0.focusTags.contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
 
-    private func featuredPeople(_ people: [SpecialPerson]) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            ForEach(people.prefix(4)) { person in
-                Button { selectedPerson = person } label: {
-                    VStack(spacing: 10) {
-                        AvatarView(
-                            url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
-                            name: person.name,
-                            size: 68,
-                            assetName: person.avatarAssetName
-                        )
-                        Text(person.name)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                header
+                organizationPicker
+                if showsList {
+                    listContent
+                } else {
+                    graphContent
+                    if let focusedPerson {
+                        focusedPersonCard(focusedPerson)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(PeoplePressStyle())
+            }
+            .padding(.bottom, 112)
+        }
+        .scrollIndicators(.hidden)
+        .refreshable { await onRefresh() }
+        .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--people-relations-list-preview") {
+                showsList = true
+            }
+            if ProcessInfo.processInfo.arguments.contains("--people-relations-focus-preview"),
+               focusedPersonID == nil {
+                focusedPersonID = people.first(where: { !$0.relatedPeople.isEmpty })?.id ?? people.first?.id
+            }
+            #endif
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("关系探索")
+                    .font(.system(size: 28, weight: .bold))
+                Text(breadcrumb)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Button {
+                withAnimation(animation) {
+                    showsList.toggle()
+                    if showsList { focusedPersonID = nil }
+                }
+            } label: {
+                Label(showsList ? "关系" : "列表", systemImage: showsList ? "point.3.connected.trianglepath.dotted" : "list.bullet")
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 13)
+                    .frame(height: 36)
+                    .background(Color.accentColor.opacity(0.11), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(showsList ? "切换到关系图" : "切换到人物列表")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+    }
+
+    private var breadcrumb: String {
+        if let focusedPerson {
+            return "\(topic.rawValue) › \(focusedPerson.name)"
+        }
+        if let selectedOrganization {
+            return "\(topic.rawValue) › \(selectedOrganization)"
+        }
+        return "\(topic.rawValue) › 局部关系镜头"
+    }
+
+    private var organizationPicker: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 9) {
+                organizationButton(title: "全部", organization: nil, count: people.count)
+                ForEach(lenses) { lens in
+                    organizationButton(
+                        title: lens.title,
+                        organization: lens.title,
+                        count: lens.memberCount
+                    )
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func organizationButton(title: String, organization: String?, count: Int) -> some View {
+        let isSelected = selectedOrganization == organization
+        return Button {
+            withAnimation(animation) {
+                selectedOrganization = organization
+                focusedPersonID = nil
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                Text("\(count)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.82) : Color.secondary)
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .padding(.horizontal, 13)
+            .frame(height: 34)
+            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.1), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var graphContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(focusedPerson == nil ? "点击人物，展开一层关系" : "再次点击中心人物，进入完整档案")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("最多 \(visiblePeople.count) 个节点")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+
+            PeopleRelationshipCanvas(
+                topic: topic,
+                organization: selectedOrganization,
+                focusedPerson: focusedPerson,
+                people: visiblePeople,
+                baseURL: baseURL,
+                onSelect: selectPerson,
+                onOpenFocusedPerson: {
+                    if let focusedPerson { onOpenPerson(focusedPerson) }
+                }
+            )
+            .frame(height: 410)
+            .background(
+                LinearGradient(
+                    colors: [Color.accentColor.opacity(0.09), Color(uiColor: .secondarySystemBackground).opacity(0.5)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.12), lineWidth: 1)
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private var listContent: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("搜索人物、机构或领域", text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("清除搜索")
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+
+            if filteredListPeople.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+                    .padding(.top, 36)
+            } else {
+                ForEach(filteredListPeople) { person in
+                    Button { onOpenPerson(person) } label: {
+                        PersonActivityRow(person: person, latestPost: latestPost(person))
+                    }
+                    .buttonStyle(PeoplePressStyle())
+                    if person.id != filteredListPeople.last?.id {
+                        Divider().padding(.leading, 84)
+                    }
+                }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 20)
+    }
+
+    private func focusedPersonCard(_ person: SpecialPerson) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 13) {
+                AvatarView(
+                    url: person.avatarURL(baseURL: baseURL),
+                    name: person.name,
+                    size: 58,
+                    assetName: person.avatarAssetName
+                )
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(person.name)
+                        .font(.system(size: 21, weight: .bold))
+                    Text(person.organizationName ?? person.topic.rawValue)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button {
+                    withAnimation(animation) { focusedPersonID = nil }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(width: 30, height: 30)
+                        .background(Color.secondary.opacity(0.11), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关闭人物摘要")
+            }
+
+            Text(person.summary)
+                .font(.system(size: 15))
+                .lineSpacing(3)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+
+            if !person.relatedPeople.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(person.relatedPeople.prefix(3)) { related in
+                            Text("\(related.name) · \(related.relationship)")
+                                .font(.system(size: 12, weight: .medium))
+                                .padding(.horizontal, 10)
+                                .frame(height: 30)
+                                .background(Color.secondary.opacity(0.09), in: Capsule())
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+
+            Button {
+                onOpenPerson(person)
+            } label: {
+                HStack {
+                    Text("查看完整档案")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, 16)
+    }
+
+    private func selectPerson(_ person: SpecialPerson) {
+        if focusedPersonID == person.id {
+            onOpenPerson(person)
+            return
+        }
+        withAnimation(animation) {
+            focusedPersonID = person.id
+            selectedOrganization = nil
+        }
+    }
+
+    private var animation: Animation? {
+        reduceMotion ? nil : .snappy(duration: 0.32)
+    }
+}
+
+private struct PeopleRelationshipCanvas: View {
+    let topic: PeopleTopic
+    let organization: String?
+    let focusedPerson: SpecialPerson?
+    let people: [SpecialPerson]
+    let baseURL: URL
+    let onSelect: (SpecialPerson) -> Void
+    let onOpenFocusedPerson: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            let points = people.indices.map { point(for: $0, count: people.count, size: proxy.size) }
+
+            ZStack {
+                Canvas { context, _ in
+                    for point in points {
+                        var path = Path()
+                        path.move(to: center)
+                        path.addLine(to: point)
+                        context.stroke(
+                            path,
+                            with: .color(Color.accentColor.opacity(focusedPerson == nil ? 0.22 : 0.38)),
+                            style: StrokeStyle(lineWidth: focusedPerson == nil ? 1 : 1.5, dash: focusedPerson == nil ? [4, 5] : [])
+                        )
+                    }
+                }
+                .accessibilityHidden(true)
+
+                centerNode
+                    .position(center)
+
+                ForEach(Array(people.enumerated()), id: \.element.id) { index, person in
+                    Button {
+                        onSelect(person)
+                    } label: {
+                        VStack(spacing: 6) {
+                            AvatarView(
+                                url: person.avatarURL(baseURL: baseURL),
+                                name: person.name,
+                                size: focusedPerson == nil ? 56 : 52,
+                                assetName: person.avatarAssetName
+                            )
+                            .overlay {
+                                Circle()
+                                    .stroke(Color(uiColor: .systemBackground), lineWidth: 3)
+                            }
+                            Text(person.name)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.thinMaterial, in: Capsule())
+                            if let focusedPerson {
+                                Text(PeopleRelationshipPlanner.relationshipLabel(from: focusedPerson, to: person))
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.65)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(.thinMaterial, in: Capsule())
+                            }
+                        }
+                        .frame(width: 92)
+                    }
+                    .buttonStyle(PeoplePressStyle())
+                    .position(points[index])
+                    .accessibilityLabel(nodeAccessibilityLabel(person))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var centerNode: some View {
+        if let focusedPerson {
+            Button(action: onOpenFocusedPerson) {
+                VStack(spacing: 7) {
+                    AvatarView(
+                        url: focusedPerson.avatarURL(baseURL: baseURL),
+                        name: focusedPerson.name,
+                        size: 80,
+                        assetName: focusedPerson.avatarAssetName
+                    )
+                    .overlay {
+                        Circle().stroke(Color.accentColor, lineWidth: 4)
+                    }
+                    Text(focusedPerson.name)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .frame(width: 112)
+            }
+            .buttonStyle(PeoplePressStyle())
+            .accessibilityLabel("\(focusedPerson.name)，已聚焦，再次点击查看完整档案")
+        } else {
+            VStack(spacing: 5) {
+                Image(systemName: organization == nil ? "point.3.connected.trianglepath.dotted" : "building.2.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                Text(organization ?? topic.rawValue)
+                    .font(.system(size: 15, weight: .bold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                Text("\(people.count) 位人物")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(Color.accentColor)
+            .frame(width: 104, height: 104)
+            .background(.regularMaterial, in: Circle())
+            .overlay { Circle().stroke(Color.accentColor.opacity(0.25), lineWidth: 1) }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func point(for index: Int, count: Int, size: CGSize) -> CGPoint {
+        guard count > 0 else { return CGPoint(x: size.width / 2, y: size.height / 2) }
+        let angle = (-Double.pi / 2) + (2 * Double.pi * Double(index) / Double(count))
+        let radiusX = min(max(108, size.width * 0.34), 138)
+        let radiusY = min(max(126, size.height * 0.34), 150)
+        return CGPoint(
+            x: size.width / 2 + CGFloat(cos(angle)) * radiusX,
+            y: size.height / 2 + CGFloat(sin(angle)) * radiusY
+        )
+    }
+
+    private func nodeAccessibilityLabel(_ person: SpecialPerson) -> String {
+        guard let focusedPerson else { return "\(person.name)，点击查看关系" }
+        return "\(person.name)，与\(focusedPerson.name)的关系：\(PeopleRelationshipPlanner.relationshipLabel(from: focusedPerson, to: person))"
     }
 }
 

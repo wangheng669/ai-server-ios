@@ -159,6 +159,73 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(payload.users.first?.xProfileURL?.absoluteString, "https://x.com/peterthiel")
     }
 
+    func testRelationshipPlannerBuildsServerDrivenLocalGraph() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "users": [
+                {
+                  "user_id": "sam",
+                  "user_name": "Sam",
+                  "user_desc": "OpenAI CEO",
+                  "organization_name": "OpenAI 联合创始人兼 CEO",
+                  "topic": "technology",
+                  "roles": [{"organization": "OpenAI", "title": "CEO"}],
+                  "related_people": [{"id": "satya", "name": "Satya", "relationship": "战略合作伙伴"}],
+                  "today_count": 2,
+                  "total_count": 20
+                },
+                {
+                  "user_id": "greg",
+                  "user_name": "Greg",
+                  "user_desc": "OpenAI President",
+                  "organization_name": "OpenAI 联合创始人兼总裁",
+                  "topic": "technology",
+                  "roles": [{"organization": "OpenAI", "title": "总裁"}],
+                  "today_count": 0,
+                  "total_count": 10
+                },
+                {
+                  "user_id": "satya",
+                  "user_name": "Satya",
+                  "user_desc": "Microsoft CEO",
+                  "organization_name": "Microsoft 董事长兼 CEO",
+                  "topic": "technology",
+                  "roles": [{"organization": "Microsoft", "title": "CEO"}],
+                  "today_count": 1,
+                  "total_count": 15
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let people = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data).users
+        let lenses = PeopleRelationshipPlanner.lenses(for: people)
+        let focused = PeopleRelationshipPlanner.visiblePeople(
+            topicPeople: people,
+            allPeople: people,
+            focusedPersonID: "sam",
+            organization: nil
+        )
+        let openAI = PeopleRelationshipPlanner.visiblePeople(
+            topicPeople: people,
+            allPeople: people,
+            focusedPersonID: nil,
+            organization: "OpenAI"
+        )
+
+        XCTAssertEqual(lenses.first, PeopleRelationshipLens(title: "OpenAI", memberCount: 2))
+        XCTAssertEqual(focused.first?.id, "satya")
+        XCTAssertTrue(focused.contains { $0.id == "greg" })
+        XCTAssertEqual(Set(openAI.map(\.id)), Set(["sam", "greg"]))
+        XCTAssertEqual(
+            PeopleRelationshipPlanner.relationshipLabel(from: people[0], to: people[2]),
+            "战略合作伙伴"
+        )
+    }
+
     func testDecodesXQuotedTweetForPersonPostCard() throws {
         let data = #"{"post":{"id":1,"source":"x","meta":{"quoted_tweet":{"id":"99","text":"Gemini who?","text_zh":"双子座是谁？","author":{"name":"Example","screenName":"example","profileImageUrl":"https://example.com/a.jpg"},"media":[{"type":"photo","url":"https://example.com/p.jpg","thumbnail_url":"https://example.com/t.jpg","width":1200,"height":800}]}}}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
