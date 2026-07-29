@@ -57,7 +57,7 @@ struct PostDetailView: View {
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
-        .navigationTitle(post.isWeiboRSS ? "微博" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情")))))
+        .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar((["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube)
@@ -69,6 +69,11 @@ struct PostDetailView: View {
         // navigation pop recognizer on this screen prevents a scrub from popping
         // the detail view; the visible back button remains available.
         .background(InteractivePopGestureEnabler(isEnabled: !post.isBilibili))
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if post.isWeiboRSS {
+                weiboBottomBar
+            }
+        }
         .toolbar {
             if post.sourceName == "X" {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -85,6 +90,27 @@ struct PostDetailView: View {
                     }
                     Menu {
                         Button("在 B 站观看") { openOriginal() }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                }
+            } else if post.isWeiboRSS {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if let link = post.linkURL {
+                        ShareLink(item: link) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    Menu {
+                        Button {
+                            isRSSBookmarked.toggle()
+                            RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
+                        } label: {
+                            Label(isRSSBookmarked ? "取消收藏" : "收藏", systemImage: isRSSBookmarked ? "bookmark.slash" : "bookmark")
+                        }
+                        Button { openOriginal() } label: {
+                            Label("在微博中打开", systemImage: "safari")
+                        }
                     } label: {
                         Image(systemName: "ellipsis")
                     }
@@ -296,80 +322,252 @@ struct PostDetailView: View {
 
     private var weiboDetail: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 12) {
-                    AvatarView(url: post.avatarURL, name: post.authorName, size: 44)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(post.authorName)
-                            .font(.headline)
-                        HStack(spacing: 5) {
-                            Text("来自微博")
-                            if let time = post.formattedTime { Text("· \(time)") }
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 11) {
+                        AvatarView(url: post.avatarURL, name: post.authorName, size: 46)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Text(post.authorName)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(post.user?.verified == true ? Color(red: 0.94, green: 0.42, blue: 0.08) : .primary)
+                                    .lineLimit(1)
+
+                                if post.user?.verified == true {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(Color(red: 0.96, green: 0.55, blue: 0.08))
+                                        .accessibilityLabel("已认证")
+                                }
+                            }
+
+                            HStack(spacing: 6) {
+                                if let time = post.formattedTime {
+                                    Text(time)
+                                }
+                                Text("来自微博")
+                            }
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
 
-                if !post.weiboDetailContent.isEmpty {
-                    Text(post.weiboDetailContent)
-                        .font(.body)
-                        .lineSpacing(6)
-                        .textSelection(.enabled)
-                }
+                        Spacer(minLength: 8)
 
-                if post.weiboFollowingImageURLs.count == 1,
-                   let url = post.weiboFollowingImageURLs.first {
-                    WeiboDetailImage(url: url, index: 0, count: 1)
-                } else if !post.weiboFollowingImageURLs.isEmpty {
-                    LazyVGrid(
-                        columns: [.init(.flexible(), spacing: 6), .init(.flexible(), spacing: 6)],
-                        spacing: 6
-                    ) {
-                        ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
-                            WeiboDetailImage(
-                                url: url,
-                                index: index,
-                                count: post.weiboFollowingImageURLs.count,
-                                isCompact: true
-                            )
+                        Button { openOriginal() } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, height: 34)
+                                .background(Color(uiColor: .secondarySystemBackground), in: Circle())
                         }
+                        .accessibilityLabel("更多微博操作")
                     }
-                }
 
-                if post.hasWeiboVideoReference, let link = post.linkURL {
-                    Button { openURL(link) } label: {
-                        Label("视频内容 · 在微博观看", systemImage: "play.rectangle.fill")
-                            .font(.headline)
+                    if !post.weiboDetailContent.isEmpty {
+                        Text(post.weiboDetailContent)
+                            .font(.system(size: 17))
+                            .lineSpacing(5)
+                            .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(14)
                     }
-                    .buttonStyle(.bordered)
-                }
 
-                if let link = post.linkURL {
-                    Divider()
-                    HStack(spacing: 10) {
+                    if post.weiboFollowingImageURLs.count == 1,
+                       let url = post.weiboFollowingImageURLs.first {
+                        WeiboDetailImage(url: url, index: 0, count: 1)
+                    } else if !post.weiboFollowingImageURLs.isEmpty {
+                        LazyVGrid(columns: weiboImageColumns, spacing: 4) {
+                            ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
+                                WeiboDetailImage(
+                                    url: url,
+                                    index: index,
+                                    count: post.weiboFollowingImageURLs.count,
+                                    isCompact: true,
+                                    compactHeight: weiboGridImageHeight
+                                )
+                            }
+                        }
+                    }
+
+                    if post.hasWeiboVideoReference, let link = post.linkURL {
                         Button { openURL(link) } label: {
-                            Label("查看原微博", systemImage: "safari")
-                                .frame(maxWidth: .infinity)
+                            HStack(spacing: 11) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 38, height: 38)
+                                    .background(.black.opacity(0.72), in: Circle())
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("微博视频")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                    Text("点击前往微博观看")
+                                        .font(.system(size: 12.5))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(12)
+                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .buttonStyle(.borderedProminent)
-
-                        ShareLink(item: link) {
-                            Label("分享", systemImage: "square.and.arrow.up")
-                        }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.plain)
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
+
+                Divider()
+                weiboEngagementRow
+                Rectangle()
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .frame(height: 10)
+
+                weiboCommentsSection
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 36)
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var weiboImageColumnCount: Int {
+        [2, 4].contains(post.weiboFollowingImageURLs.count) ? 2 : 3
+    }
+
+    private var weiboImageColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: 4),
+            count: weiboImageColumnCount
+        )
+    }
+
+    private var weiboGridImageHeight: CGFloat {
+        let availableWidth = max(UIScreen.main.bounds.width - 32, 240)
+        let totalSpacing = CGFloat(weiboImageColumnCount - 1) * 4
+        return (availableWidth - totalSpacing) / CGFloat(weiboImageColumnCount)
+    }
+
+    private var weiboEngagementRow: some View {
+        HStack(spacing: 0) {
+            weiboEngagementButton(
+                icon: "arrow.2.squarepath",
+                title: "转发",
+                value: post.meta?.metrics?.retweets
+            )
+            weiboEngagementButton(
+                icon: "bubble.left",
+                title: "评论",
+                value: post.meta?.metrics?.replies
+            )
+            weiboEngagementButton(
+                icon: "hand.thumbsup",
+                title: "赞",
+                value: post.meta?.metrics?.likes
+            )
+        }
+        .frame(height: 46)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private func weiboEngagementButton(icon: String, title: String, value: Int?) -> some View {
+        Button { openOriginal() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                Text(value.flatMap { $0 > 0 ? compactCount($0) : nil } ?? title)
+                    .font(.system(size: 13.5))
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(value.flatMap { $0 > 0 ? "\(title) \(compactCount($0))" : nil } ?? title)
+    }
+
+    private var weiboCommentsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("评论")
+                    .font(.system(size: 16, weight: .semibold))
+                if let replies = post.meta?.metrics?.replies, replies > 0 {
+                    Text(compactCount(replies))
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { openOriginal() } label: {
+                    HStack(spacing: 3) {
+                        Text("按热度")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 48)
+
+            Divider()
+
+            VStack(spacing: 11) {
+                Image(systemName: "bubble.left")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(.tertiary)
+                Text((post.meta?.metrics?.replies ?? 0) > 0 ? "前往微博查看全部评论" : "还没有评论，快来抢沙发")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                if post.linkURL != nil {
+                    Button("打开微博") { openOriginal() }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color(red: 1, green: 0.45, blue: 0.12))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 34)
+        }
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private var weiboBottomBar: some View {
+        HStack(spacing: 16) {
+            Button { openOriginal() } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "pencil")
+                    Text("写评论...")
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Button { openOriginal() } label: {
+                Image(systemName: "arrow.2.squarepath")
+            }
+            .accessibilityLabel("转发")
+            Button { openOriginal() } label: {
+                Image(systemName: "bubble.left")
+            }
+            .accessibilityLabel("评论")
+            Button { openOriginal() } label: {
+                Image(systemName: "hand.thumbsup")
+            }
+            .accessibilityLabel("赞")
+        }
+        .font(.system(size: 18))
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var rssSourceHeader: some View {
@@ -2409,6 +2607,7 @@ private struct WeiboDetailImage: View {
     let index: Int
     let count: Int
     var isCompact = false
+    var compactHeight: CGFloat = 172
     @State private var aspectRatio: CGFloat = 4 / 3
     @State private var previewURL: URL?
 
@@ -2421,7 +2620,7 @@ private struct WeiboDetailImage: View {
     }
 
     private var imageHeight: CGFloat {
-        if isCompact { return 172 }
+        if isCompact { return compactHeight }
         let safeRatio = min(max(aspectRatio, 0.2), 5)
         if isLongImage { return 360 }
         return min(max(availableWidth / safeRatio, 120), 460)
