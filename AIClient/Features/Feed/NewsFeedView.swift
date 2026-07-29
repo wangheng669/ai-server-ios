@@ -4,12 +4,11 @@ import WebKit
 enum RootTab: Hashable { case observation, investment, learning, people }
 
 private enum FlashFilter: String, CaseIterable, Identifiable {
-    case all, important, tech, equity, commodity, company, geopolitical, other
+    case important, tech, equity, commodity, company, geopolitical, other
 
     var id: Self { self }
     var title: String {
         return switch self {
-        case .all: "全部"
         case .important: "重要"
         case .tech: "AI科技"
         case .equity: "股票"
@@ -22,7 +21,7 @@ private enum FlashFilter: String, CaseIterable, Identifiable {
 
     var serverCategory: String? {
         return switch self {
-        case .all, .important: nil
+        case .important: nil
         default: rawValue
         }
     }
