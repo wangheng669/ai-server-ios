@@ -77,12 +77,30 @@ jobs:
       - ARM64
       - office-builder
     timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+      EXPECTED_XCODE_BUILD: 27A5228h
 
     steps:
       - name: Check out requested version
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.git_ref || 'main' }}
+
+      - name: Verify supported Xcode
+        run: |
+          set -euo pipefail
+          test -x "$DEVELOPER_DIR/usr/bin/xcodebuild"
+          actual_build="$(
+            plutil -extract ProductBuildVersion raw -o - \
+              "$DEVELOPER_DIR/../version.plist"
+          )"
+          if [[ "$actual_build" != "$EXPECTED_XCODE_BUILD" ]]; then
+            echo "Expected Xcode build $EXPECTED_XCODE_BUILD, found $actual_build."
+            exit 1
+          fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Prepare App Store Connect authentication
         env:
@@ -100,8 +118,6 @@ jobs:
           echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - name: Run tests
-        env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
         run: |
           set -o pipefail
           xcodebuild test \
@@ -113,7 +129,6 @@ jobs:
 
       - name: Create App Store archive
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
@@ -139,7 +154,6 @@ jobs:
 
       - name: Upload archive to TestFlight
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
