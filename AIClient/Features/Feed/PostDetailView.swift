@@ -347,10 +347,10 @@ struct PostDetailView: View {
                         }
 
                         if !post.weiboDetailContent.isEmpty {
-                            Text(post.weiboDetailContent)
-                                .font(.system(size: 17))
-                                .lineSpacing(5)
-                                .textSelection(.enabled)
+                            WeiboRichText(
+                                text: post.weiboDetailContent,
+                                emojis: post.weiboInlineEmojis
+                            )
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
@@ -2637,6 +2637,101 @@ private enum RSSBookmarkStore {
             ids.remove(postID)
         }
         UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+}
+
+private struct WeiboRichText: View {
+    let text: String
+    let emojis: [WeiboInlineEmoji]
+    @State private var images: [URL: UIImage] = [:]
+
+    var body: some View {
+        WeiboRichTextView(text: text, emojis: emojis, images: images)
+            .task(id: emojis) {
+                let urls = Set(emojis.map(\.url))
+                var loaded: [URL: UIImage] = [:]
+                await withTaskGroup(of: (URL, UIImage?).self) { group in
+                    for url in urls {
+                        group.addTask {
+                            (url, await ImageLoader.load(url, targetSize: CGSize(width: 24, height: 24)))
+                        }
+                    }
+                    for await (url, image) in group {
+                        if let image { loaded[url] = image }
+                    }
+                }
+                images = loaded
+            }
+    }
+}
+
+private struct WeiboRichTextView: UIViewRepresentable {
+    let text: String
+    let emojis: [WeiboInlineEmoji]
+    let images: [URL: UIImage]
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.backgroundColor = .clear
+        view.isEditable = false
+        view.isScrollEnabled = false
+        view.isSelectable = true
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        view.attributedText = attributedText
+        view.accessibilityLabel = text
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width else { return nil }
+        return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    }
+
+    private var attributedText: NSAttributedString {
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17))
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 5
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: paragraph
+        ]
+        let result = NSMutableAttributedString(string: text, attributes: attributes)
+
+        for emoji in emojis {
+            guard let image = images[emoji.url] else { continue }
+            let source = result.string as NSString
+            let ranges = source.ranges(of: emoji.token)
+            for range in ranges.reversed() {
+                let attachment = NSTextAttachment()
+                attachment.image = image
+                let size = font.lineHeight
+                attachment.bounds = CGRect(x: 0, y: font.descender, width: size, height: size)
+                result.replaceCharacters(in: range, with: NSAttributedString(attachment: attachment))
+            }
+        }
+        return result
+    }
+}
+
+private extension NSString {
+    func ranges(of value: String) -> [NSRange] {
+        guard !value.isEmpty else { return [] }
+        var result: [NSRange] = []
+        var searchRange = NSRange(location: 0, length: length)
+        while searchRange.length > 0 {
+            let range = range(of: value, options: [], range: searchRange)
+            guard range.location != NSNotFound else { break }
+            result.append(range)
+            let nextLocation = NSMaxRange(range)
+            searchRange = NSRange(location: nextLocation, length: length - nextLocation)
+        }
+        return result
     }
 }
 
