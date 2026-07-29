@@ -117,6 +117,27 @@ jobs:
           chmod 600 "$key_path"
           echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
+      - name: Prepare next TestFlight version
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          TESTFLIGHT_BASE_MARKETING_VERSION="$(
+            plutil -extract CFBundleShortVersionString raw -o - Config/Info.plist
+          )"
+          export TESTFLIGHT_BASE_MARKETING_VERSION
+          ruby ci/testflight-processing-notify.rb \
+            prepare "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
+
+      - name: Apply TestFlight version
+        run: |
+          set -euo pipefail
+          plutil -replace CFBundleShortVersionString \
+            -string "$TESTFLIGHT_MARKETING_VERSION" \
+            Config/Info.plist
+          echo "Building TestFlight version $TESTFLIGHT_MARKETING_VERSION."
+
       - name: Run tests
         run: |
           set -o pipefail
@@ -145,12 +166,6 @@ jobs:
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM=9M7P4VLHY3 \
             CODE_SIGN_STYLE=Automatic
-
-      - name: Capture existing TestFlight builds
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: ruby ci/testflight-processing-notify.rb snapshot "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
 
       - name: Upload archive to TestFlight
         env:
