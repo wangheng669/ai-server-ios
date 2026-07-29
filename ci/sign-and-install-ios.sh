@@ -68,6 +68,53 @@ install_app_with_connectivity_retry() {
   return 1
 }
 
+xcode_refreshed_app=""
+
+refresh_signing_with_xcode() {
+  local refreshed_derived_data="$RUNNER_TEMP/AIServerClient-RefreshedSigning"
+  local build_log
+  local max_attempts=${IOS_XCODE_DESTINATION_ATTEMPTS:-12}
+  local retry_seconds=${IOS_XCODE_DESTINATION_RETRY_SECONDS:-5}
+  local destination_timeout=${IOS_XCODE_DESTINATION_TIMEOUT_SECONDS:-10}
+  build_log=$(mktemp "$RUNNER_TEMP/xcode-signing-refresh.XXXXXX")
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    : > "$build_log"
+    if xcodebuild build \
+      -project AIServerClient.xcodeproj \
+      -scheme AIServerClient \
+      -configuration Debug \
+      -destination "id=$DEVICE_UDID" \
+      -destination-timeout "$destination_timeout" \
+      -derivedDataPath "$refreshed_derived_data" \
+      -allowProvisioningUpdates \
+      -allowProvisioningDeviceRegistration \
+      DEVELOPMENT_TEAM="$TEAM_ID" \
+      CODE_SIGN_STYLE=Automatic 2>&1 | tee "$build_log"; then
+      xcode_refreshed_app="$refreshed_derived_data/Build/Products/Debug-iphoneos/AIServerClient.app"
+      test -d "$xcode_refreshed_app"
+      codesign --verify --deep --strict --verbose=2 "$xcode_refreshed_app"
+      return 0
+    fi
+
+    if ! grep -Eq \
+      "Unable to find a destination matching|requested device could not be found" \
+      "$build_log"; then
+      return 1
+    fi
+
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      echo "Xcode has not registered iPhone $DEVICE_UDID yet; retrying signing refresh ($attempt/$max_attempts)..."
+      if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+        ./ci/report-ios-deployment.sh running 0.88 waiting-for-device || true
+      fi
+      sleep "$retry_seconds"
+    fi
+  done
+
+  return 1
+}
+
 expected_application_id="$TEAM_ID.$BUNDLE_ID"
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 selected_profile=""
@@ -120,25 +167,11 @@ done < <(find "${profile_roots[@]}" -type f -name '*.mobileprovision' -print 2>/
 
 if [[ -z "$selected_profile" ]]; then
   echo "No cached provisioning profile matches this iPhone; asking Xcode to refresh automatic signing."
-  refreshed_derived_data="$RUNNER_TEMP/AIServerClient-RefreshedSigning"
-  xcodebuild build \
-    -project AIServerClient.xcodeproj \
-    -scheme AIServerClient \
-    -configuration Debug \
-    -destination "id=$DEVICE_UDID" \
-    -derivedDataPath "$refreshed_derived_data" \
-    -allowProvisioningUpdates \
-    -allowProvisioningDeviceRegistration \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_STYLE=Automatic
-
-  refreshed_app="$refreshed_derived_data/Build/Products/Debug-iphoneos/AIServerClient.app"
-  test -d "$refreshed_app"
-  codesign --verify --deep --strict --verbose=2 "$refreshed_app"
+  refresh_signing_with_xcode
   if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
     ./ci/report-ios-deployment.sh running 0.92 installing || true
   fi
-  install_app_with_connectivity_retry "$refreshed_app"
+  install_app_with_connectivity_retry "$xcode_refreshed_app"
   echo "Installed $BUNDLE_ID on $DEVICE_UDID using Xcode-refreshed automatic signing."
   exit 0
 fi
@@ -193,22 +226,8 @@ if ! install_app_with_connectivity_retry "$APP_PATH"; then
   fi
 
   echo "The device rejected the cached signing identity; refreshing signing assets with Xcode."
-  refreshed_derived_data="$RUNNER_TEMP/AIServerClient-RefreshedSigning"
-  xcodebuild build \
-    -project AIServerClient.xcodeproj \
-    -scheme AIServerClient \
-    -configuration Debug \
-    -destination "id=$DEVICE_UDID" \
-    -derivedDataPath "$refreshed_derived_data" \
-    -allowProvisioningUpdates \
-    -allowProvisioningDeviceRegistration \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_STYLE=Automatic
-
-  refreshed_app="$refreshed_derived_data/Build/Products/Debug-iphoneos/AIServerClient.app"
-  test -d "$refreshed_app"
-  codesign --verify --deep --strict --verbose=2 "$refreshed_app"
-  install_app_with_connectivity_retry "$refreshed_app"
+  refresh_signing_with_xcode
+  install_app_with_connectivity_retry "$xcode_refreshed_app"
   installation_description="Xcode-refreshed automatic signing"
 fi
 
