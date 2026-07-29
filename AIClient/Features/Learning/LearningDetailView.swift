@@ -256,6 +256,11 @@ private struct LearningArticleView: View {
                     .padding(.top, 22)
                     .padding(.bottom, 26)
 
+                if let examples = detail.companyExamples, !examples.isEmpty {
+                    LearningCompanyExamplesView(examples: examples)
+                        .padding(.bottom, 28)
+                }
+
                 if let videoURL = topic.mediaURL(detail.videoURLValue) {
                     video(url: videoURL)
                         .padding(.bottom, 28)
@@ -463,6 +468,86 @@ private struct LearningArticleView: View {
                 .background(.black.opacity(0.55), in: Capsule())
                 .padding(10)
         }
+    }
+}
+
+private struct LearningCompanyExamplesView: View {
+    let examples: [LearningCompanyExample]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Rectangle()
+                    .fill(LearningDetailPalette.accent)
+                    .frame(width: 28, height: 2)
+                Text("公司案例")
+                    .font(.system(size: 18, weight: .bold, design: .serif))
+                Text("把概念放进经营现场")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(examples) { example in
+                VStack(alignment: .leading, spacing: 15) {
+                    HStack(spacing: 11) {
+                        Text(monogram(for: example.company))
+                            .font(.system(size: 14, weight: .bold, design: .serif))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(LearningDetailPalette.accent, in: Circle())
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(example.company)
+                                .font(.system(size: 16, weight: .semibold))
+                            if let ticker = example.ticker, !ticker.isEmpty {
+                                Text(ticker)
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(LearningDetailPalette.accent)
+                            }
+                        }
+                    }
+
+                    exampleSection(title: "公司情况", text: example.situation)
+
+                    Divider().opacity(0.55)
+
+                    exampleSection(title: "理解关键", text: example.connection)
+
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.top, 1)
+                        Text(example.caution)
+                            .font(.system(size: 11))
+                            .lineSpacing(3)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .padding(16)
+                .background(LearningDetailPalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(LearningDetailPalette.accent.opacity(0.24), lineWidth: 0.9)
+                }
+            }
+        }
+    }
+
+    private func exampleSection(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(LearningDetailPalette.accent)
+            Text(text)
+                .font(.system(size: 15))
+                .lineSpacing(5)
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private func monogram(for company: String) -> String {
+        String(company.prefix(1))
     }
 }
 

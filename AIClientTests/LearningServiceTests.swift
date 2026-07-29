@@ -35,6 +35,36 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.sections[0].topics[0].hasVideo, true)
     }
 
+    func testDecodesCompanyExampleInLearningDetail() throws {
+        let topic = try JSONDecoder().decode(
+            LearningTopic.self,
+            from: Data(
+                """
+                {
+                  "id":"49127","lesson_id":"220217121","title":"什么是市盈率？",
+                  "summary":"估值指标","category":"股票",
+                  "source_url":"https://www.futunn.com/learn/detail-pe",
+                  "detail":{
+                    "title":"什么是市盈率？","subtitle":"估值指标",
+                    "views":1,"views_text":"1","updated_at":"2025/08/19",
+                    "blocks":[],
+                    "company_examples":[{
+                      "company":"开市客","ticker":"COST",
+                      "situation":"会员收入较稳定。",
+                      "connection":"估值包含质量预期。",
+                      "caution":"不构成投资建议。"
+                    }]
+                  }
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(topic.detail?.companyExamples?.count, 1)
+        XCTAssertEqual(topic.detail?.companyExamples?.first?.company, "开市客")
+        XCTAssertEqual(topic.detail?.companyExamples?.first?.ticker, "COST")
+    }
+
     func testResolvesCachedMediaAgainstServer() throws {
         let topic = try JSONDecoder().decode(
             LearningTopic.self,

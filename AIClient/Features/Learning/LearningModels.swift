@@ -58,6 +58,7 @@ struct LearningDetail: Decodable, Hashable {
     let videoPosterURLValue: String?
     let videoDuration: Int?
     let blocks: [LearningBlock]
+    let companyExamples: [LearningCompanyExample]?
 
     enum CodingKeys: String, CodingKey {
         case title, subtitle, views, blocks
@@ -66,7 +67,18 @@ struct LearningDetail: Decodable, Hashable {
         case videoURLValue = "video_url"
         case videoPosterURLValue = "video_poster_url"
         case videoDuration = "video_duration_seconds"
+        case companyExamples = "company_examples"
     }
+}
+
+struct LearningCompanyExample: Decodable, Hashable, Identifiable {
+    let company: String
+    let ticker: String?
+    let situation: String
+    let connection: String
+    let caution: String
+
+    var id: String { "\(company)-\(ticker ?? "")-\(situation)" }
 }
 
 struct LearningBlock: Decodable, Hashable, Identifiable {

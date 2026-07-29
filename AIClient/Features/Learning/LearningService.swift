@@ -34,7 +34,8 @@ struct LearningService: LearningServing {
 
     func fetchTopic(id: String) async throws -> LearningTopic {
         let response: LearningTopicResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/topics").appending(path: id)
+            baseURL.appending(path: "api/v1/learning/topics").appending(path: id),
+            cachePolicy: .reloadRevalidatingCacheData
         )
         return response.data
     }
