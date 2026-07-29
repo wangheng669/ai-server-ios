@@ -1,5 +1,11 @@
 import SwiftUI
 import UIKit
+import OSLog
+
+private let learningImageLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "AIServerClient",
+    category: "LearningImages"
+)
 
 struct LearningView: View {
     @Binding private var showsDetail: Bool
@@ -208,38 +214,36 @@ struct LearningView: View {
     @ViewBuilder
     private func topicList(_ catalog: LearningCatalog) -> some View {
         let topics = filteredTopics(catalog)
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(query.isEmpty ? "\(selectedCategory)知识" : "搜索结果")
-                    .font(.system(size: 23, weight: .bold))
-                Spacer()
-                Text("\(topics.count) 篇")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 28)
-            .padding(.bottom, 8)
+        HStack(alignment: .firstTextBaseline) {
+            Text(query.isEmpty ? "\(selectedCategory)知识" : "搜索结果")
+                .font(.system(size: 23, weight: .bold))
+            Spacer()
+            Text("\(topics.count) 篇")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 28)
+        .padding(.bottom, 8)
 
-            if topics.isEmpty {
-                ContentUnavailableView(
-                    "没有找到相关内容",
-                    systemImage: "magnifyingglass",
-                    description: Text("试试其他关键词")
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.top, 40)
-            } else {
-                ForEach(topics) { topic in
-                    Button {
-                        path.append(topic)
-                    } label: {
-                        LearningTopicRow(topic: topic)
-                    }
-                    .buttonStyle(LearningPressStyle())
-                    if topic.id != topics.last?.id {
-                        Divider().padding(.leading, 118)
-                    }
+        if topics.isEmpty {
+            ContentUnavailableView(
+                "没有找到相关内容",
+                systemImage: "magnifyingglass",
+                description: Text("试试其他关键词")
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.top, 40)
+        } else {
+            ForEach(topics) { topic in
+                Button {
+                    path.append(topic)
+                } label: {
+                    LearningTopicRow(topic: topic)
+                }
+                .buttonStyle(LearningPressStyle())
+                if topic.id != topics.last?.id {
+                    Divider().padding(.leading, 118)
                 }
             }
         }
@@ -373,14 +377,40 @@ private struct LearningTopicThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityHidden(true)
         .task(id: topic.thumbnailURLValue) {
-            finishedLoading = false
-            let url = topic.mediaURL(topic.thumbnailURLValue)
-            image = await ImageLoader.load(
+            await loadImage()
+        }
+    }
+
+    private func loadImage() async {
+        image = nil
+        finishedLoading = false
+        guard let url = topic.mediaURL(topic.thumbnailURLValue) else {
+            finishedLoading = true
+            learningImageLogger.error("Missing thumbnail URL for topic \(topic.id, privacy: .public)")
+            return
+        }
+
+        for attempt in 1...3 {
+            if let loadedImage = await ImageLoader.load(
                 url,
                 targetSize: CGSize(width: 84, height: 58)
-            )
-            finishedLoading = true
+            ) {
+                image = loadedImage
+                finishedLoading = true
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            if attempt < 3 {
+                try? await Task.sleep(for: .milliseconds(attempt * 350))
+                guard !Task.isCancelled else { return }
+            }
         }
+
+        finishedLoading = true
+        learningImageLogger.error(
+            "Failed to load thumbnail for topic \(topic.id, privacy: .public): \(url.absoluteString, privacy: .public)"
+        )
     }
 
     private var fallback: some View {

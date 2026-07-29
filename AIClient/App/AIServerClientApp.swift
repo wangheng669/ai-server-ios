@@ -108,9 +108,8 @@ private struct EditorialRootView: View {
             tabContent(.investment) {
                 InvestmentView(showsDetail: $marketShowsDetail)
             }
-            if selectedTab == .learning {
+            tabContent(.learning) {
                 LearningView(showsDetail: $learningShowsDetail)
-                    .zIndex(10)
             }
             tabContent(.people) {
                 PeopleView(store: peopleStore, showsDetail: $peopleShowsDetail)
