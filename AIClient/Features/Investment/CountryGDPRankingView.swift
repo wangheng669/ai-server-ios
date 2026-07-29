@@ -128,7 +128,7 @@ struct CountryGDPRankingView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     if let ranking {
                         overview(ranking)
                         searchField
@@ -141,7 +141,7 @@ struct CountryGDPRankingView: View {
                     }
                 }
                 .padding(.horizontal, InvestmentDesign.pageInset)
-                .padding(.top, 14)
+                .padding(.top, 16)
                 .padding(.bottom, 112)
             }
             .scrollIndicators(.hidden)
@@ -159,53 +159,88 @@ struct CountryGDPRankingView: View {
     }
 
     private func overview(_ ranking: CountryGDPRanking) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("全球经济体量")
-                        .font(.system(size: 23, weight: .bold))
-                    Text("\(ranking.year) 年 · 名义 GDP · 现价美元")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "globe.americas.fill")
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .padding(10)
-                    .background(InvestmentDesign.accentSoft, in: Circle())
-            }
+        ZStack(alignment: .topTrailing) {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.08, green: 0.24, blue: 0.60),
+                    Color(red: 0.10, green: 0.40, blue: 0.96)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-            HStack(spacing: 8) {
-                ForEach(Array(ranking.countries.prefix(3))) { country in
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("#\(country.rank)  \(country.flag)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(country.localizedName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .lineLimit(1)
-                        Text(CountryGDPFormat.compact(country.gdpCurrentUSD))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(InvestmentDesign.accent)
-                            .minimumScaleFactor(0.78)
-                            .lineLimit(1)
+            Circle()
+                .stroke(Color.white.opacity(0.10), lineWidth: 22)
+                .frame(width: 150, height: 150)
+                .offset(x: 48, y: -56)
+
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("全球经济体量")
+                            .font(.system(size: 25, weight: .bold))
+                        HStack(spacing: 6) {
+                            Text("\(ranking.year)")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.white.opacity(0.16), in: Capsule())
+                            Text("名义 GDP · 现价美元")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.white.opacity(0.72))
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(11)
-                    .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 11))
+                    Spacer()
+                    Image(systemName: "globe.asia.australia.fill")
+                        .font(.system(size: 27, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.88))
+                        .padding(9)
+                        .background(Color.white.opacity(0.12), in: Circle())
+                }
+
+                HStack(spacing: 8) {
+                    ForEach(Array(ranking.countries.prefix(3))) { country in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(country.flag)
+                                    .font(.system(size: 20))
+                                Spacer()
+                                Text("#\(country.rank)")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.white.opacity(0.70))
+                            }
+                            Text(country.localizedName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .lineLimit(1)
+                            Text(CountryGDPFormat.compact(country.gdpCurrentUSD))
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .minimumScaleFactor(0.72)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(11)
+                        .background(Color.white.opacity(country.rank == 1 ? 0.20 : 0.12), in: RoundedRectangle(cornerRadius: 13))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 13)
+                                .stroke(Color.white.opacity(country.rank == 1 ? 0.24 : 0.10), lineWidth: 0.7)
+                        }
+                    }
                 }
             }
+            .foregroundStyle(.white)
+            .padding(18)
         }
-        .padding(16)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: InvestmentDesign.accent.opacity(0.16), radius: 14, y: 7)
     }
 
     private var searchField: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("搜索国家或代码", text: $searchText)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(InvestmentDesign.accent)
+            TextField("搜索国家或三位代码", text: $searchText)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
             if !searchText.isEmpty {
@@ -219,16 +254,26 @@ struct CountryGDPRankingView: View {
             }
         }
         .font(.system(size: 14))
-        .padding(.horizontal, 13)
-        .frame(height: 42)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 14)
+        .frame(height: 46)
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.6)
+        }
+        .shadow(color: Color.black.opacity(0.035), radius: 8, y: 3)
     }
 
     private func rankingList(_ ranking: CountryGDPRanking) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("国家排名")
-                    .font(.system(size: 16, weight: .bold))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("国家排名")
+                        .font(.system(size: 17, weight: .bold))
+                    Text("点击国家查看历年走势")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text(searchText.isEmpty ? "\(ranking.countries.count) 个国家和经济体" : "\(visibleCountries.count) 个结果")
                     .font(.system(size: 11, weight: .medium))
@@ -237,7 +282,7 @@ struct CountryGDPRankingView: View {
             .padding(.horizontal, 15)
             .padding(.vertical, 14)
 
-            Divider().padding(.leading, 15)
+            Divider().padding(.horizontal, 15)
 
             if visibleCountries.isEmpty {
                 ContentUnavailableView("没有匹配的国家", systemImage: "magnifyingglass")
@@ -249,7 +294,7 @@ struct CountryGDPRankingView: View {
                     }
                     .buttonStyle(.plain)
                     if country.id != visibleCountries.last?.id {
-                        Divider().padding(.leading, 63)
+                        Divider().padding(.leading, 73)
                     }
                 }
             }
@@ -258,18 +303,22 @@ struct CountryGDPRankingView: View {
     }
 
     private func countryRow(_ country: CountryGDP, leaderGDP: Double) -> some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 10) {
             Text("\(country.rank)")
-                .font(.system(size: 13, weight: country.rank <= 3 ? .bold : .semibold, design: .rounded))
-                .foregroundStyle(country.rank <= 3 ? InvestmentDesign.accent : Color.secondary)
-                .frame(width: 28)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(country.rank <= 3 ? Color.white : Color.secondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    country.rank <= 3 ? InvestmentDesign.accent : InvestmentDesign.secondarySurface,
+                    in: RoundedRectangle(cornerRadius: 9)
+                )
 
             Text(country.flag)
-                .font(.system(size: 25))
-                .frame(width: 32)
+                .font(.system(size: 24))
+                .frame(width: 30)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(country.localizedName)
                             .font(.system(size: 15, weight: .semibold))
@@ -279,7 +328,7 @@ struct CountryGDPRankingView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 3) {
+                    VStack(alignment: .trailing, spacing: 5) {
                         Text(CountryGDPFormat.compact(country.gdpCurrentUSD))
                             .font(.system(size: 14, weight: .bold, design: .rounded))
                             .minimumScaleFactor(0.72)
@@ -288,18 +337,21 @@ struct CountryGDPRankingView: View {
                     }
                 }
                 GeometryReader { geometry in
-                    Capsule()
-                        .fill(InvestmentDesign.accent.opacity(country.rank <= 3 ? 0.82 : 0.38))
-                        .frame(width: max(4, geometry.size.width * country.gdpCurrentUSD / max(leaderGDP, 1)), height: 3)
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(InvestmentDesign.accentSoft)
+                        Capsule()
+                            .fill(InvestmentDesign.accent.opacity(country.rank <= 3 ? 0.88 : 0.48))
+                            .frame(width: max(5, geometry.size.width * country.gdpCurrentUSD / max(leaderGDP, 1)))
+                    }
                 }
-                .frame(height: 3)
+                .frame(height: 4)
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(country))
     }
@@ -309,7 +361,7 @@ struct CountryGDPRankingView: View {
         HStack(spacing: 5) {
             if let change = country.rankChange {
                 if change == 0 {
-                    Text("—").foregroundStyle(.secondary)
+                    Text("持平").foregroundStyle(.secondary)
                 } else {
                     Label("\(abs(change))", systemImage: change > 0 ? "arrow.up" : "arrow.down")
                         .foregroundStyle(change > 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
@@ -321,6 +373,9 @@ struct CountryGDPRankingView: View {
             }
         }
         .font(.system(size: 10, weight: .semibold, design: .rounded))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(InvestmentDesign.secondarySurface, in: Capsule())
     }
 
     private func accessibilityLabel(_ country: CountryGDP) -> String {
