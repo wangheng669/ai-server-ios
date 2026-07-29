@@ -138,9 +138,15 @@ private struct PeopleStarMapExplorer: View {
                     }
                 )
                 .frame(width: proxy.size.width, height: proxy.size.height)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 36)
+                        .onEnded(handleStarMapSwipe)
+                )
                 .animation(animation, value: focusedPerson.id)
                 .animation(animation, value: expandedClusterID)
                 .animation(animation, value: clusterPage)
+                .accessibilityHint("左右滑动可切换人物")
 
                 if showsSearch {
                     searchPanel
@@ -382,6 +388,21 @@ private struct PeopleStarMapExplorer: View {
             selectedMemberID = nil
             clusterPage = 0
         }
+    }
+
+    private func handleStarMapSwipe(_ value: DragGesture.Value) {
+        let horizontalDistance = value.translation.width
+        let verticalDistance = value.translation.height
+        guard abs(horizontalDistance) >= 56,
+              abs(horizontalDistance) > abs(verticalDistance) * 1.25,
+              let currentIndex = orderedPeople.firstIndex(where: { $0.id == focusedPerson.id }) else {
+            return
+        }
+
+        let offset = horizontalDistance < 0 ? 1 : -1
+        let nextIndex = (currentIndex + offset + orderedPeople.count) % orderedPeople.count
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        focus(on: orderedPeople[nextIndex])
     }
 
     private func dismissSearch() {
