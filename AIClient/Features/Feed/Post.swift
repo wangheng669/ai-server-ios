@@ -796,7 +796,7 @@ struct Post: Decodable, Identifiable, Hashable {
     }
 
     static func flash(_ item: FlashItem) -> Post {
-        let isImportant = item.finalScore.map { $0 >= importantFlashScore } ?? (item.isImportant == true)
+        let isImportant = item.isImportant ?? item.finalScore.map { $0 >= importantFlashScore } ?? false
         return Post(
             id: syntheticID("flash:\(item.similarityGroupId.map(String.init) ?? item.id ?? ""):\(item.text ?? "")"),
             title: nil, text: item.text, summary: nil, content: item.text, contentZH: nil,

@@ -495,7 +495,7 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.displayContent, "快讯正文")
         XCTAssertEqual(post.authorName, "金十数据")
         XCTAssertEqual(post.score, 7.4)
-        XCTAssertEqual(post.tagNames, ["重要"])
+        XCTAssertEqual(post.tagNames, [])
         XCTAssertEqual(post.meta?.flashCategory, "company")
     }
 
@@ -509,13 +509,13 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(query["category"], "tech")
     }
 
-    func testFlashScoreOverridesLegacyImportantFlag() throws {
+    func testFlashUsesExplicitServerImportantFlagBeforeScore() throws {
         let json = #"{"success":true,"data":{"items":[{"id":"f2","time":"18:01","text":"普通快讯","source":"flash:sina","isImportant":true,"finalScore":6.9}],"hasMore":false}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(FlashResponse.self, from: json)
         let post = Post.flash(try XCTUnwrap(response.data.items.first))
 
         XCTAssertEqual(post.score, 6.9)
-        XCTAssertTrue(post.tagNames.isEmpty)
+        XCTAssertEqual(post.tagNames, ["重要"])
     }
 
     func testFlashMapsMergedPlatformMetadata() throws {
