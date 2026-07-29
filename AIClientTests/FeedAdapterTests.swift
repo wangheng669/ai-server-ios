@@ -177,14 +177,43 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.weiboDetailContent, "今天 真开心😵‍💫\n\n继续分享")
     }
 
+    func testWeiboRSSDetailPreservesAndResolvesInlineEmoji() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":20,"source":"rss:20","post_link":"https://weibo.com/123/abc","content":"今天<img class='emoji' src='https://h5.sinaimg.cn/face/emoji_wabi.png' alt='[挖鼻]'>继续"}"#.utf8)
+        )
+
+        XCTAssertEqual(post.weiboDetailContent, "今天[挖鼻]继续")
+        let emoji = try XCTUnwrap(post.weiboInlineEmojis.first)
+        XCTAssertEqual(post.weiboInlineEmojis.count, 1)
+        XCTAssertEqual(emoji.token, "[挖鼻]")
+        XCTAssertEqual(
+            URLComponents(url: emoji.url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "url" })?
+                .value,
+            "https://h5.sinaimg.cn/face/emoji_wabi.png"
+        )
+    }
+
+    func testWeiboRSSDetailFallsBackToUnicodeForEmojiWithoutImageURL() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":21,"source":"rss:21","post_link":"https://weibo.com/123/abc","content":"专业意见。[挖鼻] 感谢[心][鲜花]"}"#.utf8)
+        )
+
+        XCTAssertEqual(post.weiboDetailContent, "专业意见。😏 感谢❤️🌹")
+        XCTAssertTrue(post.weiboInlineEmojis.isEmpty)
+    }
+
     func testWeiboRSSRecognizesEmbeddedVideoButUnrelatedRSSDoesNot() throws {
         let weibo = try JSONDecoder().decode(
             Post.self,
-            from: Data(#"{"id":20,"source":"rss:20","post_link":"https://weibo.com/123/abc","content":"<video src='https://video.weibo.com/example'></video>"}"#.utf8)
+            from: Data(#"{"id":22,"source":"rss:22","post_link":"https://weibo.com/123/abc","content":"<video src='https://video.weibo.com/example'></video>"}"#.utf8)
         )
         let unrelated = try JSONDecoder().decode(
             Post.self,
-            from: Data(#"{"id":21,"source":"rss:21","post_link":"https://example.com/article","content":"<video src='clip.mp4'></video>"}"#.utf8)
+            from: Data(#"{"id":23,"source":"rss:23","post_link":"https://example.com/article","content":"<video src='clip.mp4'></video>"}"#.utf8)
         )
 
         XCTAssertTrue(weibo.hasWeiboVideoReference)

@@ -72,6 +72,11 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
 }
 struct PostDetailResponse: Decodable { let post: Post }
 
+struct WeiboInlineEmoji: Hashable {
+    let token: String
+    let url: URL
+}
+
 struct XCommentsResponse: Decodable {
     let success: Bool
     let data: Payload
@@ -362,12 +367,39 @@ struct Post: Decodable, Identifiable, Hashable {
         }
     }
     var weiboDetailContent: String {
-        displayContent
+        let value = weiboText(contentZH) ?? weiboText(content) ?? clean(text) ?? clean(summary) ?? displayContent
+        let inlineTokens = Set(weiboInlineEmojis.map(\.token))
+        var normalized = value
             .replacingOccurrences(of: "[图片]", with: "")
-            .replacingOccurrences(of: "[裂开]", with: "😵‍💫")
             .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        for (token, fallback) in Self.weiboEmojiFallbacks where !inlineTokens.contains(token) {
+            normalized = normalized.replacingOccurrences(of: token, with: fallback)
+        }
+        return normalized
+    }
+    var weiboInlineEmojis: [WeiboInlineEmoji] {
+        var result: [WeiboInlineEmoji] = []
+        var seenTokens = Set<String>()
+
+        for image in images ?? [] where image.isKnownInlineAsset {
+            guard let token = clean(image.altText),
+                  let url = MediaURL.image(image.url),
+                  seenTokens.insert(token).inserted else { continue }
+            result.append(.init(token: token, url: url))
+        }
+
+        for rawHTML in [contentZH, content].compactMap({ $0 }) {
+            for tag in htmlImageTags(in: rawHTML) {
+                guard let token = htmlAttribute("alt", in: tag) ?? htmlAttribute("title", in: tag),
+                      let rawURL = htmlAttribute("src", in: tag),
+                      let url = MediaURL.image(rawURL),
+                      seenTokens.insert(token).inserted else { continue }
+                result.append(.init(token: token, url: url))
+            }
+        }
+        return result
     }
     var weiboFollowingListContent: String {
         let candidates = [htmlText(content), clean(title), clean(text), clean(summary)]
@@ -606,6 +638,94 @@ struct Post: Decodable, Identifiable, Hashable {
         }))
         return clean(text)
     }
+
+    private func weiboText(_ value: String?) -> String? {
+        guard var value = clean(value) else { return nil }
+        let source = value as NSString
+        guard let regex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
+            return htmlText(value) ?? value
+        }
+        for match in regex.matches(in: value, range: NSRange(location: 0, length: source.length)).reversed() {
+            let tag = source.substring(with: match.range)
+            let replacement = htmlAttribute("alt", in: tag) ?? htmlAttribute("title", in: tag) ?? ""
+            guard let range = Range(match.range, in: value) else { continue }
+            value.replaceSubrange(range, with: replacement)
+        }
+        return htmlText(value) ?? clean(value)
+    }
+
+    private func htmlImageTags(in value: String) -> [String] {
+        let source = value as NSString
+        guard let regex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
+            return []
+        }
+        return regex.matches(in: value, range: NSRange(location: 0, length: source.length))
+            .map { source.substring(with: $0.range) }
+    }
+
+    private func htmlAttribute(_ name: String, in tag: String) -> String? {
+        let source = tag as NSString
+        let escapedName = NSRegularExpression.escapedPattern(for: name)
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\b"# + escapedName + #"\s*=\s*["']([^"']+)["']"#,
+            options: .caseInsensitive
+        ), let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: source.length)),
+           match.numberOfRanges > 1 else { return nil }
+        let value = source.substring(with: match.range(at: 1))
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private static let weiboEmojiFallbacks: [String: String] = [
+        "[挖鼻]": "😏",
+        "[心]": "❤️",
+        "[鲜花]": "🌹",
+        "[捂嘴哭]": "🥹",
+        "[并不简单]": "😏",
+        "[笑cry]": "😂",
+        "[允悲]": "😂",
+        "[泪]": "😢",
+        "[哈哈]": "😄",
+        "[爱你]": "🥰",
+        "[赞]": "👍",
+        "[鼓掌]": "👏",
+        "[抱拳]": "🙏",
+        "[doge]": "🐶",
+        "[吃瓜]": "🍉",
+        "[微笑]": "🙂",
+        "[怒]": "😠",
+        "[晕]": "😵",
+        "[惊讶]": "😮",
+        "[害羞]": "😊",
+        "[馋嘴]": "😋",
+        "[可怜]": "🥺",
+        "[思考]": "🤔",
+        "[摊手]": "🤷",
+        "[裂开]": "😵‍💫",
+        "[白眼]": "🙄",
+        "[打call]": "📣",
+        "[加油]": "💪",
+        "[比心]": "🫰",
+        "[握手]": "🤝",
+        "[ok]": "👌",
+        "[拜拜]": "👋",
+        "[作揖]": "🙏",
+        "[嘻嘻]": "😁",
+        "[偷笑]": "🤭",
+        "[闭嘴]": "🤐",
+        "[抓狂]": "😫",
+        "[吐]": "🤮",
+        "[酷]": "😎",
+        "[亲亲]": "😘",
+        "[生病]": "🤒",
+        "[失望]": "😞",
+        "[黑线]": "😓",
+        "[困]": "😴",
+        "[疑问]": "❓"
+    ]
 
     private func decodeNumericHTMLEntities(_ value: String) -> String {
         let pattern = #"&#(?:x([0-9A-Fa-f]+)|([0-9]+));"#
