@@ -72,6 +72,7 @@ struct PeopleView: View {
                 .accessibilityAddTraits(selectedTopic == topic ? .isSelected : [])
             }
         }
+        .padding(.horizontal, 22)
         .padding(.top, 13)
         .overlay(alignment: .bottom) { Divider() }
     }
