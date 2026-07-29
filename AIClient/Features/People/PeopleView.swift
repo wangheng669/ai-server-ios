@@ -14,37 +14,46 @@ struct PeopleView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if store.isLoading && store.people.isEmpty {
-                    PeopleLoadingTimeline()
-                } else if let error = store.errorMessage, store.people.isEmpty {
-                    ContentUnavailableView {
-                        Label("载入失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("重试") { Task { await store.load(force: true) } }
+            ZStack {
+                Group {
+                    if store.isLoading && store.people.isEmpty {
+                        PeopleLoadingTimeline()
+                    } else if let error = store.errorMessage, store.people.isEmpty {
+                        ContentUnavailableView {
+                            Label("载入失败", systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(error)
+                        } actions: {
+                            Button("重试") { Task { await store.load(force: true) } }
+                        }
+                    } else if store.people.isEmpty {
+                        ContentUnavailableView(
+                            "暂无人物",
+                            systemImage: "person.2",
+                            description: Text("人物资料正在整理中")
+                        )
+                    } else {
+                        PeopleStarMapExplorer(
+                            people: store.people,
+                            baseURL: store.baseURL,
+                            onOpenPerson: { selectedPerson = $0 },
+                            onRefresh: { await store.load(force: true) }
+                        )
                     }
-                } else if store.people.isEmpty {
-                    ContentUnavailableView(
-                        "暂无人物",
-                        systemImage: "person.2",
-                        description: Text("人物资料正在整理中")
+                }
+
+                if let selectedPerson {
+                    InlinePersonDetail(
+                        person: selectedPerson,
+                        onCollapse: { self.selectedPerson = nil }
                     )
-                } else {
-                    PeopleStarMapExplorer(
-                        people: store.people,
-                        baseURL: store.baseURL,
-                        onOpenPerson: { selectedPerson = $0 },
-                        onRefresh: { await store.load(force: true) }
-                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(2)
                 }
             }
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .navigationBarHidden(true)
-            .navigationDestination(item: $selectedPerson) { person in
-                PersonDetailPage(person: person)
-            }
+            .animation(.snappy(duration: 0.38), value: selectedPerson?.id)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -134,7 +143,7 @@ private struct PeopleStarMapExplorer: View {
                         .onEnded(handleStarMapSwipe)
                 )
                 .animation(animation, value: focusedPerson.id)
-                .accessibilityHint("左右滑动可切换人物")
+                .accessibilityHint("左右滑动切换人物，上滑展开人物详情")
 
                 if showsSearch {
                     searchPanel
@@ -356,6 +365,14 @@ private struct PeopleStarMapExplorer: View {
     private func handleStarMapSwipe(_ value: DragGesture.Value) {
         let horizontalDistance = value.translation.width
         let verticalDistance = value.translation.height
+
+        if verticalDistance <= -64,
+           abs(verticalDistance) > abs(horizontalDistance) * 1.15 {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            onOpenPerson(focusedPerson)
+            return
+        }
+
         guard abs(horizontalDistance) >= 56,
               abs(horizontalDistance) > abs(verticalDistance) * 1.25,
               let currentIndex = orderedPeople.firstIndex(where: { $0.id == focusedPerson.id }) else {
@@ -549,6 +566,9 @@ private struct PeopleOrbitCanvas: View {
                     .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
+                Label("上滑看详情", systemImage: "chevron.up")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
             .frame(width: 138)
         }
@@ -1782,8 +1802,63 @@ private struct PeopleLoadingTimeline: View {
     }
 }
 
+private struct InlinePersonDetail: View {
+    let person: SpecialPerson
+    let onCollapse: () -> Void
+
+    @GestureState private var pullDownOffset: CGFloat = 0
+
+    var body: some View {
+        ZStack {
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
+
+            PersonDetailPage(person: person, showsNavigationChrome: false)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    collapseHandle
+                }
+        }
+        .offset(y: max(0, pullDownOffset))
+        .shadow(color: .black.opacity(pullDownOffset > 0 ? 0.12 : 0), radius: 18, y: -4)
+    }
+
+    private var collapseHandle: some View {
+        VStack(spacing: 4) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.34))
+                .frame(width: 38, height: 5)
+            Text("下滑返回关系图")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+        .background(.ultraThinMaterial)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .updating($pullDownOffset) { value, state, _ in
+                    state = max(0, value.translation.height)
+                }
+                .onEnded { value in
+                    if value.translation.height >= 42 ||
+                        value.predictedEndTranslation.height >= 88 {
+                        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                        onCollapse()
+                    }
+                }
+        )
+        .onTapGesture(perform: onCollapse)
+        .accessibilityElement()
+        .accessibilityLabel("收起人物详情，返回关系图")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onCollapse() }
+    }
+}
+
 private struct PersonDetailPage: View {
     let person: SpecialPerson
+    let showsNavigationChrome: Bool
     @State private var store = PersonDetailStore()
     @State private var section: PersonDetailSection
     @State private var ownContentSection = PersonOwnContentSection.posts
@@ -1793,8 +1868,9 @@ private struct PersonDetailPage: View {
     @State private var selectedArticle: PersonArticle?
     @State private var selectedPhoto: PersonPhoto?
 
-    init(person: SpecialPerson) {
+    init(person: SpecialPerson, showsNavigationChrome: Bool = true) {
         self.person = person
+        self.showsNavigationChrome = showsNavigationChrome
         _section = State(initialValue: person.topic == .history ? .profile : .posts)
     }
 
@@ -1812,26 +1888,28 @@ private struct PersonDetailPage: View {
         .background(Color(uiColor: .systemBackground))
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
+        .toolbar(showsNavigationChrome ? .visible : .hidden, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if let url = person.xProfileURL {
-                        Link(destination: url) {
-                            Label("在 X 中打开", systemImage: "arrow.up.right.square")
+            if showsNavigationChrome {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if let url = person.xProfileURL {
+                            Link(destination: url) {
+                                Label("在 X 中打开", systemImage: "arrow.up.right.square")
+                            }
                         }
-                    }
-                    if let handle = person.xHandle ?? person.handle {
-                        Button {
-                            UIPasteboard.general.string = handle
-                        } label: {
-                            Label(person.xHandle == nil ? "复制账号" : "复制 X 账号", systemImage: "doc.on.doc")
+                        if let handle = person.xHandle ?? person.handle {
+                            Button {
+                                UIPasteboard.general.string = handle
+                            } label: {
+                                Label(person.xHandle == nil ? "复制账号" : "复制 X 账号", systemImage: "doc.on.doc")
+                            }
                         }
+                    } label: {
+                        Image(systemName: "ellipsis")
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
+                    .accessibilityLabel("更多")
                 }
-                .accessibilityLabel("更多")
             }
         }
         .toolbar(.hidden, for: .tabBar)
