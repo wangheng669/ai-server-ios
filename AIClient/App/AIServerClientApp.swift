@@ -119,8 +119,6 @@ private struct EditorialRootView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !hidesRootTabBar {
                 RootNavigationBar(selection: $selectedTab)
-                    .padding(.horizontal, 22)
-                    .offset(y: 8)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -171,10 +169,13 @@ private struct RootNavigationBar: View {
             item(.learning, title: "学习", icon: "graduationcap")
             item(.people, title: "人物", icon: "person")
         }
-        .frame(height: 50)
-        .background(Color(uiColor: .systemBackground).opacity(0.98), in: Capsule())
-        .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
-        .overlay(Capsule().stroke(Color.black.opacity(0.025)))
+        .frame(height: 56)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(InvestmentDesign.divider)
+                .frame(height: 0.5)
+        }
     }
 
     private func item(_ tab: RootTab, title: String, icon: String) -> some View {
@@ -183,11 +184,11 @@ private struct RootNavigationBar: View {
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: selection == tab ? .semibold : .regular))
+                    .font(.system(size: 19, weight: selection == tab ? .semibold : .regular))
                 Text(title)
-                    .font(.system(size: 11, weight: selection == tab ? .semibold : .regular))
+                    .font(.system(size: 10.5, weight: selection == tab ? .semibold : .regular))
             }
-            .foregroundStyle(selection == tab ? HoldingsPalette.purple : Color.secondary)
+            .foregroundStyle(selection == tab ? InvestmentDesign.accent : Color.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
