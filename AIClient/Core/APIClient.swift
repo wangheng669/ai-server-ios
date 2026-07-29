@@ -16,12 +16,17 @@ struct APIClient {
 
     func checkHealth() async throws { let _: HealthResponse = try await get(baseURL.appending(path: "health")) }
 
-    func fetchPosts(page: Int, limit: Int = 20, source: FeedSource) async throws -> [Post] {
+    func fetchPosts(
+        page: Int,
+        limit: Int = 20,
+        source: FeedSource,
+        flashCategory: String? = nil
+    ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin:
             return try await fetchHotTopics(page: page, limit: limit, source: source).map { .hotTopic($0, source: source) }
         case .flash:
-            return try await fetchFlash(page: page, limit: limit).map(Post.flash)
+            return try await fetchFlash(page: page, limit: limit, category: flashCategory).map(Post.flash)
         case .xueqiu:
             return try await fetchXueqiuPosts(page: page, limit: limit)
         default:
@@ -156,12 +161,22 @@ struct APIClient {
         return response.data.topics
     }
 
-    private func fetchFlash(page: Int, limit: Int) async throws -> [FlashItem] {
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/market/flash/live"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = [
-            .init(name: "limit", value: String(limit)), .init(name: "offset", value: String((page - 1) * limit)),
-            .init(name: "source", value: "all"), .init(name: "include_options", value: "0")
+    static func flashQueryItems(page: Int, limit: Int, category: String?) -> [URLQueryItem] {
+        var items: [URLQueryItem] = [
+            .init(name: "limit", value: String(limit)),
+            .init(name: "offset", value: String((page - 1) * limit)),
+            .init(name: "source", value: "all"),
+            .init(name: "include_options", value: "0")
         ]
+        if let category, !category.isEmpty {
+            items.append(.init(name: "category", value: category))
+        }
+        return items
+    }
+
+    private func fetchFlash(page: Int, limit: Int, category: String?) async throws -> [FlashItem] {
+        var parts = URLComponents(url: baseURL.appending(path: "api/v1/market/flash/live"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = Self.flashQueryItems(page: page, limit: limit, category: category)
         guard let url = parts?.url else { throw APIError.invalidURL }
         let response: FlashResponse = try await get(url)
         guard response.success else { throw APIError.invalidResponse }

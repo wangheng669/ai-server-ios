@@ -14,6 +14,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var selectedRSSFeedID: Int?
     @Published private(set) var selectedRSSPosts: [Post] = []
     @Published private(set) var isLoadingRSSSelection = false
+    @Published private(set) var selectedFlashCategory: String?
     @Published var errorMessage: String?
     @Published var source: FeedSource {
         didSet { UserDefaults.standard.set(source.rawValue, forKey: "feed.source") }
@@ -26,6 +27,7 @@ final class NewsFeedViewModel: ObservableObject {
     private var realtimeClient: RealtimeFeedClient?
     private var activeRefreshID: UUID?
     private let fetchPosts: (Int, Int, FeedSource) async throws -> [Post]
+    private let fetchFlashPosts: (Int, Int, String?) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int) async throws -> [Post]
@@ -37,6 +39,7 @@ final class NewsFeedViewModel: ObservableObject {
     init(
         source initialSource: FeedSource? = nil,
         fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
+        fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
         fetchRSSFeedPosts: ((Int) async throws -> [Post])? = nil,
         fetchPostDetail: ((Int) async throws -> Post)? = nil,
@@ -64,6 +67,22 @@ final class NewsFeedViewModel: ObservableObject {
         }
         self.fetchNewYorkTimesArticle = fetchNewYorkTimesArticle ?? { url in
             try await client.fetchNewYorkTimesArticle(url: url)
+        }
+        if let fetchFlashPosts {
+            self.fetchFlashPosts = fetchFlashPosts
+        } else if let fetchPosts {
+            self.fetchFlashPosts = { page, limit, _ in
+                try await fetchPosts(page, limit, .flash)
+            }
+        } else {
+            self.fetchFlashPosts = { page, limit, category in
+                try await client.fetchPosts(
+                    page: page,
+                    limit: limit,
+                    source: .flash,
+                    flashCategory: category
+                )
+            }
         }
         #if DEBUG
         if usesXFeedPreview {
@@ -123,6 +142,16 @@ final class NewsFeedViewModel: ObservableObject {
             guard selectedRSSFeedID == feedID else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    func selectFlashCategory(_ category: String?) async {
+        guard source == .flash, selectedFlashCategory != category else { return }
+        selectedFlashCategory = category
+        posts = []
+        page = 1
+        canLoadMore = true
+        cache[.flash] = nil
+        await refresh()
     }
 
     private func prefetchNewYorkTimesBodies(for posts: [Post]) async throws -> [Post] {
@@ -298,6 +327,7 @@ final class NewsFeedViewModel: ObservableObject {
     func refresh() async {
         let refreshID = UUID()
         let requestedSource = source
+        let requestedFlashCategory = selectedFlashCategory
         let completesSourceSwitch = isSwitchingSource
         activeRefreshID = refreshID
         isLoading = true
@@ -310,8 +340,15 @@ final class NewsFeedViewModel: ObservableObject {
         }
         do {
             let pageSize = pageSize(for: requestedSource)
-            let result = try await fetchPage(1, limit: pageSize, source: requestedSource)
-            guard source == requestedSource, activeRefreshID == refreshID else { return }
+            let result = try await fetchPage(
+                1,
+                limit: pageSize,
+                source: requestedSource,
+                flashCategory: requestedFlashCategory
+            )
+            guard source == requestedSource,
+                  selectedFlashCategory == requestedFlashCategory,
+                  activeRefreshID == refreshID else { return }
             posts = result
             pendingRealtimePosts = []
             page = 1
@@ -337,12 +374,18 @@ final class NewsFeedViewModel: ObservableObject {
               !isLoadingMore,
               !isLoading else { return }
         let requestedSource = source
+        let requestedFlashCategory = selectedFlashCategory
         let pageSize = pageSize(for: requestedSource)
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let result = try await fetchPage(page + 1, limit: pageSize, source: requestedSource)
-            guard source == requestedSource else { return }
+            let result = try await fetchPage(
+                page + 1,
+                limit: pageSize,
+                source: requestedSource,
+                flashCategory: requestedFlashCategory
+            )
+            guard source == requestedSource, selectedFlashCategory == requestedFlashCategory else { return }
             let ids = Set(posts.map(\.id))
             posts += result.filter { !ids.contains($0.id) }
             page += 1
@@ -352,11 +395,21 @@ final class NewsFeedViewModel: ObservableObject {
         } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
     }
 
-    private func fetchPage(_ page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
+    private func fetchPage(
+        _ page: Int,
+        limit: Int,
+        source: FeedSource,
+        flashCategory: String? = nil
+    ) async throws -> [Post] {
         var lastError: Error?
         for attempt in 0..<2 {
             do {
-                let result = try await fetchPosts(page, limit, source)
+                let result: [Post]
+                if source == .flash {
+                    result = try await fetchFlashPosts(page, limit, flashCategory)
+                } else {
+                    result = try await fetchPosts(page, limit, source)
+                }
                 if source == .newYorkTimes {
                     return try await prefetchNewYorkTimesBodies(for: result)
                 }
@@ -417,7 +470,10 @@ final class NewsFeedViewModel: ObservableObject {
         case .rss: return post.isRSS && !post.hasDedicatedFeedTab
         case .laozhong: return post.isRSS && post.tagNames.contains("老中")
         case .youtube: return post.isRSS && post.tagNames.contains("YouTube")
-        case .flash: return post.isFlash
+        case .flash:
+            guard post.isFlash else { return false }
+            guard let selectedFlashCategory else { return true }
+            return post.meta?.flashCategory == selectedFlashCategory
         case .weibo, .douyin: return false
         }
     }

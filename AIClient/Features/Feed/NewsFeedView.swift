@@ -4,27 +4,33 @@ import WebKit
 enum RootTab: Hashable { case observation, investment, learning, people }
 
 private enum FlashFilter: String, CaseIterable, Identifiable {
-    case all, important, ai, market, policy
+    case all, important, tech, equity, commodity, company, geopolitical, other
 
     var id: Self { self }
     var title: String {
         return switch self {
         case .all: "全部"
         case .important: "重要"
-        case .ai: "AI"
-        case .market: "市场"
-        case .policy: "政策"
+        case .tech: "AI科技"
+        case .equity: "股票"
+        case .commodity: "商品"
+        case .company: "公司"
+        case .geopolitical: "国际"
+        case .other: "综合"
+        }
+    }
+
+    var serverCategory: String? {
+        return switch self {
+        case .all, .important: nil
+        default: rawValue
         }
     }
 
     func matches(_ post: Post) -> Bool {
-        let content = post.displayContent.lowercased()
-        return switch self {
-        case .all: true
+        switch self {
         case .important: post.tagNames.contains("重要")
-        case .ai: ["ai", "人工智能", "大模型", "算力", "芯片", "openai", "gpt"].contains { content.contains($0) }
-        case .market: ["股", "市场", "指数", "涨", "跌", "ipo", "营收", "利润"].contains { content.contains($0) }
-        case .policy: ["政策", "发改委", "工信部", "国务院", "监管", "标准", "方案"].contains { content.contains($0) }
+        default: true
         }
     }
 }
@@ -850,7 +856,9 @@ struct NewsFeedView: View {
             HStack(spacing: 8) {
                 ForEach(FlashFilter.allCases) { filter in
                     Button {
+                        guard flashFilter != filter else { return }
                         withAnimation(.easeOut(duration: 0.18)) { flashFilter = filter }
+                        Task { await model.selectFlashCategory(filter.serverCategory) }
                     } label: {
                         Text(filter.title)
                             .font(.system(size: 14, weight: flashFilter == filter ? .semibold : .medium))
@@ -2732,11 +2740,16 @@ private struct NewsCardView: View {
     }
 
     private var flashCategory: String {
-        let content = post.displayContent.lowercased()
-        if ["ai", "人工智能", "大模型", "算力", "芯片", "openai", "gpt"].contains(where: content.contains) { return "AI" }
-        if ["政策", "发改委", "工信部", "国务院", "监管", "标准"].contains(where: content.contains) { return "政策" }
-        if ["股", "市场", "指数", "涨", "跌", "ipo", "营收", "利润"].contains(where: content.contains) { return "市场" }
-        return "快讯"
+        switch post.meta?.flashCategory {
+        case "tech": "AI科技"
+        case "equity": "股票"
+        case "commodity": "商品"
+        case "company": "公司"
+        case "geopolitical": "国际"
+        case "other": "综合"
+        case "policy": "政策"
+        default: "快讯"
+        }
     }
 
     private var socialCard: some View {
