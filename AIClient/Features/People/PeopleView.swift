@@ -13,15 +13,21 @@ struct PeopleView: View {
         _showsDetail = showsDetail
     }
 
-    private var filteredPeople: [SpecialPerson] {
-        store.people.filter { $0.topic == selectedTopic }
+    private func filteredPeople(for topic: PeopleTopic) -> [SpecialPerson] {
+        store.people.filter { $0.topic == topic }
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 topicPicker
-                peopleList
+                TabView(selection: $selectedTopic) {
+                    ForEach(store.topics) { topic in
+                        peopleList(for: topic)
+                            .tag(topic)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
             }
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .navigationBarHidden(true)
@@ -71,10 +77,11 @@ struct PeopleView: View {
     }
 
     @ViewBuilder
-    private var peopleList: some View {
-        if store.isLoading && filteredPeople.isEmpty {
+    private func peopleList(for topic: PeopleTopic) -> some View {
+        let people = filteredPeople(for: topic)
+        if store.isLoading && people.isEmpty {
             PeopleLoadingTimeline()
-        } else if let error = store.errorMessage, filteredPeople.isEmpty {
+        } else if let error = store.errorMessage, people.isEmpty {
             ContentUnavailableView {
                 Label("载入失败", systemImage: "wifi.exclamationmark")
             } description: {
@@ -82,27 +89,27 @@ struct PeopleView: View {
             } actions: {
                 Button("重试") { Task { await store.load(force: true) } }
             }
-        } else if filteredPeople.isEmpty {
+        } else if people.isEmpty {
             ContentUnavailableView(
-                "暂无\(selectedTopic.rawValue)人物",
+                "暂无\(topic.rawValue)人物",
                 systemImage: "person.2",
                 description: Text("这一分类暂时还没有收录人物")
             )
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    featuredPeople
+                    featuredPeople(people)
                     Text("最新动态")
                         .font(.system(size: 22, weight: .bold))
                         .padding(.horizontal, 20)
                         .padding(.top, 24)
                         .padding(.bottom, 8)
-                    ForEach(filteredPeople) { person in
+                    ForEach(people) { person in
                         Button { selectedPerson = person } label: {
                             PersonActivityRow(person: person, latestPost: store.latestPost(for: person))
                         }
                         .buttonStyle(PeoplePressStyle())
-                        if person.id != filteredPeople.last?.id {
+                        if person.id != people.last?.id {
                             Divider().padding(.leading, 84)
                         }
                     }
@@ -117,9 +124,9 @@ struct PeopleView: View {
         }
     }
 
-    private var featuredPeople: some View {
+    private func featuredPeople(_ people: [SpecialPerson]) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            ForEach(filteredPeople.prefix(4)) { person in
+            ForEach(people.prefix(4)) { person in
                 Button { selectedPerson = person } label: {
                     VStack(spacing: 10) {
                         AvatarView(
