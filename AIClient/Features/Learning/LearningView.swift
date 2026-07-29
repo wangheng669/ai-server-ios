@@ -13,7 +13,6 @@ struct LearningView: View {
     @State private var store = LearningStore()
     @State private var repository = LearningContentRepository()
     @State private var path: [LearningRoute] = []
-    @State private var selectedCategory = "股票"
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
         (ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
@@ -22,8 +21,6 @@ struct LearningView: View {
         .investment
         #endif
     }()
-    @State private var query = ""
-    @State private var showsSearch = false
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
@@ -62,7 +59,8 @@ struct LearningView: View {
         .task(id: prefetchKey) {
             guard selectedSection == .investment,
                   let catalog = store.catalog,
-                  let section = catalog.sections.first(where: { $0.name == selectedCategory }) else {
+                  let section = catalog.sections.first(where: { $0.name == "股票" }) ??
+                    catalog.sections.first else {
                 return
             }
             await repository.prefetch(section.topics.prefix(10))
@@ -71,7 +69,7 @@ struct LearningView: View {
     }
 
     private var prefetchKey: String {
-        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)-\(selectedSection)-\(selectedCategory)"
+        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)-\(selectedSection)"
     }
 
     private var knowledgeHome: some View {
@@ -79,12 +77,7 @@ struct LearningView: View {
             KnowledgePagePalette.canvas.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                header
                 sectionPicker
-                if showsSearch {
-                    searchField
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         switch selectedSection {
@@ -94,7 +87,7 @@ struct LearningView: View {
                             booksContent
                         }
                     }
-                    .padding(.top, 22)
+                    .padding(.top, 12)
                     .padding(.bottom, 32)
                 }
                 .id(selectedSection)
@@ -110,80 +103,34 @@ struct LearningView: View {
                 }
             }
         }
-        .animation(.snappy(duration: 0.24), value: showsSearch)
-    }
-
-    private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("知识")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                Text(selectedSection.subtitle)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.opacity)
-            }
-            Spacer()
-            Button {
-                showsSearch.toggle()
-                if !showsSearch { query = "" }
-            } label: {
-                Image(systemName: showsSearch ? "xmark" : "magnifyingglass")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 42, height: 42)
-                    .background(KnowledgePagePalette.surface, in: Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
-                    }
-                    .shadow(color: .black.opacity(0.045), radius: 8, y: 3)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(
-                showsSearch ? "关闭搜索" : "搜索\(selectedSection.title)内容"
-            )
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 13)
-        .padding(.bottom, 18)
     }
 
     private var sectionPicker: some View {
-        HStack(spacing: 5) {
+        HStack(alignment: .top, spacing: 30) {
             sectionButton(.investment)
             sectionButton(.books)
+            Spacer()
         }
-        .padding(5)
-        .frame(height: 52)
-        .background(KnowledgePagePalette.segmentBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
         .padding(.horizontal, 20)
-        .padding(.bottom, showsSearch ? 14 : 0)
+        .padding(.top, 12)
+        .padding(.bottom, 5)
     }
 
     private func sectionButton(_ section: KnowledgeSection) -> some View {
         Button {
             guard selectedSection != section else { return }
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(.snappy(duration: 0.22)) {
                 selectedSection = section
-                query = ""
             }
         } label: {
-            HStack(spacing: 7) {
-                Image(systemName: section.icon)
-                    .font(.system(size: 14, weight: .semibold))
+            VStack(spacing: 7) {
                 Text(section.title)
-                    .font(.system(size: 16, weight: .semibold))
-            }
-                .foregroundStyle(selectedSection == section ? Color.white : Color.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background {
-                    if selectedSection == section {
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .fill(KnowledgePagePalette.accent)
-                            .shadow(color: KnowledgePagePalette.accent.opacity(0.22), radius: 7, y: 3)
-                    }
+                    .font(.system(size: 26, weight: .semibold, design: .serif))
+                    .foregroundStyle(selectedSection == section ? Color.primary : Color.secondary)
+                Circle()
+                    .fill(selectedSection == section ? KnowledgePagePalette.accent : .clear)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
         }
@@ -191,41 +138,15 @@ struct LearningView: View {
         .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
     }
 
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(selectedSection.searchPlaceholder, text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 48)
-        .background(KnowledgePagePalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
-        }
-        .padding(.horizontal, 20)
-    }
-
     @ViewBuilder
     private var investmentContent: some View {
         if let catalog = store.catalog {
-            if query.isEmpty {
-                featuredTopic(in: catalog)
-                categoryPicker(catalog.sections)
-                topicList(catalog)
-            } else {
-                investmentSearchResults(catalog)
-            }
+            let topics = stockTopics(in: catalog)
+            WeeklyStudyCard()
+                .padding(.horizontal, 20)
+
+            learningPath(topics)
+            savedTopics(in: catalog, excluding: Set(topics.prefix(4).map(\.id)))
         } else if store.isLoading {
             InvestmentContentLoadingView()
         } else {
@@ -242,132 +163,64 @@ struct LearningView: View {
     }
 
     @ViewBuilder
-    private func featuredTopic(in catalog: LearningCatalog) -> some View {
-        if let topic = catalog.sections
-            .flatMap(\.topics)
-            .first(where: { $0.title.contains("市盈率") }) ?? catalog.sections.first?.topics.first {
-            Button {
-                path.append(.topic(topic))
-            } label: {
-                ZStack(alignment: .leading) {
-                    LearningHeroArtwork()
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("今日精选")
-                            .font(.system(size: 12, weight: .bold))
-                            .tracking(1.5)
-                            .foregroundStyle(.white.opacity(0.7))
-                        Text("从零开始\n读懂股票")
-                            .font(.system(size: 27, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineSpacing(2)
-                            .padding(.top, 10)
-                        Spacer()
-                        HStack(spacing: 8) {
-                            Text("12 个基础概念")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.74))
-                            Circle()
-                                .fill(.white.opacity(0.36))
-                                .frame(width: 3, height: 3)
-                            Text("开始学习")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    .padding(22)
-                }
-                .frame(height: 190)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .stroke(.white.opacity(0.12), lineWidth: 0.7)
-                }
-                .shadow(color: KnowledgePagePalette.accent.opacity(0.16), radius: 18, y: 9)
-                .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            }
-            .buttonStyle(LearningPressStyle())
+    private func learningPath(_ topics: [LearningTopic]) -> some View {
+        Text("股票入门路径")
+            .font(.system(size: 24, weight: .bold, design: .serif))
             .padding(.horizontal, 20)
-        }
-    }
-
-    private func categoryPicker(_ sections: [LearningSection]) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 9) {
-                ForEach(sections) { section in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.16)) {
-                            selectedCategory = section.name
-                        }
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: categoryIcon(section.name))
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(section.name)
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundStyle(
-                            selectedCategory == section.name ? Color.white : Color.secondary
-                        )
-                        .padding(.horizontal, 15)
-                        .frame(height: 40)
-                        .background(
-                            selectedCategory == section.name
-                                ? KnowledgePagePalette.accent
-                                : KnowledgePagePalette.surface,
-                            in: Capsule()
-                        )
-                        .overlay {
-                            if selectedCategory != section.name {
-                                Capsule()
-                                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedCategory == section.name ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 20)
-        }
-        .scrollIndicators(.hidden)
-        .padding(.top, 22)
-    }
-
-    @ViewBuilder
-    private func topicList(_ catalog: LearningCatalog) -> some View {
-        let topics = filteredTopics(catalog)
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(selectedCategory)知识")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                Text("循序渐进，建立自己的投资框架")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text("\(topics.count) 篇")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(KnowledgePagePalette.accent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(KnowledgePagePalette.accent.opacity(0.09), in: Capsule())
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 28)
-        .padding(.bottom, 13)
+            .padding(.top, 26)
+            .padding(.bottom, 13)
 
         if topics.isEmpty {
             ContentUnavailableView(
-                "没有找到相关内容",
-                systemImage: "magnifyingglass",
-                description: Text("试试其他关键词")
+                "暂无学习内容",
+                systemImage: "point.topleft.down.to.point.bottomright.curvepath",
+                description: Text("下拉刷新后重试")
             )
             .frame(maxWidth: .infinity)
-            .padding(.top, 40)
+            .padding(.top, 24)
         } else {
+            let milestones = learningMilestones(from: topics)
+            VStack(spacing: 0) {
+                ForEach(Array(milestones.enumerated()), id: \.element.id) { index, milestone in
+                    Button {
+                        path.append(.topic(milestone.topic))
+                    } label: {
+                        LearningMilestoneRow(
+                            number: index + 1,
+                            title: milestone.title,
+                            topic: milestone.topic,
+                            isCurrent: index == 0,
+                            isLast: index == milestones.count - 1
+                        )
+                    }
+                    .buttonStyle(LearningPressStyle())
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    @ViewBuilder
+    private func savedTopics(in catalog: LearningCatalog, excluding excludedIDs: Set<String>) -> some View {
+        let topics = Array(
+            catalog.sections
+                .flatMap(\.topics)
+                .filter { !excludedIDs.contains($0.id) }
+                .prefix(2)
+        )
+        if topics.isEmpty {
+            EmptyView()
+        } else {
+            Divider()
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+
+            Text("稍后阅读")
+                .font(.system(size: 21, weight: .bold, design: .serif))
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 7)
+
             VStack(spacing: 0) {
                 ForEach(topics) { topic in
                     Button {
@@ -380,60 +233,6 @@ struct LearningView: View {
                         Divider().padding(.leading, 112)
                     }
                 }
-            }
-            .background(KnowledgePagePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
-            }
-            .padding(.horizontal, 20)
-        }
-    }
-
-    @ViewBuilder
-    private func investmentSearchResults(_ catalog: LearningCatalog) -> some View {
-        let topics = filteredTopics(catalog)
-
-        HStack(alignment: .firstTextBaseline) {
-            Text("搜索结果")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-            Spacer()
-            Text("\(topics.count) 篇")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-
-        if topics.isEmpty {
-            ContentUnavailableView(
-                "没有找到相关内容",
-                systemImage: "magnifyingglass",
-                description: Text("试试其他关键词")
-            )
-            .frame(maxWidth: .infinity)
-            .padding(.top, 40)
-        } else {
-            VStack(spacing: 0) {
-                ForEach(topics) { topic in
-                    Button {
-                        path.append(.topic(topic))
-                    } label: {
-                        LearningTopicRow(topic: topic)
-                    }
-                    .buttonStyle(LearningPressStyle())
-                    if topic.id != topics.last?.id {
-                        Divider().padding(.leading, 112)
-                    }
-                }
-            }
-            .background(KnowledgePagePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
             }
             .padding(.horizontal, 20)
         }
@@ -441,27 +240,11 @@ struct LearningView: View {
 
     @ViewBuilder
     private var booksContent: some View {
-        let books = filteredBooks()
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(query.isEmpty ? "精选书架" : "搜索结果")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                if query.isEmpty {
-                    Text("值得反复阅读的思想与人物")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Text("\(books.count) 本")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(KnowledgePagePalette.accent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(KnowledgePagePalette.accent.opacity(0.09), in: Capsule())
-        }
+        let books = store.bookshelf?.books ?? []
+        Text("正在读")
+            .font(.system(size: 24, weight: .bold, design: .serif))
         .padding(.horizontal, 20)
-        .padding(.bottom, 16)
+        .padding(.bottom, 12)
 
         if store.isBookshelfLoading && store.bookshelf == nil {
             ProgressView("正在载入书架")
@@ -481,76 +264,59 @@ struct LearningView: View {
             .padding(.top, 36)
         } else if books.isEmpty {
             ContentUnavailableView(
-                query.isEmpty ? "暂无可展示书籍" : "没有找到相关书籍",
+                "暂无可展示书籍",
                 systemImage: "books.vertical",
-                description: Text("试试书名、作者或投资主题")
+                description: Text("下拉刷新后重试")
             )
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
         } else {
-            VStack(spacing: 14) {
-                ForEach(Array(books.enumerated()), id: \.element.id) { index, book in
-                    Button {
-                        if let url = book.openURL {
-                            openURL(url)
-                        }
-                    } label: {
-                        KnowledgeFeaturedBookCard(
-                            book: book,
-                            source: store.bookshelf?.source ?? "微信读书",
-                            paletteIndex: index
-                        )
+            if let book = books.first {
+                Button {
+                    if let url = book.openURL {
+                        openURL(url)
                     }
-                    .buttonStyle(LearningPressStyle())
+                } label: {
+                    BookReadingDeskCard(
+                        book: book,
+                        source: store.bookshelf?.source ?? "微信读书"
+                    )
                 }
-            }
-            .padding(.horizontal, 20)
+                .buttonStyle(LearningPressStyle())
+                .padding(.horizontal, 20)
 
-            if query.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(KnowledgePagePalette.accent)
-                    Text("书架会持续加入精选好书")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 18)
+                ReadingNotesView()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 26)
             }
         }
     }
 
-    private func filteredTopics(_ catalog: LearningCatalog) -> [LearningTopic] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            return catalog.sections
-                .flatMap(\.topics)
-                .filter {
-                    $0.title.localizedCaseInsensitiveContains(trimmed) ||
-                        $0.summary.localizedCaseInsensitiveContains(trimmed)
-                }
-        }
-        return catalog.sections.first(where: { $0.name == selectedCategory })?.topics ?? []
+    private func stockTopics(in catalog: LearningCatalog) -> [LearningTopic] {
+        catalog.sections.first(where: { $0.name == "股票" })?.topics ??
+            catalog.sections.first?.topics ??
+            []
     }
 
-    private func filteredBooks() -> [KnowledgeBook] {
-        let books = store.bookshelf?.books ?? []
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return books }
-        return books.filter {
-            $0.title.localizedCaseInsensitiveContains(trimmed) ||
-                $0.author.localizedCaseInsensitiveContains(trimmed) ||
-                ($0.category?.localizedCaseInsensitiveContains(trimmed) ?? false)
-        }
-    }
+    private func learningMilestones(from topics: [LearningTopic]) -> [LearningMilestone] {
+        let definitions: [(String, [String])] = [
+            ("基础概念", ["净收入", "净资产"]),
+            ("读懂财报", ["资产负债", "现金流", "财报"]),
+            ("估值方法", ["市盈率", "估值"]),
+            ("风险管理", ["风险", "安全边际"])
+        ]
 
-    private func categoryIcon(_ category: String) -> String {
-        switch category {
-        case "股票": "chart.line.uptrend.xyaxis"
-        case "基金": "chart.pie"
-        case "期货": "chart.bar.xaxis"
-        case "期权": "point.3.connected.trianglepath.dotted"
-        default: "globe.asia.australia"
+        var usedIDs = Set<String>()
+        return definitions.enumerated().compactMap { index, definition in
+            let matched = topics.first { topic in
+                !usedIDs.contains(topic.id) &&
+                    definition.1.contains(where: { keyword in topic.title.contains(keyword) })
+            }
+            let fallback = topics.first { !usedIDs.contains($0.id) } ??
+                (topics.indices.contains(index) ? topics[index] : nil)
+            guard let topic = matched ?? fallback else { return nil }
+            usedIDs.insert(topic.id)
+            return LearningMilestone(title: definition.0, topic: topic)
         }
     }
 }
@@ -565,27 +331,6 @@ private enum KnowledgeSection: String {
         case .books: "书籍"
         }
     }
-
-    var searchPlaceholder: String {
-        switch self {
-        case .investment: "搜索投资知识"
-        case .books: "搜索书名、作者或主题"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .investment: "建立清晰、可复用的认知框架"
-        case .books: "从好书中认识思想与世界"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .investment: "chart.line.uptrend.xyaxis"
-        case .books: "books.vertical.fill"
-        }
-    }
 }
 
 private enum LearningRoute: Hashable {
@@ -593,93 +338,314 @@ private enum LearningRoute: Hashable {
 }
 
 private enum KnowledgePagePalette {
-    static let accent = Color(red: 0.35, green: 0.25, blue: 0.73)
-    static let canvas = Color(uiColor: .systemGroupedBackground)
-    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
-    static let segmentBackground = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let stroke = Color.primary.opacity(0.07)
+    static let accent = Color(red: 0.76, green: 0.29, blue: 0.12)
+    static let sage = Color(red: 0.40, green: 0.48, blue: 0.39)
+    static let canvas = Color(
+        uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor.systemBackground
+                : UIColor(red: 0.98, green: 0.965, blue: 0.94, alpha: 1)
+        }
+    )
+    static let surface = Color(
+        uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor.secondarySystemBackground
+                : UIColor(red: 0.995, green: 0.985, blue: 0.965, alpha: 1)
+        }
+    )
+    static let stroke = Color.primary.opacity(0.10)
 }
 
-private struct KnowledgeFeaturedBookCard: View {
-    let book: KnowledgeBook
-    let source: String
-    let paletteIndex: Int
+private struct LearningMilestone: Identifiable {
+    let title: String
+    let topic: LearningTopic
+
+    var id: String { "\(title)-\(topic.id)" }
+}
+
+private struct WeeklyStudyCard: View {
+    private let days = ["一", "二", "三", "四", "五", "六", "日"]
 
     var body: some View {
-        HStack(spacing: 18) {
-            KnowledgeBookCover(book: book, paletteIndex: paletteIndex)
-                .frame(width: 106, height: 148)
-                .shadow(color: .black.opacity(0.18), radius: 9, x: 0, y: 6)
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 6) {
-                    Image(systemName: "book.closed.fill")
-                        .font(.system(size: 10, weight: .bold))
-                    Text(source)
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(KnowledgePagePalette.accent)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(KnowledgePagePalette.accent.opacity(0.1), in: Capsule())
-
-                Text(book.title)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .padding(.top, 11)
-
-                Text(book.author)
-                    .font(.system(size: 13))
+        VStack(spacing: 16) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text("本周学习")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("3")
+                    .font(.system(size: 25, weight: .bold, design: .serif))
+                    .foregroundStyle(KnowledgePagePalette.accent)
+                Text("天")
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .padding(.top, 5)
+                Spacer()
+                Text("保持节奏")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
 
-                Spacer(minLength: 12)
-
-                HStack(spacing: 7) {
-                    if let category = book.category, !category.isEmpty {
-                        Text(category)
+            HStack {
+                ForEach(Array(days.enumerated()), id: \.offset) { index, day in
+                    VStack(spacing: 9) {
+                        Text(day)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        Circle()
+                            .fill(index < 3 ? KnowledgePagePalette.accent : KnowledgePagePalette.stroke)
+                            .frame(width: 8, height: 8)
                     }
-                    Spacer(minLength: 6)
-                    Text("打开阅读")
-                        .font(.system(size: 13, weight: .semibold))
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 11, weight: .bold))
+                    if index != days.indices.last {
+                        Spacer()
+                    }
                 }
-                .foregroundStyle(KnowledgePagePalette.accent)
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, minHeight: 184, alignment: .leading)
-        .background {
-            ZStack {
-                KnowledgePagePalette.surface
-                LinearGradient(
-                    colors: [
-                        KnowledgePagePalette.accent.opacity(0.09),
-                        .clear,
-                        Color.blue.opacity(0.035)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(17)
+        .background(KnowledgePagePalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
         }
-        .shadow(color: .black.opacity(0.045), radius: 14, y: 7)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("本周学习三天")
+    }
+}
+
+private struct LearningMilestoneRow: View {
+    let number: Int
+    let title: String
+    let topic: LearningTopic
+    let isCurrent: Bool
+    let isLast: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(isCurrent ? KnowledgePagePalette.accent : KnowledgePagePalette.canvas)
+                    .frame(width: 27, height: 27)
+                    .overlay {
+                        Circle().stroke(
+                            isCurrent ? KnowledgePagePalette.accent : Color.secondary.opacity(0.35),
+                            lineWidth: 1
+                        )
+                        Text("\(number)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(isCurrent ? .white : .secondary)
+                    }
+                if !isLast {
+                    Rectangle()
+                        .fill(KnowledgePagePalette.stroke)
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 28)
+            .frame(maxHeight: .infinity, alignment: .top)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold))
+                    Spacer()
+                    Image(systemName: isCurrent ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                if isCurrent {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(KnowledgePagePalette.accent)
+                            .frame(width: 7, height: 7)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("市盈率与估值")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text("12 分钟")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("继续")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 13)
+                            .frame(height: 36)
+                            .background(KnowledgePagePalette.accent, in: RoundedRectangle(cornerRadius: 9))
+                    }
+                    .padding(12)
+                    .background(KnowledgePagePalette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+                    }
+
+                    HStack(spacing: 10) {
+                        Text("已学 2/6")
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(KnowledgePagePalette.stroke)
+                                Capsule()
+                                    .fill(KnowledgePagePalette.accent)
+                                    .frame(width: geometry.size.width / 3)
+                            }
+                        }
+                        .frame(height: 2)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 12)
+                } else {
+                    Text(topic.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.bottom, 18)
+                }
+            }
+            .padding(.top, 3)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(number)，\(title)，\(topic.title)")
+        .accessibilityHint("打开课程")
+    }
+}
+
+private struct BookReadingDeskCard: View {
+    let book: KnowledgeBook
+    let source: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .fill(Color(red: 0.81, green: 0.67, blue: 0.48).opacity(0.52))
+
+                Circle()
+                    .fill(Color.brown.opacity(0.25))
+                    .frame(width: 82, height: 82)
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.42), lineWidth: 7)
+                            .padding(10)
+                    }
+                    .offset(x: 142, y: -78)
+
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(red: 0.16, green: 0.12, blue: 0.09))
+                    .frame(width: 5, height: 112)
+                    .rotationEffect(.degrees(18))
+                    .offset(x: 143, y: 63)
+
+                KnowledgeBookCover(book: book, paletteIndex: 0)
+                    .frame(width: 126, height: 176)
+                    .shadow(color: .black.opacity(0.24), radius: 10, x: 0, y: 8)
+            }
+            .frame(height: 222)
+
+            Text(book.title)
+                .font(.system(size: 21, weight: .bold, design: .serif))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .padding(.top, 16)
+
+            Text(book.author)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.top, 5)
+
+            HStack(spacing: 9) {
+                Text(book.isFinished ? "已读 100%" : "已读 18%")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(KnowledgePagePalette.stroke)
+                        Capsule()
+                            .fill(KnowledgePagePalette.accent)
+                            .frame(width: geometry.size.width * (book.isFinished ? 1 : 0.18))
+                    }
+                }
+                .frame(height: 2)
+                Spacer(minLength: 12)
+                Text(book.isFinished ? "再次阅读" : "继续阅读")
+                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+            }
+            .foregroundStyle(KnowledgePagePalette.accent)
+            .padding(.top, 16)
+
+            HStack(spacing: 6) {
+                if let category = book.category, !category.isEmpty {
+                    Text(category)
+                }
+                Text("·")
+                Text(source)
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.top, 12)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)")
-        .accessibilityHint("在\(source)打开阅读")
+        .accessibilityHint("在\(source)继续阅读")
+    }
+}
+
+private struct ReadingNotesView: View {
+    private let notes = [
+        ("5月24日", "智能的本质不是记住事实，而是发现模式，并在混乱中创造新的可能。"),
+        ("5月22日", "真正的突破来自跨学科的融合，边界之外往往是下一次跃迁的起点。")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider()
+                .padding(.bottom, 19)
+            Text("最近笔记")
+                .font(.system(size: 21, weight: .bold, design: .serif))
+                .padding(.bottom, 13)
+
+            ForEach(Array(notes.enumerated()), id: \.offset) { index, note in
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(spacing: 0) {
+                        Circle()
+                            .fill(index == 0 ? KnowledgePagePalette.accent : KnowledgePagePalette.stroke)
+                            .frame(width: 8, height: 8)
+                        if index != notes.indices.last {
+                            Rectangle()
+                                .fill(KnowledgePagePalette.stroke)
+                                .frame(width: 1, height: 58)
+                        }
+                    }
+                    .padding(.top, 4)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(note.0)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text(note.1)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 22)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -769,56 +735,6 @@ private struct KnowledgeBookCover: View {
             [Color(red: 0.13, green: 0.26, blue: 0.43), Color(red: 0.20, green: 0.48, blue: 0.64)]
         default:
             [Color(red: 0.42, green: 0.29, blue: 0.10), Color(red: 0.73, green: 0.53, blue: 0.20)]
-        }
-    }
-}
-
-private struct LearningHeroArtwork: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.16, green: 0.12, blue: 0.37),
-                    KnowledgePagePalette.accent,
-                    Color(red: 0.30, green: 0.21, blue: 0.63)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            Circle()
-                .fill(.white.opacity(0.07))
-                .frame(width: 210, height: 210)
-                .blur(radius: 2)
-                .offset(x: 145, y: -80)
-            Canvas { context, size in
-                var line = Path()
-                let points: [CGPoint] = [
-                    CGPoint(x: size.width * 0.51, y: size.height * 0.72),
-                    CGPoint(x: size.width * 0.60, y: size.height * 0.59),
-                    CGPoint(x: size.width * 0.68, y: size.height * 0.64),
-                    CGPoint(x: size.width * 0.76, y: size.height * 0.42),
-                    CGPoint(x: size.width * 0.84, y: size.height * 0.49),
-                    CGPoint(x: size.width * 0.94, y: size.height * 0.22)
-                ]
-                if let first = points.first {
-                    line.move(to: first)
-                    for point in points.dropFirst() {
-                        line.addLine(to: point)
-                    }
-                }
-                context.stroke(
-                    line,
-                    with: .color(.white.opacity(0.72)),
-                    style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
-                )
-
-                for point in points {
-                    context.fill(
-                        Path(ellipseIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)),
-                        with: .color(.white.opacity(0.92))
-                    )
-                }
-            }
         }
     }
 }
@@ -935,16 +851,14 @@ private struct LearningTopicThumbnail: View {
 
 private struct InvestmentContentLoadingView: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            RoundedRectangle(cornerRadius: 26).frame(height: 190)
-            HStack(spacing: 10) {
-                ForEach(0..<4, id: \.self) { _ in
-                    Capsule().frame(width: 72, height: 40)
-                }
-            }
-            Text("投资知识").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 18) {
+            RoundedRectangle(cornerRadius: 14).frame(height: 108)
+            Text("股票入门路径").font(.title2.bold())
             ForEach(0..<4, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 14).frame(height: 76)
+                HStack {
+                    Circle().frame(width: 27, height: 27)
+                    RoundedRectangle(cornerRadius: 8).frame(height: 46)
+                }
             }
         }
         .padding(.horizontal, 20)
