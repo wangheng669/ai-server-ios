@@ -381,6 +381,34 @@ struct PeopleRelationshipLens: Identifiable, Equatable {
     var id: String { title }
 }
 
+struct PeopleRelationshipMember: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let relationship: String
+    let person: SpecialPerson?
+    let avatarURLValue: String?
+    let avatarAssetName: String?
+
+    func avatarURL(baseURL: URL) -> URL? {
+        if let person {
+            return person.avatarURL(baseURL: baseURL)
+        }
+        guard let avatarURLValue = nonempty(avatarURLValue) else { return nil }
+        if let url = URL(string: avatarURLValue), url.scheme != nil {
+            return MediaURL.image(avatarURLValue) ?? url
+        }
+        return URL(string: avatarURLValue, relativeTo: baseURL)?.absoluteURL
+    }
+}
+
+struct PeopleRelationshipCluster: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let members: [PeopleRelationshipMember]
+
+    var memberCount: Int { members.count }
+}
+
 enum PeopleRelationshipPlanner {
     static func lenses(for people: [SpecialPerson], limit: Int = 6) -> [PeopleRelationshipLens] {
         let counts = Dictionary(grouping: people) { primaryOrganization(for: $0) }
@@ -458,12 +486,137 @@ enum PeopleRelationshipPlanner {
         return "同属\(center.topic.rawValue)领域"
     }
 
+    static func clusters(
+        around center: SpecialPerson,
+        allPeople: [SpecialPerson],
+        maximumClusters: Int = 5
+    ) -> [PeopleRelationshipCluster] {
+        guard maximumClusters > 0 else { return [] }
+        let peopleByID = allPeople.reduce(into: [String: SpecialPerson]()) { result, person in
+            result[person.id] = person
+        }
+        var membersByID: [String: PeopleRelationshipMember] = [:]
+
+        for related in center.relatedPeople {
+            let person = peopleByID[related.id]
+            membersByID[related.id] = PeopleRelationshipMember(
+                id: related.id,
+                name: related.name,
+                relationship: related.relationship,
+                person: person,
+                avatarURLValue: related.avatarURLValue,
+                avatarAssetName: related.avatarAssetName
+            )
+        }
+
+        for person in allPeople where person.id != center.id {
+            guard let inbound = person.relatedPeople.first(where: { $0.id == center.id }) else { continue }
+            if membersByID[person.id] == nil {
+                membersByID[person.id] = PeopleRelationshipMember(
+                    id: person.id,
+                    name: person.name,
+                    relationship: inbound.relationship,
+                    person: person,
+                    avatarURLValue: person.avatarPath,
+                    avatarAssetName: person.avatarAssetName
+                )
+            }
+        }
+
+        if membersByID.isEmpty {
+            let fallbackPeople = ranked(
+                allPeople.filter { $0.id != center.id && $0.topic == center.topic }
+            )
+            for person in fallbackPeople {
+                membersByID[person.id] = PeopleRelationshipMember(
+                    id: person.id,
+                    name: person.name,
+                    relationship: "同属\(center.topic.rawValue)领域",
+                    person: person,
+                    avatarURLValue: person.avatarPath,
+                    avatarAssetName: person.avatarAssetName
+                )
+            }
+        }
+
+        let grouped = Dictionary(grouping: membersByID.values) {
+            relationshipClusterTitle(
+                relationship: $0.relationship,
+                center: center,
+                other: $0.person
+            )
+        }
+        var clusters = grouped.map { title, members in
+            PeopleRelationshipCluster(
+                id: title,
+                title: title,
+                members: members.sorted {
+                    if ($0.person?.todayCount ?? 0) != ($1.person?.todayCount ?? 0) {
+                        return ($0.person?.todayCount ?? 0) > ($1.person?.todayCount ?? 0)
+                    }
+                    return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+                }
+            )
+        }
+        .sorted {
+            if $0.memberCount != $1.memberCount {
+                return $0.memberCount > $1.memberCount
+            }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+
+        guard clusters.count > maximumClusters else { return clusters }
+        let retainedCount = max(0, maximumClusters - 1)
+        let retained = Array(clusters.prefix(retainedCount))
+        let remainingMembers = clusters.dropFirst(retainedCount).flatMap(\.members)
+        let other = PeopleRelationshipCluster(
+            id: "other-relations",
+            title: "其他关联",
+            members: remainingMembers
+        )
+        clusters = retained + [other]
+        return clusters
+    }
+
     static func primaryOrganization(for person: SpecialPerson) -> String {
         let raw = person.roles.first?.organization
             ?? person.organizationName
             ?? person.focusTags.first
             ?? person.topic.rawValue
         return compactOrganizationName(raw, fallback: person.topic.rawValue)
+    }
+
+    private static func relationshipClusterTitle(
+        relationship: String,
+        center: SpecialPerson,
+        other: SpecialPerson?
+    ) -> String {
+        let value = relationship.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mappings: [(title: String, keywords: [String])] = [
+            ("同事", ["同事", "团队", "任职", "高管", "下属", "创始"]),
+            ("行业同行", ["同行", "同业"]),
+            ("合作", ["合作", "伙伴", "客户", "供应", "生态", "联盟"]),
+            ("投资", ["投资", "股东", "资本", "基金", "出资"]),
+            ("竞争", ["竞争", "对手", "竞品"]),
+            ("师友", ["导师", "学生", "师生", "前辈", "好友", "朋友"]),
+            ("家庭", ["家人", "家庭", "夫妻", "父亲", "母亲", "兄弟", "姐妹", "亲属"])
+        ]
+        if let mapping = mappings.first(where: { item in
+            item.keywords.contains { value.localizedCaseInsensitiveContains($0) }
+        }) {
+            return mapping.title
+        }
+        if let other {
+            let centerOrganization = primaryOrganization(for: center)
+            let otherOrganization = primaryOrganization(for: other)
+            if centerOrganization == otherOrganization {
+                return centerOrganization.count <= 8 ? centerOrganization : "同一机构"
+            }
+        }
+        if !value.isEmpty, value.count <= 6 {
+            return value
+        }
+        return "行业关联"
     }
 
     private static func ranked(_ people: [SpecialPerson]) -> [SpecialPerson] {

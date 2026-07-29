@@ -5,7 +5,6 @@ struct PeopleView: View {
     @Binding private var showsDetail: Bool
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
-    @State private var selectedTopic = PeopleTopic.technology
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
@@ -13,21 +12,33 @@ struct PeopleView: View {
         _showsDetail = showsDetail
     }
 
-    private func filteredPeople(for topic: PeopleTopic) -> [SpecialPerson] {
-        store.people.filter { $0.topic == topic }
-    }
-
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                topicPicker
-                TabView(selection: $selectedTopic) {
-                    ForEach(store.topics) { topic in
-                        peopleList(for: topic)
-                            .tag(topic)
+            Group {
+                if store.isLoading && store.people.isEmpty {
+                    PeopleLoadingTimeline()
+                } else if let error = store.errorMessage, store.people.isEmpty {
+                    ContentUnavailableView {
+                        Label("载入失败", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("重试") { Task { await store.load(force: true) } }
                     }
+                } else if store.people.isEmpty {
+                    ContentUnavailableView(
+                        "暂无人物",
+                        systemImage: "person.2",
+                        description: Text("人物资料正在整理中")
+                    )
+                } else {
+                    PeopleStarMapExplorer(
+                        people: store.people,
+                        baseURL: store.baseURL,
+                        onOpenPerson: { selectedPerson = $0 },
+                        onRefresh: { await store.load(force: true) }
+                    )
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
             }
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .navigationBarHidden(true)
@@ -52,64 +63,582 @@ struct PeopleView: View {
         }
         .onDisappear { showsDetail = false }
     }
+}
 
-    private var topicPicker: some View {
-        HStack(spacing: 0) {
-            ForEach(store.topics) { topic in
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) { selectedTopic = topic }
-                } label: {
-                    VStack(spacing: 12) {
-                        Text(topic.rawValue)
-                            .font(.system(size: 15, weight: selectedTopic == topic ? .semibold : .regular))
-                            .foregroundStyle(selectedTopic == topic ? Color.accentColor : Color.secondary)
-                        Capsule()
-                            .fill(selectedTopic == topic ? Color.accentColor : Color.clear)
-                            .frame(width: 24, height: 3)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedTopic == topic ? .isSelected : [])
-            }
+private struct PeopleStarMapExplorer: View {
+    let people: [SpecialPerson]
+    let baseURL: URL
+    let onOpenPerson: (SpecialPerson) -> Void
+    let onRefresh: () async -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var searchIsFocused: Bool
+    @State private var focusedPersonID: String?
+    @State private var expandedClusterID: String?
+    @State private var selectedMemberID: String?
+    @State private var clusterPage = 0
+    @State private var searchText = ""
+    @State private var showsSearch = false
+    @State private var isRefreshing = false
+
+    private var focusedPerson: SpecialPerson {
+        if let focusedPersonID, let person = people.first(where: { $0.id == focusedPersonID }) {
+            return person
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 13)
-        .overlay(alignment: .bottom) { Divider() }
+        return defaultCenter
     }
 
-    @ViewBuilder
-    private func peopleList(for topic: PeopleTopic) -> some View {
-        let people = filteredPeople(for: topic)
-        if store.isLoading && people.isEmpty {
-            PeopleLoadingTimeline()
-        } else if let error = store.errorMessage, people.isEmpty {
-            ContentUnavailableView {
-                Label("载入失败", systemImage: "wifi.exclamationmark")
-            } description: {
-                Text(error)
-            } actions: {
-                Button("重试") { Task { await store.load(force: true) } }
-            }
-        } else if people.isEmpty {
-            ContentUnavailableView(
-                "暂无\(topic.rawValue)人物",
-                systemImage: "person.2",
-                description: Text("这一分类暂时还没有收录人物")
-            )
-        } else {
-            PeopleRelationshipExplorer(
-                topic: topic,
-                people: people,
-                allPeople: store.people,
-                baseURL: store.baseURL,
-                latestPost: { store.latestPost(for: $0) },
-                loadLatestPost: { await store.loadLatestPost(for: $0) },
-                onOpenPerson: { selectedPerson = $0 },
-                onRefresh: { await store.load(force: true) }
-            )
-            .id(topic)
+    private var defaultCenter: SpecialPerson {
+        people.max {
+            let lhs = ($0.relatedPeople.count, $0.todayCount, $0.totalCount)
+            let rhs = ($1.relatedPeople.count, $1.todayCount, $1.totalCount)
+            if lhs.0 != rhs.0 { return lhs.0 < rhs.0 }
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+            return lhs.2 < rhs.2
+        } ?? people[0]
+    }
+
+    private var clusters: [PeopleRelationshipCluster] {
+        PeopleRelationshipPlanner.clusters(around: focusedPerson, allPeople: people)
+    }
+
+    private var searchResults: [SpecialPerson] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = query.isEmpty ? people.sorted(by: activityOrder) : people.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+                ($0.organizationName?.localizedCaseInsensitiveContains(query) ?? false) ||
+                $0.focusTags.contains { $0.localizedCaseInsensitiveContains(query) }
         }
+        return Array(source.prefix(6))
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                Color(uiColor: .systemBackground)
+                    .ignoresSafeArea()
+
+                PeopleClusterCanvas(
+                    focusedPerson: focusedPerson,
+                    clusters: clusters,
+                    expandedClusterID: expandedClusterID,
+                    selectedMemberID: selectedMemberID,
+                    clusterPage: clusterPage,
+                    baseURL: baseURL,
+                    onOpenCenter: { onOpenPerson(focusedPerson) },
+                    onSelectCluster: selectCluster,
+                    onSelectMember: selectMember,
+                    onShowMoreMembers: {
+                        selectedMemberID = nil
+                        clusterPage += 1
+                    }
+                )
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .animation(animation, value: focusedPerson.id)
+                .animation(animation, value: expandedClusterID)
+                .animation(animation, value: clusterPage)
+
+                if showsSearch {
+                    searchPanel
+                        .padding(.leading, 12)
+                        .padding(.trailing, 52)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                } else {
+                    Button {
+                        withAnimation(animation) { showsSearch = true }
+                        Task { @MainActor in searchIsFocused = true }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 48, height: 48)
+                            .background(.regularMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+                    }
+                    .buttonStyle(PeoplePressStyle())
+                    .padding(.trailing, 56)
+                    .padding(.top, 10)
+                    .accessibilityLabel("搜索人物")
+                }
+            }
+        }
+        .onAppear {
+            if focusedPersonID == nil {
+                focusedPersonID = defaultCenter.id
+            }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--people-relations-focus-preview") {
+                expandedClusterID = clusters.first?.id
+            }
+            #endif
+        }
+    }
+
+    private var searchPanel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("搜索人物、公司或领域", text: $searchText)
+                    .focused($searchIsFocused)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("清除搜索")
+                }
+                Button("完成") {
+                    dismissSearch()
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+
+            Divider()
+
+            if searchResults.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+                    .frame(height: 170)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(searchResults) { person in
+                        Button {
+                            focus(on: person)
+                            dismissSearch()
+                        } label: {
+                            HStack(spacing: 11) {
+                                AvatarView(
+                                    url: person.avatarURL(baseURL: baseURL),
+                                    name: person.name,
+                                    size: 36,
+                                    assetName: person.avatarAssetName
+                                )
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(person.name)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(person.organizationName ?? person.topic.rawValue)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(height: 52)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PeoplePressStyle())
+                    }
+                }
+            }
+
+            Divider()
+            Button {
+                guard !isRefreshing else { return }
+                isRefreshing = true
+                Task {
+                    await onRefresh()
+                    isRefreshing = false
+                }
+            } label: {
+                Label(isRefreshing ? "正在刷新" : "刷新人物资料", systemImage: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 38)
+            }
+            .buttonStyle(.plain)
+            .disabled(isRefreshing)
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.1), radius: 18, y: 7)
+    }
+
+    private func selectCluster(_ cluster: PeopleRelationshipCluster) {
+        withAnimation(animation) {
+            if expandedClusterID == cluster.id {
+                expandedClusterID = nil
+            } else {
+                expandedClusterID = cluster.id
+            }
+            selectedMemberID = nil
+            clusterPage = 0
+        }
+    }
+
+    private func selectMember(_ member: PeopleRelationshipMember) {
+        if selectedMemberID == member.id, let person = member.person {
+            focus(on: person)
+            return
+        }
+        withAnimation(animation) {
+            selectedMemberID = member.id
+        }
+    }
+
+    private func focus(on person: SpecialPerson) {
+        withAnimation(animation) {
+            focusedPersonID = person.id
+            expandedClusterID = nil
+            selectedMemberID = nil
+            clusterPage = 0
+        }
+    }
+
+    private func dismissSearch() {
+        searchIsFocused = false
+        withAnimation(animation) { showsSearch = false }
+    }
+
+    private func activityOrder(_ lhs: SpecialPerson, _ rhs: SpecialPerson) -> Bool {
+        let left = (lhs.todayCount, lhs.relatedPeople.count, lhs.totalCount)
+        let right = (rhs.todayCount, rhs.relatedPeople.count, rhs.totalCount)
+        if left.0 != right.0 { return left.0 > right.0 }
+        if left.1 != right.1 { return left.1 > right.1 }
+        if left.2 != right.2 { return left.2 > right.2 }
+        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    }
+
+    private var animation: Animation? {
+        reduceMotion ? nil : .snappy(duration: 0.34)
+    }
+}
+
+private struct PeopleClusterCanvas: View {
+    let focusedPerson: SpecialPerson
+    let clusters: [PeopleRelationshipCluster]
+    let expandedClusterID: String?
+    let selectedMemberID: String?
+    let clusterPage: Int
+    let baseURL: URL
+    let onOpenCenter: () -> Void
+    let onSelectCluster: (PeopleRelationshipCluster) -> Void
+    let onSelectMember: (PeopleRelationshipMember) -> Void
+    let onShowMoreMembers: () -> Void
+
+    private let pageSize = 5
+
+    private var expandedCluster: PeopleRelationshipCluster? {
+        expandedClusterID.flatMap { id in clusters.first { $0.id == id } }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let center = centerPoint(size: proxy.size)
+            let clusterPoints = pointsForClusters(size: proxy.size, center: center)
+            let visibleMembers = pagedMembers
+            let memberPoints = pointsForMembers(count: visibleMembers.count, size: proxy.size)
+
+            ZStack {
+                Canvas { context, _ in
+                    drawClusterLines(context: context, center: center, clusterPoints: clusterPoints)
+                    if let expandedCluster,
+                       let hub = clusterPoints[expandedCluster.id] {
+                        drawMemberLines(context: context, hub: hub, memberPoints: memberPoints)
+                    }
+                }
+                .accessibilityHidden(true)
+
+                centerNode
+                    .position(center)
+
+                ForEach(Array(clusters.enumerated()), id: \.element.id) { index, cluster in
+                    Button {
+                        onSelectCluster(cluster)
+                    } label: {
+                        RelationshipClusterNode(
+                            cluster: cluster,
+                            tint: tint(for: index),
+                            isExpanded: expandedClusterID == cluster.id
+                        )
+                    }
+                    .buttonStyle(PeoplePressStyle())
+                    .position(clusterPoints[cluster.id] ?? center)
+                    .accessibilityLabel(
+                        "\(cluster.title)，\(cluster.memberCount) 位关联人物，\(expandedClusterID == cluster.id ? "已展开" : "点击展开")"
+                    )
+                }
+
+                if let expandedCluster {
+                    ForEach(Array(visibleMembers.enumerated()), id: \.element.id) { index, member in
+                        Button {
+                            onSelectMember(member)
+                        } label: {
+                            RelationshipMemberNode(
+                                member: member,
+                                baseURL: baseURL,
+                                showsRelationship: selectedMemberID == member.id
+                            )
+                        }
+                        .buttonStyle(PeoplePressStyle())
+                        .position(memberPoints[index])
+                        .accessibilityLabel(
+                            "\(member.name)，与\(focusedPerson.name)的关系：\(member.relationship)"
+                        )
+                        .accessibilityHint(
+                            selectedMemberID == member.id && member.person != nil
+                                ? "再次点击，以此人物为中心"
+                                : "点击显示关系"
+                        )
+                    }
+
+                    if expandedCluster.memberCount > pageSize {
+                        Button(action: onShowMoreMembers) {
+                            Text(moreButtonTitle(cluster: expandedCluster))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 9)
+                                .frame(height: 28)
+                                .background(Color.accentColor.opacity(0.09), in: Capsule())
+                        }
+                        .buttonStyle(PeoplePressStyle())
+                        .position(moreButtonPoint(size: proxy.size))
+                        .accessibilityHint("循环查看这一组的全部关联人物")
+                    }
+                }
+            }
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+    }
+
+    private var centerNode: some View {
+        Button(action: onOpenCenter) {
+            VStack(spacing: 7) {
+                AvatarView(
+                    url: focusedPerson.avatarURL(baseURL: baseURL),
+                    name: focusedPerson.name,
+                    size: 92,
+                    assetName: focusedPerson.avatarAssetName
+                )
+                .overlay {
+                    Circle().stroke(Color.accentColor, lineWidth: 3)
+                }
+                Text(focusedPerson.name)
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(focusedPerson.organizationName ?? focusedPerson.topic.rawValue)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(width: 150)
+        }
+        .buttonStyle(PeoplePressStyle())
+        .accessibilityLabel("\(focusedPerson.name)，点击查看完整档案")
+    }
+
+    private var pagedMembers: [PeopleRelationshipMember] {
+        guard let expandedCluster, !expandedCluster.members.isEmpty else { return [] }
+        let pageCount = max(1, Int(ceil(Double(expandedCluster.memberCount) / Double(pageSize))))
+        let normalizedPage = clusterPage % pageCount
+        let start = normalizedPage * pageSize
+        let end = min(start + pageSize, expandedCluster.memberCount)
+        return Array(expandedCluster.members[start..<end])
+    }
+
+    private func centerPoint(size: CGSize) -> CGPoint {
+        CGPoint(
+            x: size.width * (expandedCluster == nil ? 0.5 : 0.36),
+            y: size.height * 0.49
+        )
+    }
+
+    private func pointsForClusters(size: CGSize, center: CGPoint) -> [String: CGPoint] {
+        guard !clusters.isEmpty else { return [:] }
+        if let expandedCluster {
+            var result: [String: CGPoint] = [
+                expandedCluster.id: CGPoint(x: size.width * 0.64, y: size.height * 0.49)
+            ]
+            let remaining = clusters.filter { $0.id != expandedCluster.id }
+            let normalizedPoints: [CGPoint] = [
+                CGPoint(x: 0.28, y: 0.20),
+                CGPoint(x: 0.14, y: 0.37),
+                CGPoint(x: 0.16, y: 0.68),
+                CGPoint(x: 0.38, y: 0.81),
+                CGPoint(x: 0.52, y: 0.22)
+            ]
+            for (cluster, point) in zip(remaining, normalizedPoints) {
+                result[cluster.id] = CGPoint(x: size.width * point.x, y: size.height * point.y)
+            }
+            return result
+        }
+
+        let radiusX = min(size.width * 0.34, 132)
+        let radiusY = min(size.height * 0.31, 218)
+        return Dictionary(uniqueKeysWithValues: clusters.enumerated().map { index, cluster in
+            let angle = (-Double.pi / 2) + (2 * Double.pi * Double(index) / Double(clusters.count))
+            return (
+                cluster.id,
+                CGPoint(
+                    x: center.x + CGFloat(cos(angle)) * radiusX,
+                    y: center.y + CGFloat(sin(angle)) * radiusY
+                )
+            )
+        })
+    }
+
+    private func pointsForMembers(count: Int, size: CGSize) -> [CGPoint] {
+        guard count > 0 else { return [] }
+        let startY = size.height * 0.20
+        let endY = size.height * 0.78
+        if count == 1 {
+            return [CGPoint(x: size.width * 0.84, y: size.height * 0.49)]
+        }
+        return (0..<count).map { index in
+            let progress = CGFloat(index) / CGFloat(count - 1)
+            let curve = sin(progress * .pi) * size.width * 0.035
+            return CGPoint(
+                x: size.width * 0.82 + curve,
+                y: startY + (endY - startY) * progress
+            )
+        }
+    }
+
+    private func moreButtonPoint(size: CGSize) -> CGPoint {
+        CGPoint(x: size.width * 0.82, y: size.height * 0.88)
+    }
+
+    private func moreButtonTitle(cluster: PeopleRelationshipCluster) -> String {
+        let pageCount = max(1, Int(ceil(Double(cluster.memberCount) / Double(pageSize))))
+        let nextPage = (clusterPage + 1) % pageCount
+        if nextPage == 0 {
+            return "回到前 \(min(pageSize, cluster.memberCount)) 人"
+        }
+        let nextStart = nextPage * pageSize
+        return "还有 \(cluster.memberCount - nextStart) 人"
+    }
+
+    private func drawClusterLines(
+        context: GraphicsContext,
+        center: CGPoint,
+        clusterPoints: [String: CGPoint]
+    ) {
+        for (index, cluster) in clusters.enumerated() {
+            guard let point = clusterPoints[cluster.id] else { continue }
+            var path = Path()
+            path.move(to: center)
+            let control = CGPoint(
+                x: (center.x + point.x) / 2,
+                y: (center.y + point.y) / 2 - 10
+            )
+            path.addQuadCurve(to: point, control: control)
+            context.stroke(
+                path,
+                with: .color(tint(for: index).opacity(expandedClusterID == cluster.id ? 0.42 : 0.22)),
+                style: StrokeStyle(lineWidth: expandedClusterID == cluster.id ? 2.2 : 1.2)
+            )
+        }
+    }
+
+    private func drawMemberLines(
+        context: GraphicsContext,
+        hub: CGPoint,
+        memberPoints: [CGPoint]
+    ) {
+        for point in memberPoints {
+            var path = Path()
+            path.move(to: hub)
+            path.addQuadCurve(
+                to: point,
+                control: CGPoint(x: (hub.x + point.x) / 2 + 8, y: (hub.y + point.y) / 2)
+            )
+            context.stroke(
+                path,
+                with: .color(Color.secondary.opacity(0.22)),
+                style: StrokeStyle(lineWidth: 0.8, dash: [2.5, 3.5])
+            )
+        }
+    }
+
+    private func tint(for index: Int) -> Color {
+        let colors: [Color] = [
+            Color(red: 0.23, green: 0.48, blue: 0.84),
+            Color(red: 0.32, green: 0.58, blue: 0.42),
+            Color(red: 0.70, green: 0.48, blue: 0.22),
+            Color(red: 0.46, green: 0.39, blue: 0.69),
+            Color(red: 0.28, green: 0.57, blue: 0.62)
+        ]
+        return colors[index % colors.count]
+    }
+}
+
+private struct RelationshipClusterNode: View {
+    let cluster: PeopleRelationshipCluster
+    let tint: Color
+    let isExpanded: Bool
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(cluster.title)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text("\(cluster.memberCount)")
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+        }
+        .foregroundStyle(isExpanded ? Color.white : Color.primary)
+        .frame(width: 72, height: 72)
+        .background(isExpanded ? tint : tint.opacity(0.1), in: Circle())
+        .overlay {
+            Circle().stroke(tint.opacity(isExpanded ? 0 : 0.34), lineWidth: 1)
+        }
+    }
+}
+
+private struct RelationshipMemberNode: View {
+    let member: PeopleRelationshipMember
+    let baseURL: URL
+    let showsRelationship: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            AvatarView(
+                url: member.avatarURL(baseURL: baseURL),
+                name: member.name,
+                size: 42,
+                assetName: member.person?.avatarAssetName ?? member.avatarAssetName
+            )
+            .overlay {
+                Circle().stroke(
+                    showsRelationship ? Color.accentColor : Color(uiColor: .systemBackground),
+                    lineWidth: showsRelationship ? 2 : 2.5
+                )
+            }
+            Text(member.name)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            if showsRelationship {
+                Text(member.relationship)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .padding(.horizontal, 6)
+                    .frame(height: 20)
+                    .background(Color.accentColor.opacity(0.09), in: Capsule())
+            }
+        }
+        .frame(width: 76)
     }
 }
 
