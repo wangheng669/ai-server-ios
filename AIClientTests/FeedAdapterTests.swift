@@ -167,10 +167,20 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.weiboFollowingImageURLs.count, 1)
     }
 
+    func testWeiboDetailUsesSourceImageAspectRatio() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":19,"source":"rss:19","post_link":"https://weibo.com/123/abc","images":[{"url":"https://example.com/photo.jpg","width":1200,"height":800}]}"#.utf8)
+        )
+
+        let url = try XCTUnwrap(post.weiboFollowingImageURLs.first)
+        XCTAssertEqual(post.weiboImageAspectRatio(for: url), 1.5)
+    }
+
     func testWeiboRSSDetailRecognitionAndImportedMarkerCleanup() throws {
         let post = try JSONDecoder().decode(
             Post.self,
-            from: Data(#"{"id":19,"source":"rss:19","post_link":"https://weibo.com/123/abc","content":"今天  真开心[裂开][图片]\n\n\n继续分享"}"#.utf8)
+            from: Data(#"{"id":20,"source":"rss:20","post_link":"https://weibo.com/123/abc","content":"今天  真开心[裂开][图片]\n\n\n继续分享"}"#.utf8)
         )
 
         XCTAssertTrue(post.isWeiboRSS)
