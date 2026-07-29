@@ -1,5 +1,20 @@
 import SwiftUI
 
+enum InvestmentDesign {
+    static let accent = Color(red: 0.12, green: 0.40, blue: 0.96)
+    static let accentSoft = accent.opacity(0.10)
+    static let gain = Color(red: 0.94, green: 0.20, blue: 0.25)
+    static let loss = Color(red: 0.03, green: 0.65, blue: 0.38)
+    static let warning = Color(red: 0.96, green: 0.50, blue: 0.12)
+    static let canvas = Color(uiColor: .systemGroupedBackground)
+    static let surface = Color(uiColor: .systemBackground)
+    static let secondarySurface = Color(uiColor: .secondarySystemBackground)
+    static let divider = Color(uiColor: .separator).opacity(0.42)
+    static let pageInset: CGFloat = 16
+    static let sectionSpacing: CGFloat = 10
+    static let cornerRadius: CGFloat = 14
+}
+
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
     case sentiment = "情绪"
@@ -39,34 +54,34 @@ struct InvestmentView: View {
             case .market:
                 VStack(spacing: 0) {
                     if !marketShowsDetail {
-                        InvestmentHeader(selection: $section, floatsOverContent: false)
+                        InvestmentHeader(selection: $section)
                     }
                     MarketView(showsDetail: $marketShowsDetail)
                 }
             case .sentiment:
                 VStack(spacing: 0) {
                     if !showsDetail {
-                        InvestmentHeader(selection: $section, floatsOverContent: false)
+                        InvestmentHeader(selection: $section)
                     }
                     RetailInvestorView(showsDetail: $showsDetail)
                 }
             case .holdings:
-                ZStack(alignment: .top) {
-                    FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
+                VStack(spacing: 0) {
                     if !holdingsShowsDetail {
-                        InvestmentHeader(selection: $section, floatsOverContent: true)
+                        InvestmentHeader(selection: $section)
                     }
+                    FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
                 }
             case .industries:
                 VStack(spacing: 0) {
                     if !showsDetail {
-                        InvestmentHeader(selection: $section, floatsOverContent: false)
+                        InvestmentHeader(selection: $section)
                     }
                     IndustryPanoramaView()
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(InvestmentDesign.canvas)
         .task {
             await holdingsStore.load()
             if let managers = holdingsStore.holdings?.managers {
@@ -90,21 +105,21 @@ struct InvestmentView: View {
 
 private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
-    let floatsOverContent: Bool
 
     var body: some View {
-        HStack(spacing: 17) {
+        HStack(spacing: 24) {
             ForEach(InvestmentSection.allCases) { section in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) { selection = section }
                 } label: {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 0) {
                         Text(section.rawValue)
-                            .font(.system(size: 14, weight: selection == section ? .bold : .medium))
-                            .foregroundStyle(selection == section ? HoldingsPalette.indigo : Color.secondary)
+                            .font(.system(size: 14, weight: selection == section ? .semibold : .regular))
+                            .foregroundStyle(selection == section ? Color.primary : Color.secondary)
+                            .frame(height: 42)
                         Capsule()
-                            .fill(selection == section ? HoldingsPalette.indigo : .clear)
-                            .frame(width: 16, height: 2)
+                            .fill(selection == section ? InvestmentDesign.accent : .clear)
+                            .frame(width: 18, height: 2.5)
                     }
                 }
                 .buttonStyle(.plain)
@@ -112,8 +127,13 @@ private struct InvestmentHeader: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 22)
-        .padding(.top, 6)
-        .padding(.bottom, floatsOverContent ? 0 : 10)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 6)
+        .background(InvestmentDesign.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(InvestmentDesign.divider)
+                .frame(height: 0.5)
+        }
     }
 }

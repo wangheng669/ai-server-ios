@@ -3,17 +3,17 @@ import SwiftUI
 import UIKit
 
 enum HoldingsPalette {
-    static let blue = Color(red: 0.16, green: 0.39, blue: 0.96)
-    static let green = Color(red: 0.04, green: 0.68, blue: 0.44)
-    static let orange = Color(red: 1.00, green: 0.39, blue: 0.08)
-    static let red = Color(red: 0.94, green: 0.12, blue: 0.28)
-    static let purple = Color(red: 0.52, green: 0.31, blue: 0.94)
-    static let indigo = Color(red: 0.31, green: 0.32, blue: 1.00)
-    static let pink = Color(red: 0.95, green: 0.25, blue: 0.53)
+    static let blue = InvestmentDesign.accent
+    static let green = InvestmentDesign.loss
+    static let orange = InvestmentDesign.warning
+    static let red = InvestmentDesign.gain
+    static let purple = InvestmentDesign.accent
+    static let indigo = InvestmentDesign.accent
+    static let pink = Color(red: 0.91, green: 0.31, blue: 0.52)
     static let teal = Color(red: 0.08, green: 0.65, blue: 0.66)
-    static let divider = Color(uiColor: .separator).opacity(0.55)
-    static let card = Color(uiColor: .secondarySystemGroupedBackground)
-    static let canvas = Color(uiColor: .systemGroupedBackground)
+    static let divider = InvestmentDesign.divider
+    static let card = InvestmentDesign.surface
+    static let canvas = InvestmentDesign.canvas
 }
 
 private struct HoldingSector: Identifiable {
@@ -26,7 +26,6 @@ private struct HoldingSector: Identifiable {
 struct FamousHoldingsView: View {
     let store: FamousHoldingsStore
     @Binding var showsDetail: Bool
-    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedIndex = 0
     @State private var path: [String] = []
 
@@ -36,7 +35,7 @@ struct FamousHoldingsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            GeometryReader { proxy in
+            GeometryReader { _ in
                 Group {
                     if managers.indices.contains(selectedIndex) {
                         let manager = managers[selectedIndex]
@@ -48,14 +47,6 @@ struct FamousHoldingsView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(alignment: .top) {
-                    if managers.indices.contains(selectedIndex) {
-                        heroBackdrop
-                            .frame(height: 186 + proxy.safeAreaInsets.top)
-                            .frame(maxWidth: .infinity)
-                            .ignoresSafeArea(.container, edges: .top)
-                    }
-                }
                 .background(HoldingsPalette.canvas.ignoresSafeArea())
             }
             .task {
@@ -81,10 +72,9 @@ struct FamousHoldingsView: View {
 
     private func overview(_ manager: FamousHoldingsManager) -> some View {
         ScrollView {
-            VStack(spacing: 14) {
+            VStack(spacing: InvestmentDesign.sectionSpacing) {
                 hero(manager)
                 filingSummary(manager)
-                    .padding(.top, -36)
                 filingInsights(manager)
                 footer(manager)
             }
@@ -97,10 +87,10 @@ struct FamousHoldingsView: View {
     }
 
     private func hero(_ manager: FamousHoldingsManager) -> some View {
-        ZStack(alignment: .bottomLeading) {
+        VStack(spacing: 13) {
             HStack(alignment: .center, spacing: 15) {
                 InvestorPortraitImage(manager: manager, contentMode: .fill)
-                    .frame(width: 78, height: 78)
+                    .frame(width: 68, height: 68)
                     .background(HoldingsPalette.purple.opacity(0.14), in: Circle())
                     .clipShape(Circle())
                     .overlay(Circle().stroke(HoldingsPalette.purple.opacity(0.25), lineWidth: 1))
@@ -108,19 +98,12 @@ struct FamousHoldingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("当前关注")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(HoldingsPalette.purple)
                         .padding(.horizontal, 9)
                         .frame(height: 19)
-                        .background(
-                            LinearGradient(
-                                colors: [HoldingsPalette.purple, HoldingsPalette.indigo],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            in: Capsule()
-                        )
+                        .background(HoldingsPalette.purple.opacity(0.10), in: Capsule())
                     HStack(spacing: 6) {
-                        Text(manager.displayName).font(.system(size: 22, weight: .bold))
+                        Text(manager.displayName).font(.system(size: 21, weight: .semibold))
                         Image(systemName: "checkmark.seal.fill")
                             .font(.system(size: 14))
                             .foregroundStyle(HoldingsPalette.indigo)
@@ -131,7 +114,7 @@ struct FamousHoldingsView: View {
                     HStack(spacing: 5) {
                         Text(manager.institutionName).lineLimit(1)
                         Text("·")
-                        Label("12.3 万人关注", systemImage: "person.2.fill")
+                        Text("SEC 13F")
                     }
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -139,54 +122,30 @@ struct FamousHoldingsView: View {
                 .foregroundStyle(.primary)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 20)
-            .padding(.trailing, 14)
-            .padding(.bottom, 40)
+            .padding(.horizontal, 18)
 
-            if managers.indices.contains(selectedIndex + 1) {
-                let next = managers[selectedIndex + 1]
-                HStack(spacing: 4) {
-                    Text("下一位")
-                    Text(next.displayName).fontWeight(.semibold)
-                    Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold))
+            HStack {
+                pageProgress
+                Spacer()
+                if managers.indices.contains(selectedIndex + 1) {
+                    let next = managers[selectedIndex + 1]
+                    HStack(spacing: 4) {
+                        Text("下一位")
+                        Text(next.displayName).fontWeight(.semibold)
+                        Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold))
+                    }
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
                 }
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .frame(height: 20)
-                .background(Color(uiColor: .systemBackground).opacity(colorScheme == .dark ? 0.25 : 0.55), in: Capsule())
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .padding(.trailing, 12)
-                .padding(.bottom, 20)
             }
+            .padding(.horizontal, 18)
         }
-        .frame(height: 186)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity)
+        .background(HoldingsPalette.card)
         .accessibilityAction(named: "下一个人物") { moveManager(by: 1) }
         .accessibilityAction(named: "上一个人物") { moveManager(by: -1) }
-    }
-
-    private var heroBackdrop: some View {
-        ZStack {
-            LinearGradient(
-                colors: colorScheme == .dark
-                    ? [Color(red: 0.06, green: 0.06, blue: 0.12), Color(red: 0.15, green: 0.12, blue: 0.28)]
-                    : [Color(red: 0.99, green: 0.98, blue: 1.00), Color(red: 0.93, green: 0.91, blue: 0.99)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [HoldingsPalette.purple.opacity(colorScheme == .dark ? 0.42 : 0.26), .clear],
-                center: UnitPoint(x: 0.88, y: 0.10),
-                startRadius: 6,
-                endRadius: 220
-            )
-            Circle()
-                .fill(HoldingsPalette.purple.opacity(colorScheme == .dark ? 0.14 : 0.08))
-                .frame(width: 170, height: 170)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .offset(x: 60, y: -40)
-        }
     }
 
     private func filingSummary(_ manager: FamousHoldingsManager) -> some View {
@@ -200,8 +159,11 @@ struct FamousHoldingsView: View {
             summaryItem("持仓总市值", dollarValue(manager.totalValueUsd), "dollarsign.circle.fill")
         }
         .padding(.vertical, 15)
-        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(0.05), radius: 12, y: 5)
+        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
+                .stroke(HoldingsPalette.divider)
+        }
         .padding(.horizontal, 16)
     }
 
@@ -247,8 +209,11 @@ struct FamousHoldingsView: View {
                     .font(.system(size: 9)).foregroundStyle(.secondary)
             }
             .padding(18)
-            .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 18))
-            .shadow(color: .black.opacity(0.05), radius: 12, y: 5)
+            .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
+                    .stroke(HoldingsPalette.divider)
+            }
 
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
@@ -271,8 +236,11 @@ struct FamousHoldingsView: View {
                     .font(.system(size: 9)).foregroundStyle(.secondary)
             }
             .padding(18)
-            .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 18))
-            .shadow(color: .black.opacity(0.05), radius: 12, y: 5)
+            .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
+                    .stroke(HoldingsPalette.divider)
+            }
         }
         .padding(.horizontal, 16)
     }
@@ -383,7 +351,7 @@ struct FamousHoldingsView: View {
         HStack(spacing: 5) {
             ForEach(managers.indices, id: \.self) { index in
                 Capsule()
-                    .fill(index == selectedIndex ? HoldingsPalette.purple : Color.white.opacity(0.18))
+                    .fill(index == selectedIndex ? HoldingsPalette.purple : Color.secondary.opacity(0.18))
                     .frame(width: index == selectedIndex ? 22 : 14, height: 2)
             }
         }

@@ -132,7 +132,7 @@ struct IndustryPanoramaView: View {
             .padding(.bottom, 112)
         }
         .scrollIndicators(.hidden)
-        .background(HoldingsPalette.paper)
+        .background(InvestmentDesign.canvas)
         .task { await load() }
         .refreshable { await load() }
         .onChange(of: selectedID) { _, _ in
@@ -173,10 +173,10 @@ struct IndustryPanoramaView: View {
                                         .font(.system(size: 14, weight: selected ? .semibold : .regular))
                                         .lineLimit(1)
                                     Capsule()
-                                        .fill(selected ? HoldingsPalette.green : .clear)
+                                        .fill(selected ? InvestmentDesign.accent : .clear)
                                         .frame(width: 18, height: 2)
                                 }
-                                .foregroundStyle(selected ? HoldingsPalette.green : HoldingsPalette.ink.opacity(0.76))
+                                .foregroundStyle(selected ? Color.primary : Color.secondary)
                                 .contentShape(Rectangle())
                             }
                             .id(industry.id)
@@ -191,7 +191,7 @@ struct IndustryPanoramaView: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .background(HoldingsPalette.paper)
+        .background(InvestmentDesign.surface)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(HoldingsPalette.line)
@@ -200,7 +200,7 @@ struct IndustryPanoramaView: View {
     }
 
     private func panorama(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 22) {
             industryIntroduction(industry)
             scaleSection(industry)
             chainSection(industry)
@@ -219,14 +219,14 @@ struct IndustryPanoramaView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 10) {
                 Text(industry.title)
-                    .font(.system(size: 27, weight: .bold, design: .serif))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(HoldingsPalette.ink)
                 Text(industry.scale.period)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(HoldingsPalette.green)
+                    .foregroundStyle(InvestmentDesign.accent)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 5)
-                    .background(HoldingsPalette.green.opacity(0.08), in: Capsule())
+                    .background(InvestmentDesign.accentSoft, in: Capsule())
             }
 
             Text(industry.subtitle)
@@ -243,7 +243,7 @@ struct IndustryPanoramaView: View {
                                 .foregroundStyle(HoldingsPalette.ink.opacity(0.8))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 7)
-                                .background(Color.white.opacity(0.7), in: Capsule())
+                                .background(InvestmentDesign.surface, in: Capsule())
                                 .overlay(Capsule().stroke(HoldingsPalette.line))
                         }
                     }
@@ -270,8 +270,8 @@ struct IndustryPanoramaView: View {
 
                     HStack(alignment: .lastTextBaseline, spacing: 8) {
                         Text(parts.value)
-                            .font(.system(size: 46, weight: .semibold, design: .serif))
-                            .foregroundStyle(HoldingsPalette.green)
+                            .font(.system(size: 42, weight: .semibold, design: .rounded))
+                            .foregroundStyle(InvestmentDesign.accent)
                             .minimumScaleFactor(0.62)
                             .lineLimit(1)
                         if !parts.unit.isEmpty {
@@ -312,19 +312,19 @@ struct IndustryPanoramaView: View {
                 } else {
                     HStack(spacing: 9) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
-                            .foregroundStyle(HoldingsPalette.green)
+                            .foregroundStyle(InvestmentDesign.accent)
                         Text("该指标暂无连续可比历史序列，当前仅展示权威机构已发布的最新值。")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .lineSpacing(3)
                     }
                     .padding(12)
-                    .background(HoldingsPalette.green.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                    .background(InvestmentDesign.accentSoft, in: RoundedRectangle(cornerRadius: 10))
                 }
             }
             .padding(16)
-            .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 15))
-            .overlay(RoundedRectangle(cornerRadius: 15).stroke(HoldingsPalette.line))
+            .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius).stroke(HoldingsPalette.line))
         }
     }
 
@@ -336,7 +336,7 @@ struct IndustryPanoramaView: View {
             )
             .foregroundStyle(
                 LinearGradient(
-                    colors: [HoldingsPalette.green.opacity(0.2), HoldingsPalette.green.opacity(0.015)],
+                    colors: [InvestmentDesign.accent.opacity(0.2), InvestmentDesign.accent.opacity(0.015)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -346,14 +346,14 @@ struct IndustryPanoramaView: View {
                 x: .value("年份", String(point.year)),
                 y: .value("规模", point.value)
             )
-            .foregroundStyle(HoldingsPalette.green)
+            .foregroundStyle(InvestmentDesign.accent)
             .lineStyle(StrokeStyle(lineWidth: 2))
 
             PointMark(
                 x: .value("年份", String(point.year)),
                 y: .value("规模", point.value)
             )
-            .foregroundStyle(HoldingsPalette.green)
+            .foregroundStyle(InvestmentDesign.accent)
             .symbolSize(34)
             .annotation(position: .top, spacing: 5) {
                 Text(point.value.formatted(.number.precision(.fractionLength(0...1))))
@@ -434,7 +434,7 @@ struct IndustryPanoramaView: View {
                     }
                     .padding(.horizontal, 8)
                     .frame(height: 36)
-                    .background(Color.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 9))
+                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 9))
                     .overlay(RoundedRectangle(cornerRadius: 9).stroke(HoldingsPalette.line))
                 }
             }
@@ -486,14 +486,14 @@ struct IndustryPanoramaView: View {
                 Text(title)
                 Text("\(count)")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(selected ? HoldingsPalette.green.opacity(0.75) : Color.secondary.opacity(0.55))
+                    .foregroundStyle(selected ? InvestmentDesign.accent.opacity(0.75) : Color.secondary.opacity(0.55))
             }
             .font(.system(size: 13, weight: selected ? .semibold : .regular))
-            .foregroundStyle(selected ? HoldingsPalette.green : HoldingsPalette.ink.opacity(0.7))
+            .foregroundStyle(selected ? InvestmentDesign.accent : HoldingsPalette.ink.opacity(0.7))
             .padding(.bottom, 7)
             .overlay(alignment: .bottom) {
                 Capsule()
-                    .fill(selected ? HoldingsPalette.green : .clear)
+                    .fill(selected ? InvestmentDesign.accent : .clear)
                     .frame(height: 2)
             }
         }
@@ -546,7 +546,7 @@ struct IndustryPanoramaView: View {
             }
         }
         .padding(13)
-        .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 13))
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(HoldingsPalette.line))
     }
 
@@ -573,7 +573,7 @@ struct IndustryPanoramaView: View {
                         Spacer(minLength: 0)
                     }
                     .padding(14)
-                    .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 13))
+                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 13))
                     .overlay(RoundedRectangle(cornerRadius: 13).stroke(HoldingsPalette.line))
                 }
             }
@@ -589,7 +589,7 @@ struct IndustryPanoramaView: View {
             ForEach(Array(industry.provenance.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .top, spacing: 8) {
                     Circle()
-                        .fill(HoldingsPalette.green)
+                        .fill(InvestmentDesign.accent)
                         .frame(width: 4, height: 4)
                         .padding(.top, 6)
                     Text(item)
@@ -601,7 +601,7 @@ struct IndustryPanoramaView: View {
         }
         .padding(15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.52), in: RoundedRectangle(cornerRadius: 13))
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 13))
     }
 
     private func sectionContainer<Content: View>(
@@ -612,10 +612,10 @@ struct IndustryPanoramaView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 9) {
                 Text(number)
-                    .font(.system(size: 24, weight: .medium, design: .serif))
-                    .foregroundStyle(HoldingsPalette.green)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(InvestmentDesign.accent)
                 Text(title)
-                    .font(.system(size: 19, weight: .bold, design: .serif))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(HoldingsPalette.ink)
             }
             content()
@@ -714,9 +714,9 @@ struct IndustryPanoramaView: View {
 }
 
 private extension HoldingsPalette {
-    static let paper = Color(red: 0.975, green: 0.972, blue: 0.958)
-    static let ink = Color(red: 0.09, green: 0.12, blue: 0.15)
-    static let line = Color.black.opacity(0.08)
+    static let paper = InvestmentDesign.canvas
+    static let ink = Color.primary
+    static let line = InvestmentDesign.divider
 }
 
 #Preview {

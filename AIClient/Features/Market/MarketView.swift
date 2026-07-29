@@ -2,12 +2,12 @@ import SwiftUI
 import UIKit
 
 private enum MarketStyle {
-    static let canvas = Color(uiColor: .systemBackground)
-    static let surface = Color(uiColor: .systemBackground)
-    static let divider = Color(uiColor: .separator).opacity(0.55)
-    static let gain = Color(red: 0.96, green: 0.18, blue: 0.22)
-    static let loss = Color(red: 0.06, green: 0.65, blue: 0.32)
-    static let accent = Color(red: 0.07, green: 0.49, blue: 0.98)
+    static let canvas = InvestmentDesign.canvas
+    static let surface = InvestmentDesign.surface
+    static let divider = InvestmentDesign.divider
+    static let gain = InvestmentDesign.gain
+    static let loss = InvestmentDesign.loss
+    static let accent = InvestmentDesign.accent
     static let chartTransition = Animation.smooth(duration: 0.6)
     static let purple = accent
 }
@@ -198,9 +198,9 @@ private struct MarketHomeView: View {
 }
 
 private enum MarketTerminalPalette {
-    static let header = Color(uiColor: .systemBackground)
-    static let headerSurface = Color(uiColor: .secondarySystemBackground)
-    static let headerDivider = Color(uiColor: .separator).opacity(0.55)
+    static let header = InvestmentDesign.surface
+    static let headerSurface = InvestmentDesign.secondarySurface
+    static let headerDivider = InvestmentDesign.divider
 }
 
 private enum MarketRegion: String, CaseIterable, Identifiable {
