@@ -62,6 +62,7 @@ private struct EditorialRootView: View {
         if ProcessInfo.processInfo.arguments.contains("--learning-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-video-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-book-preview") { return .learning }
         return .observation
         #else

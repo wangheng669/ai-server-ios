@@ -13,6 +13,13 @@ struct LearningView: View {
     @State private var repository = LearningContentRepository()
     @State private var path: [LearningRoute] = []
     @State private var selectedCategory = "股票"
+    @State private var selectedSection: KnowledgeSection = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ? .books : .investment
+        #else
+        .investment
+        #endif
+    }()
     @State private var query = ""
     @State private var showsSearch = false
 
@@ -22,21 +29,7 @@ struct LearningView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if let catalog = store.catalog {
-                    learningHome(catalog)
-                } else if store.isLoading {
-                    LearningLoadingView()
-                } else {
-                    ContentUnavailableView {
-                        Label("知识内容载入失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(store.errorMessage ?? "请稍后重试")
-                    } actions: {
-                        Button("重试") { Task { await store.load(force: true) } }
-                    }
-                }
-            }
+            knowledgeHome
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: LearningRoute.self) { route in
@@ -69,7 +62,8 @@ struct LearningView: View {
             showsDetail = !isEmpty
         }
         .task(id: prefetchKey) {
-            guard let catalog = store.catalog,
+            guard selectedSection == .investment,
+                  let catalog = store.catalog,
                   let section = catalog.sections.first(where: { $0.name == selectedCategory }) else {
                 return
             }
@@ -79,31 +73,40 @@ struct LearningView: View {
     }
 
     private var prefetchKey: String {
-        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)-\(selectedCategory)"
+        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)-\(selectedSection)-\(selectedCategory)"
     }
 
-    private func learningHome(_ catalog: LearningCatalog) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                header
-                if showsSearch {
-                    searchField
-                        .transition(.move(edge: .top).combined(with: .opacity))
+    private var knowledgeHome: some View {
+        VStack(spacing: 0) {
+            header
+            sectionPicker
+            if showsSearch {
+                searchField
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    switch selectedSection {
+                    case .investment:
+                        investmentContent
+                    case .books:
+                        booksContent
+                    }
                 }
-                if query.isEmpty {
-                    featuredTopic(in: catalog)
-                    featuredBooks
-                    categoryPicker(catalog.sections)
-                    topicList(catalog)
-                } else {
-                    searchResults(catalog)
+                .padding(.bottom, 32)
+            }
+            .id(selectedSection)
+            .scrollIndicators(.hidden)
+            .safeAreaPadding(.bottom, 90)
+            .refreshable {
+                switch selectedSection {
+                case .investment:
+                    await store.load(force: true)
+                case .books:
+                    break
                 }
             }
-            .padding(.bottom, 32)
         }
-        .scrollIndicators(.hidden)
-        .safeAreaPadding(.bottom, 90)
-        .refreshable { await store.load(force: true) }
         .animation(.easeOut(duration: 0.18), value: showsSearch)
     }
 
@@ -123,17 +126,60 @@ struct LearningView: View {
                     .background(Color(uiColor: .secondarySystemBackground), in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(showsSearch ? "关闭搜索" : "搜索知识与书籍")
+            .accessibilityLabel(
+                showsSearch ? "关闭搜索" : "搜索\(selectedSection.title)内容"
+            )
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
-        .padding(.bottom, 18)
+        .padding(.bottom, 8)
+    }
+
+    private var sectionPicker: some View {
+        HStack(spacing: 0) {
+            sectionButton(.investment)
+            sectionButton(.books)
+        }
+        .frame(height: 48)
+        .padding(.horizontal, 20)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.16))
+                .frame(height: 0.5)
+                .padding(.horizontal, 20)
+        }
+        .padding(.bottom, showsSearch ? 14 : 20)
+    }
+
+    private func sectionButton(_ section: KnowledgeSection) -> some View {
+        Button {
+            guard selectedSection != section else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                selectedSection = section
+                query = ""
+            }
+        } label: {
+            Text(section.title)
+                .font(.system(size: 17, weight: selectedSection == section ? .semibold : .medium))
+                .foregroundStyle(selectedSection == section ? Color.primary : Color.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .bottom) {
+                    if selectedSection == section {
+                        Capsule()
+                            .fill(HoldingsPalette.purple)
+                            .frame(width: 38, height: 3)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
     }
 
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("搜索知识与书籍", text: $query)
+            TextField(selectedSection.searchPlaceholder, text: $query)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if !query.isEmpty {
@@ -149,7 +195,32 @@ struct LearningView: View {
         .frame(height: 46)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal, 20)
-        .padding(.bottom, 16)
+        .padding(.bottom, 20)
+    }
+
+    @ViewBuilder
+    private var investmentContent: some View {
+        if let catalog = store.catalog {
+            if query.isEmpty {
+                featuredTopic(in: catalog)
+                categoryPicker(catalog.sections)
+                topicList(catalog)
+            } else {
+                investmentSearchResults(catalog)
+            }
+        } else if store.isLoading {
+            InvestmentContentLoadingView()
+        } else {
+            ContentUnavailableView {
+                Label("投资知识载入失败", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(store.errorMessage ?? "请稍后重试")
+            } actions: {
+                Button("重试") { Task { await store.load(force: true) } }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 60)
+        }
     }
 
     @ViewBuilder
@@ -187,37 +258,6 @@ struct LearningView: View {
             .buttonStyle(LearningPressStyle())
             .padding(.horizontal, 20)
         }
-    }
-
-    private var featuredBooks: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("精选书籍")
-                    .font(.system(size: 23, weight: .bold))
-                Spacer()
-                Text("\(KnowledgeBook.featured.count) 本")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 20)
-
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 16) {
-                    ForEach(Array(KnowledgeBook.featured.enumerated()), id: \.element.id) { index, book in
-                        Button {
-                            path.append(.book(book))
-                        } label: {
-                            KnowledgeBookCard(book: book, paletteIndex: index)
-                        }
-                        .buttonStyle(LearningPressStyle())
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 2)
-            }
-            .scrollIndicators(.hidden)
-        }
-        .padding(.top, 28)
     }
 
     private func categoryPicker(_ sections: [LearningSection]) -> some View {
@@ -293,16 +333,14 @@ struct LearningView: View {
     }
 
     @ViewBuilder
-    private func searchResults(_ catalog: LearningCatalog) -> some View {
+    private func investmentSearchResults(_ catalog: LearningCatalog) -> some View {
         let topics = filteredTopics(catalog)
-        let books = filteredBooks()
-        let total = topics.count + books.count
 
         HStack(alignment: .firstTextBaseline) {
             Text("搜索结果")
                 .font(.system(size: 23, weight: .bold))
             Spacer()
-            Text("\(total) 项")
+            Text("\(topics.count) 篇")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
         }
@@ -310,7 +348,7 @@ struct LearningView: View {
         .padding(.top, 12)
         .padding(.bottom, 8)
 
-        if total == 0 {
+        if topics.isEmpty {
             ContentUnavailableView(
                 "没有找到相关内容",
                 systemImage: "magnifyingglass",
@@ -319,41 +357,70 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
         } else {
-            if !books.isEmpty {
-                searchSectionTitle("书籍")
-                ForEach(Array(books.enumerated()), id: \.element.id) { index, book in
-                    Button {
-                        path.append(.book(book))
-                    } label: {
-                        KnowledgeBookSearchRow(book: book, paletteIndex: index)
-                    }
-                    .buttonStyle(LearningPressStyle())
+            ForEach(topics) { topic in
+                Button {
+                    path.append(.topic(topic))
+                } label: {
+                    LearningTopicRow(topic: topic)
                 }
-            }
-            if !topics.isEmpty {
-                searchSectionTitle("知识文章")
-                ForEach(topics) { topic in
-                    Button {
-                        path.append(.topic(topic))
-                    } label: {
-                        LearningTopicRow(topic: topic)
-                    }
-                    .buttonStyle(LearningPressStyle())
-                    if topic.id != topics.last?.id {
-                        Divider().padding(.leading, 118)
-                    }
+                .buttonStyle(LearningPressStyle())
+                if topic.id != topics.last?.id {
+                    Divider().padding(.leading, 118)
                 }
             }
         }
     }
 
-    private func searchSectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(.secondary)
+    @ViewBuilder
+    private var booksContent: some View {
+        let books = filteredBooks()
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(query.isEmpty ? "投资经典" : "搜索结果")
+                    .font(.system(size: 25, weight: .bold))
+                if query.isEmpty {
+                    Text("建立体系，训练判断")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Text("\(books.count) 本")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 20)
+
+        if books.isEmpty {
+            ContentUnavailableView(
+                "没有找到相关书籍",
+                systemImage: "books.vertical",
+                description: Text("试试书名、作者或投资主题")
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.top, 40)
+        } else {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 20),
+                    GridItem(.flexible(), spacing: 20)
+                ],
+                alignment: .center,
+                spacing: 28
+            ) {
+                ForEach(books) { book in
+                    let paletteIndex = KnowledgeBook.featured.firstIndex(where: { $0.id == book.id }) ?? 0
+                    Button {
+                        path.append(.book(book))
+                    } label: {
+                        KnowledgeBookCard(book: book, paletteIndex: paletteIndex)
+                    }
+                    .buttonStyle(LearningPressStyle())
+                }
+            }
             .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 2)
+        }
     }
 
     private func filteredTopics(_ catalog: LearningCatalog) -> [LearningTopic] {
@@ -392,6 +459,25 @@ struct LearningView: View {
     }
 }
 
+private enum KnowledgeSection: String {
+    case investment
+    case books
+
+    var title: String {
+        switch self {
+        case .investment: "投资"
+        case .books: "书籍"
+        }
+    }
+
+    var searchPlaceholder: String {
+        switch self {
+        case .investment: "搜索投资知识"
+        case .books: "搜索书名、作者或主题"
+        }
+    }
+}
+
 private enum LearningRoute: Hashable {
     case topic(LearningTopic)
     case book(KnowledgeBook)
@@ -420,38 +506,6 @@ private struct KnowledgeBookCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)")
         .accessibilityHint("查看书籍介绍")
-    }
-}
-
-private struct KnowledgeBookSearchRow: View {
-    let book: KnowledgeBook
-    let paletteIndex: Int
-
-    var body: some View {
-        HStack(spacing: 14) {
-            KnowledgeBookCover(book: book, paletteIndex: paletteIndex, compact: true)
-                .frame(width: 54, height: 76)
-                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(book.title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(book.author)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                Text(book.summary)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
     }
 }
 
@@ -781,26 +835,23 @@ private struct LearningTopicThumbnail: View {
     }
 }
 
-private struct LearningLoadingView: View {
+private struct InvestmentContentLoadingView: View {
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("知识").font(.system(size: 38, weight: .bold))
-                RoundedRectangle(cornerRadius: 24).frame(height: 228)
-                HStack(spacing: 10) {
-                    ForEach(0..<4, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 18).frame(height: 78)
-                    }
-                }
-                Text("投资知识").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 20) {
+            RoundedRectangle(cornerRadius: 24).frame(height: 228)
+            HStack(spacing: 10) {
                 ForEach(0..<4, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 14).frame(height: 76)
+                    RoundedRectangle(cornerRadius: 18).frame(height: 78)
                 }
             }
-            .padding(20)
-            .foregroundStyle(Color.secondary.opacity(0.16))
-            .redacted(reason: .placeholder)
+            Text("投资知识").font(.title2.bold())
+            ForEach(0..<4, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 14).frame(height: 76)
+            }
         }
+        .padding(.horizontal, 20)
+        .foregroundStyle(Color.secondary.opacity(0.16))
+        .redacted(reason: .placeholder)
     }
 }
 
