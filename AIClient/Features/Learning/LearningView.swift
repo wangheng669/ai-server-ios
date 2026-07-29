@@ -75,53 +75,69 @@ struct LearningView: View {
     }
 
     private var knowledgeHome: some View {
-        VStack(spacing: 0) {
-            header
-            sectionPicker
-            if showsSearch {
-                searchField
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+        ZStack {
+            KnowledgePagePalette.canvas.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+                sectionPicker
+                if showsSearch {
+                    searchField
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        switch selectedSection {
+                        case .investment:
+                            investmentContent
+                        case .books:
+                            booksContent
+                        }
+                    }
+                    .padding(.top, 22)
+                    .padding(.bottom, 32)
+                }
+                .id(selectedSection)
+                .scrollIndicators(.hidden)
+                .safeAreaPadding(.bottom, 90)
+                .refreshable {
                     switch selectedSection {
                     case .investment:
-                        investmentContent
+                        await store.load(force: true)
                     case .books:
-                        booksContent
+                        await store.loadBookshelf(force: true)
                     }
-                }
-                .padding(.bottom, 32)
-            }
-            .id(selectedSection)
-            .scrollIndicators(.hidden)
-            .safeAreaPadding(.bottom, 90)
-            .refreshable {
-                switch selectedSection {
-                case .investment:
-                    await store.load(force: true)
-                case .books:
-                    await store.loadBookshelf(force: true)
                 }
             }
         }
-        .animation(.easeOut(duration: 0.18), value: showsSearch)
+        .animation(.snappy(duration: 0.24), value: showsSearch)
     }
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("知识")
-                .font(.system(size: 38, weight: .bold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("知识")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                Text(selectedSection.subtitle)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.opacity)
+            }
             Spacer()
             Button {
                 showsSearch.toggle()
                 if !showsSearch { query = "" }
             } label: {
                 Image(systemName: showsSearch ? "xmark" : "magnifyingglass")
-                    .font(.system(size: 19, weight: .medium))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
-                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+                    .frame(width: 42, height: 42)
+                    .background(KnowledgePagePalette.surface, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+                    }
+                    .shadow(color: .black.opacity(0.045), radius: 8, y: 3)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
@@ -129,24 +145,21 @@ struct LearningView: View {
             )
         }
         .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.top, 13)
+        .padding(.bottom, 18)
     }
 
     private var sectionPicker: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 5) {
             sectionButton(.investment)
             sectionButton(.books)
         }
-        .frame(height: 48)
+        .padding(5)
+        .frame(height: 52)
+        .background(KnowledgePagePalette.segmentBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
         .padding(.horizontal, 20)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.16))
-                .frame(height: 0.5)
-                .padding(.horizontal, 20)
-        }
-        .padding(.bottom, showsSearch ? 14 : 20)
+        .padding(.bottom, showsSearch ? 14 : 0)
     }
 
     private func sectionButton(_ section: KnowledgeSection) -> some View {
@@ -157,15 +170,19 @@ struct LearningView: View {
                 query = ""
             }
         } label: {
-            Text(section.title)
-                .font(.system(size: 17, weight: selectedSection == section ? .semibold : .medium))
-                .foregroundStyle(selectedSection == section ? Color.primary : Color.secondary)
+            HStack(spacing: 7) {
+                Image(systemName: section.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(section.title)
+                    .font(.system(size: 16, weight: .semibold))
+            }
+                .foregroundStyle(selectedSection == section ? Color.white : Color.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .bottom) {
+                .background {
                     if selectedSection == section {
-                        Capsule()
-                            .fill(HoldingsPalette.purple)
-                            .frame(width: 38, height: 3)
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(KnowledgePagePalette.accent)
+                            .shadow(color: KnowledgePagePalette.accent.opacity(0.22), radius: 7, y: 3)
                     }
                 }
                 .contentShape(Rectangle())
@@ -190,10 +207,13 @@ struct LearningView: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 46)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .frame(height: 48)
+        .background(KnowledgePagePalette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+        }
         .padding(.horizontal, 20)
-        .padding(.bottom, 20)
     }
 
     @ViewBuilder
@@ -229,29 +249,44 @@ struct LearningView: View {
             Button {
                 path.append(.topic(topic))
             } label: {
-                ZStack(alignment: .bottomLeading) {
+                ZStack(alignment: .leading) {
                     LearningHeroArtwork()
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("从零开始读懂股票")
-                            .font(.system(size: 25, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text("精选 12 个基础概念")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 7) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("今日精选")
+                            .font(.system(size: 12, weight: .bold))
+                            .tracking(1.5)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text("从零开始\n读懂股票")
+                            .font(.system(size: 27, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineSpacing(2)
+                            .padding(.top, 10)
+                        Spacer()
+                        HStack(spacing: 8) {
+                            Text("12 个基础概念")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.74))
+                            Circle()
+                                .fill(.white.opacity(0.36))
+                                .frame(width: 3, height: 3)
                             Text("开始学习")
-                                .font(.system(size: 16, weight: .semibold))
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
                         }
-                        .foregroundStyle(HoldingsPalette.purple)
-                        .padding(.top, 30)
                     }
-                    .padding(24)
+                    .padding(22)
                 }
-                .frame(height: 228)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .frame(height: 190)
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(.white.opacity(0.12), lineWidth: 0.7)
+                }
+                .shadow(color: KnowledgePagePalette.accent.opacity(0.16), radius: 18, y: 9)
+                .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             }
             .buttonStyle(LearningPressStyle())
             .padding(.horizontal, 20)
@@ -259,53 +294,70 @@ struct LearningView: View {
     }
 
     private func categoryPicker(_ sections: [LearningSection]) -> some View {
-        HStack(spacing: 8) {
-            ForEach(sections) { section in
-                Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        selectedCategory = section.name
+        ScrollView(.horizontal) {
+            HStack(spacing: 9) {
+                ForEach(sections) { section in
+                    Button {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            selectedCategory = section.name
+                        }
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: categoryIcon(section.name))
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(section.name)
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundStyle(
+                            selectedCategory == section.name ? Color.white : Color.secondary
+                        )
+                        .padding(.horizontal, 15)
+                        .frame(height: 40)
+                        .background(
+                            selectedCategory == section.name
+                                ? KnowledgePagePalette.accent
+                                : KnowledgePagePalette.surface,
+                            in: Capsule()
+                        )
+                        .overlay {
+                            if selectedCategory != section.name {
+                                Capsule()
+                                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+                            }
+                        }
                     }
-                } label: {
-                    VStack(spacing: 10) {
-                        Image(systemName: categoryIcon(section.name))
-                            .font(.system(size: 22, weight: .medium))
-                        Text(section.name)
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .foregroundStyle(
-                        selectedCategory == section.name ? HoldingsPalette.purple : Color.secondary
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 78)
-                    .background(
-                        selectedCategory == section.name
-                            ? HoldingsPalette.purple.opacity(0.09)
-                            : Color(uiColor: .secondarySystemBackground),
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    )
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedCategory == section.name ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedCategory == section.name ? .isSelected : [])
             }
+            .padding(.horizontal, 20)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
+        .scrollIndicators(.hidden)
+        .padding(.top, 22)
     }
 
     @ViewBuilder
     private func topicList(_ catalog: LearningCatalog) -> some View {
         let topics = filteredTopics(catalog)
         HStack(alignment: .firstTextBaseline) {
-            Text("\(selectedCategory)知识")
-                .font(.system(size: 23, weight: .bold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(selectedCategory)知识")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                Text("循序渐进，建立自己的投资框架")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Text("\(topics.count) 篇")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(KnowledgePagePalette.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(KnowledgePagePalette.accent.opacity(0.09), in: Capsule())
         }
         .padding(.horizontal, 20)
         .padding(.top, 28)
-        .padding(.bottom, 8)
+        .padding(.bottom, 13)
 
         if topics.isEmpty {
             ContentUnavailableView(
@@ -316,17 +368,26 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
         } else {
-            ForEach(topics) { topic in
-                Button {
-                    path.append(.topic(topic))
-                } label: {
-                    LearningTopicRow(topic: topic)
-                }
-                .buttonStyle(LearningPressStyle())
-                if topic.id != topics.last?.id {
-                    Divider().padding(.leading, 118)
+            VStack(spacing: 0) {
+                ForEach(topics) { topic in
+                    Button {
+                        path.append(.topic(topic))
+                    } label: {
+                        LearningTopicRow(topic: topic)
+                    }
+                    .buttonStyle(LearningPressStyle())
+                    if topic.id != topics.last?.id {
+                        Divider().padding(.leading, 112)
+                    }
                 }
             }
+            .background(KnowledgePagePalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+            }
+            .padding(.horizontal, 20)
         }
     }
 
@@ -336,7 +397,7 @@ struct LearningView: View {
 
         HStack(alignment: .firstTextBaseline) {
             Text("搜索结果")
-                .font(.system(size: 23, weight: .bold))
+                .font(.system(size: 22, weight: .bold, design: .rounded))
             Spacer()
             Text("\(topics.count) 篇")
                 .font(.system(size: 14))
@@ -355,17 +416,26 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
         } else {
-            ForEach(topics) { topic in
-                Button {
-                    path.append(.topic(topic))
-                } label: {
-                    LearningTopicRow(topic: topic)
-                }
-                .buttonStyle(LearningPressStyle())
-                if topic.id != topics.last?.id {
-                    Divider().padding(.leading, 118)
+            VStack(spacing: 0) {
+                ForEach(topics) { topic in
+                    Button {
+                        path.append(.topic(topic))
+                    } label: {
+                        LearningTopicRow(topic: topic)
+                    }
+                    .buttonStyle(LearningPressStyle())
+                    if topic.id != topics.last?.id {
+                        Divider().padding(.leading, 112)
+                    }
                 }
             }
+            .background(KnowledgePagePalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+            }
+            .padding(.horizontal, 20)
         }
     }
 
@@ -374,21 +444,24 @@ struct LearningView: View {
         let books = filteredBooks()
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(query.isEmpty ? "我的书架" : "搜索结果")
-                    .font(.system(size: 25, weight: .bold))
+                Text(query.isEmpty ? "精选书架" : "搜索结果")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
                 if query.isEmpty {
-                    Text(store.bookshelf?.source ?? "微信读书")
-                        .font(.system(size: 15))
+                    Text("值得反复阅读的思想与人物")
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                 }
             }
             Spacer()
             Text("\(books.count) 本")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(KnowledgePagePalette.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(KnowledgePagePalette.accent.opacity(0.09), in: Capsule())
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 20)
+        .padding(.bottom, 16)
 
         if store.isBookshelfLoading && store.bookshelf == nil {
             ProgressView("正在载入书架")
@@ -415,26 +488,35 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
         } else {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 20),
-                    GridItem(.flexible(), spacing: 20)
-                ],
-                alignment: .center,
-                spacing: 28
-            ) {
+            VStack(spacing: 14) {
                 ForEach(Array(books.enumerated()), id: \.element.id) { index, book in
                     Button {
                         if let url = book.openURL {
                             openURL(url)
                         }
                     } label: {
-                        KnowledgeBookCard(book: book, paletteIndex: index)
+                        KnowledgeFeaturedBookCard(
+                            book: book,
+                            source: store.bookshelf?.source ?? "微信读书",
+                            paletteIndex: index
+                        )
                     }
                     .buttonStyle(LearningPressStyle())
                 }
             }
             .padding(.horizontal, 20)
+
+            if query.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(KnowledgePagePalette.accent)
+                    Text("书架会持续加入精选好书")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 18)
+            }
         }
     }
 
@@ -490,35 +572,114 @@ private enum KnowledgeSection: String {
         case .books: "搜索书名、作者或主题"
         }
     }
+
+    var subtitle: String {
+        switch self {
+        case .investment: "建立清晰、可复用的认知框架"
+        case .books: "从好书中认识思想与世界"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .investment: "chart.line.uptrend.xyaxis"
+        case .books: "books.vertical.fill"
+        }
+    }
 }
 
 private enum LearningRoute: Hashable {
     case topic(LearningTopic)
 }
 
-private struct KnowledgeBookCard: View {
+private enum KnowledgePagePalette {
+    static let accent = Color(red: 0.35, green: 0.25, blue: 0.73)
+    static let canvas = Color(uiColor: .systemGroupedBackground)
+    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let segmentBackground = Color(uiColor: .tertiarySystemGroupedBackground)
+    static let stroke = Color.primary.opacity(0.07)
+}
+
+private struct KnowledgeFeaturedBookCard: View {
     let book: KnowledgeBook
+    let source: String
     let paletteIndex: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        HStack(spacing: 18) {
             KnowledgeBookCover(book: book, paletteIndex: paletteIndex)
-                .frame(width: 132, height: 184)
-                .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 5)
-            Text(book.title)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            Text(book.author)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .frame(width: 106, height: 148)
+                .shadow(color: .black.opacity(0.18), radius: 9, x: 0, y: 6)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(source)
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(KnowledgePagePalette.accent)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(KnowledgePagePalette.accent.opacity(0.1), in: Capsule())
+
+                Text(book.title)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .padding(.top, 11)
+
+                Text(book.author)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .padding(.top, 5)
+
+                Spacer(minLength: 12)
+
+                HStack(spacing: 7) {
+                    if let category = book.category, !category.isEmpty {
+                        Text(category)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    Text("打开阅读")
+                        .font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(KnowledgePagePalette.accent)
+            }
         }
-        .frame(width: 132, alignment: .leading)
+        .padding(18)
+        .frame(maxWidth: .infinity, minHeight: 184, alignment: .leading)
+        .background {
+            ZStack {
+                KnowledgePagePalette.surface
+                LinearGradient(
+                    colors: [
+                        KnowledgePagePalette.accent.opacity(0.09),
+                        .clear,
+                        Color.blue.opacity(0.035)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+        }
+        .shadow(color: .black.opacity(0.045), radius: 14, y: 7)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)")
-        .accessibilityHint("查看书籍介绍")
+        .accessibilityHint("在\(source)打开阅读")
     }
 }
 
@@ -617,46 +778,46 @@ private struct LearningHeroArtwork: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    HoldingsPalette.purple.opacity(0.12),
-                    Color(red: 0.96, green: 0.95, blue: 1)
+                    Color(red: 0.16, green: 0.12, blue: 0.37),
+                    KnowledgePagePalette.accent,
+                    Color(red: 0.30, green: 0.21, blue: 0.63)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+            Circle()
+                .fill(.white.opacity(0.07))
+                .frame(width: 210, height: 210)
+                .blur(radius: 2)
+                .offset(x: 145, y: -80)
             Canvas { context, size in
-                var bars = Path()
-                let values: [CGFloat] = [0.24, 0.42, 0.34, 0.58, 0.5, 0.75, 0.68, 0.88]
-                let spacing = size.width * 0.055
-                let startX = size.width * 0.53
-                for (index, value) in values.enumerated() {
-                    let x = startX + CGFloat(index) * spacing
-                    let centerY = size.height * (0.74 - value * 0.44)
-                    bars.move(to: CGPoint(x: x, y: centerY - 14))
-                    bars.addLine(to: CGPoint(x: x, y: centerY + 14))
-                    bars.addRect(CGRect(x: x - 6, y: centerY - 8, width: 12, height: 16))
-                }
-                context.stroke(
-                    bars,
-                    with: .color(HoldingsPalette.purple.opacity(0.34)),
-                    lineWidth: 1.5
-                )
-
                 var line = Path()
-                let points = values.enumerated().map { index, value in
-                    CGPoint(
-                        x: startX + CGFloat(index) * spacing,
-                        y: size.height * (0.77 - value * 0.48)
-                    )
-                }
+                let points: [CGPoint] = [
+                    CGPoint(x: size.width * 0.51, y: size.height * 0.72),
+                    CGPoint(x: size.width * 0.60, y: size.height * 0.59),
+                    CGPoint(x: size.width * 0.68, y: size.height * 0.64),
+                    CGPoint(x: size.width * 0.76, y: size.height * 0.42),
+                    CGPoint(x: size.width * 0.84, y: size.height * 0.49),
+                    CGPoint(x: size.width * 0.94, y: size.height * 0.22)
+                ]
                 if let first = points.first {
                     line.move(to: first)
-                    for point in points.dropFirst() { line.addLine(to: point) }
+                    for point in points.dropFirst() {
+                        line.addLine(to: point)
+                    }
                 }
                 context.stroke(
                     line,
-                    with: .color(HoldingsPalette.purple.opacity(0.52)),
-                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+                    with: .color(.white.opacity(0.72)),
+                    style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
                 )
+
+                for point in points {
+                    context.fill(
+                        Path(ellipseIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)),
+                        with: .color(.white.opacity(0.92))
+                    )
+                }
             }
         }
     }
@@ -686,8 +847,8 @@ private struct LearningTopicRow: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 13)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
 }
@@ -775,10 +936,10 @@ private struct LearningTopicThumbnail: View {
 private struct InvestmentContentLoadingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            RoundedRectangle(cornerRadius: 24).frame(height: 228)
+            RoundedRectangle(cornerRadius: 26).frame(height: 190)
             HStack(spacing: 10) {
                 ForEach(0..<4, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 18).frame(height: 78)
+                    Capsule().frame(width: 72, height: 40)
                 }
             }
             Text("投资知识").font(.title2.bold())
