@@ -142,7 +142,7 @@ jobs:
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \
             -destination 'platform=iOS Simulator,name=iPhone 16e' \
-            -derivedDataPath "$RUNNER_TEMP/AIServerClient-AIMergeTests" \
+            -derivedDataPath "$RUNNER_TEMP/AIServerClient-AIMergeTests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Report merge verification completed

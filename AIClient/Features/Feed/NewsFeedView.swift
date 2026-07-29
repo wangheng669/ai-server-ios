@@ -64,7 +64,7 @@ struct NewsFeedView: View {
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
     @StateObject private var scrollPositionStore = FeedScrollPositionStore()
     @State private var hasLoadedFeedOnce = false
-    @State private var flashFilter: FlashFilter = .all
+    @State private var flashFilter: FlashFilter = .important
     @State private var expandedFlashIDs: Set<Int> = []
     @State private var weiboSection: WeiboSection = .hot
     @State private var openingWebPostID: Int?
