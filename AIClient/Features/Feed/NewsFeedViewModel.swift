@@ -14,6 +14,8 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var selectedRSSFeedID: Int?
     @Published private(set) var selectedRSSPosts: [Post] = []
     @Published private(set) var isLoadingRSSSelection = false
+    @Published private(set) var isLoadingMoreRSSSelection = false
+    @Published private(set) var canLoadMoreRSSSelection = true
     @Published private(set) var selectedFlashCategory: String?
     @Published var errorMessage: String?
     @Published var source: FeedSource {
@@ -30,18 +32,20 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchFlashPosts: (Int, Int, String?) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
-    private let fetchRSSFeedPosts: (Int) async throws -> [Post]
+    private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchPostDetail: (Int) async throws -> Post
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
+    private var selectedRSSPage = 1
+    private let selectedRSSPageSize = 20
 
     init(
         source initialSource: FeedSource? = nil,
         fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
-        fetchRSSFeedPosts: ((Int) async throws -> [Post])? = nil,
+        fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchPostDetail: ((Int) async throws -> Post)? = nil,
         fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil
     ) {
@@ -59,8 +63,8 @@ final class NewsFeedViewModel: ObservableObject {
             try await client.fetchXTranslation(tweetID: tweetID)
         }
         self.fetchRSSFeeds = { try await client.fetchRSSFeeds() }
-        self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID in
-            try await client.fetchRSSFeedPosts(feedID: feedID)
+        self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID, page, limit in
+            try await client.fetchRSSFeedPosts(feedID: feedID, page: page, limit: limit)
         }
         self.fetchPostDetail = fetchPostDetail ?? { postID in
             try await client.fetchPost(id: postID)
@@ -119,6 +123,8 @@ final class NewsFeedViewModel: ObservableObject {
     func selectRSSFeed(_ feedID: Int?) async {
         selectedRSSFeedID = feedID
         selectedRSSPosts = []
+        selectedRSSPage = 1
+        canLoadMoreRSSSelection = true
         guard let feedID else {
             isLoadingRSSSelection = false
             return
@@ -126,22 +132,50 @@ final class NewsFeedViewModel: ObservableObject {
         isLoadingRSSSelection = true
         defer { if selectedRSSFeedID == feedID { isLoadingRSSSelection = false } }
         do {
-            let result = try await fetchRSSFeedPosts(feedID)
+            let result = try await fetchRSSFeedPosts(feedID, 1, selectedRSSPageSize)
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
-            guard result.contains(where: \.isNewYorkTimes) else {
-                selectedRSSPosts = result
-                return
-            }
-
-            let warmedPosts = try await prefetchNewYorkTimesBodies(for: result)
+            let warmedPosts = try await warmNewYorkTimesPostsIfNeeded(result)
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
             selectedRSSPosts = warmedPosts
+            canLoadMoreRSSSelection = !result.isEmpty
         } catch is CancellationError {
             return
         } catch {
             guard selectedRSSFeedID == feedID else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    func loadMoreSelectedRSSIfNeeded(current post: Post) async {
+        guard let feedID = selectedRSSFeedID,
+              post.id == selectedRSSPosts.last?.id,
+              canLoadMoreRSSSelection,
+              !isLoadingRSSSelection,
+              !isLoadingMoreRSSSelection else { return }
+        let nextPage = selectedRSSPage + 1
+        isLoadingMoreRSSSelection = true
+        defer { isLoadingMoreRSSSelection = false }
+        do {
+            let result = try await fetchRSSFeedPosts(feedID, nextPage, selectedRSSPageSize)
+            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
+            let warmedPosts = try await warmNewYorkTimesPostsIfNeeded(result)
+            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
+            let existingIDs = Set(selectedRSSPosts.map(\.id))
+            selectedRSSPosts += warmedPosts.filter { !existingIDs.contains($0.id) }
+            selectedRSSPage = nextPage
+            canLoadMoreRSSSelection = !result.isEmpty
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedRSSFeedID == feedID else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func warmNewYorkTimesPostsIfNeeded(_ posts: [Post]) async throws -> [Post] {
+        guard posts.contains(where: \.isNewYorkTimes) else { return posts }
+        return try await prefetchNewYorkTimesBodies(for: posts)
     }
 
     func selectFlashCategory(_ category: String?) async {
@@ -413,7 +447,7 @@ final class NewsFeedViewModel: ObservableObject {
                 if source == .newYorkTimes {
                     return try await prefetchNewYorkTimesBodies(for: result)
                 }
-                return source == .rss ? result.filter { !$0.hasDedicatedFeedTab } : result
+                return result
             } catch is CancellationError {
                 throw CancellationError()
             } catch {

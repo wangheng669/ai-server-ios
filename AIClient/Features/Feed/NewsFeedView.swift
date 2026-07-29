@@ -452,6 +452,8 @@ struct NewsFeedView: View {
 
     private func feedList(for source: FeedSource, posts: [Post], topInset: CGFloat = 53) -> some View {
         let visiblePosts = visiblePosts(for: source, posts: posts)
+        let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
+        let usesFilteredPagination = source == .flash || (source == .rss && !isSelectedRSSPage)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -537,12 +539,16 @@ struct NewsFeedView: View {
                                 guard rootTabIsActive, source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
-                            .task(id: "\(rootTabIsActive)-page-\(source == .flash ? posts.last?.id ?? -1 : post.id)") {
+                            .task(id: "\(rootTabIsActive)-page-\(usesFilteredPagination ? posts.last?.id ?? -1 : post.id)") {
                                 guard rootTabIsActive, source == model.source else { return }
-                                await model.loadMoreIfNeeded(
-                                    current: post,
-                                    thresholdPostID: source == .flash ? visiblePosts.last?.id : nil
-                                )
+                                if isSelectedRSSPage {
+                                    await model.loadMoreSelectedRSSIfNeeded(current: post)
+                                } else {
+                                    await model.loadMoreIfNeeded(
+                                        current: post,
+                                        thresholdPostID: usesFilteredPagination ? visiblePosts.last?.id : nil
+                                    )
+                                }
                             }
                         if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
@@ -551,10 +557,29 @@ struct NewsFeedView: View {
                                 .padding(.leading, source == .flash ? 84 : 0)
                         }
                     }
-                    if model.isLoadingMore { ProgressView().padding(20) }
+                    if visiblePosts.isEmpty,
+                       !posts.isEmpty,
+                       !isSelectedRSSPage,
+                       let rawTail = posts.last {
+                        Color.clear
+                            .frame(height: 1)
+                            .task(id: "\(rootTabIsActive)-empty-page-\(rawTail.id)") {
+                                guard rootTabIsActive, source == model.source else { return }
+                                await model.loadMoreIfNeeded(current: rawTail)
+                            }
+                    }
+                    if model.isLoadingMore || (isSelectedRSSPage && model.isLoadingMoreRSSSelection) {
+                        ProgressView().padding(20)
+                    }
                     if model.errorMessage != nil {
                         Button("加载失败，点按重试") {
-                            if let last = model.posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                            if source == .rss,
+                               model.selectedRSSFeedID != nil,
+                               let last = model.selectedRSSPosts.last {
+                                Task { await model.loadMoreSelectedRSSIfNeeded(current: last) }
+                            } else if let last = model.posts.last {
+                                Task { await model.loadMoreIfNeeded(current: last) }
+                            }
                         }
                             .font(.footnote).padding(16)
                     }
@@ -570,7 +595,11 @@ struct NewsFeedView: View {
             ))
             .refreshable {
                 guard source == model.source else { return }
-                await model.refresh()
+                if isSelectedRSSPage, let feedID = model.selectedRSSFeedID {
+                    await model.selectRSSFeed(feedID)
+                } else {
+                    await model.refresh()
+                }
             }
             .allowsHitTesting(openingWebPostID == nil)
             .overlay(alignment: .top) {

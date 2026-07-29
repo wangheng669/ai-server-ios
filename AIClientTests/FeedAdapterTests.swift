@@ -44,7 +44,7 @@ final class FeedAdapterTests: XCTestCase {
         }
         let model = NewsFeedViewModel(
             source: .rss,
-            fetchRSSFeedPosts: { _ in feedPosts },
+            fetchRSSFeedPosts: { _, _, _ in feedPosts },
             fetchPostDetail: { id in
                 try JSONDecoder().decode(
                     Post.self,
@@ -65,6 +65,49 @@ final class FeedAdapterTests: XCTestCase {
             )
         })
         XCTAssertFalse(model.isLoadingRSSSelection)
+    }
+
+    @MainActor
+    func testSelectedRSSFeedLoadsMoreAndDeduplicates() async throws {
+        var requests: [(feedID: Int, page: Int, limit: Int)] = []
+        let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:88"}"#.utf8))
+        let duplicate = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:88"}"#.utf8))
+        let second = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"rss:88"}"#.utf8))
+        let model = NewsFeedViewModel(
+            source: .rss,
+            fetchRSSFeedPosts: { feedID, page, limit in
+                requests.append((feedID, page, limit))
+                return page == 1 ? [first] : [duplicate, second]
+            }
+        )
+
+        await model.selectRSSFeed(88)
+        await model.loadMoreSelectedRSSIfNeeded(current: first)
+
+        XCTAssertEqual(requests.map(\.feedID), [88, 88])
+        XCTAssertEqual(requests.map(\.page), [1, 2])
+        XCTAssertEqual(requests.map(\.limit), [20, 20])
+        XCTAssertEqual(model.selectedRSSPosts.map(\.id), [1, 2])
+    }
+
+    @MainActor
+    func testRSSPaginationKeepsRawRowsSoFilteredPagesCanContinue() async throws {
+        let dedicated = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:47"}"#.utf8)
+        )
+        let visible = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss"}"#.utf8)
+        )
+        let model = NewsFeedViewModel(source: .rss) { page, _, _ in
+            page == 1 ? [dedicated] : [visible]
+        }
+
+        await model.refresh()
+        await model.loadMoreIfNeeded(current: dedicated)
+
+        XCTAssertEqual(model.posts.map(\.id), [1, 2])
     }
 
     func testYouTubeRequestsAllScores() {
