@@ -6,6 +6,7 @@ struct PeopleView: View {
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
     @State private var selectedTopic = PeopleTopic.technology
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
         self.store = store
@@ -34,7 +35,8 @@ struct PeopleView: View {
                 PersonDetailPage(person: person)
             }
         }
-        .task {
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
             await store.load()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
@@ -102,6 +104,7 @@ struct PeopleView: View {
                 allPeople: store.people,
                 baseURL: store.baseURL,
                 latestPost: { store.latestPost(for: $0) },
+                loadLatestPost: { await store.loadLatestPost(for: $0) },
                 onOpenPerson: { selectedPerson = $0 },
                 onRefresh: { await store.load(force: true) }
             )
@@ -116,6 +119,7 @@ private struct PeopleRelationshipExplorer: View {
     let allPeople: [SpecialPerson]
     let baseURL: URL
     let latestPost: (SpecialPerson) -> Post?
+    let loadLatestPost: (SpecialPerson) async -> Void
     let onOpenPerson: (SpecialPerson) -> Void
     let onRefresh: () async -> Void
 
@@ -343,6 +347,7 @@ private struct PeopleRelationshipExplorer: View {
                         PersonActivityRow(person: person, latestPost: latestPost(person))
                     }
                     .buttonStyle(PeoplePressStyle())
+                    .task { await loadLatestPost(person) }
                     if person.id != filteredListPeople.last?.id {
                         Divider().padding(.leading, 84)
                     }

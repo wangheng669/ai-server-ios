@@ -20,6 +20,7 @@ final class FamousHoldingsStore {
 
     func load(force: Bool = false) async {
         if !force, hasLoadedFromNetwork { return }
+        if !force, holdings != nil, FamousHoldingsCache.isFreshForNetworkRefresh() { return }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -55,6 +56,12 @@ private enum FamousHoldingsCache {
     private static let payloadKey = "market.famous-holdings.cache.v1"
     private static let savedAtKey = "market.famous-holdings.cache.saved-at.v1"
     private static let maxAge: TimeInterval = 7 * 24 * 60 * 60
+    private static let networkRefreshInterval: TimeInterval = 6 * 60 * 60
+
+    static func isFreshForNetworkRefresh() -> Bool {
+        let savedAt = UserDefaults.standard.double(forKey: savedAtKey)
+        return savedAt > 0 && Date().timeIntervalSince1970 - savedAt <= networkRefreshInterval
+    }
 
     static func load() -> FamousHoldings? {
         let defaults = UserDefaults.standard

@@ -35,6 +35,8 @@ final class MarketStore {
     private var constituentRetryTasks: [String: Task<Void, Never>] = [:]
     private var chartRetryTasks: [ChartKey: Task<Void, Never>] = [:]
     private var chartRetryAttempts: [ChartKey: Int] = [:]
+    private var loadingConstituentSymbols: Set<String> = []
+    private var trendBackfillTask: Task<Void, Never>?
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -48,8 +50,12 @@ final class MarketStore {
         }
         realtime.onStatus = { [weak self] status in self?.realtimeStatus = status }
         realtime.start()
-        defer { realtime.stop() }
-        await refresh(force: true)
+        defer {
+            realtime.stop()
+            trendBackfillTask?.cancel()
+            trendBackfillTask = nil
+        }
+        await refresh(force: false)
         while !Task.isCancelled {
             do { try await Task.sleep(for: .seconds(5)) }
             catch { break }
@@ -85,7 +91,7 @@ final class MarketStore {
             cacheSavedAt = nil
             errorMessage = marketHealthMessage(for: value)
             MarketSnapshotCache.save(value, at: Date())
-            await backfillClosedTrends()
+            scheduleClosedTrendBackfill()
         } catch is CancellationError {
             return
         } catch {
@@ -148,6 +154,8 @@ final class MarketStore {
 
     func loadIndexConstituents(symbol: String, force: Bool = false) async {
         if !force, indexConstituents[symbol] != nil { return }
+        guard loadingConstituentSymbols.insert(symbol).inserted else { return }
+        defer { loadingConstituentSymbols.remove(symbol) }
         do {
             let value = try await service.indexConstituents(symbol: symbol)
             indexConstituents[symbol] = value
@@ -210,6 +218,14 @@ final class MarketStore {
         for symbol in symbols {
             guard !Task.isCancelled else { return }
             await loadTrendFallback(symbol: symbol)
+        }
+    }
+
+    private func scheduleClosedTrendBackfill() {
+        guard trendBackfillTask == nil else { return }
+        trendBackfillTask = Task { [weak self] in
+            await self?.backfillClosedTrends()
+            self?.trendBackfillTask = nil
         }
     }
 
@@ -342,7 +358,7 @@ final class MarketStore {
         let serverInterval = TimeInterval(dashboard?.refreshIntervalMs ?? 15_000) / 1_000
         let disconnected = realtimeStatus != .connected
         let messageIsStale = lastRealtimeMessageAt.map { now.timeIntervalSince($0) >= 30 } ?? true
-        let desiredInterval = disconnected || messageIsStale ? max(15, serverInterval) : max(30, serverInterval * 2)
+        let desiredInterval = disconnected || messageIsStale ? max(15, serverInterval) : max(120, serverInterval * 4)
         guard now.timeIntervalSince(lastSnapshotRefreshAt ?? .distantPast) >= desiredInterval else { return }
         if messageIsStale, realtimeStatus == .connected { realtime.reconnect() }
         await refresh(force: false)

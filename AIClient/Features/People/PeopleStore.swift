@@ -11,6 +11,8 @@ final class PeopleStore {
     private(set) var errorMessage: String?
     let baseURL: URL
     private let service: PeopleService
+    private var loadingLatestPostIDs: Set<String> = []
+    private var loadedLatestPostIDs: Set<String> = []
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         self.baseURL = baseURL
@@ -31,8 +33,6 @@ final class PeopleStore {
             if !serverTopics.isEmpty {
                 topics = serverTopics
             }
-            let posts = await service.latestPosts(for: payload.users.filter(\.hasOwnPostSource))
-            latestPosts = await translatedLatestPosts(posts)
         } catch is CancellationError {
             return
         } catch {
@@ -44,59 +44,20 @@ final class PeopleStore {
         latestPosts[person.id]
     }
 
-    private func translatedLatestPosts(_ posts: [String: Post]) async -> [String: Post] {
-        let baseURL = baseURL
-        return await withTaskGroup(of: (String, Post).self, returning: [String: Post].self) { group in
-            for (personID, post) in posts {
-                group.addTask {
-                    guard post.needsXTranslation, let tweetID = post.xTweetID else {
-                        return (personID, post)
-                    }
-                    if let cached = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
-                        return (personID, post.replacingTranslation(with: cached))
-                    }
-                    do {
-                        let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
-                        guard !Task.isCancelled else { return (personID, post) }
-                        let translation = PersonDetailStore.presentedTranslation(
-                            result.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                            original: post.originalDisplayContent
-                        )
-                        guard !translation.isEmpty, translation != post.originalDisplayContent else {
-                            return (personID, post)
-                        }
-                        PersonDetailStore.cacheXTranslation(translation, tweetID: tweetID)
-                        return (personID, post.replacingTranslation(with: translation))
-                    } catch {
-                        return (personID, post)
-                    }
-                }
+    func loadLatestPost(for person: SpecialPerson) async {
+        guard person.hasOwnPostSource,
+              !loadedLatestPostIDs.contains(person.id),
+              loadingLatestPostIDs.insert(person.id).inserted else { return }
+        defer { loadingLatestPostIDs.remove(person.id) }
+        do {
+            if let post = try await service.latestPost(userID: person.userID) {
+                latestPosts[person.id] = post
             }
-
-            var translated = posts
-            for await (personID, post) in group {
-                translated[personID] = post
-            }
-            return translated
-        }
-    }
-}
-
-enum PeopleImagePreheater {
-    @MainActor
-    static func preheatTechnologyLeaders() async {
-        guard let payload = try? await PeopleService().specialPeople() else { return }
-        let requests = payload.users
-            .filter { $0.topic == .technology }
-            .prefix(6)
-            .compactMap { $0.avatarURL(baseURL: ServerConfiguration.currentURL) }
-
-        await withTaskGroup(of: Void.self) { group in
-            for url in requests {
-                group.addTask {
-                    _ = await ImageLoader.load(url, targetSize: CGSize(width: 52, height: 52))
-                }
-            }
+            loadedLatestPostIDs.insert(person.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            // Latest activity is optional context; keep the directory usable.
         }
     }
 }

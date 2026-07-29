@@ -69,6 +69,7 @@ struct NewsFeedView: View {
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
     private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
     private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
@@ -105,10 +106,15 @@ struct NewsFeedView: View {
                 }
             }
         }
-        .onAppear { model.startRealtime() }
-        .onDisappear { model.stopRealtime() }
+        .onChange(of: rootTabIsActive, initial: true) { _, isActive in
+            if isActive && scenePhase == .active {
+                model.startRealtime()
+            } else {
+                model.stopRealtime()
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
+            if rootTabIsActive, phase == .active {
                 model.startRealtime()
                 if hasLoadedFeedOnce {
                     Task { await model.refresh() }
@@ -140,7 +146,8 @@ struct NewsFeedView: View {
             showsDetail = false
             hidesTabBar = false
         }
-        .task(id: model.source) {
+        .task(id: "\(rootTabIsActive)-\(model.source.rawValue)") {
+            guard rootTabIsActive else { return }
             await model.loadInitial()
             hasLoadedFeedOnce = true
             #if DEBUG
@@ -162,7 +169,8 @@ struct NewsFeedView: View {
             }
             #endif
         }
-        .task {
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
             await model.warmSourceCache()
         }
     }
@@ -323,8 +331,8 @@ struct NewsFeedView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .task(id: source) {
-                if source == .rss { await model.loadRSSFeedsIfNeeded() }
+            .task(id: "\(rootTabIsActive)-\(source.rawValue)") {
+                if rootTabIsActive, source == .rss { await model.loadRSSFeedsIfNeeded() }
             }
         }
     }
@@ -346,8 +354,8 @@ struct NewsFeedView: View {
                 weiboFollowingFeed
             }
         }
-        .task {
-            if weiboSection == .following {
+        .task(id: rootTabIsActive) {
+            if rootTabIsActive, weiboSection == .following {
                 await weiboFollowingModel.loadInitial()
             }
         }
@@ -396,7 +404,10 @@ struct NewsFeedView: View {
                             WeiboFollowingRow(post: post)
                                 .contentShape(Rectangle())
                                 .onTapGesture { path.append(post) }
-                                .task { await weiboFollowingModel.loadMoreIfNeeded(current: post) }
+                                .task(id: rootTabIsActive) {
+                                    guard rootTabIsActive else { return }
+                                    await weiboFollowingModel.loadMoreIfNeeded(current: post)
+                                }
                             Divider()
                                 .overlay(Color.primary.opacity(0.04))
                                 .padding(.leading, 56)
@@ -516,12 +527,12 @@ struct NewsFeedView: View {
                                     .allowsHitTesting(false)
                                 }
                             }
-                            .task {
-                                guard source == model.source else { return }
+                            .task(id: "\(rootTabIsActive)-translate-\(post.id)") {
+                                guard rootTabIsActive, source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
-                            .task(id: source == .flash ? posts.last?.id : post.id) {
-                                guard source == model.source else { return }
+                            .task(id: "\(rootTabIsActive)-page-\(source == .flash ? posts.last?.id ?? -1 : post.id)") {
+                                guard rootTabIsActive, source == model.source else { return }
                                 await model.loadMoreIfNeeded(
                                     current: post,
                                     thresholdPostID: source == .flash ? visiblePosts.last?.id : nil

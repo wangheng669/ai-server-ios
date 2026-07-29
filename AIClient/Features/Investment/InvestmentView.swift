@@ -82,12 +82,6 @@ struct InvestmentView: View {
             }
         }
         .background(InvestmentDesign.canvas)
-        .task {
-            await holdingsStore.load()
-            if let managers = holdingsStore.holdings?.managers {
-                await InvestorPortraitLoader.preload(managers)
-            }
-        }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
         .onChange(of: holdingsShowsDetail) { _, value in
             showsDetail = value
