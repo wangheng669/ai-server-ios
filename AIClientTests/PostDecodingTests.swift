@@ -120,6 +120,7 @@ final class PostDecodingTests: XCTestCase {
                 "user_desc": "科技投资人",
                 "x_screen_name": "peterthiel",
                 "organization_name": "Founders Fund 联合创始人",
+                "life_years": "1967–",
                 "topic": "investment",
                 "discussion_keywords": ["Peter Thiel", "彼得·蒂尔"],
                 "focus_tags": ["投资", "创业"],
@@ -146,6 +147,7 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(payload.categories?.compactMap(\.topic), [.technology, .investment])
         XCTAssertEqual(payload.users.first?.topic, .investment)
         XCTAssertEqual(payload.users.first?.organizationName, "Founders Fund 联合创始人")
+        XCTAssertEqual(payload.users.first?.lifeYears, "1967–")
         XCTAssertEqual(payload.users.first?.discussionKeywords, ["Peter Thiel", "彼得·蒂尔"])
         XCTAssertEqual(payload.users.first?.focusTags, ["投资", "创业"])
         XCTAssertEqual(payload.users.first?.roles.first?.organization, "Founders Fund")

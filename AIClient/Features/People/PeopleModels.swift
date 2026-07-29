@@ -41,6 +41,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     private let relatedPeopleValue: [RelatedPerson]?
     private let photosValue: [PersonPhoto]?
     private let profileUpdatedAtValue: String?
+    private let lifeYearsValue: String?
 
     var id: String { userID }
     var isCurated: Bool { userID.hasPrefix("curated:") }
@@ -86,6 +87,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var relatedPeople: [RelatedPerson] { relatedPeopleValue ?? [] }
     var photos: [PersonPhoto] { photosValue ?? [] }
     var profileUpdatedAt: String? { nonempty(profileUpdatedAtValue) }
+    var lifeYears: String? { nonempty(lifeYearsValue) }
     var summary: String {
         if let description = nonempty(userDescription),
            !description.contains("127.0.0.1"), !description.contains("localhost") {
@@ -119,6 +121,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         case relatedPeopleValue = "related_people"
         case photosValue = "photos"
         case profileUpdatedAtValue = "profile_updated_at"
+        case lifeYearsValue = "life_years"
     }
 
     init(
@@ -151,6 +154,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         relatedPeopleValue = nil
         photosValue = nil
         profileUpdatedAtValue = nil
+        lifeYearsValue = nil
     }
 
     func avatarURL(baseURL: URL) -> URL? {

@@ -329,14 +329,6 @@ private struct HistoricalPeopleGallery: View {
 private struct HistoricalPersonCard: View {
     let person: SpecialPerson
 
-    private var lifespan: String? {
-        switch person.userID {
-        case "curated:mao-zedong": "1893–1976"
-        case "curated:deng-xiaoping": "1904–1997"
-        default: nil
-        }
-    }
-
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             AvatarView(
@@ -359,8 +351,8 @@ private struct HistoricalPersonCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(person.name)
                     .font(.system(size: 20, weight: .bold))
-                if let lifespan {
-                    Text(lifespan)
+                if let lifeYears = person.lifeYears {
+                    Text(lifeYears)
                         .font(.system(size: 13, weight: .medium))
                 }
                 Text(person.roles.first?.title ?? person.summary)
