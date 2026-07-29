@@ -102,9 +102,13 @@ private struct PeopleStarMapExplorer: View {
         PeopleRelationshipPlanner.clusters(around: focusedPerson, allPeople: people)
     }
 
+    private var orderedPeople: [SpecialPerson] {
+        people.sorted(by: activityOrder)
+    }
+
     private var searchResults: [SpecialPerson] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = query.isEmpty ? people.sorted(by: activityOrder) : people.filter {
+        let source = query.isEmpty ? orderedPeople : people.filter {
             $0.name.localizedCaseInsensitiveContains(query) ||
                 ($0.organizationName?.localizedCaseInsensitiveContains(query) ?? false) ||
                 $0.focusTags.contains { $0.localizedCaseInsensitiveContains(query) }
@@ -161,6 +165,16 @@ private struct PeopleStarMapExplorer: View {
                     .padding(.top, 10)
                     .accessibilityLabel("搜索人物")
                 }
+
+                VStack {
+                    Spacer()
+                    quickSwitcher
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 92)
+                }
+                .opacity(showsSearch ? 0 : 1)
+                .allowsHitTesting(!showsSearch)
+                .animation(animation, value: showsSearch)
             }
         }
         .onAppear {
@@ -173,6 +187,76 @@ private struct PeopleStarMapExplorer: View {
             }
             #endif
         }
+    }
+
+    private var quickSwitcher: some View {
+        HStack(spacing: 9) {
+            Text("\(people.count) 人")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+
+            Divider()
+                .frame(height: 28)
+
+            ScrollViewReader { reader in
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 7) {
+                        ForEach(orderedPeople) { person in
+                            let isFocused = person.id == focusedPerson.id
+                            Button {
+                                focus(on: person)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    AvatarView(
+                                        url: person.avatarURL(baseURL: baseURL),
+                                        name: person.name,
+                                        size: 30,
+                                        assetName: person.avatarAssetName
+                                    )
+                                    Text(person.name)
+                                        .font(.system(size: 13, weight: isFocused ? .semibold : .medium))
+                                        .foregroundStyle(isFocused ? Color.accentColor : Color.primary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.leading, 4)
+                                .padding(.trailing, 10)
+                                .frame(height: 40)
+                                .background(
+                                    isFocused ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.045),
+                                    in: Capsule()
+                                )
+                                .overlay {
+                                    if isFocused {
+                                        Capsule()
+                                            .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
+                                    }
+                                }
+                            }
+                            .id(person.id)
+                            .buttonStyle(PeoplePressStyle())
+                            .accessibilityLabel(
+                                isFocused ? "\(person.name)，当前人物" : "切换到 \(person.name)"
+                            )
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+                .onChange(of: focusedPerson.id, initial: true) { _, personID in
+                    withAnimation(animation) {
+                        reader.scrollTo(personID, anchor: .center)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 56)
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
     }
 
     private var searchPanel: some View {
