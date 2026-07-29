@@ -1947,6 +1947,81 @@ private struct MarketBreadthComposition: View {
     private func ratio(_ value: Int) -> Double { total > 0 ? Double(value) / Double(total) : 0 }
 }
 
+private struct MarketDetailBreadth: View {
+    let title: String
+    let breadth: MarketBreadth?
+
+    private var total: Int {
+        guard let breadth else { return 0 }
+        return max(breadth.total, breadth.up + breadth.down + breadth.flat)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 7) {
+                Text(title)
+                    .font(.system(size: 19, weight: .semibold))
+                Image(systemName: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(breadth == nil ? "更新中" : "共 \(total.formatted())")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let breadth {
+                MarketBreadthComposition(
+                    up: breadth.up,
+                    down: breadth.down,
+                    flat: breadth.flat,
+                    total: total
+                )
+                .frame(height: 7)
+                HStack {
+                    breadthLabel("上涨", value: breadth.up, color: MarketStyle.gain)
+                    Spacer()
+                    breadthLabel("平盘", value: breadth.flat, color: .secondary)
+                    Spacer()
+                    breadthLabel("下跌", value: breadth.down, color: MarketStyle.loss)
+                }
+            } else {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(height: 7)
+                Text("市场宽度更新中")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 18)
+        .overlay(alignment: .top) { Divider().padding(.horizontal, 18) }
+        .overlay(alignment: .bottom) { Divider().padding(.horizontal, 18) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private func breadthLabel(_ title: String, value: Int, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(title).foregroundStyle(.secondary)
+            Text(percent(value)).foregroundStyle(color)
+        }
+        .font(.caption)
+        .monospacedDigit()
+    }
+
+    private func percent(_ value: Int) -> String {
+        guard total > 0 else { return "—" }
+        return "\(Int((Double(value) / Double(total) * 100).rounded()))%"
+    }
+
+    private var accessibilityText: String {
+        guard let breadth else { return "\(title)，市场宽度更新中" }
+        return "\(title)，上涨 \(breadth.up)，平盘 \(breadth.flat)，下跌 \(breadth.down)"
+    }
+}
+
 private struct MarketIndexDetailView: View {
     let symbol: String
     let store: MarketStore
@@ -1959,26 +2034,54 @@ private struct MarketIndexDetailView: View {
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
     private var financials: MarketCompanyFinancials? { store.companyFinancials[symbol] }
-    private var isIndex: Bool { store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true }
+    private var isIndex: Bool {
+        store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
+            || CoreDescriptor(symbol: symbol).isIndex
+    }
+    private var isAShareIndex: Bool {
+        symbol.hasSuffix(".SS") || symbol.hasSuffix(".SZ") || symbol.hasPrefix("THS:")
+    }
+    private var detailBreadth: MarketBreadth? {
+        if isAShareIndex {
+            return store.dashboard?.currentAShareBreadth
+        }
+        guard let items = store.indexConstituents[symbol]?.items, !items.isEmpty else { return nil }
+        let up = items.filter { $0.quote.percentValue > 0.005 }.count
+        let down = items.filter { $0.quote.percentValue < -0.005 }.count
+        let flat = max(items.count - up - down, 0)
+        return MarketBreadth(up: up, down: down, flat: flat, total: items.count)
+    }
 
     var body: some View {
         ZStack {
-            MarketStyle.canvas.ignoresSafeArea()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 15) {
-                    detailHeader
-                    MarketDetailChart(selectedRange: $selectedRange, symbol: symbol, store: store)
-                    keyData
-                    if showsCompanyProfile { companyProfile }
-                    MarketSummary(quote: quote)
-                    if isIndex { componentStocks }
-                    Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
-                        .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 18)
-                    Color.clear.frame(height: 20)
+            MarketStyle.surface.ignoresSafeArea()
+            VStack(spacing: 0) {
+                detailNavigation
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        detailHeader
+                        MarketDetailChart(selectedRange: $selectedRange, symbol: symbol, store: store)
+                        keyData
+                        if showsCompanyProfile { companyProfile }
+                        if isIndex {
+                            MarketDetailBreadth(
+                                title: isAShareIndex ? "市场温度" : "成分表现",
+                                breadth: detailBreadth
+                            )
+                        }
+                        MarketSummary(quote: quote, isIndex: isIndex)
+                        if isIndex { componentStocks }
+                        Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 16)
+                            .padding(.horizontal, 18)
+                        Color.clear.frame(height: 28)
+                    }
                 }
-                .padding(.top, 4)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -1999,84 +2102,125 @@ private struct MarketIndexDetailView: View {
         }
     }
 
-    private var detailHeader: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack {
-                Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
-                    .accessibilityLabel("返回市场")
-                Spacer()
-                ShareLink(item: shareText) {
-                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("分享行情")
+    private var detailNavigation: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 21, weight: .medium))
+                    .frame(width: 44, height: 44, alignment: .leading)
             }
-            .font(.system(size: 21, weight: .medium)).foregroundStyle(.primary)
+            .accessibilityLabel("返回市场")
+            Spacer()
+            ShareLink(item: shareText) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 20, weight: .medium))
+                    .frame(width: 44, height: 44, alignment: .trailing)
+            }
+            .accessibilityLabel("分享行情")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 18)
+        .background(MarketStyle.surface)
+    }
 
+    private var detailHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 if let quote, showsCompanyProfile {
                     CompanyLogo(quote: quote, path: companyLogoPath)
                 } else {
-                    Image(systemName: CoreDescriptor(symbol: symbol).icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(.blue)
-                        .frame(width: 30, height: 30).background(Color.blue.opacity(0.10), in: Circle())
+                    Image(systemName: CoreDescriptor(symbol: symbol).icon)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(MarketStyle.accent, in: RoundedRectangle(cornerRadius: 9))
                 }
-                Text(quote?.name ?? CoreDescriptor(symbol: symbol).name).font(.system(size: 22, weight: .semibold)).tracking(-0.35)
-                Text(quote?.displayCode ?? CoreDescriptor(symbol: symbol).code).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                    .padding(.horizontal, 8).padding(.vertical, 5).background(Color.primary.opacity(0.06), in: Capsule())
+                Text(quote?.name ?? CoreDescriptor(symbol: symbol).name)
+                    .font(.system(size: 22, weight: .semibold))
+                    .tracking(-0.35)
+                    .lineLimit(1)
+                Text(quote?.displayCode ?? CoreDescriptor(symbol: symbol).code)
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                HStack(spacing: 5) {
+                    Circle().fill(sessionColor).frame(width: 6, height: 6)
+                    Text(sessionText)
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(sessionColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .overlay {
+                    Capsule().stroke(sessionColor.opacity(0.35), lineWidth: 0.75)
+                }
             }
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—").font(.system(size: 33, weight: .bold)).monospacedDigit().tracking(-0.8).foregroundStyle(quoteTint(quote))
-                    Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
-                        .font(.system(size: 16, weight: .semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                    .font(.system(size: 40, weight: .bold))
+                    .monospacedDigit()
+                    .tracking(-1.2)
+                    .foregroundStyle(quoteTint(quote))
+                    .contentTransition(.numericText())
+                Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
+                    .font(.system(size: 18, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(quoteTint(quote))
+                Text(quote?.timestamp.map { "\(marketTimestamp($0)) 更新" } ?? "行情更新中")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if showsIndexSession, let session = indexSessionQuote {
+                    sessionQuotePill(title: "期货夜盘", quote: session)
+                } else if let quote, quote.hasActiveExtendedSessionQuote, let nightPrice = quote.sessionPrice {
                     HStack(spacing: 7) {
-                        Circle().fill(sessionColor).frame(width: 6, height: 6)
-                        Text(sessionText)
-                        if let timestamp = quote?.timestamp { Text(marketTimestamp(timestamp)) }
+                        Text("个股夜盘").fontWeight(.semibold)
+                        Text(number(nightPrice, digits: 2)).fontWeight(.semibold).monospacedDigit()
+                        Text(quote.formattedSessionPercent ?? "—").fontWeight(.semibold).monospacedDigit()
+                        Sparkline(values: quote.nightTrend, color: MarketStyle.purple, showsFill: false)
+                            .frame(width: 52, height: 20)
                     }
-                    .font(.caption).foregroundStyle(.secondary)
-                    if showsIndexSession, let session = indexSessionQuote {
-                        HStack(spacing: 7) {
-                            Text("期货夜盘").fontWeight(.semibold)
-                            Text(session.symbol)
-                            Text(number(session.price, digits: 2)).fontWeight(.semibold).monospacedDigit()
-                            Text(session.formattedPercent).fontWeight(.semibold).monospacedDigit().foregroundStyle(quoteTint(session))
-                            Sparkline(values: session.trend, color: MarketStyle.purple, showsFill: false)
-                                .frame(width: 52, height: 20)
-                        }
-                        .font(.caption)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(MarketStyle.purple.opacity(0.08), in: Capsule())
-                        .accessibilityLabel("期货夜盘，\(session.name)，\(number(session.price, digits: 2))，\(session.formattedPercent)")
-                    } else if let quote, quote.hasActiveExtendedSessionQuote, let nightPrice = quote.sessionPrice {
-                        HStack(spacing: 7) {
-                            Text("个股夜盘").fontWeight(.semibold)
-                            Text(number(nightPrice, digits: 2)).fontWeight(.semibold).monospacedDigit()
-                            Text(quote.formattedSessionPercent ?? "—").fontWeight(.semibold).monospacedDigit()
-                            Sparkline(values: quote.nightTrend, color: MarketStyle.purple, showsFill: false)
-                                .frame(width: 52, height: 20)
-                        }
-                        .font(.caption)
-                        .foregroundStyle(MarketStyle.purple)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(MarketStyle.purple.opacity(0.08), in: Capsule())
-                    }
+                    .font(.caption)
+                    .foregroundStyle(MarketStyle.purple)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(MarketStyle.purple.opacity(0.08), in: Capsule())
                 }
-                Spacer()
             }
         }
         .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
     }
 
     private var keyData: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("关键数据").font(.system(size: 17, weight: .semibold))
-            Grid(horizontalSpacing: 10, verticalSpacing: 13) {
-                GridRow { metric("开盘", quote?.openPrice); metric("最高", quote?.high, MarketStyle.gain); metric("最低", quote?.low, MarketStyle.loss); metric(isCrypto ? "24H开盘" : "昨收", quote?.previousClose) }
-                GridRow { metric("成交量", quote?.volume, compact: true); metric("市值", quote?.marketCap, compact: true); metric("市盈率", quote?.pe); textMetric("状态", quote?.freshnessLabel ?? "更新中") }
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 0) {
+                metric(isCrypto ? "24H开盘" : "今开", quote?.openPrice)
+                metricDivider
+                metric("最高", quote?.high, MarketStyle.gain)
+                metricDivider
+                metric("最低", quote?.low, MarketStyle.loss)
+                metricDivider
+                metric("昨收", quote?.previousClose)
             }
-            .padding(12).marketCard(cornerRadius: 10)
+            Divider()
+            HStack(spacing: 0) {
+                metric("成交量", quote?.volume, compact: true)
+                metricDivider
+                textMetric("振幅", amplitudeText)
+                metricDivider
+                textMetric("涨跌额", quote.map { signed($0.changeValue, digits: cryptoChangeDigits($0)) } ?? "—", quoteTint(quote))
+                metricDivider
+                textMetric("状态", sessionText)
+            }
+            Divider()
         }
         .padding(.horizontal, 18)
+        .padding(.top, 4)
+        .padding(.bottom, 18)
     }
 
     private var showsCompanyProfile: Bool {
@@ -2117,19 +2261,37 @@ private struct MarketIndexDetailView: View {
     }
 
     private func textMetric(_ title: String, _ value: String, _ color: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .center, spacing: 6) {
             Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Text(value).font(.footnote.weight(.semibold)).monospacedDigit().foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 62)
+    }
+
+    private var metricDivider: some View {
+        Rectangle()
+            .fill(MarketStyle.divider)
+            .frame(width: 0.5, height: 42)
+    }
+
+    private var amplitudeText: String {
+        guard let quote, let high = quote.high, let low = quote.low else { return "—" }
+        let baseline = quote.previousClose ?? low
+        guard baseline != 0 else { return "—" }
+        return "\(number((high - low) / baseline * 100, digits: 2))%"
     }
 
     private var componentStocks: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(store.indexConstituents[symbol]?.label ?? "主要成分股").font(.system(size: 17, weight: .semibold))
+                Text(store.indexConstituents[symbol]?.label ?? "主要成分股")
+                    .font(.system(size: 19, weight: .semibold))
                 Spacer()
-                if let asOf = store.indexConstituents[symbol]?.asOf { Text("指数专属 · \(asOf)").font(.system(size: 11)).foregroundStyle(.secondary) }
+                if let asOf = store.indexConstituents[symbol]?.asOf {
+                    Text("截至 \(asOf)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             VStack(spacing: 0) {
                 let items = store.indexConstituents[symbol]?.items ?? []
@@ -2140,7 +2302,7 @@ private struct MarketIndexDetailView: View {
                         MarketConstituentRow(item: item, trend: store.trendValues(for: item.quote))
                     }
                     .buttonStyle(.plain)
-                    if item.id != items.last?.id { Divider().padding(.leading, 62) }
+                    if item.id != items.last?.id { Divider().padding(.leading, 52) }
                 }
                 if let error = store.constituentErrors[symbol] {
                     Text(error).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 72)
@@ -2148,9 +2310,28 @@ private struct MarketIndexDetailView: View {
                     ProgressView().frame(maxWidth: .infinity, minHeight: 72)
                 }
             }
-            .marketCard(cornerRadius: 11)
+            .overlay(alignment: .top) { Divider() }
+            .overlay(alignment: .bottom) { Divider() }
         }
         .padding(.horizontal, 18)
+        .padding(.top, 20)
+    }
+
+    @ViewBuilder
+    private func sessionQuotePill(title: String, quote: MarketQuote) -> some View {
+        HStack(spacing: 7) {
+            Text(title).fontWeight(.semibold)
+            Text(quote.symbol)
+            Text(number(quote.price, digits: 2)).fontWeight(.semibold).monospacedDigit()
+            Text(quote.formattedPercent).fontWeight(.semibold).monospacedDigit().foregroundStyle(quoteTint(quote))
+            Sparkline(values: quote.trend, color: MarketStyle.purple, showsFill: false)
+                .frame(width: 52, height: 20)
+        }
+        .font(.caption)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(MarketStyle.purple.opacity(0.08), in: Capsule())
+        .accessibilityLabel("\(title)，\(quote.name)，\(number(quote.price, digits: 2))，\(quote.formattedPercent)")
     }
 
     private var sessionText: String {
@@ -2222,12 +2403,11 @@ private struct MarketDetailChart: View {
         marketChartDisplayPoints(chart?.candles ?? []).sorted { $0.timestamp < $1.timestamp }
     }
     private var values: [Double] {
-        let bounds = points.flatMap { [$0.low, $0.high].compactMap { $0 } }
-        return bounds.isEmpty ? points.compactMap(\.displayValue) : bounds
+        points.compactMap(\.displayValue)
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(MarketRange.allCases) { range in
                     Button {
@@ -2243,6 +2423,7 @@ private struct MarketDetailChart: View {
                     .accessibilityAddTraits(selectedRange == range ? .isSelected : [])
                 }
             }
+            Divider()
             ZStack {
                 ChartGrid(values: values)
                 if values.isEmpty {
@@ -2262,42 +2443,54 @@ private struct MarketDetailChart: View {
                     )
                         .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
-                    ChartInspectionOverlay(points: points, interval: chart?.interval, selected: $inspectedPoint)
+                    if let previousClose = store.quote(symbol: symbol)?.previousClose {
+                        ChartReferenceLine(value: previousClose, values: values)
+                    }
+                    ChartInspectionOverlay(
+                        points: points,
+                        interval: chart?.interval,
+                        range: selectedRange,
+                        timezone: chart?.timezone,
+                        tint: quoteTint(store.quote(symbol: symbol)),
+                        selected: $inspectedPoint
+                    )
                 }
             }
-            .frame(height: 184)
+            .frame(height: 210)
+            .padding(.top, 10)
             .animation(MarketStyle.chartTransition, value: selectedRange)
-            if let inspectedPoint {
-                Text("\(chartTime(inspectedPoint.timestamp, range: selectedRange, timezone: chart?.timezone))  \(number(inspectedPoint.displayValue ?? 0, digits: 2))")
-                    .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
             HStack {
                 ForEach(Array(timelineLabels.enumerated()), id: \.offset) { index, label in
                     Text(label)
                     if index < 2 { Spacer() }
                 }
             }
-            .font(.caption2).foregroundStyle(.secondary).padding(.leading, 48).padding(.trailing, 5)
-            Group {
-                if hasVolume {
-                    VolumeBars(points: points, interval: chart?.interval).frame(height: 25).padding(.leading, 48)
-                } else {
-                    Color.clear.frame(height: 25)
-                }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 48)
+            .padding(.trailing, 5)
+            .padding(.top, 5)
+            if hasVolume {
+                VolumeBars(points: points, interval: chart?.interval)
+                    .frame(height: 22)
+                    .padding(.leading, 48)
+                    .padding(.top, 4)
             }
-                .overlay(alignment: .topTrailing) {
-                    Text(chartCaption)
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
+            Text(chartCaption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, 4)
             if let coverageMessage {
                 Text(coverageMessage)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 5)
             }
         }
         .padding(.horizontal, 18)
+        .padding(.bottom, 10)
         .task(id: selectedRange) {
             inspectedPoint = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
@@ -2347,17 +2540,50 @@ private struct MarketDetailChart: View {
 private struct ChartInspectionOverlay: View {
     let points: [MarketChartPoint]
     let interval: String?
+    let range: MarketRange
+    let timezone: String?
+    let tint: Color
     @Binding var selected: MarketChartPoint?
 
     var body: some View {
         GeometryReader { proxy in
             let leftInset: CGFloat = 48
             let usableWidth = max(proxy.size.width - leftInset, 1)
+            let topInset: CGFloat = 9
+            let bottomInset: CGFloat = 6
+            let usableHeight = max(proxy.size.height - topInset - bottomInset, 1)
             let fractions = marketChartXFractions(timestamps: points.map(\.timestamp), interval: interval)
-            ZStack(alignment: .leading) {
+            ZStack(alignment: .topLeading) {
                 if let selected, let index = points.firstIndex(where: { $0.id == selected.id }) {
                     let x = leftInset + usableWidth * fractions[index]
-                    Rectangle().fill(Color.secondary.opacity(0.35)).frame(width: 1).offset(x: x)
+                    let y = topInset + usableHeight * normalizedY(selected.displayValue ?? selected.close)
+                    Path { path in
+                        path.move(to: CGPoint(x: x, y: topInset))
+                        path.addLine(to: CGPoint(x: x, y: proxy.size.height - bottomInset))
+                    }
+                    .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
+                    Circle()
+                        .fill(MarketStyle.surface)
+                        .frame(width: 8, height: 8)
+                        .overlay { Circle().stroke(tint, lineWidth: 2) }
+                        .position(x: x, y: y)
+                    Text("\(chartTime(selected.timestamp, range: range, timezone: timezone))  \(number(selected.displayValue ?? selected.close, digits: 2))")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(MarketStyle.divider, lineWidth: 0.5)
+                        }
+                        .shadow(color: Color.black.opacity(0.08), radius: 5, y: 2)
+                        .fixedSize()
+                        .position(
+                            x: min(max(x, 84), proxy.size.width - 84),
+                            y: max(y - 28, 20)
+                        )
                 }
                 Color.clear.contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0).onChanged { value in
@@ -2368,6 +2594,35 @@ private struct ChartInspectionOverlay: View {
                     })
             }
         }
+    }
+
+    private func normalizedY(_ value: Double) -> CGFloat {
+        let displayValues = points.compactMap(\.displayValue)
+        guard let low = displayValues.min(), let high = displayValues.max(), high > low else { return 0.5 }
+        return 0.06 + CGFloat((high - value) / (high - low)) * 0.88
+    }
+}
+
+private struct ChartReferenceLine: View {
+    let value: Double
+    let values: [Double]
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let low = values.min(), let high = values.max(), high > low, value >= low, value <= high {
+                let topInset: CGFloat = 19
+                let bottomInset: CGFloat = 6
+                let chartHeight = max(proxy.size.height - topInset - bottomInset, 1)
+                let y = topInset + chartHeight * (0.06 + CGFloat((high - value) / (high - low)) * 0.88)
+                Path { path in
+                    path.move(to: CGPoint(x: 48, y: y))
+                    path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                }
+                .stroke(Color.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -2443,6 +2698,20 @@ private struct MarketSessionLineChart: View {
                 path.move(to: canvasPoint(segment[0]))
                 segment.dropFirst().forEach { path.addLine(to: canvasPoint($0)) }
                 let isRegular = segment[0].session == nil || segment[0].session == "regular"
+                if isRegular, let first = segment.first, let last = segment.last {
+                    var fill = path
+                    fill.addLine(to: CGPoint(x: canvasPoint(last).x, y: size.height))
+                    fill.addLine(to: CGPoint(x: canvasPoint(first).x, y: size.height))
+                    fill.closeSubpath()
+                    context.fill(
+                        fill,
+                        with: .linearGradient(
+                            Gradient(colors: [regularColor.opacity(0.18), regularColor.opacity(0.01)]),
+                            startPoint: .zero,
+                            endPoint: CGPoint(x: 0, y: size.height)
+                        )
+                    )
+                }
                 context.stroke(
                     path,
                     with: .color(isRegular ? regularColor : MarketStyle.purple),
@@ -2562,34 +2831,82 @@ private struct VolumeBars: View {
 
 private struct MarketSummary: View {
     let quote: MarketQuote?
+    let isIndex: Bool
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack { Image(systemName: "info.circle.fill").foregroundStyle(.white).frame(width: 22, height: 22).background(MarketStyle.purple, in: Circle()); Text("日内摘要").font(.system(size: 16, weight: .semibold)); Spacer(); Text(quote?.freshnessLabel ?? "更新中").font(.system(size: 11)).foregroundStyle(.secondary) }
-            Text(summary).font(.footnote).lineSpacing(3).foregroundStyle(.primary.opacity(0.86))
-            Text("仅汇总当前行情字段，不构成分析或投资建议。")
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(MarketStyle.gain)
+                Text("行情洞察")
+                    .font(.system(size: 19, weight: .semibold))
+                Spacer()
+                Text(quote?.freshnessLabel ?? "更新中")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Text(summary)
+                .font(.subheadline)
+                .lineSpacing(4)
+                .foregroundStyle(.primary.opacity(0.88))
+            HStack(spacing: 8) {
+                insightTag(relativeCloseLabel, tint: quoteTint(quote))
+                insightTag(amplitudeLabel, tint: MarketStyle.accent)
+                if let quote {
+                    insightTag("成交量 \(quote.volume.map(compactNumber) ?? "—")", tint: .secondary)
+                }
+            }
+            Text("仅供行情参考，不构成投资建议。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
-        .padding(14)
-        .background(LinearGradient(colors: [MarketStyle.purple.opacity(0.08), MarketStyle.surface], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 11))
-        .overlay { RoundedRectangle(cornerRadius: 11).stroke(MarketStyle.purple.opacity(0.07), lineWidth: 0.5) }
         .padding(.horizontal, 18)
+        .padding(.top, 18)
     }
 
     private var summary: String {
         guard let quote else { return "正在获取最新行情。" }
-        var details: [String] = []
-        if let high = quote.high, let low = quote.low {
-            let baseline = quote.previousClose ?? low
-            let amplitude = baseline == 0 ? 0 : (high - low) / baseline * 100
-            details.append("日内区间 \(number(low, digits: 2))–\(number(high, digits: 2))，振幅 \(number(amplitude, digits: 2))%")
+        let subject = isIndex ? "指数" : "价格"
+        let direction = quote.changeValue >= 0 ? "高于" : "低于"
+        guard let high = quote.high, let low = quote.low, high > low else {
+            return "\(subject)当前\(direction)昨收，最新行情仍在更新。"
         }
-        if let open = quote.openPrice, open != 0 {
-            let changeFromOpen = (quote.price - open) / open * 100
-            details.append("较开盘\(changeFromOpen >= 0 ? "上涨" : "下跌") \(number(abs(changeFromOpen), digits: 2))%")
+        let position = (quote.price - low) / (high - low)
+        let positionText: String
+        switch position {
+        case ..<0.35: positionText = "区间下部"
+        case 0.65...: positionText = "区间上部"
+        default: positionText = "区间中部"
         }
-        if let volume = quote.volume { details.append("成交量 \(compactNumber(volume))") }
-        details.append("来源：\(quote.dataSource ?? "行情服务")")
-        return details.joined(separator: "；") + "。"
+        return "\(subject)当前\(direction)昨收，日内运行于 \(number(low, digits: 2))–\(number(high, digits: 2))，目前位于\(positionText)。"
+    }
+
+    private var relativeCloseLabel: String {
+        guard let quote else { return "等待行情" }
+        return quote.changeValue >= 0 ? "高于昨收" : "低于昨收"
+    }
+
+    private var amplitudeLabel: String {
+        guard let quote, let high = quote.high, let low = quote.low else { return "振幅 —" }
+        let baseline = quote.previousClose ?? low
+        guard baseline != 0 else { return "振幅 —" }
+        return "振幅 \(number((high - low) / baseline * 100, digits: 2))%"
+    }
+
+    private func insightTag(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(tint.opacity(0.18), lineWidth: 0.5)
+            }
     }
 }
 
@@ -2599,50 +2916,38 @@ private struct MarketConstituentRow: View {
     private var quote: MarketQuote { item.quote }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             CompanyLogo(quote: quote, path: item.logoPath)
             VStack(alignment: .leading, spacing: 4) {
                 Text(quote.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text(quote.symbol)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(number(quote.price, digits: 2)).font(.system(size: 14, weight: .semibold)).monospacedDigit()
-                Text(quote.formattedPercent).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
-                if quote.isNightSession == true, let nightPrice = quote.sessionPrice {
-                    Text("夜 \(number(nightPrice, digits: 2)) \(quote.formattedSessionPercent ?? "")\(nightUpdateTime)")
-                        .font(.caption2.weight(.semibold)).monospacedDigit().foregroundStyle(MarketStyle.purple)
+                HStack(spacing: 5) {
+                    Text(quote.symbol)
+                    if let weight = item.weight {
+                        Text("· \(number(weight, digits: 2))%")
+                    }
                 }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
+            Spacer(minLength: 4)
             Sparkline(
                 values: trend,
                 color: quoteTint(quote),
                 showsFill: false
             )
-                .frame(width: 58, height: 28)
-        }
-        .padding(.horizontal, 12).frame(minHeight: 66)
-        .accessibilityElement(children: .combine)
-        .overlay(alignment: .bottomLeading) {
-            HStack(spacing: 10) {
-                Text("占比 \(item.weight.map { "\(number($0, digits: 2))%" } ?? "—")")
-                Text("市值 \(quote.marketCap.map(compactNumber) ?? "—")")
+            .frame(width: 64, height: 26)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(number(quote.price, digits: 2)).font(.system(size: 14, weight: .semibold)).monospacedDigit()
+                Text(quote.formattedPercent).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(quoteTint(quote))
             }
-            .font(.caption2)
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
-            .padding(.leading, 64)
-            .padding(.bottom, 5)
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(.bottom, 12)
+        .frame(minHeight: 64)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("\(quote.name)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)，点按查看详情")
-    }
-
-    private var nightUpdateTime: String {
-        guard let timestamp = quote.timestamp else { return "" }
-        let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
-        return " · " + date.formatted(date: .omitted, time: .standard)
     }
 }
 
@@ -2737,6 +3042,16 @@ private struct CoreRegion: Identifiable {
 
 private struct CoreDescriptor {
     let symbol: String
+    var isIndex: Bool {
+        switch symbol {
+        case "^GSPC", "^NDX", "^DJI", "000001.SS", "000016.SS", "000300.SS", "399006.SZ",
+             "000688.SS", "000905.SS", "000852.SS", "932000.SS", "THS:883418", "^HSTECH",
+             "^HSI", "^N225", "^KS11", "^STOXX50E", "^GDAXI", "^FTSE", "^FCHI":
+            true
+        default:
+            false
+        }
+    }
     var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "000001.SS": "上证指数"; case "000016.SS": "上证50"; case "000300.SS": "沪深300"; case "399006.SZ": "创业板指"; case "000688.SS": "科创50"; case "000905.SS": "中证500"; case "000852.SS": "中证1000"; case "932000.SS": "中证2000"; case "THS:883418": "微盘股"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; default: symbol } }
     var code: String { switch symbol { case "^GSPC": "SPX"; case "^NDX": "NDX"; case "^DJI": "DJI"; case "000001.SS": "000001.SH"; case "000300.SS": "000300.SH"; case "000688.SS": "000688.SH"; case "^HSTECH": "HSTECH"; case "^HSI": "HSI"; case "^N225": "N225"; case "^KS11": "KOSPI"; case "^STOXX50E": "SX5E"; case "^GDAXI": "DAX"; case "^FTSE": "FTSE"; case "^FCHI": "CAC40"; default: symbol } }
     var icon: String { switch symbol { case "^NDX": "n.circle.fill"; case "^DJI": "building.columns.fill"; case "000001.SS", "000300.SS": "building.2.fill"; case "000688.SS": "cpu.fill"; case "^HSTECH": "asterisk"; case "^HSI": "h.circle.fill"; case "^N225": "yensign.circle.fill"; case "^KS11": "k.circle.fill"; case "^STOXX50E": "globe.europe.africa.fill"; case "^GDAXI": "shield.fill"; case "^FTSE": "sterlingsign.circle.fill"; case "^FCHI": "f.circle.fill"; default: "star.fill" } }
