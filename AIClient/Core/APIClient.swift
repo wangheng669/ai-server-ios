@@ -8,7 +8,7 @@ struct APIClient {
         if let session { self.session = session } else {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 30
-            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            config.requestCachePolicy = .useProtocolCachePolicy
             config.urlCache = .shared
             self.session = URLSession(configuration: config)
         }
@@ -207,7 +207,7 @@ struct APIClient {
             .init(name: "to", value: "zh")
         ]
         guard let url = parts?.url else { throw APIError.invalidURL }
-        let response: XTranslationResponse = try await get(url)
+        let response: XTranslationResponse = try await get(url, retriesTransientFailures: false)
         guard response.success else { throw APIError.invalidResponse }
         return response.data
     }
@@ -290,12 +290,16 @@ struct APIClient {
         return parts?.url
     }
 
-    private func get<Response: Decodable>(_ url: URL) async throws -> Response {
-        for attempt in 0..<2 {
+    private func get<Response: Decodable>(
+        _ url: URL,
+        retriesTransientFailures: Bool = true
+    ) async throws -> Response {
+        let attempts = retriesTransientFailures ? 2 : 1
+        for attempt in 0..<attempts {
             do {
                 let (data, response) = try await session.data(from: url)
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-                if [500, 502, 503, 504].contains(http.statusCode), attempt < 1 {
+                if [500, 502, 503, 504].contains(http.statusCode), attempt + 1 < attempts {
                     try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
                     continue
                 }
@@ -309,7 +313,7 @@ struct APIClient {
                 }
             } catch let error as URLError {
                 if error.code == .cancelled { throw CancellationError() }
-                guard attempt < 1 else { throw error }
+                guard attempt + 1 < attempts else { throw error }
                 #if DEBUG
                 print("Feed request failed (attempt \(attempt + 1)): \(url.absoluteString) — \(error)")
                 #endif

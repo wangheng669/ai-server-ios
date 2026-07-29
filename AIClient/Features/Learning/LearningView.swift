@@ -10,6 +10,7 @@ private let learningImageLogger = Logger(
 struct LearningView: View {
     @Binding private var showsDetail: Bool
     @Environment(\.openURL) private var openURL
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var store = LearningStore()
     @State private var repository = LearningContentRepository()
     @State private var path: [LearningRoute] = []
@@ -41,7 +42,8 @@ struct LearningView: View {
                 }
             }
         }
-        .task {
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
             async let catalog: Void = store.load()
             async let bookshelf: Void = store.loadBookshelf()
             _ = await (catalog, bookshelf)
@@ -59,8 +61,9 @@ struct LearningView: View {
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty
         }
-        .task(id: prefetchKey) {
-            guard selectedSection == .investment,
+        .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
+            guard rootTabIsActive,
+                  selectedSection == .investment,
                   let catalog = store.catalog,
                   let section = catalog.sections.first(where: { $0.name == selectedCategory }) else {
                 return

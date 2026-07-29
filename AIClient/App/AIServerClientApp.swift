@@ -1,6 +1,17 @@
 import SwiftUI
 import UIKit
 
+private struct RootTabIsActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var rootTabIsActive: Bool {
+        get { self[RootTabIsActiveKey.self] }
+        set { self[RootTabIsActiveKey.self] = newValue }
+    }
+}
+
 @MainActor
 final class AppOrientationController {
     static let shared = AppOrientationController()
@@ -138,7 +149,6 @@ private struct EditorialRootView: View {
         }
         .task {
             deploymentStore.start()
-            await PeopleImagePreheater.preheatTechnologyLeaders()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -154,6 +164,7 @@ private struct EditorialRootView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
+            .environment(\.rootTabIsActive, selectedTab == tab)
             .opacity(selectedTab == tab ? 1 : 0)
             .allowsHitTesting(selectedTab == tab)
             .accessibilityHidden(selectedTab != tab)
