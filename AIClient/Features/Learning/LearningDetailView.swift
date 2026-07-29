@@ -5,16 +5,27 @@ import SwiftUI
 struct LearningDetailView: View {
     let topic: LearningTopic
     let repository: LearningContentRepository
+    let progressStore: LearningProgressStore
+    var lessonTitle: String?
+    var lessonNumber: Int?
+    var lessonCount: Int?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(spacing: 0) {
             detailBar
-            progressRule
+            if hasLessonPosition {
+                progressRule
+            }
 
             if let loaded = repository.topic(id: topic.id), let detail = loaded.detail {
-                LearningArticleView(topic: loaded, detail: detail)
+                LearningArticleView(
+                    topic: loaded,
+                    detail: detail,
+                    isCompleted: progressStore.isCompleted(topic.id),
+                    onComplete: completeLesson
+                )
             } else if let errorMessage = repository.errorMessages[topic.id] {
                 ContentUnavailableView {
                     Label("内容载入失败", systemImage: "wifi.exclamationmark")
@@ -31,6 +42,8 @@ struct LearningDetailView: View {
         }
         .background(LearningDetailPalette.canvas.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .background(InteractivePopGestureEnabler())
+        .simultaneousGesture(edgeBackGesture)
         .task { await repository.load(id: topic.id) }
     }
 
@@ -53,7 +66,7 @@ struct LearningDetailView: View {
                 Text("股票入门路径")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text("第 1 节 · 基础概念")
+                Text(lessonPositionText)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -83,11 +96,46 @@ struct LearningDetailView: View {
                 Rectangle().fill(LearningDetailPalette.stroke)
                 Rectangle()
                     .fill(LearningDetailPalette.accent)
-                    .frame(width: geometry.size.width / 6)
+                    .frame(width: geometry.size.width * lessonProgress)
             }
         }
         .frame(height: 2)
         .accessibilityHidden(true)
+    }
+
+    private var hasLessonPosition: Bool {
+        lessonNumber != nil && lessonCount != nil
+    }
+
+    private var lessonProgress: CGFloat {
+        guard let lessonNumber, let lessonCount, lessonCount > 0 else { return 0 }
+        return CGFloat(min(max(lessonNumber, 0), lessonCount)) / CGFloat(lessonCount)
+    }
+
+    private var lessonPositionText: String {
+        guard let lessonNumber, let lessonCount else { return "延伸阅读" }
+        if let lessonTitle, !lessonTitle.isEmpty {
+            return "第 \(lessonNumber)/\(lessonCount) 节 · \(lessonTitle)"
+        }
+        return "第 \(lessonNumber)/\(lessonCount) 节"
+    }
+
+    private func completeLesson() {
+        progressStore.markCompleted(topic.id)
+        dismiss()
+    }
+
+    private var edgeBackGesture: some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onEnded { value in
+                let horizontalDistance = value.translation.width
+                guard value.startLocation.x <= 28,
+                      horizontalDistance >= 72,
+                      abs(horizontalDistance) > abs(value.translation.height) else {
+                    return
+                }
+                dismiss()
+            }
     }
 }
 
@@ -168,7 +216,7 @@ private struct LearningDetailPlaceholder: View {
                 .frame(width: 7, height: 7)
             Text(topic.category)
             Text("·")
-            Text("12 分钟")
+            Text("正在载入")
         }
         .font(.system(size: 12, weight: .semibold))
         .foregroundStyle(LearningDetailPalette.accent)
@@ -178,7 +226,8 @@ private struct LearningDetailPlaceholder: View {
 private struct LearningArticleView: View {
     let topic: LearningTopic
     let detail: LearningDetail
-    @Environment(\.dismiss) private var dismiss
+    let isCompleted: Bool
+    let onComplete: () -> Void
     @State private var player: AVPlayer?
 
     var body: some View {
@@ -301,9 +350,13 @@ private struct LearningArticleView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("本节阅读完成")
+                    Text(isCompleted ? "本节已完成" : "读完了吗？")
                         .font(.system(size: 16, weight: .semibold))
-                    Text("返回路径，继续建立投资框架")
+                    Text(
+                        isCompleted
+                            ? "完成记录已保存，可以继续学习下一节"
+                            : "确认完成后才会计入真实学习进度"
+                    )
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -316,12 +369,12 @@ private struct LearningArticleView: View {
             }
 
             Button {
-                dismiss()
+                onComplete()
             } label: {
                 HStack {
-                    Text("返回学习路径")
+                    Text(isCompleted ? "返回学习路径" : "完成本节")
                     Spacer()
-                    Image(systemName: "arrow.right")
+                    Image(systemName: isCompleted ? "arrow.right" : "checkmark")
                 }
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
@@ -350,7 +403,7 @@ private struct LearningArticleView: View {
     }
 
     private var durationText: String {
-        guard let seconds = detail.videoDuration, seconds > 0 else { return "12 分钟" }
+        guard let seconds = detail.videoDuration, seconds > 0 else { return "图文课程" }
         let minutes = max(1, Int(ceil(Double(seconds) / 60)))
         return "\(minutes) 分钟"
     }

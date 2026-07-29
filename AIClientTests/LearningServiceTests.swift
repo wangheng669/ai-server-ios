@@ -78,4 +78,27 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.books.first?.coverURL?.host, "example.com")
         XCTAssertEqual(response.data.books.first?.openURL?.scheme, "weread")
     }
+
+    @MainActor
+    func testLearningProgressPersistsRealCompletionDates() {
+        let suiteName = "LearningProgressStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let key = "completed"
+        let calendar = Calendar(identifier: .iso8601)
+        let completionDate = Date(timeIntervalSince1970: 1_786_467_600)
+
+        let store = LearningProgressStore(defaults: defaults, storageKey: key)
+        XCTAssertFalse(store.isCompleted("lesson-1"))
+
+        store.markCompleted("lesson-1", at: completionDate)
+
+        let restored = LearningProgressStore(defaults: defaults, storageKey: key)
+        XCTAssertTrue(restored.isCompleted("lesson-1"))
+        XCTAssertEqual(restored.completedAt["lesson-1"], completionDate)
+        XCTAssertEqual(
+            restored.studyDays(inWeekContaining: completionDate, calendar: calendar).count,
+            1
+        )
+    }
 }

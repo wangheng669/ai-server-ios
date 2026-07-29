@@ -13,6 +13,7 @@ struct LearningView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var store = LearningStore()
     @State private var repository = LearningContentRepository()
+    @State private var progressStore = LearningProgressStore()
     @State private var path: [LearningRoute] = []
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
@@ -33,10 +34,14 @@ struct LearningView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: LearningRoute.self) { route in
-                switch route {
-                case let .topic(topic):
-                    LearningDetailView(topic: topic, repository: repository)
-                }
+                LearningDetailView(
+                    topic: route.topic,
+                    repository: repository,
+                    progressStore: progressStore,
+                    lessonTitle: route.lessonTitle,
+                    lessonNumber: route.lessonNumber,
+                    lessonCount: route.lessonCount
+                )
             }
         }
         .task(id: rootTabIsActive) {
@@ -51,7 +56,13 @@ struct LearningView: View {
                let topic = store.catalog?.sections
                 .flatMap(\.topics)
                 .first(where: { $0.title.contains("市盈率") }) {
-                path = [.topic(topic)]
+                let topics = store.catalog.map { stockTopics(in: $0) } ?? []
+                let milestones = learningMilestones(from: topics)
+                if let index = milestones.firstIndex(where: { $0.topic.id == topic.id }) {
+                    path = [route(for: milestones[index], at: index, total: milestones.count)]
+                } else {
+                    path = [LearningRoute(topic: topic)]
+                }
             }
             #endif
         }
@@ -145,7 +156,7 @@ struct LearningView: View {
     private var investmentContent: some View {
         if let catalog = store.catalog {
             let topics = stockTopics(in: catalog)
-            WeeklyStudyCard()
+            WeeklyStudyCard(studiedDays: progressStore.studyDays())
                 .padding(.horizontal, 20)
 
             learningPath(topics)
@@ -183,17 +194,24 @@ struct LearningView: View {
             .padding(.top, 24)
         } else {
             let milestones = learningMilestones(from: topics)
+            let completedCount = progressStore.completedCount(in: milestones.map(\.topic))
+            let currentIndex = milestones.firstIndex {
+                !progressStore.isCompleted($0.topic.id)
+            }
             VStack(spacing: 0) {
                 ForEach(Array(milestones.enumerated()), id: \.element.id) { index, milestone in
                     Button {
-                        path.append(.topic(milestone.topic))
+                        path.append(route(for: milestone, at: index, total: milestones.count))
                     } label: {
                         LearningMilestoneRow(
                             number: index + 1,
                             title: milestone.title,
                             topic: milestone.topic,
-                            isCurrent: index == 0,
-                            isLast: index == milestones.count - 1
+                            isCurrent: index == currentIndex,
+                            isCompleted: progressStore.isCompleted(milestone.topic.id),
+                            isLast: index == milestones.count - 1,
+                            completedCount: completedCount,
+                            totalCount: milestones.count
                         )
                     }
                     .buttonStyle(LearningPressStyle())
@@ -227,7 +245,7 @@ struct LearningView: View {
             VStack(spacing: 0) {
                 ForEach(topics) { topic in
                     Button {
-                        path.append(.topic(topic))
+                        path.append(LearningRoute(topic: topic))
                     } label: {
                         LearningTopicRow(topic: topic)
                     }
@@ -288,9 +306,6 @@ struct LearningView: View {
                 .buttonStyle(LearningPressStyle())
                 .padding(.horizontal, 20)
 
-                ReadingNotesView()
-                    .padding(.horizontal, 20)
-                    .padding(.top, 26)
             }
         }
     }
@@ -322,6 +337,19 @@ struct LearningView: View {
             return LearningMilestone(title: definition.0, topic: topic)
         }
     }
+
+    private func route(
+        for milestone: LearningMilestone,
+        at index: Int,
+        total: Int
+    ) -> LearningRoute {
+        LearningRoute(
+            topic: milestone.topic,
+            lessonTitle: milestone.title,
+            lessonNumber: index + 1,
+            lessonCount: total
+        )
+    }
 }
 
 private enum KnowledgeSection: String {
@@ -336,8 +364,11 @@ private enum KnowledgeSection: String {
     }
 }
 
-private enum LearningRoute: Hashable {
-    case topic(LearningTopic)
+private struct LearningRoute: Hashable {
+    let topic: LearningTopic
+    var lessonTitle: String?
+    var lessonNumber: Int?
+    var lessonCount: Int?
 }
 
 private enum KnowledgePagePalette {
@@ -369,20 +400,21 @@ private struct LearningMilestone: Identifiable {
 
 private struct WeeklyStudyCard: View {
     private let days = ["一", "二", "三", "四", "五", "六", "日"]
+    let studiedDays: Set<Int>
 
     var body: some View {
         VStack(spacing: 16) {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Text("本周学习")
                     .font(.system(size: 16, weight: .semibold))
-                Text("3")
+                Text("\(studiedDays.count)")
                     .font(.system(size: 25, weight: .bold, design: .serif))
                     .foregroundStyle(KnowledgePagePalette.accent)
                 Text("天")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("保持节奏")
+                Text(studiedDays.isEmpty ? "完成课程后记录" : "保持节奏")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -394,7 +426,11 @@ private struct WeeklyStudyCard: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.secondary)
                         Circle()
-                            .fill(index < 3 ? KnowledgePagePalette.accent : KnowledgePagePalette.stroke)
+                            .fill(
+                                studiedDays.contains(index)
+                                    ? KnowledgePagePalette.accent
+                                    : KnowledgePagePalette.stroke
+                            )
                             .frame(width: 8, height: 8)
                     }
                     if index != days.indices.last {
@@ -411,7 +447,7 @@ private struct WeeklyStudyCard: View {
                 .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("本周学习三天")
+        .accessibilityLabel("本周学习\(studiedDays.count)天")
     }
 }
 
@@ -420,22 +456,37 @@ private struct LearningMilestoneRow: View {
     let title: String
     let topic: LearningTopic
     let isCurrent: Bool
+    let isCompleted: Bool
     let isLast: Bool
+    let completedCount: Int
+    let totalCount: Int
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 0) {
                 Circle()
-                    .fill(isCurrent ? KnowledgePagePalette.accent : KnowledgePagePalette.canvas)
+                    .fill(
+                        isCompleted
+                            ? KnowledgePagePalette.sage
+                            : (isCurrent ? KnowledgePagePalette.accent : KnowledgePagePalette.canvas)
+                    )
                     .frame(width: 27, height: 27)
                     .overlay {
                         Circle().stroke(
-                            isCurrent ? KnowledgePagePalette.accent : Color.secondary.opacity(0.35),
+                            (isCurrent || isCompleted)
+                                ? .clear
+                                : Color.secondary.opacity(0.35),
                             lineWidth: 1
                         )
-                        Text("\(number)")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(isCurrent ? .white : .secondary)
+                        if isCompleted {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                        } else {
+                            Text("\(number)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(isCurrent ? .white : .secondary)
+                        }
                     }
                 if !isLast {
                     Rectangle()
@@ -463,11 +514,11 @@ private struct LearningMilestoneRow: View {
                             .fill(KnowledgePagePalette.accent)
                             .frame(width: 7, height: 7)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("市盈率与估值")
+                            Text(topic.title)
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
-                            Text("12 分钟")
+                            Text(topic.hasVideo == true ? "含视频" : topic.category)
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
@@ -488,13 +539,17 @@ private struct LearningMilestoneRow: View {
                     }
 
                     HStack(spacing: 10) {
-                        Text("已学 2/6")
+                        Text("已完成 \(completedCount)/\(totalCount)")
                         GeometryReader { geometry in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(KnowledgePagePalette.stroke)
                                 Capsule()
                                     .fill(KnowledgePagePalette.accent)
-                                    .frame(width: geometry.size.width / 3)
+                                    .frame(
+                                        width: totalCount > 0
+                                            ? geometry.size.width * CGFloat(completedCount) / CGFloat(totalCount)
+                                            : 0
+                                    )
                             }
                         }
                         .frame(height: 2)
@@ -564,19 +619,10 @@ private struct BookReadingDeskCard: View {
                 .padding(.top, 5)
 
             HStack(spacing: 9) {
-                Text(book.isFinished ? "已读 100%" : "已读 18%")
+                Text(book.isFinished ? "已读完" : "阅读中")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(KnowledgePagePalette.stroke)
-                        Capsule()
-                            .fill(KnowledgePagePalette.accent)
-                            .frame(width: geometry.size.width * (book.isFinished ? 1 : 0.18))
-                    }
-                }
-                .frame(height: 2)
-                Spacer(minLength: 12)
+                Spacer()
                 Text(book.isFinished ? "再次阅读" : "继续阅读")
                     .font(.system(size: 13, weight: .semibold))
                 Image(systemName: "chevron.right")
@@ -599,56 +645,6 @@ private struct BookReadingDeskCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)")
         .accessibilityHint("在\(source)继续阅读")
-    }
-}
-
-private struct ReadingNotesView: View {
-    private let notes = [
-        ("5月24日", "智能的本质不是记住事实，而是发现模式，并在混乱中创造新的可能。"),
-        ("5月22日", "真正的突破来自跨学科的融合，边界之外往往是下一次跃迁的起点。")
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Divider()
-                .padding(.bottom, 19)
-            Text("最近笔记")
-                .font(.system(size: 21, weight: .bold, design: .serif))
-                .padding(.bottom, 13)
-
-            ForEach(Array(notes.enumerated()), id: \.offset) { index, note in
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(spacing: 0) {
-                        Circle()
-                            .fill(index == 0 ? KnowledgePagePalette.accent : KnowledgePagePalette.stroke)
-                            .frame(width: 8, height: 8)
-                        if index != notes.indices.last {
-                            Rectangle()
-                                .fill(KnowledgePagePalette.stroke)
-                                .frame(width: 1, height: 58)
-                        }
-                    }
-                    .padding(.top, 4)
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(note.0)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text(note.1)
-                            .font(.system(size: 14))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Spacer(minLength: 6)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 22)
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
     }
 }
 
