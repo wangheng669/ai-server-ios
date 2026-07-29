@@ -74,9 +74,6 @@ private struct PeopleStarMapExplorer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchIsFocused: Bool
     @State private var focusedPersonID: String?
-    @State private var expandedClusterID: String?
-    @State private var selectedMemberID: String?
-    @State private var clusterPage = 0
     @State private var searchText = ""
     @State private var showsSearch = false
     @State private var isRefreshing = false
@@ -122,20 +119,13 @@ private struct PeopleStarMapExplorer: View {
                 Color(uiColor: .systemBackground)
                     .ignoresSafeArea()
 
-                PeopleClusterCanvas(
+                PeopleOrbitCanvas(
                     focusedPerson: focusedPerson,
                     clusters: clusters,
-                    expandedClusterID: expandedClusterID,
-                    selectedMemberID: selectedMemberID,
-                    clusterPage: clusterPage,
+                    allPeople: people,
                     baseURL: baseURL,
                     onOpenCenter: { onOpenPerson(focusedPerson) },
-                    onSelectCluster: selectCluster,
-                    onSelectMember: selectMember,
-                    onShowMoreMembers: {
-                        selectedMemberID = nil
-                        clusterPage += 1
-                    }
+                    onSelectMember: selectMember
                 )
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .contentShape(Rectangle())
@@ -144,8 +134,6 @@ private struct PeopleStarMapExplorer: View {
                         .onEnded(handleStarMapSwipe)
                 )
                 .animation(animation, value: focusedPerson.id)
-                .animation(animation, value: expandedClusterID)
-                .animation(animation, value: clusterPage)
                 .accessibilityHint("左右滑动可切换人物")
 
                 if showsSearch {
@@ -187,11 +175,6 @@ private struct PeopleStarMapExplorer: View {
             if focusedPersonID == nil {
                 focusedPersonID = defaultCenter.id
             }
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--people-relations-focus-preview") {
-                expandedClusterID = clusters.first?.id
-            }
-            #endif
         }
     }
 
@@ -359,34 +342,14 @@ private struct PeopleStarMapExplorer: View {
         .shadow(color: .black.opacity(0.1), radius: 18, y: 7)
     }
 
-    private func selectCluster(_ cluster: PeopleRelationshipCluster) {
-        withAnimation(animation) {
-            if expandedClusterID == cluster.id {
-                expandedClusterID = nil
-            } else {
-                expandedClusterID = cluster.id
-            }
-            selectedMemberID = nil
-            clusterPage = 0
-        }
-    }
-
     private func selectMember(_ member: PeopleRelationshipMember) {
-        if selectedMemberID == member.id, let person = member.person {
-            focus(on: person)
-            return
-        }
-        withAnimation(animation) {
-            selectedMemberID = member.id
-        }
+        guard let person = member.person else { return }
+        focus(on: person)
     }
 
     private func focus(on person: SpecialPerson) {
         withAnimation(animation) {
             focusedPersonID = person.id
-            expandedClusterID = nil
-            selectedMemberID = nil
-            clusterPage = 0
         }
     }
 
@@ -421,6 +384,318 @@ private struct PeopleStarMapExplorer: View {
 
     private var animation: Animation? {
         reduceMotion ? nil : .snappy(duration: 0.34)
+    }
+}
+
+private struct PeopleOrbitCanvas: View {
+    let focusedPerson: SpecialPerson
+    let clusters: [PeopleRelationshipCluster]
+    let allPeople: [SpecialPerson]
+    let baseURL: URL
+    let onOpenCenter: () -> Void
+    let onSelectMember: (PeopleRelationshipMember) -> Void
+
+    private let innerCount = 6
+    private let maximumVisiblePeople = 14
+
+    private struct OrbitItem: Identifiable {
+        let member: PeopleRelationshipMember
+        let relationshipGroup: String
+        let colorIndex: Int
+
+        var id: String { member.id }
+    }
+
+    private struct Placement: Identifiable {
+        let item: OrbitItem
+        let point: CGPoint
+        let isInner: Bool
+
+        var id: String { item.id }
+    }
+
+    private var orbitItems: [OrbitItem] {
+        var seen = Set<String>()
+        var items: [OrbitItem] = []
+        for (colorIndex, cluster) in clusters.enumerated() {
+            for member in cluster.members where seen.insert(member.id).inserted {
+                items.append(
+                    OrbitItem(
+                        member: member,
+                        relationshipGroup: cluster.title,
+                        colorIndex: colorIndex
+                    )
+                )
+            }
+        }
+
+        let supplementaryPeople = allPeople
+            .filter { $0.id != focusedPerson.id && !seen.contains($0.id) }
+            .sorted {
+                let lhs = ($0.topic == focusedPerson.topic, $0.todayCount, $0.relatedPeople.count, $0.totalCount)
+                let rhs = ($1.topic == focusedPerson.topic, $1.todayCount, $1.relatedPeople.count, $1.totalCount)
+                if lhs.0 != rhs.0 { return lhs.0 && !rhs.0 }
+                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+                if lhs.2 != rhs.2 { return lhs.2 > rhs.2 }
+                if lhs.3 != rhs.3 { return lhs.3 > rhs.3 }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+
+        for person in supplementaryPeople where items.count < maximumVisiblePeople {
+            seen.insert(person.id)
+            items.append(
+                OrbitItem(
+                    member: PeopleRelationshipMember(
+                        id: person.id,
+                        name: person.name,
+                        relationship: "同属\(focusedPerson.topic.rawValue)领域",
+                        person: person,
+                        avatarURLValue: person.avatarPath,
+                        avatarAssetName: person.avatarAssetName
+                    ),
+                    relationshipGroup: "同领域",
+                    colorIndex: clusters.count
+                )
+            )
+        }
+        return Array(items.prefix(maximumVisiblePeople))
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let center = centerPoint(size: proxy.size)
+            let placements = placements(size: proxy.size, center: center)
+
+            ZStack {
+                RadialGradient(
+                    colors: [Color.accentColor.opacity(0.055), Color.clear],
+                    center: UnitPoint(x: center.x / max(proxy.size.width, 1), y: center.y / max(proxy.size.height, 1)),
+                    startRadius: 4,
+                    endRadius: min(proxy.size.width, proxy.size.height) * 0.46
+                )
+                .accessibilityHidden(true)
+
+                Canvas { context, _ in
+                    drawOrbitGuides(context: context, center: center, size: proxy.size)
+                    drawConnections(context: context, center: center, placements: placements)
+                }
+                .accessibilityHidden(true)
+
+                centerNode
+                    .position(center)
+
+                ForEach(placements) { placement in
+                    Button {
+                        onSelectMember(placement.item.member)
+                    } label: {
+                        orbitNode(for: placement)
+                    }
+                    .buttonStyle(PeoplePressStyle())
+                    .position(placement.point)
+                    .accessibilityLabel(
+                        "\(placement.item.member.name)，与\(focusedPerson.name)的关系：\(placement.item.member.relationship)"
+                    )
+                    .accessibilityHint(
+                        placement.item.member.person == nil ? "此人物暂无完整档案" : "点击切换为中心人物"
+                    )
+                }
+
+                ForEach(placements.filter(\.isInner)) { placement in
+                    Text(placement.item.relationshipGroup)
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(tint(for: placement.item.colorIndex))
+                        .lineLimit(1)
+                        .padding(.horizontal, 5)
+                        .frame(height: 17)
+                        .background(.thinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(tint(for: placement.item.colorIndex).opacity(0.18), lineWidth: 0.5)
+                        }
+                        .position(
+                            relationshipLabelPoint(
+                                from: center,
+                                to: placement.point
+                            )
+                        )
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+    }
+
+    private var centerNode: some View {
+        Button(action: onOpenCenter) {
+            VStack(spacing: 7) {
+                AvatarView(
+                    url: focusedPerson.avatarURL(baseURL: baseURL),
+                    name: focusedPerson.name,
+                    size: 74,
+                    assetName: focusedPerson.avatarAssetName
+                )
+                .overlay {
+                    Circle()
+                        .stroke(Color(uiColor: .systemBackground), lineWidth: 4)
+                        .overlay {
+                            Circle().stroke(Color.accentColor, lineWidth: 2.5)
+                        }
+                }
+                .shadow(color: Color.accentColor.opacity(0.16), radius: 14, y: 5)
+
+                Text(focusedPerson.name)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .frame(width: 138)
+        }
+        .buttonStyle(PeoplePressStyle())
+        .accessibilityLabel("\(focusedPerson.name)，点击查看完整档案")
+    }
+
+    @ViewBuilder
+    private func orbitNode(for placement: Placement) -> some View {
+        let member = placement.item.member
+        let size: CGFloat = placement.isInner ? 39 : 30
+        VStack(spacing: 3) {
+            AvatarView(
+                url: member.avatarURL(baseURL: baseURL),
+                name: member.name,
+                size: size,
+                assetName: member.person?.avatarAssetName ?? member.avatarAssetName
+            )
+            .overlay {
+                Circle()
+                    .stroke(Color(uiColor: .systemBackground), lineWidth: 2.5)
+                    .overlay {
+                        Circle()
+                            .stroke(
+                                tint(for: placement.item.colorIndex).opacity(placement.isInner ? 0.62 : 0.28),
+                                lineWidth: placement.isInner ? 1.5 : 0.8
+                            )
+                    }
+            }
+            .shadow(color: .black.opacity(0.09), radius: placement.isInner ? 7 : 4, y: 2)
+
+            Text(member.name)
+                .font(.system(size: placement.isInner ? 9 : 8, weight: .semibold))
+                .foregroundStyle(placement.isInner ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.58)
+        }
+        .frame(width: placement.isInner ? 68 : 58)
+    }
+
+    private func centerPoint(size: CGSize) -> CGPoint {
+        CGPoint(x: size.width * 0.5, y: size.height * 0.44)
+    }
+
+    private func placements(size: CGSize, center: CGPoint) -> [Placement] {
+        let innerItems = Array(orbitItems.prefix(innerCount))
+        let outerItems = Array(orbitItems.dropFirst(innerCount))
+        let innerRadiusX = min(size.width * 0.30, 115)
+        let innerRadiusY = min(size.height * 0.22, 178)
+
+        let inner = innerItems.enumerated().map { index, item in
+            let angle = (-Double.pi / 2) + (2 * Double.pi * Double(index) / Double(max(innerItems.count, 1)))
+            return Placement(
+                item: item,
+                point: CGPoint(
+                    x: center.x + CGFloat(cos(angle)) * innerRadiusX,
+                    y: center.y + CGFloat(sin(angle)) * innerRadiusY
+                ),
+                isInner: true
+            )
+        }
+
+        let outerPoints: [CGPoint] = [
+            CGPoint(x: 0.34, y: 0.14),
+            CGPoint(x: 0.66, y: 0.14),
+            CGPoint(x: 0.09, y: 0.34),
+            CGPoint(x: 0.91, y: 0.34),
+            CGPoint(x: 0.09, y: 0.63),
+            CGPoint(x: 0.91, y: 0.63),
+            CGPoint(x: 0.34, y: 0.75),
+            CGPoint(x: 0.66, y: 0.75)
+        ]
+        let outer = outerItems.enumerated().map { index, item in
+            let normalizedPoint = outerPoints[index % outerPoints.count]
+            return Placement(
+                item: item,
+                point: CGPoint(
+                    x: size.width * normalizedPoint.x,
+                    y: size.height * normalizedPoint.y
+                ),
+                isInner: false
+            )
+        }
+        return inner + outer
+    }
+
+    private func relationshipLabelPoint(from center: CGPoint, to point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: center.x + (point.x - center.x) * 0.72,
+            y: center.y + (point.y - center.y) * 0.72
+        )
+    }
+
+    private func drawOrbitGuides(context: GraphicsContext, center: CGPoint, size: CGSize) {
+        let rect = CGRect(
+            x: center.x - min(size.width * 0.405, 154),
+            y: center.y - min(size.height * 0.335, 258),
+            width: min(size.width * 0.405, 154) * 2,
+            height: min(size.height * 0.335, 258) * 2
+        )
+        context.stroke(
+            Path(ellipseIn: rect),
+            with: .color(Color.secondary.opacity(0.07)),
+            style: StrokeStyle(lineWidth: 0.7, dash: [2, 7])
+        )
+    }
+
+    private func drawConnections(
+        context: GraphicsContext,
+        center: CGPoint,
+        placements: [Placement]
+    ) {
+        for placement in placements {
+            var path = Path()
+            path.move(to: center)
+            let bend = placement.isInner ? CGFloat(8) : CGFloat(18)
+            path.addQuadCurve(
+                to: placement.point,
+                control: CGPoint(
+                    x: (center.x + placement.point.x) / 2 + bend,
+                    y: (center.y + placement.point.y) / 2 - bend * 0.45
+                )
+            )
+            context.stroke(
+                path,
+                with: .color(
+                    tint(for: placement.item.colorIndex)
+                        .opacity(placement.isInner ? 0.24 : 0.10)
+                ),
+                style: StrokeStyle(
+                    lineWidth: placement.isInner ? 1.15 : 0.7,
+                    dash: placement.isInner ? [] : [2, 5]
+                )
+            )
+        }
+    }
+
+    private func tint(for index: Int) -> Color {
+        let colors: [Color] = [
+            Color(red: 0.18, green: 0.47, blue: 0.88),
+            Color(red: 0.18, green: 0.61, blue: 0.48),
+            Color(red: 0.88, green: 0.54, blue: 0.20),
+            Color(red: 0.55, green: 0.39, blue: 0.82),
+            Color(red: 0.19, green: 0.61, blue: 0.72),
+            Color(red: 0.79, green: 0.35, blue: 0.49)
+        ]
+        return colors[index % colors.count]
     }
 }
 
