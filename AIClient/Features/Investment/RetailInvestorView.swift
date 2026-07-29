@@ -4,13 +4,31 @@ import WebKit
 
 struct RetailInvestorView: View {
     @Binding private var showsDetail: Bool
-    @State private var store = RetailSentimentStore()
+    private let store: RetailSentimentStore
+    private let marketStore: MarketStore
     @State private var path: [InvestorMoodRoute] = []
     @State private var selectedMarket: SentimentMarket = .china
     @State private var showsAllInvestorMood = false
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
 
-    init(showsDetail: Binding<Bool> = .constant(false)) {
+    @MainActor
+    init(
+        store: RetailSentimentStore,
+        marketStore: MarketStore,
+        showsDetail: Binding<Bool> = .constant(false)
+    ) {
+        self.store = store
+        self.marketStore = marketStore
         _showsDetail = showsDetail
+    }
+
+    @MainActor
+    init(showsDetail: Binding<Bool> = .constant(false)) {
+        self.init(
+            store: RetailSentimentStore(),
+            marketStore: MarketStore(),
+            showsDetail: showsDetail
+        )
     }
 
     var body: some View {
@@ -38,12 +56,18 @@ struct RetailInvestorView: View {
             }
             .background(InvestmentDesign.canvas)
             .refreshable {
-                async let overview: Void = store.load(force: true)
+                async let overview: Void = store.load(marketStore: marketStore, force: true)
                 async let details: Void = store.loadDetails(for: selectedMarket, force: true)
                 _ = await (overview, details)
             }
-            .task { await store.load() }
-            .task(id: selectedMarket) { await store.loadDetails(for: selectedMarket) }
+            .task(id: rootTabIsActive) {
+                guard rootTabIsActive else { return }
+                await store.load(marketStore: marketStore)
+            }
+            .task(id: "\(rootTabIsActive):\(selectedMarket.rawValue)") {
+                guard rootTabIsActive else { return }
+                await store.loadDetails(for: selectedMarket)
+            }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: InvestorMoodRoute.self) { route in
                 InvestorMoodWebView(route: route)
@@ -1026,7 +1050,7 @@ private struct InvestorMoodWebPage: UIViewRepresentable {
 
 @MainActor
 @Observable
-private final class RetailSentimentStore {
+final class RetailSentimentStore {
     private(set) var dashboard: MarketDashboard?
     private(set) var investorMood: InvestorMoodBoard?
     private(set) var temperature: MarketAShareTemperature?
@@ -1178,23 +1202,22 @@ private final class RetailSentimentStore {
         return 100 * (Double(less) + Double(equal) / 2) / Double(max(samples.count, 1))
     }
 
-    func load(force: Bool = false) async {
-        if loaded, !force { return }
+    func load(marketStore: MarketStore, force: Bool = false) async {
+        if loaded, !force {
+            dashboard = marketStore.dashboard ?? dashboard
+            return
+        }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
-        async let dashboardRequest = service.dashboard(refresh: force)
         async let moodRequest = service.investorMood()
         async let temperatureRequest = service.aShareTemperature()
-        do {
-            dashboard = try await dashboardRequest
-            loaded = true
-            errorMessage = nil
-        } catch is CancellationError {
-            return
-        } catch {
-            errorMessage = error.localizedDescription
+        if force || marketStore.dashboard == nil {
+            await marketStore.refresh(force: force)
         }
+        guard !Task.isCancelled else { return }
+        dashboard = marketStore.dashboard
+        if dashboard != nil { errorMessage = nil }
         do {
             investorMood = try await moodRequest
         } catch is CancellationError {
@@ -1209,6 +1232,7 @@ private final class RetailSentimentStore {
         } catch {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
+        loaded = dashboard != nil || investorMood != nil || temperature != nil
     }
 
     func loadDetails(for market: SentimentMarket, force: Bool = false) async {
@@ -1225,6 +1249,7 @@ private final class RetailSentimentStore {
         case .unitedStates:
             await loadUnitedStatesDetails()
         }
+        guard !Task.isCancelled else { return }
         loadedMarkets.insert(market)
     }
 
@@ -1239,18 +1264,7 @@ private final class RetailSentimentStore {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
         if let constituents = hongKongConstituents {
-            hongKongCharts = await withTaskGroup(of: MarketChart?.self) { group in
-                for item in constituents.items {
-                    group.addTask { [service] in
-                        try? await service.chart(symbol: item.quote.symbol, range: .year)
-                    }
-                }
-                var charts: [MarketChart] = []
-                for await chart in group {
-                    if let chart { charts.append(chart) }
-                }
-                return charts
-            }
+            hongKongCharts = await loadHistoricalCharts(for: constituents.items)
         }
         do {
             hongKongValuationHistory = try await valuationRequest
@@ -1272,18 +1286,7 @@ private final class RetailSentimentStore {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
         if let constituents = unitedStatesConstituents {
-            unitedStatesCharts = await withTaskGroup(of: MarketChart?.self) { group in
-                for item in constituents.items {
-                    group.addTask { [service] in
-                        try? await service.chart(symbol: item.quote.symbol, range: .year)
-                    }
-                }
-                var charts: [MarketChart] = []
-                for await chart in group {
-                    if let chart { charts.append(chart) }
-                }
-                return charts
-            }
+            unitedStatesCharts = await loadHistoricalCharts(for: constituents.items)
         }
         do {
             unitedStatesValuationHistory = try await valuationRequest
@@ -1293,9 +1296,38 @@ private final class RetailSentimentStore {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
     }
+
+    private func loadHistoricalCharts(for items: [MarketIndexConstituent]) async -> [MarketChart] {
+        let symbols = items.map(\.quote.symbol)
+        guard !symbols.isEmpty else { return [] }
+        return await withTaskGroup(of: MarketChart?.self) { group in
+            var iterator = symbols.makeIterator()
+            let concurrency = min(4, symbols.count)
+            for _ in 0..<concurrency {
+                guard let symbol = iterator.next() else { break }
+                group.addTask { [service] in
+                    try? await service.chart(symbol: symbol, range: .year)
+                }
+            }
+            var charts: [MarketChart] = []
+            while let result = await group.next() {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    break
+                }
+                if let chart = result { charts.append(chart) }
+                if let symbol = iterator.next() {
+                    group.addTask { [service] in
+                        try? await service.chart(symbol: symbol, range: .year)
+                    }
+                }
+            }
+            return charts
+        }
+    }
 }
 
-private enum SentimentMarket: String, CaseIterable, Identifiable {
+enum SentimentMarket: String, CaseIterable, Identifiable {
     case china
     case hongKong
     case unitedStates
@@ -1324,7 +1356,7 @@ private enum SentimentMarket: String, CaseIterable, Identifiable {
     }
 }
 
-private struct SentimentSnapshot {
+struct SentimentSnapshot {
     let score: Double
     let label: String
     let primaryTitle: String
@@ -1346,7 +1378,7 @@ private struct SentimentSnapshot {
     }
 }
 
-private struct SentimentBreadth {
+struct SentimentBreadth {
     let up: Int
     let down: Int
     let flat: Int

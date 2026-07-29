@@ -14,7 +14,7 @@ private enum MarketStyle {
 
 struct MarketView: View {
     @Binding private var showsDetail: Bool
-    @State private var store = MarketStore()
+    private let store: MarketStore
     @State private var path: [String] = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -29,7 +29,16 @@ struct MarketView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
-    init(showsDetail: Binding<Bool> = .constant(false)) { _showsDetail = showsDetail }
+    @MainActor
+    init(store: MarketStore, showsDetail: Binding<Bool> = .constant(false)) {
+        self.store = store
+        _showsDetail = showsDetail
+    }
+
+    @MainActor
+    init(showsDetail: Binding<Bool> = .constant(false)) {
+        self.init(store: MarketStore(), showsDetail: showsDetail)
+    }
 
     var body: some View {
         NavigationStack(path: $path) {

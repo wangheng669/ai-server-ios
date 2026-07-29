@@ -628,6 +628,22 @@ struct MarketUSValuationHistory {
     let pe: [Double]
 }
 
+struct MarketValuationHistoryResponse: Decodable {
+    let success: Bool
+    let data: MarketValuationHistory
+}
+
+struct MarketValuationHistory: Decodable {
+    let dataContract: String
+    let market: String
+    let date: [String]
+    let pe: [Double]
+    let source: String
+    let fetchedAt: String
+    let cached: Bool
+    let stale: Bool
+}
+
 struct MarketChartResponse: Decodable {
     let success: Bool
     let data: MarketChart
