@@ -58,7 +58,8 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--sentiment-preview") { return .investment }
+            ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--gdp-preview") { return .investment }
         if ProcessInfo.processInfo.arguments.contains("--learning-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-video-preview") ||
@@ -88,7 +89,8 @@ private struct EditorialRootView: View {
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--industries-preview") { return nil }
+            ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--gdp-preview") { return nil }
         #endif
         return deploymentPreview ?? deploymentStore.snapshot
     }

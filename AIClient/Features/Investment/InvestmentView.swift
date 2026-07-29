@@ -20,6 +20,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case sentiment = "情绪"
     case holdings = "知名投资人"
     case industries = "产业全景"
+    case gdp = "GDP排行"
 
     var id: Self { self }
 }
@@ -40,6 +41,8 @@ struct InvestmentView: View {
             _section = State(initialValue: .industries)
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") {
             _section = State(initialValue: .sentiment)
+        } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") {
+            _section = State(initialValue: .gdp)
         } else {
             _section = State(initialValue: .market)
         }
@@ -79,6 +82,13 @@ struct InvestmentView: View {
                     }
                     IndustryPanoramaView()
                 }
+            case .gdp:
+                VStack(spacing: 0) {
+                    if !showsDetail {
+                        InvestmentHeader(selection: $section)
+                    }
+                    CountryGDPRankingView()
+                }
             }
         }
         .background(InvestmentDesign.canvas)
@@ -107,27 +117,41 @@ private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
 
     var body: some View {
-        HStack(spacing: 24) {
-            ForEach(InvestmentSection.allCases) { section in
-                Button {
-                    withAnimation(.easeOut(duration: 0.18)) { selection = section }
-                } label: {
-                    VStack(spacing: 0) {
-                        Text(section.rawValue)
-                            .font(.system(size: 14, weight: selection == section ? .semibold : .regular))
-                            .foregroundStyle(selection == section ? Color.primary : Color.secondary)
-                            .frame(height: 42)
-                        Capsule()
-                            .fill(selection == section ? InvestmentDesign.accent : .clear)
-                            .frame(width: 18, height: 2.5)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 24) {
+                    ForEach(InvestmentSection.allCases) { section in
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                selection = section
+                                proxy.scrollTo(section, anchor: .center)
+                            }
+                        } label: {
+                            VStack(spacing: 0) {
+                                Text(section.rawValue)
+                                    .font(.system(size: 14, weight: selection == section ? .semibold : .regular))
+                                    .foregroundStyle(selection == section ? Color.primary : Color.secondary)
+                                    .frame(height: 42)
+                                Capsule()
+                                    .fill(selection == section ? InvestmentDesign.accent : .clear)
+                                    .frame(width: 18, height: 2.5)
+                            }
+                        }
+                        .id(section)
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == section ? .isSelected : [])
                     }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == section ? .isSelected : [])
+                .padding(.horizontal, 18)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: selection) { _, value in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(value, anchor: .center)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 18)
         .padding(.bottom, 6)
         .background(InvestmentDesign.surface)
         .overlay(alignment: .bottom) {

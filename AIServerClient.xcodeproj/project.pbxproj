@@ -21,9 +21,11 @@
 		3AC230E32369C12C743332AD /* InvestmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5FF3634D4DF69CCE8DB1B32 /* InvestmentView.swift */; };
 		46344011320819650C0EEC08 /* PeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1304CD1593E840EFAF32E208 /* PeopleStore.swift */; };
 		4A2C39B8984DD9FAF7E37AC2 /* IndustryPanoramaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75D84CF1869965892028891E /* IndustryPanoramaView.swift */; };
+		5543ADDBFA9B940978410DD8 /* CountryGDPRankingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C6756677ADA82073372908E /* CountryGDPRankingView.swift */; };
 		5BD0A8A5E55F738CE9F9EE81 /* LearningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 888F04206EE0876BD874BBAF /* LearningView.swift */; };
 		617480D9D30D6A38B04EA755 /* RetailInvestorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C78B11625D59970AF947C /* RetailInvestorView.swift */; };
 		681EF7E93F4BE35044B2149C /* MarketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0964D64008AE6D9891C78345 /* MarketService.swift */; };
+		6EB37888E57023644BA4E8B0 /* CountryGDPRankingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFDC2300DFD6141704CC0B16 /* CountryGDPRankingTests.swift */; };
 		70916F86F3EB28B10FB8EB3C /* PostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F7ED7E08363D8510FC627D /* PostDetailView.swift */; };
 		776DA836074F7FFF481B3A5B /* FeedAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */; };
 		7C42227FAAD006BD492F3F7E /* LearningServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFA9759085824610FC53E65 /* LearningServiceTests.swift */; };
@@ -79,6 +81,7 @@
 		4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServerClientApp.swift; sourceTree = "<group>"; };
 		50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDecodingTests.swift; sourceTree = "<group>"; };
+		5C6756677ADA82073372908E /* CountryGDPRankingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryGDPRankingView.swift; sourceTree = "<group>"; };
 		5D7DCAC8CCF496B338DF783E /* LearningService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningService.swift; sourceTree = "<group>"; };
 		5F0204E08B2D0424F860EFFE /* ServerConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfiguration.swift; sourceTree = "<group>"; };
 		6017E166E5F6A363E603B660 /* FamousHoldingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsModels.swift; sourceTree = "<group>"; };
@@ -94,6 +97,7 @@
 		9A2C22D012A44ABE4FDE5A64 /* PersonDetailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonDetailStore.swift; sourceTree = "<group>"; };
 		9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedAdapterTests.swift; sourceTree = "<group>"; };
 		9F83C9F64DA0CE10A02AD089 /* NewsFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedView.swift; sourceTree = "<group>"; };
+		AFDC2300DFD6141704CC0B16 /* CountryGDPRankingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryGDPRankingTests.swift; sourceTree = "<group>"; };
 		BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostComponents.swift; sourceTree = "<group>"; };
 		C41BF51CBE9570E400E536EE /* AIClientTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AIClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C5FF3634D4DF69CCE8DB1B32 /* InvestmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentView.swift; sourceTree = "<group>"; };
@@ -106,6 +110,7 @@
 		287F9373E17FFE1FC50C15E6 /* AIClientTests */ = {
 			isa = PBXGroup;
 			children = (
+				AFDC2300DFD6141704CC0B16 /* CountryGDPRankingTests.swift */,
 				D9D7B5B9A81B19337F41D31D /* FamousHoldingsTests.swift */,
 				9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */,
 				3AFA9759085824610FC53E65 /* LearningServiceTests.swift */,
@@ -235,6 +240,7 @@
 		DCD558141B0F54371B604FAE /* Investment */ = {
 			isa = PBXGroup;
 			children = (
+				5C6756677ADA82073372908E /* CountryGDPRankingView.swift */,
 				041A88D0726A910552794148 /* FamousHoldingDetailView.swift */,
 				6017E166E5F6A363E603B660 /* FamousHoldingsModels.swift */,
 				40244177985ED17E7717147A /* FamousHoldingsStore.swift */,
@@ -311,7 +317,6 @@
 				};
 			};
 			buildConfigurationList = 1CB8E601656193E6689EF54E /* Build configuration list for PBXProject "AIServerClient" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -321,6 +326,7 @@
 			mainGroup = 31B803F3D04737705590B4F6;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 772B58C95655CED4643BB6A2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -346,6 +352,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6EB37888E57023644BA4E8B0 /* CountryGDPRankingTests.swift in Sources */,
 				925FAFC4FD006E95D2EA124B /* FamousHoldingsTests.swift in Sources */,
 				776DA836074F7FFF481B3A5B /* FeedAdapterTests.swift in Sources */,
 				7C42227FAAD006BD492F3F7E /* LearningServiceTests.swift in Sources */,
@@ -361,6 +368,7 @@
 			files = (
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
+				5543ADDBFA9B940978410DD8 /* CountryGDPRankingView.swift in Sources */,
 				0BB9A3475C0408092697FA60 /* DeploymentStatusTip.swift in Sources */,
 				912BA358792A0CF9208478FB /* FamousHoldingDetailView.swift in Sources */,
 				92D94B2A4B1E251539E7F2AD /* FamousHoldingsModels.swift in Sources */,
