@@ -133,5 +133,5 @@ final class LearningStore {
 enum LearningError: LocalizedError {
     case invalidResponse
 
-    var errorDescription: String? { "学习内容暂时无法访问" }
+    var errorDescription: String? { "知识内容暂时无法访问" }
 }

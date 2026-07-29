@@ -89,3 +89,67 @@ struct LearningBlock: Decodable, Hashable, Identifiable {
 
 struct LearningCatalogResponse: Decodable { let data: LearningCatalog }
 struct LearningTopicResponse: Decodable { let data: LearningTopic }
+
+struct KnowledgeBook: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let originalTitle: String?
+    let author: String
+    let summary: String
+    let recommendation: String
+    let suitableFor: String
+    let keyIdeas: [String]
+
+    static let featured: [KnowledgeBook] = [
+        KnowledgeBook(
+            id: "the-intelligent-investor",
+            title: "聪明的投资者",
+            originalTitle: "The Intelligent Investor",
+            author: "本杰明·格雷厄姆",
+            summary: "建立价值投资的基本框架，理解安全边际、市场波动与长期纪律之间的关系。",
+            recommendation: "它不负责预测下一次涨跌，而是帮助你形成一套在市场情绪变化时仍能坚持的决策原则。",
+            suitableFor: "刚开始建立投资体系，或希望重新审视风险与收益关系的读者。",
+            keyIdeas: ["区分投资与投机", "把市场先生当作报价者", "用安全边际保护判断误差"]
+        ),
+        KnowledgeBook(
+            id: "poor-charlies-almanack",
+            title: "穷查理宝典",
+            originalTitle: "Poor Charlie's Almanack",
+            author: "查理·芒格",
+            summary: "用跨学科思维模型理解商业、心理偏差与长期复利，训练更清醒的判断力。",
+            recommendation: "投资只是它的一个应用场景，真正值得反复阅读的是如何减少愚蠢决定、提高思考质量。",
+            suitableFor: "希望拓宽分析视角，并把投资判断连接到商业常识与行为心理的读者。",
+            keyIdeas: ["建立多元思维模型", "识别常见心理偏差", "优先避免可预见的错误"]
+        ),
+        KnowledgeBook(
+            id: "the-most-important-thing",
+            title: "投资最重要的事",
+            originalTitle: "The Most Important Thing",
+            author: "霍华德·马克斯",
+            summary: "从第二层思维、周期、风险控制和逆向投资出发，解释优秀判断如何形成。",
+            recommendation: "文字简洁，但每一章都适合结合真实市场反复复盘，尤其适合在行情热烈时阅读。",
+            suitableFor: "已经了解基础概念，希望进一步理解风险、价格与市场共识的读者。",
+            keyIdeas: ["练习第二层思维", "风险不等于价格波动", "在周期与共识中保持清醒"]
+        ),
+        KnowledgeBook(
+            id: "berkshire-shareholder-letters",
+            title: "巴菲特致股东的信",
+            originalTitle: "Berkshire Hathaway Shareholder Letters",
+            author: "沃伦·巴菲特",
+            summary: "通过伯克希尔历年经营实践，理解企业质量、资本配置、护城河与股东回报。",
+            recommendation: "它把抽象的价值投资原则放进长期经营结果里，是观察管理层如何使用资本的好材料。",
+            suitableFor: "关注公司基本面、商业模式和管理层资本配置能力的读者。",
+            keyIdeas: ["像企业所有者一样思考", "关注长期资本回报", "评估管理层的资本配置"]
+        ),
+        KnowledgeBook(
+            id: "mastering-the-market-cycle",
+            title: "周期",
+            originalTitle: "Mastering the Market Cycle",
+            author: "霍华德·马克斯",
+            summary: "认识经济、信贷、情绪与风险偏好如何相互影响，在不确定中判断所处位置。",
+            recommendation: "周期无法被精确计时，但理解它能帮助你调整进攻与防守的力度，避免线性外推。",
+            suitableFor: "希望把宏观环境、市场情绪与仓位管理联系起来的读者。",
+            keyIdeas: ["判断周期所处区间", "观察信贷与风险偏好", "根据环境调整攻守"]
+        )
+    ]
+}

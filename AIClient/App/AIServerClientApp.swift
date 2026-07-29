@@ -61,7 +61,8 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--sentiment-preview") { return .investment }
         if ProcessInfo.processInfo.arguments.contains("--learning-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-video-preview") { return .learning }
+            ProcessInfo.processInfo.arguments.contains("--learning-video-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-book-preview") { return .learning }
         return .observation
         #else
         .observation
@@ -166,7 +167,7 @@ private struct RootNavigationBar: View {
         HStack(spacing: 0) {
             item(.observation, title: "观点", icon: "list.bullet.rectangle")
             item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
-            item(.learning, title: "学习", icon: "graduationcap")
+            item(.learning, title: "知识", icon: "books.vertical")
             item(.people, title: "人物", icon: "person")
         }
         .frame(height: 56)
