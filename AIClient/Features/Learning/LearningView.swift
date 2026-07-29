@@ -9,13 +9,15 @@ private let learningImageLogger = Logger(
 
 struct LearningView: View {
     @Binding private var showsDetail: Bool
+    @Environment(\.openURL) private var openURL
     @State private var store = LearningStore()
     @State private var repository = LearningContentRepository()
     @State private var path: [LearningRoute] = []
     @State private var selectedCategory = "股票"
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ? .books : .investment
+        (ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-book-preview")) ? .books : .investment
         #else
         .investment
         #endif
@@ -36,13 +38,13 @@ struct LearningView: View {
                 switch route {
                 case let .topic(topic):
                     LearningDetailView(topic: topic, repository: repository)
-                case let .book(book):
-                    KnowledgeBookDetailView(book: book)
                 }
             }
         }
         .task {
-            await store.load()
+            async let catalog: Void = store.load()
+            async let bookshelf: Void = store.loadBookshelf()
+            _ = await (catalog, bookshelf)
             #if DEBUG
             if (ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-video-preview")),
@@ -51,10 +53,6 @@ struct LearningView: View {
                 .flatMap(\.topics)
                 .first(where: { $0.title.contains("市盈率") }) {
                 path = [.topic(topic)]
-            } else if ProcessInfo.processInfo.arguments.contains("--learning-book-preview"),
-                      path.isEmpty,
-                      let book = KnowledgeBook.featured.first {
-                path = [.book(book)]
             }
             #endif
         }
@@ -103,7 +101,7 @@ struct LearningView: View {
                 case .investment:
                     await store.load(force: true)
                 case .books:
-                    break
+                    await store.loadBookshelf(force: true)
                 }
             }
         }
@@ -376,10 +374,10 @@ struct LearningView: View {
         let books = filteredBooks()
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(query.isEmpty ? "投资经典" : "搜索结果")
+                Text(query.isEmpty ? "我的书架" : "搜索结果")
                     .font(.system(size: 25, weight: .bold))
                 if query.isEmpty {
-                    Text("建立体系，训练判断")
+                    Text(store.bookshelf?.source ?? "微信读书")
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
                 }
@@ -392,9 +390,25 @@ struct LearningView: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 20)
 
-        if books.isEmpty {
+        if store.isBookshelfLoading && store.bookshelf == nil {
+            ProgressView("正在载入书架")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 44)
+        } else if store.bookshelfErrorMessage != nil && store.bookshelf == nil {
+            ContentUnavailableView {
+                Label("书架载入失败", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text("稍后再试，或下拉刷新")
+            } actions: {
+                Button("重新载入") {
+                    Task { await store.loadBookshelf(force: true) }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+        } else if books.isEmpty {
             ContentUnavailableView(
-                "没有找到相关书籍",
+                query.isEmpty ? "暂无可展示书籍" : "没有找到相关书籍",
                 systemImage: "books.vertical",
                 description: Text("试试书名、作者或投资主题")
             )
@@ -409,12 +423,13 @@ struct LearningView: View {
                 alignment: .center,
                 spacing: 28
             ) {
-                ForEach(books) { book in
-                    let paletteIndex = KnowledgeBook.featured.firstIndex(where: { $0.id == book.id }) ?? 0
+                ForEach(Array(books.enumerated()), id: \.element.id) { index, book in
                     Button {
-                        path.append(.book(book))
+                        if let url = book.openURL {
+                            openURL(url)
+                        }
                     } label: {
-                        KnowledgeBookCard(book: book, paletteIndex: paletteIndex)
+                        KnowledgeBookCard(book: book, paletteIndex: index)
                     }
                     .buttonStyle(LearningPressStyle())
                 }
@@ -437,14 +452,13 @@ struct LearningView: View {
     }
 
     private func filteredBooks() -> [KnowledgeBook] {
+        let books = store.bookshelf?.books ?? []
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return KnowledgeBook.featured }
-        return KnowledgeBook.featured.filter {
+        guard !trimmed.isEmpty else { return books }
+        return books.filter {
             $0.title.localizedCaseInsensitiveContains(trimmed) ||
-                ($0.originalTitle?.localizedCaseInsensitiveContains(trimmed) ?? false) ||
                 $0.author.localizedCaseInsensitiveContains(trimmed) ||
-                $0.summary.localizedCaseInsensitiveContains(trimmed) ||
-                $0.keyIdeas.contains { $0.localizedCaseInsensitiveContains(trimmed) }
+                ($0.category?.localizedCaseInsensitiveContains(trimmed) ?? false)
         }
     }
 
@@ -480,7 +494,6 @@ private enum KnowledgeSection: String {
 
 private enum LearningRoute: Hashable {
     case topic(LearningTopic)
-    case book(KnowledgeBook)
 }
 
 private struct KnowledgeBookCard: View {
@@ -516,11 +529,7 @@ private struct KnowledgeBookCover: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            LinearGradient(
-                colors: palette,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            coverArtwork
             Rectangle()
                 .fill(.black.opacity(0.13))
                 .frame(width: compact ? 4 : 7)
@@ -529,25 +538,9 @@ private struct KnowledgeBookCover: View {
                 .frame(width: 1)
                 .padding(.leading, compact ? 5 : 9)
 
-            VStack(alignment: .leading, spacing: compact ? 4 : 9) {
-                Image(systemName: "books.vertical.fill")
-                    .font(.system(size: compact ? 10 : 16, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.82))
-                Text(book.title)
-                    .font(.system(size: compact ? 9 : 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(compact ? 3 : 4)
-                    .minimumScaleFactor(0.78)
-                Spacer(minLength: 2)
-                Text(book.author)
-                    .font(.system(size: compact ? 6.5 : 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.82))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+            if book.coverURL == nil {
+                fallbackTitle
             }
-            .padding(.leading, compact ? 9 : 17)
-            .padding(.trailing, compact ? 5 : 10)
-            .padding(.vertical, compact ? 7 : 14)
         }
         .clipShape(RoundedRectangle(cornerRadius: compact ? 5 : 9, style: .continuous))
         .overlay {
@@ -555,6 +548,52 @@ private struct KnowledgeBookCover: View {
                 .stroke(.white.opacity(0.2), lineWidth: 0.5)
         }
         .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var coverArtwork: some View {
+        if let coverURL = book.coverURL {
+            AsyncImage(url: coverURL) { phase in
+                switch phase {
+                case let .success(image):
+                    image.resizable().scaledToFill()
+                default:
+                    LinearGradient(
+                        colors: palette,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+            }
+        } else {
+            LinearGradient(
+                colors: palette,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+
+    private var fallbackTitle: some View {
+        VStack(alignment: .leading, spacing: compact ? 4 : 9) {
+            Image(systemName: "books.vertical.fill")
+                .font(.system(size: compact ? 10 : 16, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
+            Text(book.title)
+                .font(.system(size: compact ? 9 : 17, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(compact ? 3 : 4)
+                .minimumScaleFactor(0.78)
+            Spacer(minLength: 2)
+            Text(book.author)
+                .font(.system(size: compact ? 6.5 : 10.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .padding(.leading, compact ? 9 : 17)
+        .padding(.trailing, compact ? 5 : 10)
+        .padding(.vertical, compact ? 7 : 14)
     }
 
     private var palette: [Color] {
@@ -570,108 +609,6 @@ private struct KnowledgeBookCover: View {
         default:
             [Color(red: 0.42, green: 0.29, blue: 0.10), Color(red: 0.73, green: 0.53, blue: 0.20)]
         }
-    }
-}
-
-private struct KnowledgeBookDetailView: View {
-    let book: KnowledgeBook
-    @Environment(\.dismiss) private var dismiss
-
-    private var paletteIndex: Int {
-        KnowledgeBook.featured.firstIndex(where: { $0.id == book.id }) ?? 0
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            detailBar
-            Divider().opacity(0.5)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(spacing: 18) {
-                        KnowledgeBookCover(book: book, paletteIndex: paletteIndex)
-                            .frame(width: 154, height: 216)
-                            .shadow(color: .black.opacity(0.16), radius: 14, x: 0, y: 8)
-                        VStack(spacing: 7) {
-                            Text(book.title)
-                                .font(.system(size: 30, weight: .bold))
-                                .multilineTextAlignment(.center)
-                            if let originalTitle = book.originalTitle {
-                                Text(originalTitle)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                            }
-                            Text(book.author)
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 28)
-                    .padding(.bottom, 32)
-
-                    detailSection(title: "内容简介", text: book.summary)
-                    detailSection(title: "为什么值得读", text: book.recommendation)
-
-                    Text("你会学到")
-                        .font(.system(size: 22, weight: .bold))
-                        .padding(.bottom, 14)
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(book.keyIdeas.enumerated()), id: \.offset) { index, idea in
-                            HStack(alignment: .top, spacing: 12) {
-                                Text("\(index + 1)")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(HoldingsPalette.purple)
-                                    .frame(width: 26, height: 26)
-                                    .background(HoldingsPalette.purple.opacity(0.1), in: Circle())
-                                Text(idea)
-                                    .font(.system(size: 17))
-                                    .lineSpacing(5)
-                                    .padding(.top, 2)
-                            }
-                        }
-                    }
-                    .padding(.bottom, 30)
-
-                    detailSection(title: "适合谁", text: book.suitableFor)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 50)
-            }
-            .scrollIndicators(.hidden)
-        }
-        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
-    }
-
-    private var detailBar: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            Spacer()
-            Text("书籍")
-                .font(.system(size: 17, weight: .semibold))
-            Spacer()
-            Color.clear.frame(width: 44, height: 44)
-        }
-        .padding(.horizontal, 6)
-        .frame(height: 50)
-    }
-
-    private func detailSection(title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 22, weight: .bold))
-            Text(text)
-                .font(.system(size: 17))
-                .foregroundStyle(Color(uiColor: .label))
-                .lineSpacing(7)
-        }
-        .padding(.bottom, 30)
     }
 }
 

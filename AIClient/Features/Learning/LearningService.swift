@@ -39,8 +39,19 @@ struct LearningService: LearningServing {
         return response.data
     }
 
-    private func fetch<Value: Decodable>(_ url: URL) async throws -> Value {
-        var request = URLRequest(url: url)
+    func fetchBookshelf() async throws -> LearningBookshelf {
+        let response: LearningBookshelfResponse = try await fetch(
+            baseURL.appending(path: "api/v1/learning/bookshelf"),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        return response.data
+    }
+
+    private func fetch<Value: Decodable>(
+        _ url: URL,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    ) async throws -> Value {
+        var request = URLRequest(url: url, cachePolicy: cachePolicy)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -109,8 +120,11 @@ final class LearningContentRepository {
 @Observable
 final class LearningStore {
     private(set) var catalog: LearningCatalog?
+    private(set) var bookshelf: LearningBookshelf?
     private(set) var isLoading = false
+    private(set) var isBookshelfLoading = false
     private(set) var errorMessage: String?
+    private(set) var bookshelfErrorMessage: String?
     private let service: LearningService
 
     init(service: LearningService = LearningService()) { self.service = service }
@@ -126,6 +140,20 @@ final class LearningStore {
             return
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadBookshelf(force: Bool = false) async {
+        guard force || bookshelf == nil else { return }
+        isBookshelfLoading = true
+        bookshelfErrorMessage = nil
+        defer { isBookshelfLoading = false }
+        do {
+            bookshelf = try await service.fetchBookshelf()
+        } catch is CancellationError {
+            return
+        } catch {
+            bookshelfErrorMessage = error.localizedDescription
         }
     }
 }

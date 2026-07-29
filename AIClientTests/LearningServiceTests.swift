@@ -52,17 +52,30 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "https://api.example.com/api/v1/learning/media/a.jpg")
     }
 
-    func testFeaturedBooksHaveUniqueIDsAndCompleteDetails() {
-        let books = KnowledgeBook.featured
-        XCTAssertGreaterThanOrEqual(books.count, 5)
-        XCTAssertEqual(Set(books.map(\.id)).count, books.count)
-        XCTAssertTrue(books.allSatisfy {
-            !$0.title.isEmpty &&
-                !$0.author.isEmpty &&
-                !$0.summary.isEmpty &&
-                !$0.recommendation.isEmpty &&
-                !$0.suitableFor.isEmpty &&
-                !$0.keyIdeas.isEmpty
-        })
+    func testDecodesFilteredWeReadBookshelf() throws {
+        let data = Data(
+            """
+            {
+              "data": {
+                "source": "微信读书",
+                "books": [{
+                  "id": "3300203616",
+                  "title": "哈萨比斯：谷歌AI之脑",
+                  "author": "[英]塞巴斯蒂安·马拉比",
+                  "cover_url": "https://example.com/hassabis.jpg",
+                  "category": "经济理财-商业",
+                  "open_url": "weread://reading?bId=3300203616",
+                  "is_finished": false
+                }]
+              }
+            }
+            """.utf8
+        )
+        let response = try JSONDecoder().decode(LearningBookshelfResponse.self, from: data)
+        XCTAssertEqual(response.data.source, "微信读书")
+        XCTAssertEqual(response.data.books.count, 1)
+        XCTAssertEqual(response.data.books.first?.id, "3300203616")
+        XCTAssertEqual(response.data.books.first?.coverURL?.host, "example.com")
+        XCTAssertEqual(response.data.books.first?.openURL?.scheme, "weread")
     }
 }
