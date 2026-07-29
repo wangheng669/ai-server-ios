@@ -14,6 +14,7 @@
 		18F1A1D11FD420E25AA227ED /* PostComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */; };
 		19D96E271C5B8E031ED23EE1 /* LearningService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7DCAC8CCF496B338DF783E /* LearningService.swift */; };
 		212E02E9454406B9CEE36D72 /* MarketStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E95DF23DE2CBD0DEEC463B /* MarketStore.swift */; };
+		233ACCCB8DEA01858D633D98 /* CountryGDPDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */; };
 		260E90A29878D779265564DE /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */; };
 		26D2AAFFCB9B9B48EE1CD558 /* ServerAddressValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */; };
 		30DCD0C5835091D25C86B8A3 /* PeopleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3E8C146E7D023F0970E445 /* PeopleService.swift */; };
@@ -64,6 +65,7 @@
 		041A88D0726A910552794148 /* FamousHoldingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingDetailView.swift; sourceTree = "<group>"; };
 		07AB1EAB21326C8E0E5C12EB /* MarketPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketPresentationTests.swift; sourceTree = "<group>"; };
 		07CD0E8186D0B14FE290474A /* LearningDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDetailView.swift; sourceTree = "<group>"; };
+		08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryGDPDetailView.swift; sourceTree = "<group>"; };
 		0964D64008AE6D9891C78345 /* MarketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketService.swift; sourceTree = "<group>"; };
 		097BF52E5F2C1BE5326021E6 /* ServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSetupView.swift; sourceTree = "<group>"; };
 		1304CD1593E840EFAF32E208 /* PeopleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleStore.swift; sourceTree = "<group>"; };
@@ -240,6 +242,7 @@
 		DCD558141B0F54371B604FAE /* Investment */ = {
 			isa = PBXGroup;
 			children = (
+				08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */,
 				5C6756677ADA82073372908E /* CountryGDPRankingView.swift */,
 				041A88D0726A910552794148 /* FamousHoldingDetailView.swift */,
 				6017E166E5F6A363E603B660 /* FamousHoldingsModels.swift */,
@@ -368,6 +371,7 @@
 			files = (
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
+				233ACCCB8DEA01858D633D98 /* CountryGDPDetailView.swift in Sources */,
 				5543ADDBFA9B940978410DD8 /* CountryGDPRankingView.swift in Sources */,
 				0BB9A3475C0408092697FA60 /* DeploymentStatusTip.swift in Sources */,
 				912BA358792A0CF9208478FB /* FamousHoldingDetailView.swift in Sources */,

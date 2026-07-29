@@ -7,6 +7,7 @@ struct CountryGDPRankingResponse: Decodable {
 
 struct CountryGDPRanking: Decodable {
     let year: Int
+    let previousYear: Int?
     let metric: String
     let unit: String
     let sourceName: String
@@ -16,6 +17,7 @@ struct CountryGDPRanking: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case year, metric, unit, countries
+        case previousYear = "previous_year"
         case sourceName = "source_name"
         case sourceURL = "source_url"
         case updatedAt = "updated_at"
@@ -24,10 +26,14 @@ struct CountryGDPRanking: Decodable {
 
 struct CountryGDP: Decodable, Identifiable {
     let rank: Int
+    let previousRank: Int?
+    let rankChange: Int?
     let countryCode: String
     let iso2Code: String
     let countryName: String
     let gdpCurrentUSD: Double
+    let previousGDPCurrentUSD: Double?
+    let gdpGrowthPercent: Double?
 
     var id: String { "\(countryCode)-\(rank)" }
 
@@ -44,14 +50,18 @@ struct CountryGDP: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case rank
+        case previousRank = "previous_rank"
+        case rankChange = "rank_change"
         case countryCode = "country_code"
         case iso2Code = "iso2_code"
         case countryName = "country_name"
         case gdpCurrentUSD = "gdp_current_usd"
+        case previousGDPCurrentUSD = "previous_gdp_current_usd"
+        case gdpGrowthPercent = "gdp_growth_percent"
     }
 }
 
-private struct CountryGDPService {
+struct CountryGDPService {
     let baseURL: URL
     let session: URLSession
 
@@ -74,13 +84,35 @@ private struct CountryGDPService {
         }
         return payload.data
     }
+
+    func history(countryCode: String) async throws -> CountryGDPHistory {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/v1/economy/gdp-ranking/country"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "code", value: countryCode)]
+        guard let url = components?.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let payload = try JSONDecoder().decode(CountryGDPHistoryResponse.self, from: data)
+        guard payload.success, !payload.data.points.isEmpty else {
+            throw URLError(.cannotParseResponse)
+        }
+        return payload.data
+    }
 }
 
 struct CountryGDPRankingView: View {
+    @Binding var showsDetail: Bool
     @State private var ranking: CountryGDPRanking?
     @State private var isLoading = true
     @State private var loadFailed = false
     @State private var searchText = ""
+    @State private var path: [CountryGDPRoute] = []
 
     private var visibleCountries: [CountryGDP] {
         guard let countries = ranking?.countries else { return [] }
@@ -94,27 +126,36 @@ struct CountryGDPRankingView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                if let ranking {
-                    overview(ranking)
-                    searchField
-                    rankingList(ranking)
-                    sourceFooter(ranking)
-                } else if isLoading {
-                    loadingState
-                } else {
-                    errorState
+        NavigationStack(path: $path) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if let ranking {
+                        overview(ranking)
+                        searchField
+                        rankingList(ranking)
+                        sourceFooter(ranking)
+                    } else if isLoading {
+                        loadingState
+                    } else {
+                        errorState
+                    }
                 }
+                .padding(.horizontal, InvestmentDesign.pageInset)
+                .padding(.top, 14)
+                .padding(.bottom, 112)
             }
-            .padding(.horizontal, InvestmentDesign.pageInset)
-            .padding(.top, 14)
-            .padding(.bottom, 112)
+            .scrollIndicators(.hidden)
+            .background(InvestmentDesign.canvas)
+            .navigationDestination(for: CountryGDPRoute.self) { route in
+                CountryGDPDetailView(route: route)
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
-        .scrollIndicators(.hidden)
-        .background(InvestmentDesign.canvas)
         .task { await load() }
         .refreshable { await load() }
+        .onChange(of: path) { _, value in showsDetail = !value.isEmpty }
+        .onAppear { showsDetail = !path.isEmpty }
+        .onDisappear { showsDetail = false }
     }
 
     private func overview(_ ranking: CountryGDPRanking) -> some View {
@@ -203,7 +244,10 @@ struct CountryGDPRankingView: View {
                     .frame(height: 180)
             } else {
                 ForEach(visibleCountries) { country in
-                    countryRow(country, leaderGDP: ranking.countries.first?.gdpCurrentUSD ?? 1)
+                    NavigationLink(value: CountryGDPRoute(country: country)) {
+                        countryRow(country, leaderGDP: ranking.countries.first?.gdpCurrentUSD ?? 1)
+                    }
+                    .buttonStyle(.plain)
                     if country.id != visibleCountries.last?.id {
                         Divider().padding(.leading, 63)
                     }
@@ -235,10 +279,13 @@ struct CountryGDPRankingView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    Text(CountryGDPFormat.compact(country.gdpCurrentUSD))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .minimumScaleFactor(0.8)
-                        .lineLimit(1)
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(CountryGDPFormat.compact(country.gdpCurrentUSD))
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.72)
+                            .lineLimit(1)
+                        changeSummary(country)
+                    }
                 }
                 GeometryReader { geometry in
                     Capsule()
@@ -247,11 +294,41 @@ struct CountryGDPRankingView: View {
                 }
                 .frame(height: 3)
             }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("第 \(country.rank) 名，\(country.localizedName)，\(CountryGDPFormat.accessible(country.gdpCurrentUSD))")
+        .accessibilityLabel(accessibilityLabel(country))
+    }
+
+    @ViewBuilder
+    private func changeSummary(_ country: CountryGDP) -> some View {
+        HStack(spacing: 5) {
+            if let change = country.rankChange {
+                if change == 0 {
+                    Text("—").foregroundStyle(.secondary)
+                } else {
+                    Label("\(abs(change))", systemImage: change > 0 ? "arrow.up" : "arrow.down")
+                        .foregroundStyle(change > 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
+                }
+            }
+            if let growth = country.gdpGrowthPercent {
+                Text("\(growth >= 0 ? "+" : "")\(growth, specifier: "%.1f")%")
+                    .foregroundStyle(growth >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
+            }
+        }
+        .font(.system(size: 10, weight: .semibold, design: .rounded))
+    }
+
+    private func accessibilityLabel(_ country: CountryGDP) -> String {
+        var text = "第 \(country.rank) 名，\(country.localizedName)，\(CountryGDPFormat.accessible(country.gdpCurrentUSD))"
+        if let growth = country.gdpGrowthPercent {
+            text += "，同比\(growth >= 0 ? "增长" : "下降")\(abs(growth).formatted(.number.precision(.fractionLength(1))))%"
+        }
+        return text
     }
 
     private func sourceFooter(_ ranking: CountryGDPRanking) -> some View {
@@ -306,6 +383,15 @@ struct CountryGDPRankingView: View {
         defer { isLoading = false }
         do {
             ranking = try await CountryGDPService().ranking()
+            #if DEBUG
+            if path.isEmpty,
+               let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--gdp-detail-preview=") }),
+               let country = ranking?.countries.first(where: {
+                   $0.countryCode == String(argument.dropFirst("--gdp-detail-preview=".count)).uppercased()
+               }) {
+                path.append(CountryGDPRoute(country: country))
+            }
+            #endif
         } catch {
             if ranking == nil { loadFailed = true }
         }

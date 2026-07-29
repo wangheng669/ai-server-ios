@@ -41,7 +41,8 @@ struct InvestmentView: View {
             _section = State(initialValue: .industries)
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") {
             _section = State(initialValue: .sentiment)
-        } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") {
+        } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
+                    ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) {
             _section = State(initialValue: .gdp)
         } else {
             _section = State(initialValue: .market)
@@ -87,7 +88,7 @@ struct InvestmentView: View {
                     if !showsDetail {
                         InvestmentHeader(selection: $section)
                     }
-                    CountryGDPRankingView()
+                    CountryGDPRankingView(showsDetail: $showsDetail)
                 }
             }
         }
