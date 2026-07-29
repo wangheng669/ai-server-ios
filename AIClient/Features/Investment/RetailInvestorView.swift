@@ -11,14 +11,24 @@ struct RetailInvestorView: View {
     @State private var showsAllInvestorMood = false
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
+    @MainActor
     init(
-        store: RetailSentimentStore = RetailSentimentStore(),
-        marketStore: MarketStore = MarketStore(),
+        store: RetailSentimentStore,
+        marketStore: MarketStore,
         showsDetail: Binding<Bool> = .constant(false)
     ) {
         self.store = store
         self.marketStore = marketStore
         _showsDetail = showsDetail
+    }
+
+    @MainActor
+    init(showsDetail: Binding<Bool> = .constant(false)) {
+        self.init(
+            store: RetailSentimentStore(),
+            marketStore: MarketStore(),
+            showsDetail: showsDetail
+        )
     }
 
     var body: some View {

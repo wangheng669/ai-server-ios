@@ -29,9 +29,15 @@ struct MarketView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
-    init(store: MarketStore = MarketStore(), showsDetail: Binding<Bool> = .constant(false)) {
+    @MainActor
+    init(store: MarketStore, showsDetail: Binding<Bool> = .constant(false)) {
         self.store = store
         _showsDetail = showsDetail
+    }
+
+    @MainActor
+    init(showsDetail: Binding<Bool> = .constant(false)) {
+        self.init(store: MarketStore(), showsDetail: showsDetail)
     }
 
     var body: some View {
