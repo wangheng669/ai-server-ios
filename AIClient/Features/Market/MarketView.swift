@@ -27,6 +27,7 @@ struct MarketView: View {
         #endif
     }()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     init(showsDetail: Binding<Bool> = .constant(false)) { _showsDetail = showsDetail }
 
@@ -42,9 +43,12 @@ struct MarketView: View {
                 }
                 .toolbar(.hidden, for: .navigationBar)
         }
-        .task { await store.runUpdates() }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.runUpdates()
+        }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard rootTabIsActive, phase == .active else { return }
             Task { await store.resumeUpdates() }
         }
         .onChange(of: path) { _, path in showsDetail = !path.isEmpty }
@@ -2087,7 +2091,7 @@ private struct MarketIndexDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .background(InteractivePopGestureEnabler())
         .task {
-            if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+            if isIndex { await store.loadIndexConstituents(symbol: symbol) }
             if showsCompanyProfile, let quote {
                 async let logo: Void = store.loadCompanyLogo(symbol: quote.symbol, name: quote.name)
                 async let companyFinancials: Void = store.loadCompanyFinancials(symbol: quote.symbol)

@@ -4,27 +4,33 @@ import WebKit
 enum RootTab: Hashable { case observation, investment, learning, people }
 
 private enum FlashFilter: String, CaseIterable, Identifiable {
-    case all, important, ai, market, policy
+    case all, important, tech, equity, commodity, company, geopolitical, other
 
     var id: Self { self }
     var title: String {
         return switch self {
         case .all: "全部"
         case .important: "重要"
-        case .ai: "AI"
-        case .market: "市场"
-        case .policy: "政策"
+        case .tech: "AI科技"
+        case .equity: "股票"
+        case .commodity: "商品"
+        case .company: "公司"
+        case .geopolitical: "国际"
+        case .other: "综合"
+        }
+    }
+
+    var serverCategory: String? {
+        return switch self {
+        case .all, .important: nil
+        default: rawValue
         }
     }
 
     func matches(_ post: Post) -> Bool {
-        let content = post.displayContent.lowercased()
-        return switch self {
-        case .all: true
+        switch self {
         case .important: post.tagNames.contains("重要")
-        case .ai: ["ai", "人工智能", "大模型", "算力", "芯片", "openai", "gpt"].contains { content.contains($0) }
-        case .market: ["股", "市场", "指数", "涨", "跌", "ipo", "营收", "利润"].contains { content.contains($0) }
-        case .policy: ["政策", "发改委", "工信部", "国务院", "监管", "标准", "方案"].contains { content.contains($0) }
+        default: true
         }
     }
 }
@@ -69,6 +75,7 @@ struct NewsFeedView: View {
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
     private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
     private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
@@ -105,10 +112,15 @@ struct NewsFeedView: View {
                 }
             }
         }
-        .onAppear { model.startRealtime() }
-        .onDisappear { model.stopRealtime() }
+        .onChange(of: rootTabIsActive, initial: true) { _, isActive in
+            if isActive && scenePhase == .active {
+                model.startRealtime()
+            } else {
+                model.stopRealtime()
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
+            if rootTabIsActive, phase == .active {
                 model.startRealtime()
                 if hasLoadedFeedOnce {
                     Task { await model.refresh() }
@@ -140,7 +152,8 @@ struct NewsFeedView: View {
             showsDetail = false
             hidesTabBar = false
         }
-        .task(id: model.source) {
+        .task(id: "\(rootTabIsActive)-\(model.source.rawValue)") {
+            guard rootTabIsActive else { return }
             await model.loadInitial()
             hasLoadedFeedOnce = true
             #if DEBUG
@@ -162,7 +175,8 @@ struct NewsFeedView: View {
             }
             #endif
         }
-        .task {
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
             await model.warmSourceCache()
         }
     }
@@ -323,8 +337,8 @@ struct NewsFeedView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .task(id: source) {
-                if source == .rss { await model.loadRSSFeedsIfNeeded() }
+            .task(id: "\(rootTabIsActive)-\(source.rawValue)") {
+                if rootTabIsActive, source == .rss { await model.loadRSSFeedsIfNeeded() }
             }
         }
     }
@@ -346,8 +360,8 @@ struct NewsFeedView: View {
                 weiboFollowingFeed
             }
         }
-        .task {
-            if weiboSection == .following {
+        .task(id: rootTabIsActive) {
+            if rootTabIsActive, weiboSection == .following {
                 await weiboFollowingModel.loadInitial()
             }
         }
@@ -396,7 +410,10 @@ struct NewsFeedView: View {
                             WeiboFollowingRow(post: post)
                                 .contentShape(Rectangle())
                                 .onTapGesture { path.append(post) }
-                                .task { await weiboFollowingModel.loadMoreIfNeeded(current: post) }
+                                .task(id: rootTabIsActive) {
+                                    guard rootTabIsActive else { return }
+                                    await weiboFollowingModel.loadMoreIfNeeded(current: post)
+                                }
                             Divider()
                                 .overlay(Color.primary.opacity(0.04))
                                 .padding(.leading, 56)
@@ -516,12 +533,12 @@ struct NewsFeedView: View {
                                     .allowsHitTesting(false)
                                 }
                             }
-                            .task {
-                                guard source == model.source else { return }
+                            .task(id: "\(rootTabIsActive)-translate-\(post.id)") {
+                                guard rootTabIsActive, source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
-                            .task(id: source == .flash ? posts.last?.id : post.id) {
-                                guard source == model.source else { return }
+                            .task(id: "\(rootTabIsActive)-page-\(source == .flash ? posts.last?.id ?? -1 : post.id)") {
+                                guard rootTabIsActive, source == model.source else { return }
                                 await model.loadMoreIfNeeded(
                                     current: post,
                                     thresholdPostID: source == .flash ? visiblePosts.last?.id : nil
@@ -839,7 +856,9 @@ struct NewsFeedView: View {
             HStack(spacing: 8) {
                 ForEach(FlashFilter.allCases) { filter in
                     Button {
+                        guard flashFilter != filter else { return }
                         withAnimation(.easeOut(duration: 0.18)) { flashFilter = filter }
+                        Task { await model.selectFlashCategory(filter.serverCategory) }
                     } label: {
                         Text(filter.title)
                             .font(.system(size: 14, weight: flashFilter == filter ? .semibold : .medium))
@@ -2721,11 +2740,16 @@ private struct NewsCardView: View {
     }
 
     private var flashCategory: String {
-        let content = post.displayContent.lowercased()
-        if ["ai", "人工智能", "大模型", "算力", "芯片", "openai", "gpt"].contains(where: content.contains) { return "AI" }
-        if ["政策", "发改委", "工信部", "国务院", "监管", "标准"].contains(where: content.contains) { return "政策" }
-        if ["股", "市场", "指数", "涨", "跌", "ipo", "营收", "利润"].contains(where: content.contains) { return "市场" }
-        return "快讯"
+        switch post.meta?.flashCategory {
+        case "tech": "AI科技"
+        case "equity": "股票"
+        case "commodity": "商品"
+        case "company": "公司"
+        case "geopolitical": "国际"
+        case "other": "综合"
+        case "policy": "政策"
+        default: "快讯"
+        }
     }
 
     private var socialCard: some View {

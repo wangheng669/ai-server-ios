@@ -1,6 +1,17 @@
 import SwiftUI
 import UIKit
 
+private struct RootTabIsActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var rootTabIsActive: Bool {
+        get { self[RootTabIsActiveKey.self] }
+        set { self[RootTabIsActiveKey.self] = newValue }
+    }
+}
+
 @MainActor
 final class AppOrientationController {
     static let shared = AppOrientationController()
@@ -58,7 +69,8 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--sentiment-preview") { return .investment }
+            ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--gdp-preview") { return .investment }
         if ProcessInfo.processInfo.arguments.contains("--learning-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-video-preview") ||
@@ -88,7 +100,8 @@ private struct EditorialRootView: View {
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--industries-preview") { return nil }
+            ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--gdp-preview") { return nil }
         #endif
         return deploymentPreview ?? deploymentStore.snapshot
     }
@@ -138,7 +151,6 @@ private struct EditorialRootView: View {
         }
         .task {
             deploymentStore.start()
-            await PeopleImagePreheater.preheatTechnologyLeaders()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -154,6 +166,7 @@ private struct EditorialRootView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
+            .environment(\.rootTabIsActive, selectedTab == tab)
             .opacity(selectedTab == tab ? 1 : 0)
             .allowsHitTesting(selectedTab == tab)
             .accessibilityHidden(selectedTab != tab)

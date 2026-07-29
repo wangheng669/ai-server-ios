@@ -5,6 +5,7 @@ struct PeopleView: View {
     @Binding private var showsDetail: Bool
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
         self.store = store
@@ -45,7 +46,8 @@ struct PeopleView: View {
                 PersonDetailPage(person: person)
             }
         }
-        .task {
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
             await store.load()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
@@ -138,7 +140,8 @@ private struct PeopleStarMapExplorer: View {
 
                 if showsSearch {
                     searchPanel
-                        .padding(.horizontal, 12)
+                        .padding(.leading, 12)
+                        .padding(.trailing, 52)
                         .padding(.top, 8)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 } else {
@@ -154,7 +157,7 @@ private struct PeopleStarMapExplorer: View {
                             .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
                     }
                     .buttonStyle(PeoplePressStyle())
-                    .padding(.trailing, 16)
+                    .padding(.trailing, 56)
                     .padding(.top, 10)
                     .accessibilityLabel("搜索人物")
                 }
@@ -645,6 +648,7 @@ private struct PeopleRelationshipExplorer: View {
     let allPeople: [SpecialPerson]
     let baseURL: URL
     let latestPost: (SpecialPerson) -> Post?
+    let loadLatestPost: (SpecialPerson) async -> Void
     let onOpenPerson: (SpecialPerson) -> Void
     let onRefresh: () async -> Void
 
@@ -872,6 +876,7 @@ private struct PeopleRelationshipExplorer: View {
                         PersonActivityRow(person: person, latestPost: latestPost(person))
                     }
                     .buttonStyle(PeoplePressStyle())
+                    .task { await loadLatestPost(person) }
                     if person.id != filteredListPeople.last?.id {
                         Divider().padding(.leading, 84)
                     }

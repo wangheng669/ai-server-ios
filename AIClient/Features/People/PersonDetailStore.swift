@@ -60,7 +60,7 @@ final class PersonDetailStore {
         defer { isLoadingOwnPosts = false }
         do {
             let posts = person.hasOwnPostSource ? try await service.posts(userID: person.userID, page: 1, limit: pageSize) : []
-            ownPosts = await translatedBeforeDisplay(posts)
+            ownPosts = posts
             ownPostsPage = 1
             canLoadMoreOwnPosts = posts.count == pageSize
         } catch is CancellationError {
@@ -85,7 +85,7 @@ final class PersonDetailStore {
             guard !Task.isCancelled else { return }
             let existingIDs = Set(ownPosts.map(\.id))
             let newPosts = posts.filter { !existingIDs.contains($0.id) }
-            ownPosts += await translatedBeforeDisplay(newPosts)
+            ownPosts += newPosts
             ownPostsPage = nextPage
             canLoadMoreOwnPosts = posts.count == pageSize
         } catch is CancellationError {
@@ -111,24 +111,20 @@ final class PersonDetailStore {
         }
         loadingXTranslationIDs.insert(post.id)
         defer { loadingXTranslationIDs.remove(post.id) }
-        for attempt in 0..<3 {
-            do {
-                let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
-                guard !Task.isCancelled else { return }
-                let value = Self.presentedTranslation(
-                    result.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                    original: post.originalDisplayContent
-                )
-                guard !value.isEmpty, value != post.originalDisplayContent else { return }
-                Self.cacheXTranslation(value, tweetID: tweetID)
-                xTranslations[post.id] = value
-                return
-            } catch is CancellationError {
-                return
-            } catch {
-                guard attempt < 2 else { return }
-                try? await Task.sleep(for: .milliseconds(500 * (attempt + 1)))
-            }
+        do {
+            let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
+            guard !Task.isCancelled else { return }
+            let value = Self.presentedTranslation(
+                result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                original: post.originalDisplayContent
+            )
+            guard !value.isEmpty, value != post.originalDisplayContent else { return }
+            Self.cacheXTranslation(value, tweetID: tweetID)
+            xTranslations[post.id] = value
+        } catch is CancellationError {
+            return
+        } catch {
+            return
         }
     }
 
@@ -165,49 +161,11 @@ final class PersonDetailStore {
         discussionsError = nil
         defer { isLoadingDiscussions = false }
         do {
-            let posts = try await service.relatedDiscussions(for: person)
-            discussions = await translatedBeforeDisplay(posts)
+            discussions = try await service.relatedDiscussions(for: person)
         } catch is CancellationError {
             return
         } catch {
             discussionsError = error.localizedDescription
-        }
-    }
-
-    private func translatedBeforeDisplay(_ posts: [Post]) async -> [Post] {
-        let baseURL = baseURL
-        return await withTaskGroup(of: (Int, Post).self, returning: [Post].self) { group in
-            for (index, post) in posts.enumerated() {
-                group.addTask {
-                    guard post.needsXTranslation, let tweetID = post.xTweetID else {
-                        return (index, post)
-                    }
-                    if let cached = Self.cachedXTranslation(tweetID: tweetID) {
-                        return (index, post.replacingTranslation(with: cached))
-                    }
-                    do {
-                        let result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID)
-                        guard !Task.isCancelled else { return (index, post) }
-                        let translation = Self.presentedTranslation(
-                            result.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                            original: post.originalDisplayContent
-                        )
-                        guard !translation.isEmpty, translation != post.originalDisplayContent else {
-                            return (index, post)
-                        }
-                        Self.cacheXTranslation(translation, tweetID: tweetID)
-                        return (index, post.replacingTranslation(with: translation))
-                    } catch {
-                        return (index, post)
-                    }
-                }
-            }
-
-            var translated = posts
-            for await (index, post) in group {
-                translated[index] = post
-            }
-            return translated
         }
     }
 

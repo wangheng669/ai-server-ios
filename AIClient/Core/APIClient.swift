@@ -8,7 +8,7 @@ struct APIClient {
         if let session { self.session = session } else {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 30
-            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            config.requestCachePolicy = .useProtocolCachePolicy
             config.urlCache = .shared
             self.session = URLSession(configuration: config)
         }
@@ -16,12 +16,17 @@ struct APIClient {
 
     func checkHealth() async throws { let _: HealthResponse = try await get(baseURL.appending(path: "health")) }
 
-    func fetchPosts(page: Int, limit: Int = 20, source: FeedSource) async throws -> [Post] {
+    func fetchPosts(
+        page: Int,
+        limit: Int = 20,
+        source: FeedSource,
+        flashCategory: String? = nil
+    ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin:
             return try await fetchHotTopics(page: page, limit: limit, source: source).map { .hotTopic($0, source: source) }
         case .flash:
-            return try await fetchFlash(page: page, limit: limit).map(Post.flash)
+            return try await fetchFlash(page: page, limit: limit, category: flashCategory).map(Post.flash)
         case .xueqiu:
             return try await fetchXueqiuPosts(page: page, limit: limit)
         default:
@@ -156,12 +161,22 @@ struct APIClient {
         return response.data.topics
     }
 
-    private func fetchFlash(page: Int, limit: Int) async throws -> [FlashItem] {
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/market/flash/live"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = [
-            .init(name: "limit", value: String(limit)), .init(name: "offset", value: String((page - 1) * limit)),
-            .init(name: "source", value: "all"), .init(name: "include_options", value: "0")
+    static func flashQueryItems(page: Int, limit: Int, category: String?) -> [URLQueryItem] {
+        var items: [URLQueryItem] = [
+            .init(name: "limit", value: String(limit)),
+            .init(name: "offset", value: String((page - 1) * limit)),
+            .init(name: "source", value: "all"),
+            .init(name: "include_options", value: "0")
         ]
+        if let category, !category.isEmpty {
+            items.append(.init(name: "category", value: category))
+        }
+        return items
+    }
+
+    private func fetchFlash(page: Int, limit: Int, category: String?) async throws -> [FlashItem] {
+        var parts = URLComponents(url: baseURL.appending(path: "api/v1/market/flash/live"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = Self.flashQueryItems(page: page, limit: limit, category: category)
         guard let url = parts?.url else { throw APIError.invalidURL }
         let response: FlashResponse = try await get(url)
         guard response.success else { throw APIError.invalidResponse }
@@ -207,7 +222,7 @@ struct APIClient {
             .init(name: "to", value: "zh")
         ]
         guard let url = parts?.url else { throw APIError.invalidURL }
-        let response: XTranslationResponse = try await get(url)
+        let response: XTranslationResponse = try await get(url, retriesTransientFailures: false)
         guard response.success else { throw APIError.invalidResponse }
         return response.data
     }
@@ -290,12 +305,16 @@ struct APIClient {
         return parts?.url
     }
 
-    private func get<Response: Decodable>(_ url: URL) async throws -> Response {
-        for attempt in 0..<2 {
+    private func get<Response: Decodable>(
+        _ url: URL,
+        retriesTransientFailures: Bool = true
+    ) async throws -> Response {
+        let attempts = retriesTransientFailures ? 2 : 1
+        for attempt in 0..<attempts {
             do {
                 let (data, response) = try await session.data(from: url)
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-                if [500, 502, 503, 504].contains(http.statusCode), attempt < 1 {
+                if [500, 502, 503, 504].contains(http.statusCode), attempt + 1 < attempts {
                     try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
                     continue
                 }
@@ -309,7 +328,7 @@ struct APIClient {
                 }
             } catch let error as URLError {
                 if error.code == .cancelled { throw CancellationError() }
-                guard attempt < 1 else { throw error }
+                guard attempt + 1 < attempts else { throw error }
                 #if DEBUG
                 print("Feed request failed (attempt \(attempt + 1)): \(url.absoluteString) — \(error)")
                 #endif
