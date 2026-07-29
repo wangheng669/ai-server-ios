@@ -47,7 +47,50 @@ module TestFlightProcessing
       uri = URI.join(API_BASE, path)
       uri.query = URI.encode_www_form(params)
       request = Net::HTTP::Get.new(uri)
+      perform(request)
+    end
+
+    def patch(path, payload)
+      uri = URI.join(API_BASE, path)
+      request = Net::HTTP::Patch.new(uri)
+      request["Content-Type"] = "application/json"
+      request.body = JSON.generate(payload)
+      perform(request)
+    end
+
+    def expire_build(build_id)
+      patch(
+        "/v1/builds/#{build_id}",
+        data: {
+          type: "builds",
+          id: build_id,
+          attributes: { expired: true }
+        }
+      )
+    end
+
+    def app_id(bundle_id)
+      response = get("/v1/apps", "filter[bundleId]" => bundle_id, "limit" => "1")
+      response.fetch("data").first&.fetch("id") || raise("App not found for bundle ID #{bundle_id}")
+    end
+
+    def builds(app_id, limit: 200)
+      get(
+        "/v1/builds",
+        "filter[app]" => app_id,
+        "sort" => "-uploadedDate",
+        "limit" => limit.to_s,
+        "include" => "preReleaseVersion",
+        "fields[builds]" => "version,uploadedDate,processingState,expired,preReleaseVersion",
+        "fields[preReleaseVersions]" => "version"
+      )
+    end
+
+    private
+
+    def perform(request)
       request["Authorization"] = "Bearer #{token}"
+      uri = request.uri
       response = Net::HTTP.start(
         uri.hostname,
         uri.port,
@@ -61,25 +104,6 @@ module TestFlightProcessing
 
       JSON.parse(response.body)
     end
-
-    def app_id(bundle_id)
-      response = get("/v1/apps", "filter[bundleId]" => bundle_id, "limit" => "1")
-      response.fetch("data").first&.fetch("id") || raise("App not found for bundle ID #{bundle_id}")
-    end
-
-    def builds(app_id, limit: 50)
-      get(
-        "/v1/builds",
-        "filter[app]" => app_id,
-        "sort" => "-uploadedDate",
-        "limit" => limit.to_s,
-        "include" => "preReleaseVersion",
-        "fields[builds]" => "version,uploadedDate,processingState,preReleaseVersion",
-        "fields[preReleaseVersions]" => "version"
-      )
-    end
-
-    private
 
     def token
       TestFlightProcessing.jwt(
@@ -105,6 +129,62 @@ module TestFlightProcessing
       "uploadedAt" => build.dig("attributes", "uploadedDate"),
       "state" => build.dig("attributes", "processingState")
     }
+  end
+
+  def marketing_versions(response)
+    response.fetch("included", []).map do |item|
+      next unless item["type"] == "preReleaseVersions"
+
+      item.dig("attributes", "version")
+    end.compact.uniq
+  end
+
+  def version_components(value)
+    return nil unless value.to_s.match?(/\A\d+(?:\.\d+){0,2}\z/)
+
+    value.split(".").map(&:to_i).then { |parts| parts + Array.new(3 - parts.length, 0) }
+  end
+
+  def next_marketing_version(response, base_version: "1.0")
+    candidates = (marketing_versions(response) + [base_version]).map do |version|
+      components = version_components(version)
+      [components, version] if components
+    end.compact
+    raise "No valid marketing version is available" if candidates.empty?
+
+    major, minor, patch = candidates.max_by(&:first).first
+    [major, minor, patch + 1].join(".")
+  end
+
+  def append_github_env(name, value)
+    path = required_env("GITHUB_ENV")
+    File.open(path, "a") { |file| file.puts("#{name}=#{value}") }
+  end
+
+  def active_build_ids(response)
+    response.fetch("data").map do |item|
+      attributes = item.fetch("attributes", {})
+      next if attributes["expired"]
+      next unless attributes["processingState"] == "VALID"
+
+      item.fetch("id")
+    end.compact
+  end
+
+  def expire_builds(api, build_ids)
+    build_ids.each do |build_id|
+      attempts = 0
+      begin
+        attempts += 1
+        api.expire_build(build_id)
+      rescue StandardError
+        raise if attempts >= 3
+
+        sleep 5
+        retry
+      end
+    end
+    build_ids.length
   end
 
   def notify_server(status:, details:, error: nil)
@@ -177,8 +257,39 @@ module TestFlightProcessing
   def snapshot(path)
     api = client
     app_id = api.app_id(BUNDLE_ID)
-    ids = api.builds(app_id).fetch("data").map { |item| item.fetch("id") }
-    File.write(path, JSON.pretty_generate(appId: app_id, buildIds: ids))
+    response = api.builds(app_id)
+    ids = response.fetch("data").map { |item| item.fetch("id") }
+    File.write(
+      path,
+      JSON.pretty_generate(
+        appId: app_id,
+        buildIds: ids,
+        activeBuildIds: active_build_ids(response)
+      )
+    )
+    puts "Captured #{ids.length} existing TestFlight build IDs."
+  end
+
+  def prepare(path)
+    api = client
+    app_id = api.app_id(BUNDLE_ID)
+    response = api.builds(app_id)
+    ids = response.fetch("data").map { |item| item.fetch("id") }
+    version = next_marketing_version(
+      response,
+      base_version: ENV.fetch("TESTFLIGHT_BASE_MARKETING_VERSION", "1.0")
+    )
+    File.write(
+      path,
+      JSON.pretty_generate(
+        appId: app_id,
+        buildIds: ids,
+        activeBuildIds: active_build_ids(response),
+        marketingVersion: version
+      )
+    )
+    append_github_env("TESTFLIGHT_MARKETING_VERSION", version)
+    puts "Next TestFlight marketing version: #{version}"
     puts "Captured #{ids.length} existing TestFlight build IDs."
   end
 
@@ -198,6 +309,9 @@ module TestFlightProcessing
         state = details["state"]
         puts "Build #{details["version"]} (#{details["build"]}) processing state: #{state}"
         if state == "VALID"
+          old_build_ids = baseline.fetch("activeBuildIds", baseline_ids)
+          expired_count = expire_builds(api, old_build_ids)
+          puts "Expired #{expired_count} previous TestFlight builds."
           notify_server(status: "completed", details: details)
           mark_notified
           puts "TestFlight processing completed and DingTalk notification was sent."
@@ -232,7 +346,8 @@ end
 
 if $PROGRAM_NAME == __FILE__
   command, path = ARGV
-  abort "Usage: #{$PROGRAM_NAME} snapshot|wait SNAPSHOT_PATH" unless %w[snapshot wait].include?(command) && path
+  commands = %w[prepare snapshot wait]
+  abort "Usage: #{$PROGRAM_NAME} prepare|snapshot|wait SNAPSHOT_PATH" unless commands.include?(command) && path
 
   TestFlightProcessing.public_send(command, path)
 end
