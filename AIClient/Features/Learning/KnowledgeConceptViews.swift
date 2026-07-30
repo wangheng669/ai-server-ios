@@ -202,8 +202,10 @@ struct KnowledgeConceptDetailSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .fullScreenCover(item: $wikipediaEntity) { entity in
+        .sheet(item: $wikipediaEntity) { entity in
             WikipediaReaderView(entity: entity, returnTitle: "返回概念详情")
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
