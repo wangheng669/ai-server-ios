@@ -2525,16 +2525,18 @@ private struct PersonDetailPage: View {
             if showsNavigationChrome {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        if let url = person.xProfileURL {
-                            Link(destination: url) {
-                                Label("在 X 中打开", systemImage: "arrow.up.right.square")
+                        ForEach(person.socialAccounts) { account in
+                            if let url = account.profileURL {
+                                Link(destination: url) {
+                                    Label("在 \(account.platform) 中打开", systemImage: "arrow.up.right.square")
+                                }
                             }
                         }
-                        if let handle = person.xHandle ?? person.handle {
+                        ForEach(person.socialAccounts) { account in
                             Button {
-                                UIPasteboard.general.string = handle
+                                UIPasteboard.general.string = account.displayHandle
                             } label: {
-                                Label(person.xHandle == nil ? "复制账号" : "复制 X 账号", systemImage: "doc.on.doc")
+                                Label("复制\(account.platform)账号", systemImage: "doc.on.doc")
                             }
                         }
                     } label: {
@@ -2625,12 +2627,13 @@ private struct PersonDetailPage: View {
                             .frame(height: 25)
                             .background(Color.accentColor.opacity(0.11), in: Capsule())
 
-                        if let handle = person.xHandle, let url = person.xProfileURL {
+                        if let account = person.socialAccounts.first,
+                           let url = account.profileURL {
                             Link(destination: url) {
                                 HStack(spacing: 3) {
                                     Image(systemName: "at")
                                         .font(.system(size: 10, weight: .semibold))
-                                    Text(handle.replacingOccurrences(of: "@", with: ""))
+                                    Text(account.displayHandle.replacingOccurrences(of: "@", with: ""))
                                         .lineLimit(1)
                                     Image(systemName: "arrow.up.right")
                                         .font(.system(size: 8, weight: .bold))
@@ -2638,7 +2641,7 @@ private struct PersonDetailPage: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.secondary)
                             }
-                            .accessibilityLabel("在 X 中打开 \(handle)")
+                            .accessibilityLabel("在\(account.platform)中打开\(account.displayHandle)")
                         }
                     }
                 }
@@ -2707,17 +2710,18 @@ private struct PersonDetailPage: View {
                     Text("\(person.topic.rawValue) · \(person.focusTags.first ?? "人物")")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Color.accentColor)
-                    if let handle = person.xHandle, let url = person.xProfileURL {
+                    if let account = person.socialAccounts.first,
+                       let url = account.profileURL {
                         Link(destination: url) {
                             HStack(spacing: 4) {
-                                Text("X · \(handle)")
+                                Text("\(account.platform) · \(account.displayHandle)")
                                 Image(systemName: "arrow.up.right")
                                     .font(.system(size: 10, weight: .semibold))
                             }
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.secondary)
                         }
-                        .accessibilityLabel("在 X 中打开 \(handle)")
+                        .accessibilityLabel("在\(account.platform)中打开\(account.displayHandle)")
                     }
                 }
             }
@@ -4078,6 +4082,41 @@ private struct PersonProfileView: View {
                 }
             }
 
+            if !person.socialAccounts.isEmpty {
+                profileSection("社交媒体") {
+                    VStack(spacing: 0) {
+                        ForEach(Array(person.socialAccounts.enumerated()), id: \.element.id) { index, account in
+                            if let url = account.profileURL {
+                                Link(destination: url) {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: socialIcon(for: account.platform))
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(Color.accentColor)
+                                            .frame(width: 28, height: 28)
+                                            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(account.platform)
+                                                .font(.system(size: 15, weight: .medium))
+                                                .foregroundStyle(.primary)
+                                            Text(account.displayHandle)
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.vertical, 9)
+                                }
+                                .accessibilityLabel("在\(account.platform)中打开\(account.displayHandle)")
+                            }
+                            if index < person.socialAccounts.count - 1 { Divider() }
+                        }
+                    }
+                }
+            }
+
             if !person.milestones.isEmpty {
                 profileSection(person.topic == .history ? "生平时间线" : "重要经历") {
                     VStack(alignment: .leading, spacing: 14) {
@@ -4135,6 +4174,15 @@ private struct PersonProfileView: View {
         guard person.topic == .history else { return person.milestones }
         return person.milestones.sorted {
             (Int($0.year) ?? .max) < (Int($1.year) ?? .max)
+        }
+    }
+
+    private func socialIcon(for platform: String) -> String {
+        switch platform.lowercased() {
+        case "微博": "message.fill"
+        case "哔哩哔哩", "bilibili": "play.rectangle.fill"
+        case "x": "at"
+        default: "link"
         }
     }
 

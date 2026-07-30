@@ -132,6 +132,11 @@ final class PostDecodingTests: XCTestCase {
                   "relationship": "合作伙伴",
                   "avatar_url": "https://example.com/elon.jpg"
                 }],
+                "social_accounts": [{
+                  "platform": "微博",
+                  "handle": "@peterthiel",
+                  "profile_url": "https://weibo.com/peterthiel"
+                }],
                 "profile_updated_at": "2026年7月",
                 "has_own_post_source": false,
                 "today_count": 0,
@@ -153,6 +158,9 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(payload.users.first?.roles.first?.organization, "Founders Fund")
         XCTAssertEqual(payload.users.first?.milestones.first?.year, "2005")
         XCTAssertEqual(payload.users.first?.relatedPeople.first?.name, "Elon Musk")
+        XCTAssertEqual(payload.users.first?.socialAccounts.first?.platform, "微博")
+        XCTAssertEqual(payload.users.first?.socialAccounts.first?.displayHandle, "@peterthiel")
+        XCTAssertEqual(payload.users.first?.socialAccounts.count, 2)
         XCTAssertEqual(payload.users.first?.profileUpdatedAt, "2026年7月")
         XCTAssertEqual(payload.users.first?.hasOwnPostSource, false)
         XCTAssertEqual(payload.users.first?.xHandle, "@peterthiel")
