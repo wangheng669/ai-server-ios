@@ -540,7 +540,11 @@ struct InvestorMoodItem: Decodable, Identifiable {
         proxiedMediaURL(from: coverUrl)
     }
 
-    private func proxiedMediaURL(from value: String) -> URL? {
+    var prewarmURL: URL? {
+        proxiedMediaURL(from: videoUrl, prewarm: true)
+    }
+
+    private func proxiedMediaURL(from value: String, prewarm: Bool = false) -> URL? {
         guard let source = URL(string: value),
               let scheme = source.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else { return nil }
@@ -552,6 +556,9 @@ struct InvestorMoodItem: Decodable, Identifiable {
             .init(name: "url", value: source.absoluteString),
             .init(name: "context", value: "ios-investor-mood"),
         ]
+        if prewarm {
+            components?.queryItems?.append(.init(name: "prewarm", value: "1"))
+        }
         return components?.url
     }
 }

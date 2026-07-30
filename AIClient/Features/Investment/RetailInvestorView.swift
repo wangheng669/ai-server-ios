@@ -1070,7 +1070,9 @@ final class RetailSentimentStore {
         dashboard = marketStore.dashboard
         if dashboard != nil { errorMessage = nil }
         do {
-            investorMood = try await moodRequest
+            let mood = try await moodRequest
+            investorMood = mood
+            await service.prewarmInvestorMoodVideos(mood.items)
         } catch is CancellationError {
             return
         } catch {
