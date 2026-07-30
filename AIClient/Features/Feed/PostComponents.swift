@@ -215,7 +215,7 @@ struct PostMediaGrid: View {
     var multiImageHeight: CGFloat = 132
     var availableWidth: CGFloat? = nil
     var cornerRadius: CGFloat = 8
-    @State private var gallerySelection: PostImageGallerySelection?
+    @State private var gallerySelection: ImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
 
@@ -273,7 +273,7 @@ struct PostMediaGrid: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            gallerySelection = PostImageGallerySelection(urls: galleryURLs, initialIndex: initialIndex)
+            gallerySelection = ImageGallerySelection(urls: galleryURLs, initialIndex: initialIndex)
         }
     }
 
@@ -330,13 +330,11 @@ struct PostMediaGrid: View {
         }
         .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
         .clipped()
-        .fullScreenCover(item: $gallerySelection) { selection in
-            ImageGalleryView(urls: selection.urls, initialIndex: selection.initialIndex)
-        }
+        .imageGallery(item: $gallerySelection)
     }
 }
 
-private struct PostImageGallerySelection: Identifiable {
+struct ImageGallerySelection: Identifiable {
     let id = UUID()
     let urls: [URL]
     let initialIndex: Int
@@ -865,16 +863,135 @@ private enum XBookmarkStore {
     }
 }
 
+extension View {
+    func imageGallery(item: Binding<ImageGallerySelection?>) -> some View {
+        modifier(ImageGalleryPresentationModifier(selection: item))
+    }
+}
+
+private struct ImageGalleryPresentationModifier: ViewModifier {
+    @Binding var selection: ImageGallerySelection?
+
+    func body(content: Content) -> some View {
+        content.background {
+            if selection != nil {
+                ImageGalleryPresentationBridge(selection: $selection)
+                    .frame(width: 0, height: 0)
+            }
+        }
+    }
+}
+
+private struct ImageGalleryPresentationBridge: UIViewControllerRepresentable {
+    @Binding var selection: ImageGallerySelection?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        let controller = UIViewController()
+        controller.view.backgroundColor = .clear
+        controller.view.isUserInteractionEnabled = false
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UIViewController, context: Context) {
+        context.coordinator.selection = $selection
+        guard let selection else {
+            context.coordinator.dismiss(animated: false)
+            return
+        }
+        context.coordinator.present(selection, from: controller)
+    }
+
+    static func dismantleUIViewController(
+        _ controller: UIViewController,
+        coordinator: Coordinator
+    ) {
+        coordinator.dismiss(animated: false)
+    }
+
+    @MainActor
+    final class Coordinator {
+        var selection: Binding<ImageGallerySelection?>
+        private var hostingController: UIViewController?
+        private var presentedSelectionID: UUID?
+        private var pendingSelectionID: UUID?
+        private var isDismissing = false
+
+        init(selection: Binding<ImageGallerySelection?>) {
+            self.selection = selection
+        }
+
+        func present(_ selection: ImageGallerySelection, from controller: UIViewController) {
+            guard presentedSelectionID != selection.id, hostingController == nil else { return }
+            guard controller.viewIfLoaded?.window != nil else {
+                guard pendingSelectionID != selection.id else { return }
+                pendingSelectionID = selection.id
+                DispatchQueue.main.async { [weak self, weak controller] in
+                    guard let self, let controller else { return }
+                    self.pendingSelectionID = nil
+                    guard controller.viewIfLoaded?.window != nil,
+                          let selection = self.selection.wrappedValue else { return }
+                    self.present(selection, from: controller)
+                }
+                return
+            }
+
+            pendingSelectionID = nil
+            presentedSelectionID = selection.id
+            let gallery = ImageGalleryView(
+                urls: selection.urls,
+                initialIndex: selection.initialIndex
+            ) { [weak self] in
+                self?.dismiss(animated: true)
+            }
+            let hostingController = UIHostingController(rootView: gallery)
+            hostingController.view.backgroundColor = .clear
+            hostingController.modalPresentationStyle = .overFullScreen
+            hostingController.modalTransitionStyle = .crossDissolve
+            self.hostingController = hostingController
+            controller.present(hostingController, animated: true)
+        }
+
+        func dismiss(animated: Bool) {
+            guard !isDismissing else { return }
+            guard let hostingController else {
+                presentedSelectionID = nil
+                return
+            }
+
+            isDismissing = true
+            hostingController.dismiss(animated: animated) { [weak self] in
+                guard let self else { return }
+                self.hostingController = nil
+                self.presentedSelectionID = nil
+                self.isDismissing = false
+                if self.selection.wrappedValue != nil {
+                    self.selection.wrappedValue = nil
+                }
+            }
+        }
+    }
+}
+
 struct ImageGalleryView: View {
     let urls: [URL]
-    @Environment(\.dismiss) private var dismiss
+    private let onDismiss: (() -> Void)?
+    @Environment(\.dismiss) private var environmentDismiss
     @State private var selectedIndex: Int
 
-    init(urls: [URL], initialIndex: Int = 0) {
+    init(
+        urls: [URL],
+        initialIndex: Int = 0,
+        onDismiss: (() -> Void)? = nil
+    ) {
         let requestedURL = urls.indices.contains(initialIndex) ? urls[initialIndex] : urls.first
         var seen: Set<URL> = []
         let uniqueURLs = urls.filter { seen.insert($0).inserted }
         self.urls = uniqueURLs
+        self.onDismiss = onDismiss
         _selectedIndex = State(
             initialValue: requestedURL.flatMap(uniqueURLs.firstIndex(of:)) ?? 0
         )
@@ -899,7 +1016,7 @@ struct ImageGalleryView: View {
                             isActive: selectedIndex == index,
                             position: index + 1,
                             count: urls.count,
-                            onBackgroundTap: { dismiss() }
+                            onBackgroundTap: requestDismiss
                         )
                         .tag(index)
                     }
@@ -920,7 +1037,7 @@ struct ImageGalleryView: View {
 
                 HStack {
                     Spacer()
-                    Button { dismiss() } label: {
+                    Button(action: requestDismiss) {
                         Image(systemName: "xmark")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
@@ -936,7 +1053,15 @@ struct ImageGalleryView: View {
         }
         .statusBarHidden()
         .interactiveDismissDisabled()
-        .accessibilityAction(.escape) { dismiss() }
+        .accessibilityAction(.escape, requestDismiss)
+    }
+
+    private func requestDismiss() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            environmentDismiss()
+        }
     }
 }
 
@@ -1088,18 +1213,6 @@ private struct GalleryImagePage: View {
         offset = .zero
         settledOffset = .zero
     }
-}
-
-struct ZoomableImageView: View {
-    let url: URL
-
-    var body: some View {
-        ImageGalleryView(urls: [url])
-    }
-}
-
-extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
 }
 
 struct PostActionRow: View {
