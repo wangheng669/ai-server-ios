@@ -2,6 +2,17 @@ import XCTest
 @testable import AIServerClient
 
 final class CountryGDPRankingTests: XCTestCase {
+    func testGlobalRankingCategoriesAndSourceURL() {
+        XCTAssertEqual(
+            GlobalRankingCategory.allCases.map(\.rawValue),
+            ["国家 GDP", "全球资产"]
+        )
+        XCTAssertEqual(
+            GlobalAssetsPage.url.absoluteString,
+            "https://www.coinglass.com/zh/global-assets"
+        )
+    }
+
     func testDecodesRankingAndLocalizesCountry() throws {
         let json = """
         {

@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 enum GDPDesign {
     static let midnight = Color(red: 0.025, green: 0.105, blue: 0.22)
@@ -115,11 +116,25 @@ struct CountryGDPService {
 
 struct CountryGDPRankingView: View {
     @Binding var showsDetail: Bool
+    @State private var category: GlobalRankingCategory
     @State private var ranking: CountryGDPRanking?
     @State private var isLoading = true
     @State private var loadFailed = false
     @State private var searchText = ""
     @State private var selectedCountry: CountryGDPRoute?
+
+    init(showsDetail: Binding<Bool>) {
+        _showsDetail = showsDetail
+        #if DEBUG
+        _category = State(
+            initialValue: ProcessInfo.processInfo.arguments.contains("--global-assets-preview")
+                ? .globalAssets
+                : .countryGDP
+        )
+        #else
+        _category = State(initialValue: .countryGDP)
+        #endif
+    }
 
     private var visibleCountries: [CountryGDP] {
         guard let countries = ranking?.countries else { return [] }
@@ -133,40 +148,50 @@ struct CountryGDPRankingView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let ranking {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            overview(ranking)
+        VStack(spacing: 0) {
+            categoryPicker
 
-                            rankingHeader(ranking)
-                                .padding(.top, 18)
+            switch category {
+            case .countryGDP:
+                NavigationStack {
+                    Group {
+                        if let ranking {
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    overview(ranking)
 
-                            searchField
-                                .padding(.horizontal, InvestmentDesign.pageInset)
-                                .padding(.bottom, 10)
+                                    rankingHeader(ranking)
+                                        .padding(.top, 18)
 
-                            countries(ranking)
+                                    searchField
+                                        .padding(.horizontal, InvestmentDesign.pageInset)
+                                        .padding(.bottom, 10)
 
-                            sourceFooter(ranking)
-                                .padding(.horizontal, InvestmentDesign.pageInset)
-                                .padding(.vertical, 22)
+                                    countries(ranking)
+
+                                    sourceFooter(ranking)
+                                        .padding(.horizontal, InvestmentDesign.pageInset)
+                                        .padding(.vertical, 22)
+                                }
+                            }
+                            .background(GDPDesign.porcelain)
+                            .scrollIndicators(.hidden)
+                            .scrollDismissesKeyboard(.interactively)
+                            .refreshable { await load() }
+                        } else if isLoading {
+                            loadingState
+                        } else {
+                            errorState
                         }
                     }
                     .background(GDPDesign.porcelain)
-                    .scrollIndicators(.hidden)
-                    .scrollDismissesKeyboard(.interactively)
-                    .refreshable { await load() }
-                } else if isLoading {
-                    loadingState
-                } else {
-                    errorState
+                    .toolbar(.hidden, for: .navigationBar)
                 }
+            case .globalAssets:
+                GlobalAssetsRankingView()
             }
-            .background(GDPDesign.porcelain)
-            .toolbar(.hidden, for: .navigationBar)
         }
+        .background(GDPDesign.porcelain)
         .sheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
                 .presentationDetents([.fraction(0.72), .large])
@@ -174,9 +199,27 @@ struct CountryGDPRankingView: View {
                 .presentationCornerRadius(28)
                 .presentationBackground(GDPDesign.porcelain)
         }
-        .task { await load() }
+        .task(id: category) {
+            if category == .countryGDP, ranking == nil {
+                await load()
+            }
+        }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
+    }
+
+    private var categoryPicker: some View {
+        Picker("排行类型", selection: $category) {
+            ForEach(GlobalRankingCategory.allCases) { category in
+                Text(category.rawValue).tag(category)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, InvestmentDesign.pageInset)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .background(GDPDesign.midnight)
+        .accessibilityIdentifier("global-ranking-category-picker")
     }
 
     @ViewBuilder
@@ -421,6 +464,161 @@ struct CountryGDPRankingView: View {
             #endif
         } catch {
             if ranking == nil { loadFailed = true }
+        }
+    }
+}
+
+enum GlobalRankingCategory: String, CaseIterable, Identifiable {
+    case countryGDP = "国家 GDP"
+    case globalAssets = "全球资产"
+
+    var id: Self { self }
+}
+
+enum GlobalAssetsPage {
+    static let url = URL(string: "https://www.coinglass.com/zh/global-assets")!
+}
+
+private struct GlobalAssetsRankingView: View {
+    @StateObject private var model = GlobalAssetsWebViewModel()
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            GlobalAssetsWebView(url: GlobalAssetsPage.url, model: model)
+
+            if model.loadFailed {
+                ContentUnavailableView {
+                    Label("全球资产排名暂不可用", systemImage: "globe")
+                } description: {
+                    Text("无法加载 CoinGlass 全球资产页面")
+                } actions: {
+                    Button("重新加载") {
+                        model.reload()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Link("在浏览器中打开", destination: GlobalAssetsPage.url)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(GDPDesign.porcelain)
+            } else if model.isLoading {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(InvestmentDesign.accent)
+                    .accessibilityLabel("正在读取全球资产排名")
+            }
+        }
+        .background(GDPDesign.porcelain)
+    }
+}
+
+@MainActor
+private final class GlobalAssetsWebViewModel: ObservableObject {
+    @Published var isLoading = true
+    @Published var loadFailed = false
+    weak var webView: WKWebView?
+
+    func reload() {
+        isLoading = true
+        loadFailed = false
+        webView?.reloadFromOrigin()
+    }
+}
+
+private struct GlobalAssetsWebView: UIViewRepresentable {
+    let url: URL
+    @ObservedObject var model: GlobalAssetsWebViewModel
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(model: model)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = true
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        model.webView = webView
+        webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        model.webView = webView
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        coordinator.model.webView = nil
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let model: GlobalAssetsWebViewModel
+
+        init(model: GlobalAssetsWebViewModel) {
+            self.model = model
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            Task { @MainActor in
+                model.isLoading = true
+                model.loadFailed = false
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            Task { @MainActor in
+                model.isLoading = false
+                model.loadFailed = false
+            }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFail navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            finishWithError(error)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            finishWithError(error)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            Task { @MainActor in
+                model.isLoading = false
+                model.loadFailed = true
+            }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if navigationAction.targetFrame == nil {
+                webView.load(navigationAction.request)
+            }
+            return nil
+        }
+
+        private func finishWithError(_ error: Error) {
+            if (error as? URLError)?.code == .cancelled { return }
+            Task { @MainActor in
+                model.isLoading = false
+                model.loadFailed = true
+            }
         }
     }
 }

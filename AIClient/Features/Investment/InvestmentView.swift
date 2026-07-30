@@ -20,7 +20,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case sentiment = "情绪"
     case holdings = "知名投资人"
     case industries = "产业全景"
-    case gdp = "GDP排行"
+    case gdp = "全球排行"
 
     var id: Self { self }
 }
