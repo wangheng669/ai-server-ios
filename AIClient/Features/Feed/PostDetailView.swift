@@ -386,6 +386,17 @@ struct PostDetailView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
+                        if let videoURL = post.videoURLs.first {
+                            XVideoPlayerView(
+                                url: videoURL,
+                                thumbnailURL: post.previewURL,
+                                onAspectRatioResolved: { detectedVideoAspectRatio = $0 }
+                            )
+                            .id(videoURL)
+                            .frame(height: weiboVideoHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+
                         if post.weiboFollowingImageURLs.count == 1,
                            let url = post.weiboFollowingImageURLs.first {
                             WeiboDetailImage(
@@ -419,7 +430,9 @@ struct PostDetailView: View {
                             }
                         }
 
-                        if post.hasWeiboVideoReference, let link = post.linkURL {
+                        if post.videoURLs.isEmpty,
+                           post.hasWeiboVideoReference,
+                           let link = post.linkURL {
                             Button { openURL(link) } label: {
                                 HStack(spacing: 11) {
                                     Image(systemName: "play.fill")
@@ -462,6 +475,19 @@ struct PostDetailView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var weiboVideoHeight: CGFloat {
+        let availableWidth = max(UIScreen.main.bounds.width - 32, 240)
+        let metadataAspectRatio: CGFloat? = post.videos?.first.flatMap { video in
+            guard let width = video.width,
+                  let height = video.height,
+                  width > 0,
+                  height > 0 else { return nil }
+            return CGFloat(width) / CGFloat(height)
+        }
+        let aspectRatio = max(detectedVideoAspectRatio ?? metadataAspectRatio ?? (16.0 / 9.0), 0.2)
+        return min(max(availableWidth / aspectRatio, 180), 620)
     }
 
     private var weiboNavigationBar: some View {
@@ -1892,6 +1918,7 @@ struct PostDetailView: View {
 
         if !post.isYouTube,
            !post.isBilibili,
+           !post.isWeiboRSS,
            post.sourceName != "X",
            player == nil,
            let video = post.videoURLs.first {
@@ -1909,7 +1936,7 @@ struct PostDetailView: View {
                 post = detail.replacingTranslation(with: post.displayContent)
             }
         }
-        if post.isYouTube || post.isBilibili {
+        if post.isYouTube || post.isBilibili || post.isWeiboRSS {
             player?.pause()
             player = nil
         } else if post.sourceName != "X",
