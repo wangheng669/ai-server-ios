@@ -18,8 +18,14 @@ struct LearningView: View {
     @State private var path: [LearningRoute] = []
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
-        (ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-book-preview")) ? .books : .investment
+        if ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") {
+            return .concepts
+        }
+        if ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-book-preview") {
+            return .books
+        }
+        return .investment
         #else
         .investment
         #endif
@@ -106,6 +112,8 @@ struct LearningView: View {
                             investmentContent
                         case .books:
                             booksContent
+                        case .concepts:
+                            conceptsContent
                         }
                     }
                     .padding(.top, 12)
@@ -122,6 +130,8 @@ struct LearningView: View {
                         _ = await (catalog, videoLibrary)
                     case .books:
                         await store.loadBookshelf(force: true)
+                    case .concepts:
+                        await store.load(force: true)
                     }
                 }
             }
@@ -132,6 +142,7 @@ struct LearningView: View {
         HStack(alignment: .top, spacing: 30) {
             sectionButton(.investment)
             sectionButton(.books)
+            sectionButton(.concepts)
             Spacer()
         }
         .padding(.horizontal, 20)
@@ -356,6 +367,90 @@ struct LearningView: View {
         }
     }
 
+    @ViewBuilder
+    private var conceptsContent: some View {
+        if let catalog = store.catalog {
+            let sections = catalog.sections.filter { !$0.topics.isEmpty }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("概念库")
+                    .font(.system(size: 24, weight: .bold, design: .serif))
+                Text("按主题浏览，随时补上不熟悉的知识点")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
+
+            if sections.isEmpty {
+                ContentUnavailableView(
+                    "暂无概念",
+                    systemImage: "text.book.closed",
+                    description: Text("下拉刷新后重试")
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.top, 36)
+            } else {
+                ForEach(sections) { section in
+                    conceptSection(section)
+                }
+            }
+        } else if store.isLoading {
+            ProgressView("正在载入概念")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 44)
+        } else {
+            ContentUnavailableView {
+                Label("概念载入失败", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(store.errorMessage ?? "请稍后重试")
+            } actions: {
+                Button("重新载入") {
+                    Task { await store.load(force: true) }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+        }
+    }
+
+    private func conceptSection(_ section: LearningSection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(section.name)
+                    .font(.system(size: 19, weight: .bold, design: .serif))
+                Spacer()
+                Text("\(section.topics.count) 个概念")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(section.topics.enumerated()), id: \.element.id) { index, topic in
+                    Button {
+                        path.append(.topic(topic, nil, nil, nil))
+                    } label: {
+                        LearningTopicRow(topic: topic)
+                    }
+                    .buttonStyle(LearningPressStyle())
+
+                    if index != section.topics.indices.last {
+                        Divider()
+                            .padding(.leading, 112)
+                    }
+                }
+            }
+            .background(KnowledgePagePalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 22)
+    }
+
     private func stockTopics(in catalog: LearningCatalog) -> [LearningTopic] {
         catalog.sections.first(where: { $0.name == "股票" })?.topics ??
             catalog.sections.first?.topics ??
@@ -396,11 +491,13 @@ struct LearningView: View {
 private enum KnowledgeSection: String {
     case investment
     case books
+    case concepts
 
     var title: String {
         switch self {
         case .investment: "投资"
         case .books: "书籍"
+        case .concepts: "概念"
         }
     }
 }
