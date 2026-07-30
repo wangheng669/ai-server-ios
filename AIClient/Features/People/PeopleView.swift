@@ -1819,31 +1819,30 @@ private struct PersonDetailSheet: View {
     @Binding var selectedPerson: SpecialPerson?
     let people: [SpecialPerson]
     let onClose: () -> Void
-    @GestureState private var horizontalDragOffset: CGFloat = 0
+    @GestureState private var isHorizontalDragging = false
     @State private var incomingEdge: Edge = .trailing
 
     var body: some View {
         NavigationStack {
             if let person = selectedPerson {
                 ZStack(alignment: .topTrailing) {
-                    ZStack {
-                        Color(uiColor: .systemBackground)
+                    Color(uiColor: .systemBackground)
+                        .ignoresSafeArea()
 
-                        PersonDetailPage(
-                            person: person,
-                            showsNavigationChrome: false,
-                            usesSheetLayout: true
-                        )
-                        .id(person.id)
-                        .transition(personTransition)
-                    }
-                    .offset(x: horizontalDragOffset)
-                    .clipped()
+                    PersonDetailPage(
+                        person: person,
+                        showsNavigationChrome: false,
+                        usesSheetLayout: true
+                    )
+                    .id(person.id)
+                    .transition(personTransition)
+                    .disabled(isHorizontalDragging)
 
                     closeButton
                         .padding(.top, 12)
                         .padding(.trailing, 15)
                 }
+                .clipped()
                 .contentShape(Rectangle())
                 .simultaneousGesture(personSwitchGesture)
                 .accessibilityHint("左右滑动切换人物，下滑关闭人物详情")
@@ -1861,11 +1860,11 @@ private struct PersonDetailSheet: View {
 
     private var personSwitchGesture: some Gesture {
         DragGesture(minimumDistance: 24)
-            .updating($horizontalDragOffset) { value, offset, _ in
+            .updating($isHorizontalDragging) { value, isDragging, _ in
                 let horizontalDistance = value.translation.width
                 let verticalDistance = value.translation.height
                 guard abs(horizontalDistance) > abs(verticalDistance) * 1.15 else { return }
-                offset = min(max(horizontalDistance * 0.14, -24), 24)
+                isDragging = true
             }
             .onEnded(switchPerson)
     }
