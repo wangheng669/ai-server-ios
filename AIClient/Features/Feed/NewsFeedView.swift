@@ -490,6 +490,7 @@ struct NewsFeedView: View {
                             isExpandedFlash: expandedFlashIDs.contains(post.id),
                             onOpen: { openPost(displayPost) }
                         )
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .background {
                                 if source == .youtube,
                                    index == 0,
@@ -2404,6 +2405,7 @@ private struct NewsCardView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 4)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
         .contentShape(Rectangle())
@@ -2417,22 +2419,29 @@ private struct NewsCardView: View {
                 Text(post.authorName)
                     .font(.system(size: 15.5, weight: .medium))
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.18))
+                    .fixedSize()
                 if let time = post.formattedTime {
                     Text("修改于\(time)")
                         .font(.system(size: 13.5))
                         .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             xueqiuRichText(post.xueqiuBodyContent)
                 .font(.system(size: 17))
                 .lineSpacing(8)
                 .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let quoteBody = post.xueqiuQuoteBody {
@@ -2442,6 +2451,7 @@ private struct NewsCardView: View {
                         .font(.system(size: 15.5))
                         .lineSpacing(6)
                         .lineLimit(5)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     HStack(spacing: 4) {
@@ -2453,6 +2463,7 @@ private struct NewsCardView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 12)
                 .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
