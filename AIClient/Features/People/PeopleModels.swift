@@ -67,7 +67,13 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var organizationName: String? {
         nonempty(organizationNameValue) ?? (isCurated ? nonempty(userScreenName) : nil)
     }
-    var avatarAssetName: String? { nonempty(avatarAssetNameValue) }
+    var avatarAssetName: String? {
+        if userID.localizedCaseInsensitiveContains("elon-musk") ||
+            name.localizedCaseInsensitiveContains("Elon Musk") {
+            return "ElonMuskAvatar"
+        }
+        return nonempty(avatarAssetNameValue)
+    }
     var discussionKeywords: [String] {
         guard let keywords = discussionKeywordsValue?.filter({
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

@@ -240,6 +240,18 @@ final class PostDecodingTests: XCTestCase {
         )
     }
 
+    func testElonMuskUsesBundledPortraitInsteadOfServerAvatar() {
+        let person = SpecialPerson(
+            id: "elon-musk",
+            name: "Elon Musk",
+            organization: "xAI",
+            summary: "xAI 创始人",
+            avatarURL: "https://example.com/wrong-image.jpg"
+        )
+
+        XCTAssertEqual(person.avatarAssetName, "ElonMuskAvatar")
+    }
+
     func testDecodesXQuotedTweetForPersonPostCard() throws {
         let data = #"{"post":{"id":1,"source":"x","meta":{"quoted_tweet":{"id":"99","text":"Gemini who?","text_zh":"双子座是谁？","author":{"name":"Example","screenName":"example","profileImageUrl":"https://example.com/a.jpg"},"media":[{"type":"photo","url":"https://example.com/p.jpg","thumbnail_url":"https://example.com/t.jpg","width":1200,"height":800}]}}}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
