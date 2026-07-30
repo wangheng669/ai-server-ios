@@ -46,11 +46,10 @@ struct PeopleView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .navigationBarHidden(true)
         }
-        .sheet(item: $selectedPerson) { person in
+        .sheet(isPresented: detailIsPresented) {
             PersonDetailSheet(
-                person: person,
+                selectedPerson: $selectedPerson,
                 people: store.people,
-                onSelectPerson: { selectedPerson = $0 },
                 onClose: { selectedPerson = nil }
             )
             .presentationDetents([.large])
@@ -74,6 +73,17 @@ struct PeopleView: View {
             showsDetail = person != nil
         }
         .onDisappear { showsDetail = false }
+    }
+
+    private var detailIsPresented: Binding<Bool> {
+        Binding(
+            get: { selectedPerson != nil },
+            set: { isPresented in
+                if !isPresented {
+                    selectedPerson = nil
+                }
+            }
+        )
     }
 }
 
@@ -1806,31 +1816,47 @@ private struct PeopleLoadingTimeline: View {
 }
 
 private struct PersonDetailSheet: View {
-    let person: SpecialPerson
+    @Binding var selectedPerson: SpecialPerson?
     let people: [SpecialPerson]
-    let onSelectPerson: (SpecialPerson) -> Void
     let onClose: () -> Void
     @GestureState private var horizontalDragOffset: CGFloat = 0
+    @State private var incomingEdge: Edge = .trailing
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topTrailing) {
-                PersonDetailPage(
-                    person: person,
-                    showsNavigationChrome: false,
-                    usesSheetLayout: true
-                )
-                .id(person.id)
-                .offset(x: horizontalDragOffset)
+            if let person = selectedPerson {
+                ZStack(alignment: .topTrailing) {
+                    ZStack {
+                        Color(uiColor: .systemBackground)
 
-                closeButton
-                    .padding(.top, 12)
-                    .padding(.trailing, 15)
+                        PersonDetailPage(
+                            person: person,
+                            showsNavigationChrome: false,
+                            usesSheetLayout: true
+                        )
+                        .id(person.id)
+                        .transition(personTransition)
+                    }
+                    .offset(x: horizontalDragOffset)
+                    .clipped()
+
+                    closeButton
+                        .padding(.top, 12)
+                        .padding(.trailing, 15)
+                }
+                .contentShape(Rectangle())
+                .simultaneousGesture(personSwitchGesture)
+                .accessibilityHint("左右滑动切换人物，下滑关闭人物详情")
             }
-            .contentShape(Rectangle())
-            .simultaneousGesture(personSwitchGesture)
-            .accessibilityHint("左右滑动切换人物，下滑关闭人物详情")
         }
+    }
+
+    private var personTransition: AnyTransition {
+        let outgoingEdge: Edge = incomingEdge == .trailing ? .leading : .trailing
+        return .asymmetric(
+            insertion: .move(edge: incomingEdge).combined(with: .opacity),
+            removal: .move(edge: outgoingEdge).combined(with: .opacity)
+        )
     }
 
     private var personSwitchGesture: some Gesture {
@@ -1867,14 +1893,18 @@ private struct PersonDetailSheet: View {
         guard orderedPeople.count > 1,
               abs(horizontalDistance) >= 64,
               abs(horizontalDistance) > abs(verticalDistance) * 1.25,
-              let currentIndex = orderedPeople.firstIndex(where: { $0.id == person.id }) else {
+              let currentPerson = selectedPerson,
+              let currentIndex = orderedPeople.firstIndex(where: { $0.id == currentPerson.id }) else {
             return
         }
 
         let indexOffset = horizontalDistance < 0 ? 1 : -1
         let nextIndex = (currentIndex + indexOffset + orderedPeople.count) % orderedPeople.count
+        incomingEdge = horizontalDistance < 0 ? .trailing : .leading
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        onSelectPerson(orderedPeople[nextIndex])
+        withAnimation(.snappy(duration: 0.3)) {
+            selectedPerson = orderedPeople[nextIndex]
+        }
     }
 
     private var orderedPeople: [SpecialPerson] {
