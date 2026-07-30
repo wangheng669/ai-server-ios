@@ -95,8 +95,8 @@ private struct PeopleSwimlaneExplorer: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchIsFocused: Bool
+    @GestureState private var focusTranslation: CGSize = .zero
     @State private var focusedPersonID: String?
-    @State private var selectedMemberID: String?
     @State private var searchText = ""
     @State private var showsSearch = false
     @State private var isRefreshing = false
@@ -202,17 +202,14 @@ private struct PeopleSwimlaneExplorer: View {
 
             VStack(spacing: 0) {
                 utilityBar
-                focusCard
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
+                focusHeader
 
                 ScrollView {
-                    LazyVStack(spacing: 13) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
                             relationshipLane(lane, index: index)
                         }
                     }
-                    .padding(.horizontal, 12)
                     .padding(.bottom, 18)
                 }
                 .scrollIndicators(.hidden)
@@ -276,82 +273,86 @@ private struct PeopleSwimlaneExplorer: View {
         .frame(height: 48)
     }
 
-    private var focusCard: some View {
-        HStack(spacing: 4) {
-            Button { moveFocus(by: -1) } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 40, height: 72)
-            }
-            .accessibilityLabel("上一个人物")
-
-            Button {
-                onOpenPerson(focusedPerson)
-            } label: {
-                HStack(spacing: 12) {
-                    AvatarView(
-                        url: focusedPerson.avatarURL(baseURL: baseURL),
-                        name: focusedPerson.name,
-                        size: 64,
-                        assetName: focusedPerson.avatarAssetName
-                    )
-                    .overlay {
-                        Circle()
-                            .stroke(Color.accentColor.opacity(0.72), lineWidth: 2)
-                            .padding(-3)
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(focusedPerson.name)
-                            .font(.system(size: 21, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                        Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        HStack(spacing: 5) {
-                            Image(systemName: "person.2.fill")
-                            Text("\(relationshipCount)")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    }
-
-                    Spacer(minLength: 2)
+    private var focusHeader: some View {
+        VStack(spacing: 7) {
+            HStack {
+                sidePerson(previousPerson)
+                Spacer()
+                AvatarView(
+                    url: focusedPerson.avatarURL(baseURL: baseURL),
+                    name: focusedPerson.name,
+                    size: 72,
+                    assetName: focusedPerson.avatarAssetName
+                )
+                .overlay {
+                    Circle()
+                        .stroke(Color.accentColor.opacity(0.55), lineWidth: 2)
+                        .padding(-3)
                 }
-                .contentShape(Rectangle())
+                Spacer()
+                sidePerson(nextPerson)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 34)
+            .offset(x: focusPreviewOffset)
 
-            Button { moveFocus(by: 1) } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 40, height: 72)
-            }
-            .accessibilityLabel("下一个人物")
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 9)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
-        }
-        .overlay(alignment: .bottom) {
+            Text(focusedPerson.name)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
             Capsule()
-                .fill(Color.secondary.opacity(0.32))
-                .frame(width: 34, height: 4)
-                .offset(y: -7)
-                .allowsHitTesting(false)
+                .fill(Color.secondary.opacity(0.2))
+                .frame(width: 28, height: 3)
+                .padding(.top, 3)
         }
-        .shadow(color: .black.opacity(0.08), radius: 15, y: 6)
-        .contentShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .simultaneousGesture(focusGesture)
-        .accessibilityElement(children: .contain)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+        .padding(.bottom, 14)
+        .contentShape(Rectangle())
+        .clipped()
+        .highPriorityGesture(focusGesture)
+        .onTapGesture { onOpenPerson(focusedPerson) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(focusedPerson.name)，\(relationshipCount) 位关联人物")
         .accessibilityHint("点击或上滑查看详情，左右滑动切换人物")
+        .accessibilityAction(named: "上一个人物") { moveFocus(by: -1) }
+        .accessibilityAction(named: "下一个人物") { moveFocus(by: 1) }
+    }
+
+    private func sidePerson(_ person: SpecialPerson) -> some View {
+        AvatarView(
+            url: person.avatarURL(baseURL: baseURL),
+            name: person.name,
+            size: 34,
+            assetName: person.avatarAssetName
+        )
+        .opacity(0.32)
+        .accessibilityHidden(true)
+    }
+
+    private var previousPerson: SpecialPerson {
+        adjacentPerson(by: -1)
+    }
+
+    private var nextPerson: SpecialPerson {
+        adjacentPerson(by: 1)
+    }
+
+    private func adjacentPerson(by offset: Int) -> SpecialPerson {
+        guard let currentIndex = orderedPeople.firstIndex(where: { $0.id == focusedPerson.id }) else {
+            return focusedPerson
+        }
+        let index = (currentIndex + offset + orderedPeople.count) % orderedPeople.count
+        return orderedPeople[index]
+    }
+
+    private var focusPreviewOffset: CGFloat {
+        max(-18, min(18, focusTranslation.width * 0.18))
     }
 
     private var relationshipCount: Int {
@@ -359,16 +360,22 @@ private struct PeopleSwimlaneExplorer: View {
     }
 
     private var focusGesture: some Gesture {
-        DragGesture(minimumDistance: 26)
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .updating($focusTranslation) { value, state, _ in
+                state = value.translation
+            }
             .onEnded { value in
                 let horizontal = value.translation.width
                 let vertical = value.translation.height
-                if vertical <= -44, abs(vertical) > abs(horizontal) * 1.15 {
+                let predictedHorizontal = value.predictedEndTranslation.width
+                let horizontalIntent = abs(horizontal) > abs(vertical) * 0.75
+                let shouldSwitch = abs(horizontal) >= 18 || abs(predictedHorizontal) >= 42
+
+                if horizontalIntent, shouldSwitch {
+                    moveFocus(by: predictedHorizontal < 0 ? 1 : -1)
+                } else if vertical <= -30, abs(vertical) > abs(horizontal) * 0.9 {
                     UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                     onOpenPerson(focusedPerson)
-                } else if abs(horizontal) >= 48,
-                          abs(horizontal) > abs(vertical) * 1.2 {
-                    moveFocus(by: horizontal < 0 ? 1 : -1)
                 }
             }
     }
@@ -377,124 +384,62 @@ private struct PeopleSwimlaneExplorer: View {
         _ lane: PeopleRelationshipCluster,
         index: Int
     ) -> some View {
-        let tint = laneTint(index)
         return VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Text(lane.title)
-                    .font(.system(size: 17, weight: .bold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text("\(lane.memberCount)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
+                Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
 
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 13) {
+                LazyHStack(alignment: .top, spacing: 15) {
                     ForEach(lane.members) { member in
-                        relationshipNode(member, tint: tint)
+                        relationshipNode(member)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
             }
             .scrollIndicators(.hidden)
         }
-        .padding(.top, 14)
-        .padding(.bottom, 11)
-        .frame(minHeight: 156)
-        .background(
-            LinearGradient(
-                colors: [tint.opacity(0.1), tint.opacity(0.035)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 26, style: .continuous)
-        )
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(tint.opacity(0.32))
-                .frame(height: 1)
-                .padding(.top, 78)
-                .allowsHitTesting(false)
+        .padding(.top, index == 0 ? 12 : 15)
+        .padding(.bottom, 14)
+        .overlay(alignment: .bottom) {
+            Divider()
+                .padding(.leading, 20)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
-    private func relationshipNode(
-        _ member: PeopleRelationshipMember,
-        tint: Color
-    ) -> some View {
-        let isSelected = selectedMemberID == member.id
+    private func relationshipNode(_ member: PeopleRelationshipMember) -> some View {
         return Button {
-            if isSelected, let person = member.person {
+            if let person = member.person {
                 focus(on: person)
-            } else {
-                withAnimation(animation) {
-                    selectedMemberID = member.id
-                }
             }
         } label: {
             VStack(spacing: 5) {
-                ZStack(alignment: .topTrailing) {
-                    AvatarView(
-                        url: member.avatarURL(baseURL: baseURL),
-                        name: member.name,
-                        size: isSelected ? 58 : 50,
-                        assetName: member.person?.avatarAssetName ?? member.avatarAssetName
-                    )
-                    .overlay {
-                        Circle()
-                            .stroke(
-                                isSelected ? tint : Color(uiColor: .systemBackground),
-                                lineWidth: isSelected ? 2.5 : 2
-                            )
-                            .padding(isSelected ? -3 : -2)
-                    }
-                    if (member.person?.todayCount ?? 0) > 0 {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 9, height: 9)
-                            .overlay {
-                                Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2)
-                            }
-                            .offset(x: 2, y: -2)
-                    }
-                }
-                .frame(height: 61)
+                AvatarView(
+                    url: member.avatarURL(baseURL: baseURL),
+                    name: member.name,
+                    size: 48,
+                    assetName: member.person?.avatarAssetName ?? member.avatarAssetName
+                )
 
                 Text(member.name)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? tint : Color.primary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
-
-                if isSelected {
-                    HStack(spacing: 3) {
-                        Text(member.relationship)
-                            .lineLimit(1)
-                        if member.person != nil {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 8, weight: .bold))
-                        }
-                    }
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(Color(uiColor: .systemBackground).opacity(0.92), in: Capsule())
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-                }
             }
-            .frame(width: isSelected ? 124 : 68)
+            .frame(width: 62)
             .contentShape(Rectangle())
         }
         .buttonStyle(PeoplePressStyle())
         .accessibilityLabel("\(member.name)，与\(focusedPerson.name)的关系：\(member.relationship)")
-        .accessibilityHint(isSelected && member.person != nil ? "再次点击设为中心人物" : "点击查看关系")
+        .accessibilityHint(member.person != nil ? "点击设为当前人物" : "")
     }
 
     private var searchPanel: some View {
@@ -563,16 +508,6 @@ private struct PeopleSwimlaneExplorer: View {
         .shadow(color: .black.opacity(0.12), radius: 22, y: 8)
     }
 
-    private func laneTint(_ index: Int) -> Color {
-        let colors: [Color] = [
-            Color(red: 0.22, green: 0.47, blue: 0.86),
-            Color(red: 0.35, green: 0.59, blue: 0.35),
-            Color(red: 0.86, green: 0.57, blue: 0.2),
-            Color(red: 0.79, green: 0.34, blue: 0.32)
-        ]
-        return colors[index % colors.count]
-    }
-
     private func moveFocus(by offset: Int) {
         guard let currentIndex = orderedPeople.firstIndex(where: { $0.id == focusedPerson.id }) else {
             return
@@ -585,7 +520,6 @@ private struct PeopleSwimlaneExplorer: View {
     private func focus(on person: SpecialPerson) {
         withAnimation(animation) {
             focusedPersonID = person.id
-            selectedMemberID = nil
         }
     }
 
