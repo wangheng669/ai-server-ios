@@ -1230,7 +1230,6 @@ private struct ChinaIndexScopePicker: View {
 private struct MarketIndexTableRow: View {
     let quote: MarketQuote
     let overnightQuote: MarketQuote?
-    private var displayedQuote: MarketQuote { overnightQuote ?? quote }
     let trend: [Double]
 
     var body: some View {
@@ -1245,25 +1244,25 @@ private struct MarketIndexTableRow: View {
             }
             .frame(width: 112, alignment: .leading)
 
-            Text(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))
+            Text(number(displayedPrice, digits: cryptoPriceDigits(displayedPrice, symbol: displayedSymbol)))
                 .font(.system(size: 13.5, weight: .medium)).monospacedDigit()
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1).minimumScaleFactor(0.72)
 
             VStack(alignment: .trailing, spacing: 3) {
-                Text(displayedQuote.formattedPercent)
+                Text(displayedPercent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
-                Text(signed(displayedQuote.changeValue, digits: cryptoChangeDigits(displayedQuote)))
+                Text(signed(displayedChange, digits: cryptoChangeDigits(overnightQuote ?? quote)))
                     .font(.caption2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
             .font(.footnote.weight(.semibold)).monospacedDigit()
-            .foregroundStyle(quoteTint(displayedQuote))
+            .foregroundStyle(displayedTint)
             .frame(width: 64, alignment: .trailing)
 
-            Sparkline(values: trend, color: quoteTint(displayedQuote))
+            Sparkline(values: displayedTrend, color: displayedTint)
                 .frame(width: 60, height: 32)
         }
         .padding(.horizontal, 12)
@@ -1273,8 +1272,70 @@ private struct MarketIndexTableRow: View {
         .accessibilityHint("打开指数详情")
     }
 
-    private var sessionLabel: String { overnightQuote != nil ? "夜盘" : (quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") ? "24H" : (quote.marketSession == "regular" ? "交易中" : "已收盘")) }
-    private var sessionTint: Color { overnightQuote != nil || quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular" ? MarketStyle.accent : .secondary }
+    private var usesEmbeddedExtendedSession: Bool {
+        overnightQuote == nil && quote.hasActiveExtendedSessionQuote
+    }
+
+    private var displayedPrice: Double {
+        if let overnightQuote { return overnightQuote.price }
+        if usesEmbeddedExtendedSession, let sessionPrice = quote.sessionPrice { return sessionPrice }
+        return quote.price
+    }
+
+    private var displayedSymbol: String {
+        overnightQuote?.symbol ?? quote.symbol
+    }
+
+    private var displayedPercentValue: Double {
+        if let overnightQuote { return overnightQuote.percentValue }
+        if usesEmbeddedExtendedSession {
+            if let sessionChangePercent = quote.sessionChangePercent { return sessionChangePercent }
+            if let previousClose = quote.previousClose, previousClose > 0 {
+                return (displayedPrice - previousClose) / previousClose * 100
+            }
+        }
+        return quote.percentValue
+    }
+
+    private var displayedPercent: String {
+        String(format: "%@%.2f%%", displayedPercentValue >= 0 ? "+" : "−", abs(displayedPercentValue))
+    }
+
+    private var displayedChange: Double {
+        if let previousClose = overnightQuote?.previousClose ?? quote.previousClose {
+            return displayedPrice - previousClose
+        }
+        return overnightQuote?.changeValue ?? quote.changeValue
+    }
+
+    private var displayedTrend: [Double] {
+        if usesEmbeddedExtendedSession, !quote.nightTrend.isEmpty { return quote.nightTrend }
+        return trend
+    }
+
+    private var displayedTint: Color {
+        displayedPercentValue >= 0 ? MarketStyle.gain : MarketStyle.loss
+    }
+
+    private var sessionLabel: String {
+        if overnightQuote != nil || quote.isNightSession == true { return "夜盘" }
+        if usesEmbeddedExtendedSession {
+            return switch quote.marketSession?.lowercased() {
+            case "pre", "premarket": "盘前"
+            case "post", "after": "盘后"
+            default: "夜盘"
+            }
+        }
+        if quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") { return "24H" }
+        return quote.marketSession == "regular" ? "交易中" : "已收盘"
+    }
+
+    private var sessionTint: Color {
+        overnightQuote != nil || usesEmbeddedExtendedSession || quote.marketSession == "always-open"
+            || quote.symbol.hasPrefix("BINANCE:") || quote.marketSession == "regular"
+            ? MarketStyle.accent
+            : .secondary
+    }
 }
 
 private struct MarketWorldMap: View {
