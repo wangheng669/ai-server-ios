@@ -112,7 +112,7 @@ struct CountryGDPRankingView: View {
     @State private var isLoading = true
     @State private var loadFailed = false
     @State private var searchText = ""
-    @State private var path: [CountryGDPRoute] = []
+    @State private var selectedCountry: CountryGDPRoute?
 
     private var visibleCountries: [CountryGDP] {
         guard let countries = ranking?.countries else { return [] }
@@ -126,7 +126,7 @@ struct CountryGDPRankingView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             Group {
                 if let ranking {
                     List {
@@ -142,9 +142,17 @@ struct CountryGDPRankingView: View {
                                     .listRowBackground(Color.clear)
                             } else {
                                 ForEach(visibleCountries) { country in
-                                    NavigationLink(value: CountryGDPRoute(country: country)) {
-                                        countryRow(country)
+                                    Button {
+                                        selectedCountry = CountryGDPRoute(country: country)
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            countryRow(country)
+                                            Image(systemName: "chevron.right")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.tertiary)
+                                        }
                                     }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         } header: {
@@ -170,15 +178,18 @@ struct CountryGDPRankingView: View {
                 }
             }
             .background(InvestmentDesign.canvas)
-            .navigationDestination(for: CountryGDPRoute.self) { route in
-                CountryGDPDetailView(route: route)
-            }
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(item: $selectedCountry) { route in
+            CountryGDPDetailView(route: route)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(24)
+                .presentationBackground(InvestmentDesign.canvas)
         }
         .task { await load() }
         .refreshable { await load() }
-        .onChange(of: path) { _, value in showsDetail = !value.isEmpty }
-        .onAppear { showsDetail = !path.isEmpty }
+        .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
     }
 
@@ -325,12 +336,12 @@ struct CountryGDPRankingView: View {
         do {
             ranking = try await CountryGDPService().ranking()
             #if DEBUG
-            if path.isEmpty,
+            if selectedCountry == nil,
                let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--gdp-detail-preview=") }),
                let country = ranking?.countries.first(where: {
                    $0.countryCode == String(argument.dropFirst("--gdp-detail-preview=".count)).uppercased()
                }) {
-                path.append(CountryGDPRoute(country: country))
+                selectedCountry = CountryGDPRoute(country: country)
             }
             #endif
         } catch {

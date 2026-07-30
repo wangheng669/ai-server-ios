@@ -1,10 +1,12 @@
 import Charts
 import SwiftUI
 
-struct CountryGDPRoute: Hashable {
+struct CountryGDPRoute: Hashable, Identifiable {
     let countryCode: String
     let iso2Code: String
     let countryName: String
+
+    var id: String { countryCode }
 
     init(country: CountryGDP) {
         countryCode = country.countryCode
@@ -133,17 +135,17 @@ struct CountryGDPDetailView: View {
     }
 
     private var detailHeader: some View {
-        HStack(spacing: 12) {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .background(InvestmentDesign.secondarySurface, in: Circle())
-            }
-            .buttonStyle(.plain)
+        HStack {
             Text("GDP 趋势")
                 .font(.system(size: 17, weight: .bold))
             Spacer()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 23))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
         .frame(height: 52)
