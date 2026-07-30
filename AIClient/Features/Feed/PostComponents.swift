@@ -705,14 +705,13 @@ struct XVideoPlayerView: View {
                         .accessibilityLabel("正在加载视频")
                 }
             case .failed:
-                Button(action: startPlayback) {
-                    if chromeStyle == .minimal {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(.black.opacity(0.42), in: Circle())
-                    } else {
+                if chromeStyle == .minimal {
+                    MinimalVideoIdleControls(
+                        onPlay: startPlayback,
+                        onFullscreen: presentFullscreen
+                    )
+                } else {
+                    Button(action: startPlayback) {
                         Label("重试播放", systemImage: "arrow.clockwise")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
@@ -720,9 +719,9 @@ struct XVideoPlayerView: View {
                             .padding(.vertical, 8)
                             .background(.black.opacity(0.68), in: Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("重试播放视频")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("重试播放视频")
             case .playing:
                 EmptyView()
             }
@@ -864,8 +863,9 @@ struct XVideoPlayerView: View {
     }
 
     private func stopPlayback() {
-        guard let player else { return }
-        XVideoPlaybackSession.shared.pause(player, url: playbackURL)
+        if let player {
+            XVideoPlaybackSession.shared.pause(player, url: playbackURL)
+        }
         self.player = nil
         isVideoReady = false
         playbackState = .idle
@@ -967,39 +967,32 @@ private struct MinimalVideoIdleControls: View {
     let onFullscreen: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        ZStack {
             Button(action: onPlay) {
-                Label("播放", systemImage: "play.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 2)
-                    .frame(height: 32)
+                Image(systemName: "play.fill")
+                    .font(.system(size: 38, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .offset(x: 2)
+                    .frame(width: 76, height: 76)
+                    .contentShape(Rectangle())
+                    .shadow(color: .black.opacity(0.38), radius: 7, y: 2)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("播放视频")
 
-            Spacer()
-
             Button(action: onFullscreen) {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.94))
+                    .frame(width: 34, height: 34)
+                    .background(.black.opacity(0.34), in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("全屏播放")
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .padding(10)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 28)
-        .padding(.bottom, 6)
-        .background(
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.52)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
