@@ -227,6 +227,7 @@ struct PostMediaGrid: View {
     var multiImageHeight: CGFloat = 132
     var availableWidth: CGFloat? = nil
     var cornerRadius: CGFloat = 8
+    var videoContentMode: ContentMode = .fit
     @State private var gallerySelection: ImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
@@ -293,8 +294,13 @@ struct PostMediaGrid: View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
             if let videoURL = post.videoURLs.first {
-                XVideoPlayerView(url: videoURL, thumbnailURL: post.previewURL)
+                XVideoPlayerView(
+                    url: videoURL,
+                    thumbnailURL: post.previewURL,
+                    contentMode: videoContentMode
+                )
                     .id(videoURL)
+                    .frame(maxWidth: .infinity)
                     .frame(height: resolvedSingleImageHeight)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else if urls.count == 1, let url = urls.first {
@@ -447,10 +453,16 @@ struct XVideoPlayerView: View {
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let url: URL
     private let thumbnailURL: URL?
+    private let contentMode: ContentMode
 
-    init(url: URL, thumbnailURL: URL? = nil) {
+    init(
+        url: URL,
+        thumbnailURL: URL? = nil,
+        contentMode: ContentMode = .fit
+    ) {
         self.url = url
         self.thumbnailURL = thumbnailURL
+        self.contentMode = contentMode
     }
 
     var body: some View {
@@ -467,6 +479,7 @@ struct XVideoPlayerView: View {
 
             XPlayerLayerView(
                 player: player,
+                videoGravity: contentMode == .fill ? .resizeAspectFill : .resizeAspect,
                 onReadyForDisplay: markVideoReady,
                 onFailure: markPlaybackFailed
             )
@@ -540,6 +553,7 @@ struct XVideoPlayerView: View {
                 .padding(.bottom, 10)
             }
         }
+        .frame(maxWidth: .infinity)
         .clipped()
         .task(id: url) {
             await loadThumbnail()
@@ -629,6 +643,7 @@ struct XVideoPlayerView: View {
 
 private struct XPlayerLayerView: UIViewRepresentable {
     let player: AVPlayer?
+    let videoGravity: AVLayerVideoGravity
     let onReadyForDisplay: () -> Void
     let onFailure: () -> Void
 
@@ -640,11 +655,14 @@ private struct XPlayerLayerView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> PlayerView {
-        PlayerView()
+        let view = PlayerView()
+        view.playerLayer.videoGravity = videoGravity
+        return view
     }
 
     func updateUIView(_ view: PlayerView, context: Context) {
         view.playerLayer.player = player
+        view.playerLayer.videoGravity = videoGravity
         context.coordinator.observe(player: player, layer: view.playerLayer)
     }
 
@@ -665,7 +683,6 @@ private struct XPlayerLayerView: UIViewRepresentable {
         override init(frame: CGRect) {
             super.init(frame: frame)
             backgroundColor = .black
-            playerLayer.videoGravity = .resizeAspect
         }
 
         required init?(coder: NSCoder) {
