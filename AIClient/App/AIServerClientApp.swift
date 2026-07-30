@@ -65,6 +65,20 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         [.banner, .list, .sound]
     }
 
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard let value = response.notification.request.content.userInfo["url"] as? String,
+              let url = URL(string: value),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+            return
+        }
+        await MainActor.run {
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
