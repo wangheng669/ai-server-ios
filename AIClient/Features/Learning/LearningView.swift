@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import OSLog
+import AVKit
 
 private let learningImageLogger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "AIServerClient",
@@ -562,9 +563,12 @@ private struct LearningVideoLessonCard: View {
 
 private struct LearningVideoLessonDetailView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var lesson: LearningVideoLesson
     @State private var isLoadingDetail = false
+    @State private var player: AVPlayer?
+    @State private var playbackState: LearningVideoPlaybackState = .idle
+    @State private var playbackTask: Task<Void, Never>?
+    @State private var pendingStartSeconds = 0
 
     init(seed: LearningVideoLesson) {
         _lesson = State(initialValue: seed)
@@ -595,72 +599,201 @@ private struct LearningVideoLessonDetailView: View {
                 lesson = detail
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
+            guard let failedItem = notification.object as? AVPlayerItem,
+                  failedItem === player?.currentItem else { return }
+            player?.pause()
+            player = nil
+            playbackState = .failed
+        }
+        .onDisappear {
+            playbackTask?.cancel()
+            player?.pause()
+            player = nil
+        }
     }
 
     private var hero: some View {
-        ZStack(alignment: .topLeading) {
-            AsyncImage(url: lesson.coverURL) { phase in
-                if case let .success(image) = phase {
-                    image.resizable().scaledToFill()
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack {
+                Color.black
+
+                if let player {
+                    VideoPlayer(player: player)
                 } else {
+                    AsyncImage(url: lesson.coverURL) { phase in
+                        if case let .success(image) = phase {
+                            image.resizable().scaledToFill()
+                        } else {
+                            LinearGradient(
+                                colors: [.black, KnowledgePagePalette.accent.opacity(0.7)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        }
+                    }
+                    .clipped()
+
                     LinearGradient(
-                        colors: [.black, KnowledgePagePalette.accent.opacity(0.7)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        colors: [.black.opacity(0.20), .clear, .black.opacity(0.48)],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
                 }
+
+                switch playbackState {
+                case .idle:
+                    playButton(symbol: "play.fill", accessibilityLabel: "播放视频")
+                case .loading:
+                    VStack(spacing: 10) {
+                        ProgressView()
+                            .tint(.white)
+                            .controlSize(.large)
+                        Text("正在准备视频")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 13))
+                case .playing:
+                    EmptyView()
+                case .failed:
+                    Button {
+                        startPlayback()
+                    } label: {
+                        Label("重新加载", systemImage: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .frame(height: 40)
+                            .background(.black.opacity(0.68), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                VStack {
+                    HStack {
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 42, height: 42)
+                                .background(.black.opacity(0.38), in: Circle())
+                                .contentShape(Circle())
+                        }
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(.leading, 16)
+                .padding(.top, 8)
             }
-            .frame(height: 292)
+            .aspectRatio(16 / 9, contentMode: .fit)
             .clipped()
-
-            LinearGradient(
-                colors: [.black.opacity(0.28), .clear, .black.opacity(0.84)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 42, height: 42)
-                    .background(.black.opacity(0.32), in: Circle())
-                    .contentShape(Circle())
-            }
-            .padding(.leading, 16)
-            .padding(.top, 8)
 
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 7) {
                     Text(lesson.creator)
+                        .foregroundStyle(KnowledgePagePalette.accent)
                     Text("·")
                     Text(lesson.durationText)
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.82))
+                .foregroundStyle(.secondary)
 
                 Text(lesson.title)
                     .font(.system(size: 29, weight: .bold, design: .serif))
-                    .foregroundStyle(.white)
-                    .lineLimit(3)
-
-                Button {
-                    if let url = lesson.watchURL() { openURL(url) }
-                } label: {
-                    Label("在哔哩哔哩观看", systemImage: "play.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 15)
-                        .frame(height: 38)
-                        .background(KnowledgePagePalette.accent, in: Capsule())
-                }
-                .buttonStyle(LearningPressStyle())
+                    .foregroundStyle(.primary)
+                    .tracking(-0.3)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 20)
-            .frame(maxHeight: .infinity, alignment: .bottom)
+            .padding(.top, 18)
         }
-        .frame(height: 292)
+    }
+
+    private func playButton(symbol: String, accessibilityLabel: String) -> some View {
+        Button {
+            startPlayback()
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 25, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 62, height: 62)
+                .background(KnowledgePagePalette.accent.opacity(0.94), in: Circle())
+                .shadow(color: .black.opacity(0.28), radius: 9, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func startPlayback(at seconds: Int = 0) {
+        if let player {
+            seek(player, to: seconds)
+            playbackState = .playing
+            player.play()
+            return
+        }
+        pendingStartSeconds = seconds
+        if playbackTask != nil { return }
+        guard let pageURL = lesson.watchURL() else {
+            playbackState = .failed
+            return
+        }
+
+        playbackState = .loading
+        playbackTask = Task { @MainActor in
+            defer { playbackTask = nil }
+            do {
+                let source = try await APIClient(
+                    baseURL: ServerConfiguration.currentURL
+                ).resolveBilibiliPlayback(url: pageURL, title: lesson.title)
+                try Task.checkCancellation()
+
+                let asset = AVURLAsset(
+                    url: source.url,
+                    options: ["AVURLAssetHTTPHeaderFieldsKey": source.httpHeaders]
+                )
+                guard try await asset.load(.isPlayable) else {
+                    throw LearningError.invalidResponse
+                }
+                try Task.checkCancellation()
+
+                #if !targetEnvironment(simulator)
+                let audioSession = AVAudioSession.sharedInstance()
+                try? audioSession.setCategory(.playback, mode: .moviePlayback)
+                try? audioSession.setActive(true)
+                #endif
+
+                let item = AVPlayerItem(asset: asset)
+                item.preferredForwardBufferDuration = 2
+                let newPlayer = AVPlayer(playerItem: item)
+                newPlayer.automaticallyWaitsToMinimizeStalling = true
+                #if targetEnvironment(simulator)
+                newPlayer.isMuted = true
+                #endif
+                player = newPlayer
+                playbackState = .playing
+                seek(newPlayer, to: pendingStartSeconds)
+                newPlayer.play()
+            } catch is CancellationError {
+                return
+            } catch {
+                player = nil
+                playbackState = .failed
+            }
+        }
+    }
+
+    private func seek(_ player: AVPlayer, to seconds: Int) {
+        guard seconds > 0 else { return }
+        player.seek(
+            to: CMTime(seconds: Double(seconds), preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
     }
 
     private var introduction: some View {
@@ -721,7 +854,7 @@ private struct LearningVideoLessonDetailView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(lesson.chapters.enumerated()), id: \.element.id) { index, chapter in
                         Button {
-                            if let url = lesson.watchURL(at: chapter.startSeconds) { openURL(url) }
+                            startPlayback(at: chapter.startSeconds)
                         } label: {
                             HStack(spacing: 13) {
                                 Text(chapter.timestampText)
@@ -735,7 +868,7 @@ private struct LearningVideoLessonDetailView: View {
                                 Spacer()
                                 Image(systemName: "play.circle")
                                     .font(.system(size: 18))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(KnowledgePagePalette.accent)
                             }
                             .padding(.vertical, 14)
                             .contentShape(Rectangle())
@@ -780,7 +913,7 @@ private struct LearningVideoLessonDetailView: View {
     }
 
     private var sourceNote: some View {
-        Text("视频版权归原作者所有，本页提供学习导览与外部观看入口。")
+        Text("视频版权归原作者所有，本页使用应用内播放器提供学习导览。")
             .font(.system(size: 11))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 20)
@@ -791,6 +924,13 @@ private struct LearningVideoLessonDetailView: View {
         Text(title)
             .font(.system(size: 21, weight: .bold, design: .serif))
     }
+}
+
+private enum LearningVideoPlaybackState: Equatable {
+    case idle
+    case loading
+    case playing
+    case failed
 }
 
 private struct LearningMilestoneRow: View {
