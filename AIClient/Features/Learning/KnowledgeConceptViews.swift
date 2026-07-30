@@ -242,7 +242,6 @@ struct KnowledgeConceptDetailSheet: View {
     let cards: [KnowledgeConceptCard]
     let initialID: String
 
-    @Environment(\.dismiss) private var dismiss
     @State private var selectedID: String
     @State private var wikipediaEntity: WikipediaEntity?
     @State private var selectedDetent: PresentationDetent = .medium
@@ -258,42 +257,23 @@ struct KnowledgeConceptDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            TabView(selection: $selectedID) {
-                ForEach(cards) { card in
-                    KnowledgeConceptDetailPage(card: card) { detail in
-                        guard let url = detail.wikipediaURL else { return }
-                        wikipediaEntity = WikipediaEntity(
-                            id: detail.id,
-                            term: detail.wikipediaTitle,
-                            title: detail.wikipediaTitle,
-                            summary: detail.summary,
-                            url: url
-                        )
-                    }
-                    .tag(card.id)
+        TabView(selection: $selectedID) {
+            ForEach(cards) { card in
+                KnowledgeConceptDetailPage(card: card) { detail in
+                    guard let url = detail.wikipediaURL else { return }
+                    wikipediaEntity = WikipediaEntity(
+                        id: detail.id,
+                        term: detail.wikipediaTitle,
+                        title: detail.wikipediaTitle,
+                        summary: detail.summary,
+                        url: url
+                    )
                 }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .background(KnowledgeConceptPalette.paper.ignoresSafeArea())
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        Text(currentCard?.kind.title ?? "概念")
-                            .font(.headline)
-                        if cards.count > 1 {
-                            Text("\(currentIndex + 1) / \(cards.count) · 左右滑动")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .animation(.snappy(duration: 0.2), value: selectedID)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
+                .tag(card.id)
             }
         }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .background(KnowledgeConceptPalette.paper.ignoresSafeArea())
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.visible)
         .presentationContentInteraction(.resizes)
@@ -302,14 +282,6 @@ struct KnowledgeConceptDetailSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-    }
-
-    private var currentIndex: Int {
-        cards.firstIndex(where: { $0.id == selectedID }) ?? 0
-    }
-
-    private var currentCard: KnowledgeConceptCard? {
-        cards.indices.contains(currentIndex) ? cards[currentIndex] : cards.first
     }
 }
 
