@@ -106,7 +106,10 @@ struct LearningView: View {
             #endif
         }
         .sheet(item: $selectedConcept) { concept in
-            KnowledgeConceptDetailSheet(card: concept)
+            KnowledgeConceptDetailSheet(
+                cards: conceptFilter.filter(store.conceptLibrary?.concepts ?? [concept]),
+                initialID: concept.id
+            )
         }
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty || selectedIdeologyPerson != nil

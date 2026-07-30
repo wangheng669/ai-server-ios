@@ -146,45 +146,55 @@ struct KnowledgeConceptCarouselCard: View {
 }
 
 struct KnowledgeConceptDetailSheet: View {
-    let card: KnowledgeConceptCard
+    let cards: [KnowledgeConceptCard]
+    let initialID: String
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
-    @State private var detail: KnowledgeConceptDetail?
-    @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var selectedID: String
+    @State private var wikipediaEntity: WikipediaEntity?
+
+    init(cards: [KnowledgeConceptCard], initialID: String) {
+        self.cards = cards
+        self.initialID = initialID
+        _selectedID = State(
+            initialValue: cards.contains(where: { $0.id == initialID })
+                ? initialID
+                : cards.first?.id ?? initialID
+        )
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    hero
-                    summarySection
-
-                    if let detail {
-                        detailSections(detail)
-                    } else if isLoading {
-                        ProgressView("正在载入详细内容")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 42)
-                    } else if let errorMessage {
-                        ContentUnavailableView {
-                            Label("详细内容载入失败", systemImage: "wifi.exclamationmark")
-                        } description: {
-                            Text(errorMessage)
-                        } actions: {
-                            Button("重试") { Task { await load() } }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 30)
+            TabView(selection: $selectedID) {
+                ForEach(cards) { card in
+                    KnowledgeConceptDetailPage(card: card) { detail in
+                        guard let url = detail.wikipediaURL else { return }
+                        wikipediaEntity = WikipediaEntity(
+                            id: detail.id,
+                            term: detail.wikipediaTitle,
+                            title: detail.wikipediaTitle,
+                            summary: detail.summary,
+                            url: url
+                        )
                     }
+                    .tag(card.id)
                 }
-                .padding(.bottom, 44)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
             .background(KnowledgeConceptPalette.paper.ignoresSafeArea())
-            .navigationTitle(card.kind.title)
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text(currentCard?.kind.title ?? "概念")
+                            .font(.headline)
+                        if cards.count > 1 {
+                            Text("\(currentIndex + 1) / \(cards.count) · 左右滑动")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .animation(.snappy(duration: 0.2), value: selectedID)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
                 }
@@ -192,6 +202,55 @@ struct KnowledgeConceptDetailSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .fullScreenCover(item: $wikipediaEntity) { entity in
+            WikipediaReaderView(entity: entity, returnTitle: "返回概念详情")
+        }
+    }
+
+    private var currentIndex: Int {
+        cards.firstIndex(where: { $0.id == selectedID }) ?? 0
+    }
+
+    private var currentCard: KnowledgeConceptCard? {
+        cards.indices.contains(currentIndex) ? cards[currentIndex] : cards.first
+    }
+}
+
+private struct KnowledgeConceptDetailPage: View {
+    let card: KnowledgeConceptCard
+    let openWikipedia: (KnowledgeConceptDetail) -> Void
+
+    @State private var detail: KnowledgeConceptDetail?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                hero
+                summarySection
+
+                if let detail {
+                    detailSections(detail)
+                } else if isLoading {
+                    ProgressView("正在载入详细内容")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 42)
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("详细内容载入失败", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("重试") { Task { await load() } }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 30)
+                }
+            }
+            .padding(.bottom, 44)
+        }
+        .background(KnowledgeConceptPalette.paper.ignoresSafeArea())
         .task(id: card.id) { await load() }
     }
 
@@ -334,9 +393,7 @@ struct KnowledgeConceptDetailSheet: View {
 
     private func sourceSection(_ detail: KnowledgeConceptDetail) -> some View {
         Button {
-            if let url = detail.wikipediaURL {
-                openURL(url)
-            }
+            openWikipedia(detail)
         } label: {
             HStack(spacing: 12) {
                 Text("W")
