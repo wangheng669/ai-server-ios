@@ -1809,39 +1809,42 @@ private struct PersonDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            PersonDetailPage(person: person, showsNavigationChrome: false)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    sheetHeader
-                }
+            ZStack(alignment: .topTrailing) {
+                PersonDetailPage(
+                    person: person,
+                    showsNavigationChrome: false,
+                    usesSheetLayout: true
+                )
+
+                closeButton
+                    .padding(.top, 12)
+                    .padding(.trailing, 15)
+            }
         }
     }
 
-    private var sheetHeader: some View {
-        HStack(spacing: 12) {
-            Text(person.name)
-                .font(.system(size: 15, weight: .semibold))
-                .lineLimit(1)
-            Spacer()
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .background(Color.secondary.opacity(0.1), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭人物详情")
+    private var closeButton: some View {
+        Button(action: onClose) {
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.primary.opacity(0.72))
+                .frame(width: 34, height: 34)
+                .background(.regularMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.09), radius: 8, y: 3)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) { Divider() }
+        .buttonStyle(PeoplePressStyle())
+        .accessibilityLabel("关闭人物详情")
     }
 }
 
 private struct PersonDetailPage: View {
     let person: SpecialPerson
     let showsNavigationChrome: Bool
+    let usesSheetLayout: Bool
     @State private var store = PersonDetailStore()
     @State private var section: PersonDetailSection
     @State private var ownContentSection = PersonOwnContentSection.posts
@@ -1851,9 +1854,14 @@ private struct PersonDetailPage: View {
     @State private var selectedArticle: PersonArticle?
     @State private var selectedPhoto: PersonPhoto?
 
-    init(person: SpecialPerson, showsNavigationChrome: Bool = true) {
+    init(
+        person: SpecialPerson,
+        showsNavigationChrome: Bool = true,
+        usesSheetLayout: Bool = false
+    ) {
         self.person = person
         self.showsNavigationChrome = showsNavigationChrome
+        self.usesSheetLayout = usesSheetLayout
         _section = State(initialValue: person.topic == .history ? .profile : .posts)
     }
 
@@ -1926,7 +1934,113 @@ private struct PersonDetailPage: View {
         }
     }
 
+    @ViewBuilder
     private var personHeader: some View {
+        if usesSheetLayout {
+            sheetPersonHeader
+        } else {
+            standardPersonHeader
+        }
+    }
+
+    private var sheetPersonHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                AvatarView(
+                    url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
+                    name: person.name,
+                    size: 66,
+                    assetName: person.avatarAssetName
+                )
+                .overlay {
+                    Circle()
+                        .stroke(Color(uiColor: .systemBackground), lineWidth: 3)
+                }
+                .shadow(color: Color.accentColor.opacity(0.14), radius: 12, y: 5)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 6) {
+                        Text(person.name)
+                            .font(.system(size: 23, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                        if person.hasOwnPostSource {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+
+                    Text(personOrganizationLine)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+
+                    HStack(spacing: 7) {
+                        Text(person.topic.rawValue)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 9)
+                            .frame(height: 25)
+                            .background(Color.accentColor.opacity(0.11), in: Capsule())
+
+                        if let handle = person.xHandle, let url = person.xProfileURL {
+                            Link(destination: url) {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "at")
+                                        .font(.system(size: 10, weight: .semibold))
+                                    Text(handle.replacingOccurrences(of: "@", with: ""))
+                                        .lineLimit(1)
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 8, weight: .bold))
+                                }
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            }
+                            .accessibilityLabel("在 X 中打开 \(handle)")
+                        }
+                    }
+                }
+                .padding(.trailing, 36)
+            }
+
+            if !person.focusTags.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        ForEach(person.focusTags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.primary.opacity(0.78))
+                                .padding(.horizontal, 10)
+                                .frame(height: 27)
+                                .background(.thinMaterial, in: Capsule())
+                                .overlay {
+                                    Capsule()
+                                        .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
+                                }
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 31)
+        .padding(.bottom, 15)
+        .background(alignment: .topLeading) {
+            LinearGradient(
+                colors: [
+                    Color.accentColor.opacity(0.085),
+                    Color.accentColor.opacity(0.018),
+                    Color.clear
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+
+    private var standardPersonHeader: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 16) {
                 AvatarView(
