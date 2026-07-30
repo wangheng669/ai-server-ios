@@ -1029,6 +1029,7 @@ struct PostImage: Decodable, Hashable {
             || value.contains("/images/emoji/")
             || value.contains("/face/emoji_")
             || value.contains("/emoji/")
+            || (value.contains("timeline_card_small_") && value.contains("_default."))
             || isLikelyInlineEmoji
     }
 
