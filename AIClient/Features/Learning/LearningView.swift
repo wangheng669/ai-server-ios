@@ -577,10 +577,7 @@ struct LearningView: View {
     }
 
     private var ideologyPeople: [SpecialPerson] {
-        let names = ["胡锡进", "王冰冰"]
-        return names.compactMap { name in
-            peopleStore.people.first { $0.name == name }
-        }
+        peopleStore.people.filter { $0.topic == .ideology }
     }
 
     private var ideologyPersonIsPresented: Binding<Bool> {
