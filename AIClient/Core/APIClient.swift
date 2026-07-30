@@ -26,7 +26,12 @@ struct APIClient {
         case .weibo, .douyin:
             return try await fetchHotTopics(page: page, limit: limit, source: source).map { .hotTopic($0, source: source) }
         case .flash:
-            return try await fetchFlash(page: page, limit: limit, category: flashCategory).map(Post.flash)
+            return try await fetchFlash(
+                page: page,
+                limit: limit,
+                category: flashCategory,
+                importantOnly: flashCategory == nil
+            ).map(Post.flash)
         case .xueqiu:
             return try await fetchXueqiuPosts(page: page, limit: limit)
         default:
@@ -161,7 +166,12 @@ struct APIClient {
         return response.data.topics
     }
 
-    static func flashQueryItems(page: Int, limit: Int, category: String?) -> [URLQueryItem] {
+    static func flashQueryItems(
+        page: Int,
+        limit: Int,
+        category: String?,
+        importantOnly: Bool
+    ) -> [URLQueryItem] {
         var items: [URLQueryItem] = [
             .init(name: "limit", value: String(limit)),
             .init(name: "offset", value: String((page - 1) * limit)),
@@ -171,12 +181,25 @@ struct APIClient {
         if let category, !category.isEmpty {
             items.append(.init(name: "category", value: category))
         }
+        if importantOnly {
+            items.append(.init(name: "important_only", value: "1"))
+        }
         return items
     }
 
-    private func fetchFlash(page: Int, limit: Int, category: String?) async throws -> [FlashItem] {
+    private func fetchFlash(
+        page: Int,
+        limit: Int,
+        category: String?,
+        importantOnly: Bool
+    ) async throws -> [FlashItem] {
         var parts = URLComponents(url: baseURL.appending(path: "api/v1/market/flash/live"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = Self.flashQueryItems(page: page, limit: limit, category: category)
+        parts?.queryItems = Self.flashQueryItems(
+            page: page,
+            limit: limit,
+            category: category,
+            importantOnly: importantOnly
+        )
         guard let url = parts?.url else { throw APIError.invalidURL }
         let response: FlashResponse = try await get(url)
         guard response.success else { throw APIError.invalidResponse }

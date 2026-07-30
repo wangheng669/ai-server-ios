@@ -543,13 +543,25 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     func testFlashCategoryQueryUsesServerFilter() {
-        let items = APIClient.flashQueryItems(page: 2, limit: 20, category: "tech")
+        let items = APIClient.flashQueryItems(page: 2, limit: 20, category: "tech", importantOnly: false)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
             item.value.map { (item.name, $0) }
         })
 
         XCTAssertEqual(query["offset"], "20")
         XCTAssertEqual(query["category"], "tech")
+        XCTAssertNil(query["important_only"])
+    }
+
+    func testDefaultImportantFlashQueryUsesServerFilter() {
+        let items = APIClient.flashQueryItems(page: 1, limit: 20, category: nil, importantOnly: true)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["offset"], "0")
+        XCTAssertEqual(query["important_only"], "1")
+        XCTAssertNil(query["category"])
     }
 
     func testFlashUsesExplicitServerImportantFlagBeforeScore() throws {
