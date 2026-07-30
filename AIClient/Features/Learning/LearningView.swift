@@ -18,6 +18,9 @@ struct LearningView: View {
     @State private var path: [LearningRoute] = []
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") {
+            return .ideology
+        }
         if ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") {
             return .concepts
         }
@@ -114,6 +117,8 @@ struct LearningView: View {
                             booksContent
                         case .concepts:
                             conceptsContent
+                        case .ideology:
+                            ideologyContent
                         }
                     }
                     .padding(.top, 12)
@@ -132,6 +137,8 @@ struct LearningView: View {
                         await store.loadBookshelf(force: true)
                     case .concepts:
                         await store.load(force: true)
+                    case .ideology:
+                        return
                     }
                 }
             }
@@ -139,10 +146,11 @@ struct LearningView: View {
     }
 
     private var sectionPicker: some View {
-        HStack(alignment: .top, spacing: 30) {
+        HStack(alignment: .top, spacing: 20) {
             sectionButton(.investment)
             sectionButton(.books)
             sectionButton(.concepts)
+            sectionButton(.ideology)
             Spacer()
         }
         .padding(.horizontal, 20)
@@ -451,6 +459,28 @@ struct LearningView: View {
         .padding(.bottom, 22)
     }
 
+    @ViewBuilder
+    private var ideologyContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("意识形态")
+                .font(.system(size: 24, weight: .bold, design: .serif))
+            Text("理解塑造社会与公共生活的观念体系")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 18)
+
+        ContentUnavailableView(
+            "暂无意识形态内容",
+            systemImage: "point.3.connected.trianglepath.dotted",
+            description: Text("相关内容会在这里展示")
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.top, 36)
+    }
+
     private func stockTopics(in catalog: LearningCatalog) -> [LearningTopic] {
         catalog.sections.first(where: { $0.name == "股票" })?.topics ??
             catalog.sections.first?.topics ??
@@ -492,12 +522,14 @@ private enum KnowledgeSection: String {
     case investment
     case books
     case concepts
+    case ideology
 
     var title: String {
         switch self {
         case .investment: "投资"
         case .books: "书籍"
         case .concepts: "概念"
+        case .ideology: "意识形态"
         }
     }
 }
