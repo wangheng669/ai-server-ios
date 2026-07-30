@@ -35,7 +35,7 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.sections[0].topics[0].hasVideo, true)
     }
 
-    func testDecodesCompanyExampleInLearningDetail() throws {
+    func testDecodesEditorialReferencesInLearningDetail() throws {
         let topic = try JSONDecoder().decode(
             LearningTopic.self,
             from: Data(
@@ -53,6 +53,14 @@ final class LearningServiceTests: XCTestCase {
                       "situation":"会员收入较稳定。",
                       "connection":"估值包含质量预期。",
                       "caution":"不构成投资建议。"
+                    }],
+                    "video_references":[{
+                      "id":7,"platform":"bilibili","creator":"小Lin说",
+                      "title":"真正的做空","external_id":"BV1v34y1j7Nu",
+                      "watch_url":"https://www.bilibili.com/video/BV1v34y1j7Nu/",
+                      "cover_url":"https://i0.hdslb.com/cover.jpg",
+                      "duration_seconds":2150,"start_seconds":48,"end_seconds":202,
+                      "recommendation":"卖空为什么是先卖后买\\n亏损为什么可能没有上限"
                     }]
                   }
                 }
@@ -63,6 +71,12 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(topic.detail?.companyExamples?.count, 1)
         XCTAssertEqual(topic.detail?.companyExamples?.first?.company, "开市客")
         XCTAssertEqual(topic.detail?.companyExamples?.first?.ticker, "COST")
+        let video = try XCTUnwrap(topic.detail?.videoReferences?.first)
+        XCTAssertEqual(video.creator, "小Lin说")
+        XCTAssertEqual(video.externalID, "BV1v34y1j7Nu")
+        XCTAssertEqual(video.clipDurationText, "3 分钟")
+        XCTAssertEqual(video.recommendationItems.count, 2)
+        XCTAssertEqual(video.watchURL?.absoluteString, "https://www.bilibili.com/video/BV1v34y1j7Nu/?t=48")
     }
 
     func testResolvesCachedMediaAgainstServer() throws {
