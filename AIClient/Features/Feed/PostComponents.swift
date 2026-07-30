@@ -613,6 +613,7 @@ struct XVideoPlayerView: View {
     @State private var playbackState: PlaybackState = .idle
     @State private var isVideoReady = false
     @State private var thumbnailFailed = false
+    @State private var isFullscreenPresented = false
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let url: URL
     private let thumbnailURL: URL?
@@ -718,6 +719,18 @@ struct XVideoPlayerView: View {
                 .frame(maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, 10)
             }
+
+            Button(action: presentFullscreen) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 30)
+                    .background(.black.opacity(0.62), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .padding(8)
+            .accessibilityLabel("全屏播放")
         }
         .frame(maxWidth: .infinity)
         .clipped()
@@ -729,6 +742,18 @@ struct XVideoPlayerView: View {
         .onDisappear {
             stopPlayback()
         }
+        .fullScreenCover(isPresented: $isFullscreenPresented) {
+            if let player {
+                FullscreenVideoPlayerView(player: player, isMuted: $isMuted)
+            }
+        }
+    }
+
+    private func presentFullscreen() {
+        if player == nil {
+            startPlayback()
+        }
+        isFullscreenPresented = true
     }
 
     private func startPlayback() {
@@ -820,6 +845,51 @@ struct XVideoPlayerView: View {
         let height = abs(displayedSize.height)
         guard width > 0, height > 0 else { return }
         onAspectRatioResolved?(width / height)
+    }
+}
+
+private struct FullscreenVideoPlayerView: View {
+    let player: AVPlayer
+    @Binding var isMuted: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+
+            HStack(spacing: 10) {
+                Button {
+                    isMuted.toggle()
+                    player.isMuted = isMuted
+                } label: {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .frame(width: 40, height: 40)
+                        .background(.black.opacity(0.62), in: Circle())
+                }
+                .accessibilityLabel(isMuted ? "打开声音" : "静音")
+
+                Spacer()
+
+                Button(action: dismiss.callAsFunction) {
+                    Image(systemName: "xmark")
+                        .frame(width: 40, height: 40)
+                        .background(.black.opacity(0.62), in: Circle())
+                }
+                .accessibilityLabel("退出全屏")
+            }
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .onAppear {
+            player.isMuted = isMuted
+            player.play()
+        }
     }
 }
 
