@@ -573,6 +573,7 @@ private struct LearningVideoLessonDetailView: View {
     @State private var currentPlaybackTime = 0.0
     @State private var playbackDuration = 0.0
     @State private var timeObserver: Any?
+    @State private var showsFullscreenPlayer = false
 
     init(seed: LearningVideoLesson) {
         _lesson = State(initialValue: seed)
@@ -581,18 +582,22 @@ private struct LearningVideoLessonDetailView: View {
     var body: some View {
         ZStack {
             KnowledgePagePalette.canvas.ignoresSafeArea()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    hero
-                    introduction
-                    watchPoints
-                    chapters
-                    relatedTopics
-                    sourceNote
+            VStack(spacing: 0) {
+                videoSurface
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        heroMetadata
+                        introduction
+                        watchPoints
+                        chapters
+                        relatedTopics
+                        sourceNote
+                    }
+                    .padding(.bottom, 44)
                 }
-                .padding(.bottom, 44)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .overlay(alignment: .topLeading) {
             Button {
@@ -616,6 +621,24 @@ private struct LearningVideoLessonDetailView: View {
         }
         .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)
+        .fullScreenCover(isPresented: $showsFullscreenPlayer) {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let player {
+                    LearningInlineVideoPlayer(
+                        player: player,
+                        isPlaying: $isPlaying,
+                        currentTime: $currentPlaybackTime,
+                        duration: $playbackDuration,
+                        isFullscreen: true
+                    ) {
+                        showsFullscreenPlayer = false
+                    }
+                    .ignoresSafeArea()
+                }
+            }
+            .persistentSystemOverlays(.hidden)
+        }
         .task(id: lesson.id) {
             guard lesson.chapters.isEmpty else { return }
             isLoadingDetail = true
@@ -639,94 +662,87 @@ private struct LearningVideoLessonDetailView: View {
         }
     }
 
-    private var hero: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                Color.black
+    private var videoSurface: some View {
+        ZStack {
+            Color.black
 
-                if let player {
-                    LearningInlineVideoPlayer(
-                        player: player,
-                        isPlaying: $isPlaying,
-                        currentTime: $currentPlaybackTime,
-                        duration: $playbackDuration
-                    )
-                } else {
-                    AsyncImage(url: lesson.coverURL) { phase in
-                        if case let .success(image) = phase {
-                            image.resizable().scaledToFill()
-                        } else {
-                            LinearGradient(
-                                colors: [.black, KnowledgePagePalette.accent.opacity(0.7)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        }
-                    }
-                    .clipped()
-
-                    LinearGradient(
-                        colors: [.black.opacity(0.20), .clear, .black.opacity(0.48)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+            if let player {
+                LearningInlineVideoPlayer(
+                    player: player,
+                    isPlaying: $isPlaying,
+                    currentTime: $currentPlaybackTime,
+                    duration: $playbackDuration
+                ) {
+                    showsFullscreenPlayer = true
                 }
-
-                switch playbackState {
-                case .idle:
-                    playButton(symbol: "play.fill", accessibilityLabel: "播放视频")
-                case .loading:
-                    VStack(spacing: 10) {
-                        ProgressView()
-                            .tint(.white)
-                            .controlSize(.large)
-                        Text("正在准备视频")
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(.white)
+            } else {
+                AsyncImage(url: lesson.coverURL) { phase in
+                    if case let .success(image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        LinearGradient(
+                            colors: [.black, KnowledgePagePalette.accent.opacity(0.7)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 14)
-                    .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 13))
-                case .playing:
-                    EmptyView()
-                case .failed:
-                    Button {
-                        startPlayback()
-                    } label: {
-                        Label("重新加载", systemImage: "arrow.clockwise")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
-                            .frame(height: 40)
-                            .background(.black.opacity(0.68), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
                 }
+                .clipped()
 
+                LinearGradient(
+                    colors: [.black.opacity(0.20), .clear, .black.opacity(0.48)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
-            .aspectRatio(16 / 9, contentMode: .fit)
-            .clipped()
 
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 7) {
-                    Text(lesson.creator)
-                        .foregroundStyle(KnowledgePagePalette.accent)
-                    Text("·")
-                    Text(lesson.durationText)
+            switch playbackState {
+            case .idle:
+                playButton(symbol: "play.fill", accessibilityLabel: "播放视频")
+            case .loading:
+                LearningVideoLoadingIndicator()
+            case .playing:
+                EmptyView()
+            case .failed:
+                Button {
+                    startPlayback()
+                } label: {
+                    Label("重新加载", systemImage: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .frame(height: 40)
+                        .background(.black.opacity(0.68), in: Capsule())
                 }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-                Text(lesson.title)
-                    .font(.system(size: 29, weight: .bold, design: .serif))
-                    .foregroundStyle(.primary)
-                    .tracking(-0.3)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
         }
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .clipped()
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 5)
+        .zIndex(2)
+    }
+
+    private var heroMetadata: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 7) {
+                Text(lesson.creator)
+                    .foregroundStyle(KnowledgePagePalette.accent)
+                Text("·")
+                Text(lesson.durationText)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.secondary)
+
+            Text(lesson.title)
+                .font(.system(size: 29, weight: .bold, design: .serif))
+                .foregroundStyle(.primary)
+                .tracking(-0.3)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
     }
 
     private func playButton(symbol: String, accessibilityLabel: String) -> some View {
@@ -965,11 +981,63 @@ private struct LearningVideoLessonDetailView: View {
     }
 }
 
+private struct LearningVideoLoadingIndicator: View {
+    @State private var rotates = false
+
+    var body: some View {
+        VStack(spacing: 11) {
+            ZStack {
+                Circle()
+                    .stroke(.white.opacity(0.14), lineWidth: 3)
+                Circle()
+                    .trim(from: 0.08, to: 0.78)
+                    .stroke(
+                        AngularGradient(
+                            colors: [
+                                .white.opacity(0.2),
+                                KnowledgePagePalette.accent,
+                                Color(red: 1, green: 0.68, blue: 0.38),
+                                .white.opacity(0.2)
+                            ],
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(rotates ? 360 : 0))
+                Circle()
+                    .fill(.white)
+                    .frame(width: 5, height: 5)
+                    .shadow(color: .white.opacity(0.8), radius: 4)
+            }
+            .frame(width: 36, height: 36)
+
+            Text("正在载入视频")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .tracking(0.4)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 15)
+        .background(.black.opacity(0.46), in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(.white.opacity(0.10), lineWidth: 0.8)
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+                rotates = true
+            }
+        }
+    }
+}
+
 private struct LearningInlineVideoPlayer: View {
     let player: AVPlayer
     @Binding var isPlaying: Bool
     @Binding var currentTime: Double
     @Binding var duration: Double
+    var isFullscreen = false
+    let onFullscreen: () -> Void
     @State private var showsControls = true
     @State private var controlsTask: Task<Void, Never>?
     @State private var isSeeking = false
@@ -1051,6 +1119,23 @@ private struct LearningInlineVideoPlayer: View {
 
                         Text(timeText(duration))
                             .frame(width: 38, alignment: .trailing)
+
+                        Button {
+                            controlsTask?.cancel()
+                            onFullscreen()
+                        } label: {
+                            Image(
+                                systemName: isFullscreen
+                                    ? "arrow.down.right.and.arrow.up.left"
+                                    : "arrow.up.left.and.arrow.down.right"
+                            )
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isFullscreen ? "退出全屏" : "全屏播放")
                     }
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
