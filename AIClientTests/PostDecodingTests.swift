@@ -330,6 +330,13 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertFalse(image.isLikelyInlineEmoji)
     }
 
+    func testWeiboVideoPlaceholderIsTreatedAsKnownInlineAssetWithoutDimensions() throws {
+        let data = #"{"url":"https://h5.sinaimg.cn/upload/timeline_card_small_video_default.png"}"#.data(using: .utf8)!
+        let image = try JSONDecoder().decode(PostImage.self, from: data)
+
+        XCTAssertTrue(image.isKnownInlineAsset)
+    }
+
     func testDecodesPostListResponse() throws {
         let json = #"""
         {

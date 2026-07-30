@@ -1029,7 +1029,18 @@ struct PostImage: Decodable, Hashable {
             || value.contains("/images/emoji/")
             || value.contains("/face/emoji_")
             || value.contains("/emoji/")
+            || isSinaTimelinePlaceholder
             || isLikelyInlineEmoji
+    }
+
+    private var isSinaTimelinePlaceholder: Bool {
+        guard let sourceURL = URL(string: url),
+              let host = sourceURL.host()?.lowercased(),
+              host == "sinaimg.cn" || host.hasSuffix(".sinaimg.cn") else {
+            return false
+        }
+        let filename = sourceURL.lastPathComponent.lowercased()
+        return filename.hasPrefix("timeline_card_small_") && filename.contains("_default.")
     }
 
     enum CodingKeys: String, CodingKey {
