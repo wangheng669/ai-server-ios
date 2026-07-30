@@ -131,11 +131,26 @@ struct LearningView: View {
             guard rootTabIsActive, selectedSection == .ideology else { return }
             await peopleStore.load()
         }
+        .task(id: conceptImagePrefetchKey) {
+            guard rootTabIsActive,
+                  selectedSection == .concepts,
+                  let concepts = store.conceptLibrary?.concepts else {
+                return
+            }
+            await KnowledgeConceptImageLoading.prefetch(concepts)
+        }
         .onDisappear { showsDetail = false }
     }
 
     private var prefetchKey: String {
         "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)-\(selectedSection)"
+    }
+
+    private var conceptImagePrefetchKey: String {
+        let imageURLs = store.conceptLibrary?.concepts.compactMap {
+            $0.coverURL?.absoluteString
+        } ?? []
+        return "\(rootTabIsActive)-\(selectedSection)-\(imageURLs.joined(separator: "|"))"
     }
 
     private var knowledgeHome: some View {

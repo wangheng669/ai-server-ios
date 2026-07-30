@@ -162,6 +162,40 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.wikipediaURL?.host, "zh.wikipedia.org")
     }
 
+    func testKnowledgeConceptCoverURLUsesWikimediaThumbnail() throws {
+        let original = "https://upload.wikimedia.org/wikipedia/commons/4/4e/YuanShikaiPresidente1915.jpg"
+        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(original))
+
+        XCTAssertEqual(optimized.host, "upload.wikimedia.org")
+        XCTAssertTrue(optimized.path.contains("/wikipedia/commons/thumb/"))
+        XCTAssertEqual(optimized.lastPathComponent, "960px-YuanShikaiPresidente1915.jpg")
+    }
+
+    func testKnowledgeConceptCoverURLKeepsExistingThumbnail() throws {
+        let thumbnail = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Yuan.jpg/320px-Yuan.jpg"
+        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(thumbnail))
+
+        XCTAssertEqual(optimized.absoluteString, thumbnail)
+    }
+
+    func testKnowledgeConceptCoverURLSetsRedirectWidth() throws {
+        let redirect = "https://commons.wikimedia.org/wiki/Special:Redirect/file/Hankou.jpg?width=1200"
+        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(redirect))
+        let width = URLComponents(url: optimized, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "width" })?
+            .value
+
+        XCTAssertEqual(width, "960")
+    }
+
+    func testKnowledgeConceptCoverURLLeavesOtherHostsUntouched() throws {
+        let original = "https://example.com/history/cover.jpg"
+        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(original))
+
+        XCTAssertEqual(optimized.absoluteString, original)
+    }
+
     func testDecodesIndependentVideoLessonDetail() throws {
         let data = Data(
             """

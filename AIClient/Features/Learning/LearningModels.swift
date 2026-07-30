@@ -384,8 +384,7 @@ struct KnowledgeConceptCard: Identifiable, Decodable, Hashable {
     }
 
     var coverURL: URL? {
-        guard let coverURLValue else { return nil }
-        return URL(string: coverURLValue)
+        KnowledgeConceptImageURL.optimized(coverURLValue)
     }
 
     var wikipediaURL: URL? { URL(string: wikipediaURLValue) }
@@ -418,11 +417,47 @@ struct KnowledgeConceptDetail: Identifiable, Decodable, Hashable {
     }
 
     var coverURL: URL? {
-        guard let coverURLValue else { return nil }
-        return URL(string: coverURLValue)
+        KnowledgeConceptImageURL.optimized(coverURLValue)
     }
 
     var wikipediaURL: URL? { URL(string: wikipediaURLValue) }
+}
+
+enum KnowledgeConceptImageURL {
+    private static let thumbnailWidth = "960"
+    private static let commonsPathPrefix = "/wikipedia/commons/"
+
+    static func optimized(_ rawValue: String?) -> URL? {
+        guard let rawValue, let url = URL(string: rawValue) else { return nil }
+        guard let host = url.host?.lowercased() else { return url }
+
+        if host == "upload.wikimedia.org",
+           url.path.hasPrefix(commonsPathPrefix),
+           !url.path.hasPrefix("\(commonsPathPrefix)thumb/"),
+           isRasterImage(url) {
+            let relativePath = String(url.path.dropFirst(commonsPathPrefix.count))
+            let filename = url.lastPathComponent
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.path = "\(commonsPathPrefix)thumb/\(relativePath)/\(thumbnailWidth)px-\(filename)"
+            components?.query = nil
+            return components?.url ?? url
+        }
+
+        if host == "commons.wikimedia.org",
+           url.path.hasPrefix("/wiki/Special:Redirect/file/") {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            var queryItems = components?.queryItems?.filter { $0.name != "width" } ?? []
+            queryItems.append(URLQueryItem(name: "width", value: thumbnailWidth))
+            components?.queryItems = queryItems
+            return components?.url ?? url
+        }
+
+        return url
+    }
+
+    private static func isRasterImage(_ url: URL) -> Bool {
+        ["jpg", "jpeg", "png", "webp"].contains(url.pathExtension.lowercased())
+    }
 }
 
 struct KnowledgeConceptContent: Decodable, Hashable {
