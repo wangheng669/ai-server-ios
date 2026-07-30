@@ -1818,7 +1818,7 @@ private struct PeopleLoadingTimeline: View {
     }
 }
 
-private struct PersonDetailSheet: View {
+struct PersonDetailSheet: View {
     @Binding var selectedPerson: SpecialPerson?
     let people: [SpecialPerson]
     let onClose: () -> Void
