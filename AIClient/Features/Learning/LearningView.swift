@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 import OSLog
-import AVKit
+import AVFoundation
 
 private let learningImageLogger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "AIServerClient",
@@ -569,6 +569,10 @@ private struct LearningVideoLessonDetailView: View {
     @State private var playbackState: LearningVideoPlaybackState = .idle
     @State private var playbackTask: Task<Void, Never>?
     @State private var pendingStartSeconds = 0
+    @State private var isPlaying = false
+    @State private var currentPlaybackTime = 0.0
+    @State private var playbackDuration = 0.0
+    @State private var timeObserver: Any?
 
     init(seed: LearningVideoLesson) {
         _lesson = State(initialValue: seed)
@@ -590,6 +594,27 @@ private struct LearningVideoLessonDetailView: View {
             }
             .scrollIndicators(.hidden)
         }
+        .overlay(alignment: .topLeading) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.58), in: Circle())
+                    .overlay {
+                        Circle().stroke(.white.opacity(0.18), lineWidth: 0.8)
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("返回知识")
+            .padding(.leading, 14)
+            .padding(.top, 6)
+        }
+        .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)
         .task(id: lesson.id) {
             guard lesson.chapters.isEmpty else { return }
@@ -608,6 +633,7 @@ private struct LearningVideoLessonDetailView: View {
         }
         .onDisappear {
             playbackTask?.cancel()
+            stopObservingPlayback()
             player?.pause()
             player = nil
         }
@@ -619,7 +645,12 @@ private struct LearningVideoLessonDetailView: View {
                 Color.black
 
                 if let player {
-                    VideoPlayer(player: player)
+                    LearningInlineVideoPlayer(
+                        player: player,
+                        isPlaying: $isPlaying,
+                        currentTime: $currentPlaybackTime,
+                        duration: $playbackDuration
+                    )
                 } else {
                     AsyncImage(url: lesson.coverURL) { phase in
                         if case let .success(image) = phase {
@@ -672,22 +703,6 @@ private struct LearningVideoLessonDetailView: View {
                     .buttonStyle(.plain)
                 }
 
-                VStack {
-                    HStack {
-                        Button { dismiss() } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 42, height: 42)
-                                .background(.black.opacity(0.38), in: Circle())
-                                .contentShape(Circle())
-                        }
-                        Spacer()
-                    }
-                    Spacer()
-                }
-                .padding(.leading, 16)
-                .padding(.top, 8)
             }
             .aspectRatio(16 / 9, contentMode: .fit)
             .clipped()
@@ -734,6 +749,7 @@ private struct LearningVideoLessonDetailView: View {
             seek(player, to: seconds)
             playbackState = .playing
             player.play()
+            isPlaying = true
             return
         }
         pendingStartSeconds = seconds
@@ -776,8 +792,10 @@ private struct LearningVideoLessonDetailView: View {
                 #endif
                 player = newPlayer
                 playbackState = .playing
+                observePlayback(newPlayer)
                 seek(newPlayer, to: pendingStartSeconds)
                 newPlayer.play()
+                isPlaying = true
             } catch is CancellationError {
                 return
             } catch {
@@ -794,6 +812,27 @@ private struct LearningVideoLessonDetailView: View {
             toleranceBefore: .zero,
             toleranceAfter: .zero
         )
+    }
+
+    private func observePlayback(_ player: AVPlayer) {
+        stopObservingPlayback()
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { time in
+            currentPlaybackTime = max(0, time.seconds.isFinite ? time.seconds : 0)
+            let seconds = player.currentItem?.duration.seconds ?? 0
+            if seconds.isFinite, seconds > 0 {
+                playbackDuration = seconds
+            }
+        }
+    }
+
+    private func stopObservingPlayback() {
+        if let timeObserver, let player {
+            player.removeTimeObserver(timeObserver)
+        }
+        timeObserver = nil
     }
 
     private var introduction: some View {
@@ -923,6 +962,212 @@ private struct LearningVideoLessonDetailView: View {
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 21, weight: .bold, design: .serif))
+    }
+}
+
+private struct LearningInlineVideoPlayer: View {
+    let player: AVPlayer
+    @Binding var isPlaying: Bool
+    @Binding var currentTime: Double
+    @Binding var duration: Double
+    @State private var showsControls = true
+    @State private var controlsTask: Task<Void, Never>?
+    @State private var isSeeking = false
+    @State private var seekPreview = 0.0
+
+    var body: some View {
+        ZStack {
+            LearningPlayerLayer(player: player)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        showsControls.toggle()
+                    }
+                    if showsControls, isPlaying {
+                        scheduleControlsDismissal()
+                    } else {
+                        controlsTask?.cancel()
+                    }
+                }
+
+            if showsControls {
+                LinearGradient(
+                    colors: [.black.opacity(0.16), .clear, .black.opacity(0.78)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+
+                HStack(spacing: 28) {
+                    seekButton(seconds: -15, symbol: "gobackward.15")
+
+                    Button {
+                        togglePlayback()
+                    } label: {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 23, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 58, height: 58)
+                            .background(.white.opacity(0.18), in: Circle())
+                            .overlay {
+                                Circle().stroke(.white.opacity(0.28), lineWidth: 0.8)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isPlaying ? "暂停" : "播放")
+
+                    seekButton(seconds: 15, symbol: "goforward.15")
+                }
+
+                VStack {
+                    Spacer()
+                    HStack(spacing: 9) {
+                        Text(timeText(isSeeking ? seekPreview : currentTime))
+                            .frame(width: 38, alignment: .leading)
+
+                        Slider(
+                            value: Binding(
+                                get: {
+                                    min(
+                                        max(isSeeking ? seekPreview : currentTime, 0),
+                                        max(duration, 1)
+                                    )
+                                },
+                                set: { seekPreview = $0 }
+                            ),
+                            in: 0...max(duration, 1),
+                            onEditingChanged: { editing in
+                                isSeeking = editing
+                                if editing {
+                                    seekPreview = currentTime
+                                    controlsTask?.cancel()
+                                } else {
+                                    seek(to: seekPreview)
+                                    if isPlaying { scheduleControlsDismissal() }
+                                }
+                            }
+                        )
+                        .tint(KnowledgePagePalette.accent)
+
+                        Text(timeText(duration))
+                            .frame(width: 38, alignment: .trailing)
+                    }
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
+                }
+            }
+        }
+        .onAppear {
+            if isPlaying { scheduleControlsDismissal() }
+        }
+        .onDisappear {
+            controlsTask?.cancel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
+            guard let item = note.object as? AVPlayerItem,
+                  item === player.currentItem else { return }
+            isPlaying = false
+            showsControls = true
+            controlsTask?.cancel()
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func seekButton(seconds: Double, symbol: String) -> some View {
+        Button {
+            let target = min(max(currentTime + seconds, 0), max(duration, 0))
+            seek(to: target)
+            if isPlaying { scheduleControlsDismissal() }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(seconds < 0 ? "后退15秒" : "前进15秒")
+    }
+
+    private func togglePlayback() {
+        if isPlaying {
+            player.pause()
+            controlsTask?.cancel()
+        } else {
+            if currentTime >= duration - 0.5, duration > 0 {
+                seek(to: 0)
+            }
+            player.play()
+            scheduleControlsDismissal()
+        }
+        isPlaying.toggle()
+    }
+
+    private func seek(to seconds: Double) {
+        let target = max(seconds, 0)
+        player.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+        currentTime = target
+    }
+
+    private func scheduleControlsDismissal() {
+        controlsTask?.cancel()
+        controlsTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, isPlaying, !isSeeking else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                showsControls = false
+            }
+        }
+    }
+
+    private func timeText(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let value = Int(seconds.rounded(.down))
+        return String(format: "%d:%02d", value / 60, value % 60)
+    }
+}
+
+private struct LearningPlayerLayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerView {
+        let view = PlayerView()
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ view: PlayerView, context: Context) {
+        view.playerLayer.player = player
+    }
+
+    static func dismantleUIView(_ view: PlayerView, coordinator: Void) {
+        view.playerLayer.player = nil
+    }
+
+    final class PlayerView: UIView {
+        override class var layerClass: AnyClass {
+            AVPlayerLayer.self
+        }
+
+        var playerLayer: AVPlayerLayer {
+            layer as! AVPlayerLayer
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .black
+            playerLayer.videoGravity = .resizeAspect
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
     }
 }
 
