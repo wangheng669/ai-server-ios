@@ -42,18 +42,19 @@ struct PeopleView: View {
                     }
                 }
 
-                if let selectedPerson {
-                    InlinePersonDetail(
-                        person: selectedPerson,
-                        onCollapse: { self.selectedPerson = nil }
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(2)
-                }
             }
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .navigationBarHidden(true)
-            .animation(.snappy(duration: 0.38), value: selectedPerson?.id)
+        }
+        .sheet(item: $selectedPerson) { person in
+            PersonDetailSheet(
+                person: person,
+                onClose: { selectedPerson = nil }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -1802,57 +1803,39 @@ private struct PeopleLoadingTimeline: View {
     }
 }
 
-private struct InlinePersonDetail: View {
+private struct PersonDetailSheet: View {
     let person: SpecialPerson
-    let onCollapse: () -> Void
-
-    @GestureState private var pullDownOffset: CGFloat = 0
+    let onClose: () -> Void
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
-
+        NavigationStack {
             PersonDetailPage(person: person, showsNavigationChrome: false)
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    collapseHandle
+                    sheetHeader
                 }
         }
-        .offset(y: max(0, pullDownOffset))
-        .shadow(color: .black.opacity(pullDownOffset > 0 ? 0.12 : 0), radius: 18, y: -4)
     }
 
-    private var collapseHandle: some View {
-        VStack(spacing: 4) {
-            Capsule()
-                .fill(Color.secondary.opacity(0.34))
-                .frame(width: 38, height: 5)
-            Text("下滑返回关系图")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+    private var sheetHeader: some View {
+        HStack(spacing: 12) {
+            Text(person.name)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Color.secondary.opacity(0.1), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭人物详情")
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 34)
+        .padding(.horizontal, 16)
+        .frame(height: 44)
         .background(.ultraThinMaterial)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 8)
-                .updating($pullDownOffset) { value, state, _ in
-                    state = max(0, value.translation.height)
-                }
-                .onEnded { value in
-                    if value.translation.height >= 42 ||
-                        value.predictedEndTranslation.height >= 88 {
-                        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                        onCollapse()
-                    }
-                }
-        )
-        .onTapGesture(perform: onCollapse)
-        .accessibilityElement()
-        .accessibilityLabel("收起人物详情，返回关系图")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { onCollapse() }
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
