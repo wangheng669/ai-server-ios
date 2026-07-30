@@ -33,7 +33,7 @@ struct PeopleView: View {
                             description: Text("人物资料正在整理中")
                         )
                     } else {
-                        PeopleStarMapExplorer(
+                        PeopleSwimlaneExplorer(
                             people: store.people,
                             baseURL: store.baseURL,
                             onOpenPerson: { selectedPerson = $0 },
@@ -84,6 +84,518 @@ struct PeopleView: View {
                 }
             }
         )
+    }
+}
+
+private struct PeopleSwimlaneExplorer: View {
+    let people: [SpecialPerson]
+    let baseURL: URL
+    let onOpenPerson: (SpecialPerson) -> Void
+    let onRefresh: () async -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var searchIsFocused: Bool
+    @State private var focusedPersonID: String?
+    @State private var selectedMemberID: String?
+    @State private var searchText = ""
+    @State private var showsSearch = false
+    @State private var isRefreshing = false
+
+    private var focusedPerson: SpecialPerson {
+        if let focusedPersonID,
+           let person = people.first(where: { $0.id == focusedPersonID }) {
+            return person
+        }
+        return defaultCenter
+    }
+
+    private var defaultCenter: SpecialPerson {
+        people.max {
+            let lhs = ($0.relatedPeople.count, $0.todayCount, $0.totalCount)
+            let rhs = ($1.relatedPeople.count, $1.todayCount, $1.totalCount)
+            if lhs.0 != rhs.0 { return lhs.0 < rhs.0 }
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+            return lhs.2 < rhs.2
+        } ?? people[0]
+    }
+
+    private var orderedPeople: [SpecialPerson] {
+        people.sorted {
+            let lhs = ($0.todayCount, $0.relatedPeople.count, $0.totalCount)
+            let rhs = ($1.todayCount, $1.relatedPeople.count, $1.totalCount)
+            if lhs.0 != rhs.0 { return lhs.0 > rhs.0 }
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            if lhs.2 != rhs.2 { return lhs.2 > rhs.2 }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private var lanes: [PeopleRelationshipCluster] {
+        var result = PeopleRelationshipPlanner.clusters(
+            around: focusedPerson,
+            allPeople: people,
+            maximumClusters: 4
+        )
+        var usedIDs = Set(result.flatMap(\.members).map(\.id))
+        usedIDs.insert(focusedPerson.id)
+
+        func appendLane(title: String, candidates: [SpecialPerson]) {
+            guard result.count < 4 else { return }
+            let members = candidates
+                .filter { usedIDs.insert($0.id).inserted }
+                .prefix(8)
+                .map {
+                    PeopleRelationshipMember(
+                        id: $0.id,
+                        name: $0.name,
+                        relationship: PeopleRelationshipPlanner.relationshipLabel(
+                            from: focusedPerson,
+                            to: $0
+                        ),
+                        person: $0,
+                        avatarURLValue: $0.avatarPath,
+                        avatarAssetName: $0.avatarAssetName
+                    )
+                }
+            guard !members.isEmpty else { return }
+            result.append(
+                PeopleRelationshipCluster(
+                    id: "swimlane-\(title)",
+                    title: title,
+                    members: Array(members)
+                )
+            )
+        }
+
+        let organization = PeopleRelationshipPlanner.primaryOrganization(for: focusedPerson)
+        appendLane(
+            title: organization,
+            candidates: orderedPeople.filter {
+                PeopleRelationshipPlanner.primaryOrganization(for: $0) == organization
+            }
+        )
+        appendLane(
+            title: "\(focusedPerson.topic.rawValue)同行",
+            candidates: orderedPeople.filter { $0.topic == focusedPerson.topic }
+        )
+        appendLane(
+            title: "活跃人物",
+            candidates: orderedPeople
+        )
+        return Array(result.prefix(4))
+    }
+
+    private var searchResults: [SpecialPerson] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = query.isEmpty ? orderedPeople : people.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+                ($0.organizationName?.localizedCaseInsensitiveContains(query) ?? false) ||
+                $0.focusTags.contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+        return Array(source.prefix(7))
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                utilityBar
+                focusCard
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+
+                ScrollView {
+                    LazyVStack(spacing: 13) {
+                        ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
+                            relationshipLane(lane, index: index)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 18)
+                }
+                .scrollIndicators(.hidden)
+            }
+
+            if showsSearch {
+                searchPanel
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .onAppear {
+            if focusedPersonID == nil {
+                focusedPersonID = defaultCenter.id
+            }
+        }
+        .task(id: focusedPerson.id) {
+            await PeopleImagePreheater.preheatDetail(for: focusedPerson, baseURL: baseURL)
+        }
+    }
+
+    private var utilityBar: some View {
+        HStack {
+            Menu {
+                Button {
+                    guard !isRefreshing else { return }
+                    isRefreshing = true
+                    Task {
+                        await onRefresh()
+                        isRefreshing = false
+                    }
+                } label: {
+                    Label(isRefreshing ? "正在刷新" : "刷新人物资料", systemImage: "arrow.clockwise")
+                }
+                .disabled(isRefreshing)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .accessibilityLabel("更多")
+
+            Spacer()
+
+            Button {
+                withAnimation(animation) { showsSearch = true }
+                Task { @MainActor in searchIsFocused = true }
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("搜索人物")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .frame(height: 48)
+    }
+
+    private var focusCard: some View {
+        HStack(spacing: 4) {
+            Button { moveFocus(by: -1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 40, height: 72)
+            }
+            .accessibilityLabel("上一个人物")
+
+            Button {
+                onOpenPerson(focusedPerson)
+            } label: {
+                HStack(spacing: 12) {
+                    AvatarView(
+                        url: focusedPerson.avatarURL(baseURL: baseURL),
+                        name: focusedPerson.name,
+                        size: 64,
+                        assetName: focusedPerson.avatarAssetName
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(Color.accentColor.opacity(0.72), lineWidth: 2)
+                            .padding(-3)
+                    }
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(focusedPerson.name)
+                            .font(.system(size: 21, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        HStack(spacing: 5) {
+                            Image(systemName: "person.2.fill")
+                            Text("\(relationshipCount)")
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 2)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button { moveFocus(by: 1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 40, height: 72)
+            }
+            .accessibilityLabel("下一个人物")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 9)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
+        }
+        .overlay(alignment: .bottom) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.32))
+                .frame(width: 34, height: 4)
+                .offset(y: -7)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 15, y: 6)
+        .contentShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .simultaneousGesture(focusGesture)
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("点击或上滑查看详情，左右滑动切换人物")
+    }
+
+    private var relationshipCount: Int {
+        Set(lanes.flatMap(\.members).map(\.id)).count
+    }
+
+    private var focusGesture: some Gesture {
+        DragGesture(minimumDistance: 26)
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                if vertical <= -44, abs(vertical) > abs(horizontal) * 1.15 {
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    onOpenPerson(focusedPerson)
+                } else if abs(horizontal) >= 48,
+                          abs(horizontal) > abs(vertical) * 1.2 {
+                    moveFocus(by: horizontal < 0 ? 1 : -1)
+                }
+            }
+    }
+
+    private func relationshipLane(
+        _ lane: PeopleRelationshipCluster,
+        index: Int
+    ) -> some View {
+        let tint = laneTint(index)
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Text(lane.title)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("\(lane.memberCount)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 13) {
+                    ForEach(lane.members) { member in
+                        relationshipNode(member, tint: tint)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(.top, 14)
+        .padding(.bottom, 11)
+        .frame(minHeight: 156)
+        .background(
+            LinearGradient(
+                colors: [tint.opacity(0.1), tint.opacity(0.035)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 26, style: .continuous)
+        )
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(tint.opacity(0.32))
+                .frame(height: 1)
+                .padding(.top, 78)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
+
+    private func relationshipNode(
+        _ member: PeopleRelationshipMember,
+        tint: Color
+    ) -> some View {
+        let isSelected = selectedMemberID == member.id
+        return Button {
+            if isSelected, let person = member.person {
+                focus(on: person)
+            } else {
+                withAnimation(animation) {
+                    selectedMemberID = member.id
+                }
+            }
+        } label: {
+            VStack(spacing: 5) {
+                ZStack(alignment: .topTrailing) {
+                    AvatarView(
+                        url: member.avatarURL(baseURL: baseURL),
+                        name: member.name,
+                        size: isSelected ? 58 : 50,
+                        assetName: member.person?.avatarAssetName ?? member.avatarAssetName
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(
+                                isSelected ? tint : Color(uiColor: .systemBackground),
+                                lineWidth: isSelected ? 2.5 : 2
+                            )
+                            .padding(isSelected ? -3 : -2)
+                    }
+                    if (member.person?.todayCount ?? 0) > 0 {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 9, height: 9)
+                            .overlay {
+                                Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2)
+                            }
+                            .offset(x: 2, y: -2)
+                    }
+                }
+                .frame(height: 61)
+
+                Text(member.name)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? tint : Color.primary)
+                    .lineLimit(1)
+
+                if isSelected {
+                    HStack(spacing: 3) {
+                        Text(member.relationship)
+                            .lineLimit(1)
+                        if member.person != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 8)
+                    .frame(height: 22)
+                    .background(Color(uiColor: .systemBackground).opacity(0.92), in: Capsule())
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                }
+            }
+            .frame(width: isSelected ? 124 : 68)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PeoplePressStyle())
+        .accessibilityLabel("\(member.name)，与\(focusedPerson.name)的关系：\(member.relationship)")
+        .accessibilityHint(isSelected && member.person != nil ? "再次点击设为中心人物" : "点击查看关系")
+    }
+
+    private var searchPanel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("搜索人物、公司或领域", text: $searchText)
+                    .focused($searchIsFocused)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("清除搜索")
+                }
+                Button("完成") { dismissSearch() }
+                    .font(.system(size: 15, weight: .semibold))
+                    .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+
+            Divider()
+
+            ForEach(searchResults) { person in
+                Button {
+                    focus(on: person)
+                    dismissSearch()
+                } label: {
+                    HStack(spacing: 11) {
+                        AvatarView(
+                            url: person.avatarURL(baseURL: baseURL),
+                            name: person.name,
+                            size: 38,
+                            assetName: person.avatarAssetName
+                        )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(person.name)
+                                .font(.system(size: 15, weight: .semibold))
+                            Text(person.organizationName ?? person.topic.rawValue)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .frame(height: 54)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 22, y: 8)
+    }
+
+    private func laneTint(_ index: Int) -> Color {
+        let colors: [Color] = [
+            Color(red: 0.22, green: 0.47, blue: 0.86),
+            Color(red: 0.35, green: 0.59, blue: 0.35),
+            Color(red: 0.86, green: 0.57, blue: 0.2),
+            Color(red: 0.79, green: 0.34, blue: 0.32)
+        ]
+        return colors[index % colors.count]
+    }
+
+    private func moveFocus(by offset: Int) {
+        guard let currentIndex = orderedPeople.firstIndex(where: { $0.id == focusedPerson.id }) else {
+            return
+        }
+        let nextIndex = (currentIndex + offset + orderedPeople.count) % orderedPeople.count
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        focus(on: orderedPeople[nextIndex])
+    }
+
+    private func focus(on person: SpecialPerson) {
+        withAnimation(animation) {
+            focusedPersonID = person.id
+            selectedMemberID = nil
+        }
+    }
+
+    private func dismissSearch() {
+        searchIsFocused = false
+        withAnimation(animation) { showsSearch = false }
+    }
+
+    private var animation: Animation? {
+        reduceMotion ? nil : .snappy(duration: 0.32)
     }
 }
 
@@ -562,7 +1074,7 @@ private struct PeopleOrbitCanvas: View {
 
     private var centerNode: some View {
         Button(action: onOpenCenter) {
-            VStack(spacing: 7) {
+            VStack(spacing: 9) {
                 AvatarView(
                     url: focusedPerson.avatarURL(baseURL: baseURL),
                     name: focusedPerson.name,
@@ -582,9 +1094,9 @@ private struct PeopleOrbitCanvas: View {
                     .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Label("上滑看详情", systemImage: "chevron.up")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                Capsule()
+                    .fill(Color.secondary.opacity(0.28))
+                    .frame(width: 28, height: 3)
             }
             .frame(width: 138)
         }
