@@ -436,14 +436,15 @@ struct LearningView: View {
                 } else {
                     GeometryReader { proxy in
                         ScrollView(.horizontal) {
-                            LazyHStack(spacing: 12) {
+                            LazyHStack(spacing: 0) {
                                 ForEach(Array(concepts.enumerated()), id: \.element.id) { index, concept in
                                     KnowledgeConceptCarouselCard(
                                         concept: concept,
                                         index: index,
                                         count: concepts.count
                                     )
-                                    .frame(width: max(292, proxy.size.width - 72))
+                                    .frame(width: max(300, proxy.size.width - 40))
+                                    .frame(width: proxy.size.width)
                                     .id(concept.id)
                                     .onTapGesture {
                                         selectedConcept = concept
@@ -451,13 +452,12 @@ struct LearningView: View {
                                 }
                             }
                             .scrollTargetLayout()
-                            .padding(.horizontal, 36)
                         }
                         .scrollIndicators(.hidden)
-                        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                        .scrollTargetBehavior(.paging)
                         .scrollPosition(id: $selectedConceptID)
                     }
-                    .frame(height: 590)
+                    .frame(height: 452)
 
                     HStack(spacing: 8) {
                         ForEach(concepts) { concept in
