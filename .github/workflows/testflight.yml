@@ -1,9 +1,6 @@
 name: Upload iOS app to TestFlight
 
 on:
-  schedule:
-    # GitHub cron uses UTC. 20:30 UTC is 04:30 the next day in Asia/Shanghai.
-    - cron: "30 20 * * *"
   workflow_dispatch:
     inputs:
       git_ref:
@@ -11,6 +8,11 @@ on:
         required: false
         default: main
         type: string
+      only_if_new:
+        description: Skip when this revision was already uploaded successfully
+        required: false
+        default: false
+        type: boolean
 
 run-name: Upload ${{ inputs.git_ref || 'main' }} to TestFlight
 
@@ -36,9 +38,11 @@ jobs:
       - name: Decide whether an upload is needed
         id: decision
         uses: actions/github-script@v8
+        env:
+          ONLY_IF_NEW: ${{ inputs.only_if_new }}
         with:
           script: |
-            if (context.eventName !== "schedule") {
+            if (process.env.ONLY_IF_NEW !== "true") {
               core.setOutput("should_upload", "true");
               return;
             }
