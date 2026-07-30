@@ -2389,7 +2389,8 @@ private struct NewsCardView: View {
                     singleImageContentMode: .fit,
                     multiImageHeight: 148,
                     availableWidth: max(UIScreen.main.bounds.width - 32, 240),
-                    videoContentMode: .fill
+                    videoContentMode: .fit,
+                    videoMaxHeight: 440
                 )
             }
 
