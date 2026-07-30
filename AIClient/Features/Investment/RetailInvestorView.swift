@@ -6,6 +6,7 @@ struct RetailInvestorView: View {
     private let store: RetailSentimentStore
     private let marketStore: MarketStore
     @State private var selectedMarket: SentimentMarket = .china
+    @State private var selectedInvestorMoodID: InvestorMoodItem.ID?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     @MainActor
@@ -554,8 +555,12 @@ struct RetailInvestorView: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(items) { item in
-                        InvestorMoodVideoCard(item: item)
+                        InvestorMoodVideoCard(
+                            item: item,
+                            isPlaybackActive: rootTabIsActive && selectedInvestorMoodID == item.id
+                        )
                             .frame(width: cardWidth)
+                            .id(item.id)
                             .scrollTransition(.interactive, axis: .horizontal) { content, phase in
                                 content
                                     .scaleEffect(phase.isIdentity ? 1 : 0.96)
@@ -568,8 +573,27 @@ struct RetailInvestorView: View {
             }
             .scrollIndicators(.hidden)
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+            .scrollPosition(id: $selectedInvestorMoodID)
+            .onAppear {
+                selectFirstInvestorMoodItemIfNeeded(items)
+            }
+            .onChange(of: items.map(\.id)) { _, _ in
+                selectFirstInvestorMoodItemIfNeeded(items)
+            }
         }
         .frame(height: 530)
+    }
+
+    private func selectFirstInvestorMoodItemIfNeeded(_ items: [InvestorMoodItem]) {
+        guard !items.isEmpty else {
+            selectedInvestorMoodID = nil
+            return
+        }
+        if let selectedInvestorMoodID,
+           items.contains(where: { $0.id == selectedInvestorMoodID }) {
+            return
+        }
+        selectedInvestorMoodID = items.first?.id
     }
 
     private var methodologyNote: some View {
@@ -808,6 +832,7 @@ private struct InvestorMoodCount: Identifiable {
 
 private struct InvestorMoodVideoCard: View {
     let item: InvestorMoodItem
+    let isPlaybackActive: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -857,7 +882,8 @@ private struct InvestorMoodVideoCard: View {
                 url: playbackURL,
                 thumbnailURL: item.coverPlaybackURL,
                 contentMode: .fill,
-                chromeStyle: .minimal
+                chromeStyle: .minimal,
+                isPlaybackActive: isPlaybackActive
             )
         } else {
             ZStack {
