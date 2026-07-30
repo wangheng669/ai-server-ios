@@ -215,7 +215,7 @@ struct PostMediaGrid: View {
     var multiImageHeight: CGFloat = 132
     var availableWidth: CGFloat? = nil
     var cornerRadius: CGFloat = 8
-    @State private var previewURL: URL?
+    @State private var gallerySelection: PostImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
 
@@ -225,8 +225,12 @@ struct PostMediaGrid: View {
         return knownURLs.union(post.htmlInlineAssetURLs)
     }
 
+    private var allContentImageURLs: [URL] {
+        post.imageURLs.filter { !knownCompactImageURLs.contains($0) && !compactImageURLs.contains($0) }
+    }
+
     private var contentImageURLs: [URL] {
-        Array(post.imageURLs.filter { !knownCompactImageURLs.contains($0) && !compactImageURLs.contains($0) }.prefix(4))
+        Array(allContentImageURLs.prefix(4))
     }
 
     private var resolvedSingleImageHeight: CGFloat {
@@ -263,10 +267,14 @@ struct PostMediaGrid: View {
         compactImageURLs.insert(url)
     }
 
-    private func showPreview(_ url: URL) {
+    private func showGallery(startingAt url: URL, urls: [URL]) {
+        let galleryURLs = urls.isEmpty ? [url] : urls
+        let initialIndex = galleryURLs.firstIndex(of: url) ?? 0
         var transaction = Transaction()
         transaction.disablesAnimations = true
-        withTransaction(transaction) { previewURL = url }
+        withTransaction(transaction) {
+            gallerySelection = PostImageGallerySelection(urls: galleryURLs, initialIndex: initialIndex)
+        }
     }
 
     var body: some View {
@@ -278,7 +286,7 @@ struct PostMediaGrid: View {
                     .frame(height: resolvedSingleImageHeight)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else if urls.count == 1, let url = urls.first {
-                Button { showPreview(url) } label: {
+                Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
                     RemoteImage(
                         url: url,
                         height: resolvedSingleImageHeight,
@@ -293,7 +301,7 @@ struct PostMediaGrid: View {
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
-                        Button { showPreview(url) } label: {
+                        Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
                             RemoteImage(
                                 url: url,
                                 height: multiImageHeight,
@@ -308,7 +316,7 @@ struct PostMediaGrid: View {
                     }
                 }
             } else if let preview = post.previewURL {
-                Button { showPreview(preview) } label: {
+                Button { showGallery(startingAt: preview, urls: [preview]) } label: {
                     RemoteImage(
                         url: preview,
                         height: resolvedSingleImageHeight,
@@ -322,8 +330,16 @@ struct PostMediaGrid: View {
         }
         .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
         .clipped()
-        .fullScreenCover(item: $previewURL) { url in ZoomableImageView(url: url) }
+        .fullScreenCover(item: $gallerySelection) { selection in
+            ImageGalleryView(urls: selection.urls, initialIndex: selection.initialIndex)
+        }
     }
+}
+
+private struct PostImageGallerySelection: Identifiable {
+    let id = UUID()
+    let urls: [URL]
+    let initialIndex: Int
 }
 
 struct XFeedMediaView: View {
@@ -849,109 +865,208 @@ private enum XBookmarkStore {
     }
 }
 
-struct ZoomableImageView: View {
-    let url: URL
+struct ImageGalleryView: View {
+    let urls: [URL]
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedIndex: Int
+
+    init(urls: [URL], initialIndex: Int = 0) {
+        let requestedURL = urls.indices.contains(initialIndex) ? urls[initialIndex] : urls.first
+        var seen: Set<URL> = []
+        let uniqueURLs = urls.filter { seen.insert($0).inserted }
+        self.urls = uniqueURLs
+        _selectedIndex = State(
+            initialValue: requestedURL.flatMap(uniqueURLs.firstIndex(of:)) ?? 0
+        )
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            if urls.isEmpty {
+                ContentUnavailableView(
+                    "图片不可用",
+                    systemImage: "photo",
+                    description: Text("没有可预览的图片")
+                )
+                .foregroundStyle(.white)
+            } else {
+                TabView(selection: $selectedIndex) {
+                    ForEach(urls.indices, id: \.self) { index in
+                        GalleryImagePage(
+                            url: urls[index],
+                            isActive: selectedIndex == index,
+                            position: index + 1,
+                            count: urls.count
+                        )
+                        .tag(index)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+
+            ZStack {
+                if urls.count > 1 {
+                    Text("\(selectedIndex + 1) / \(urls.count)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                        .background(.black.opacity(0.56), in: Capsule())
+                        .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(urls.count) 张")
+                }
+
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(.black.opacity(0.56), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("关闭图片")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+        }
+        .statusBarHidden()
+        .interactiveDismissDisabled()
+        .accessibilityAction(.escape) { dismiss() }
+    }
+}
+
+private struct GalleryImagePage: View {
+    let url: URL
+    let isActive: Bool
+    let position: Int
+    let count: Int
     @State private var image: UIImage?
+    @State private var didFail = false
     @State private var scale: CGFloat = 1
     @State private var settledScale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var settledOffset: CGSize = .zero
-    @State private var isPresented = false
-    @State private var isClosing = false
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(backdropOpacity)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { close() }
-            Group {
+        GeometryReader { proxy in
+            ZStack {
                 if let image {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .scaleEffect(scale)
                         .offset(offset)
-                        .gesture(magnificationGesture.simultaneously(with: dragGesture))
-                        .onTapGesture(count: 2) { toggleZoom() }
+                        .contentShape(Rectangle())
+                        .gesture(
+                            dragGesture(in: proxy.size),
+                            including: scale > 1 ? .all : .none
+                        )
+                        .simultaneousGesture(magnificationGesture(in: proxy.size))
+                        .onTapGesture(count: 2) {
+                            toggleZoom(in: proxy.size)
+                        }
+                } else if didFail {
+                    VStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 28))
+                        Text("图片加载失败")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.8))
                 } else {
-                    ProgressView().tint(.white)
+                    ProgressView()
+                        .tint(.white)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .scaleEffect(presentationScale)
-            .opacity(isPresented ? 1 : 0)
+            .clipped()
         }
-        .presentationBackground(.clear)
-        .accessibilityAction(.escape) { close() }
-        .task(id: url) { image = await ImageLoader.load(url) }
-        .onAppear {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { isPresented = true }
+        .task(id: url) {
+            didFail = false
+            image = await ImageLoader.load(url)
+            didFail = image == nil
+            resetZoom()
         }
+        .onChange(of: isActive) { _, active in
+            if !active { resetZoom() }
+        }
+        .accessibilityLabel("第 \(position) 张图片，共 \(count) 张")
+        .accessibilityHint(count > 1 ? "左右滑动切换，双击或捏合缩放" : "双击或捏合缩放")
     }
 
-    private var presentationScale: CGFloat {
-        guard isPresented else { return 0.82 }
-        guard scale == 1, offset.height > 0 else { return 1 }
-        return max(0.88, 1 - offset.height / 1_600)
-    }
-
-    private var backdropOpacity: CGFloat {
-        guard isPresented else { return 0 }
-        guard scale == 1, offset.height > 0 else { return 1 }
-        return max(0, 1 - offset.height / 360)
-    }
-
-    private var magnificationGesture: some Gesture {
+    private func magnificationGesture(in size: CGSize) -> some Gesture {
         MagnifyGesture()
-            .onChanged { value in scale = min(max(settledScale * value.magnification, 1), 5) }
+            .onChanged { value in
+                scale = min(max(settledScale * value.magnification, 1), 5)
+                offset = clamped(offset, in: size, at: scale)
+            }
             .onEnded { _ in
                 settledScale = scale
-                if scale == 1 { resetPosition() }
+                if scale <= 1 {
+                    resetZoom()
+                } else {
+                    offset = clamped(offset, in: size, at: scale)
+                    settledOffset = offset
+                }
             }
     }
 
-    private var dragGesture: some Gesture {
+    private func dragGesture(in size: CGSize) -> some Gesture {
         DragGesture()
             .onChanged { value in
-                if scale > 1 {
-                    offset = CGSize(width: settledOffset.width + value.translation.width, height: settledOffset.height + value.translation.height)
-                } else if value.translation.height > 0 {
-                    offset = CGSize(width: 0, height: value.translation.height)
-                }
+                guard scale > 1 else { return }
+                let proposed = CGSize(
+                    width: settledOffset.width + value.translation.width,
+                    height: settledOffset.height + value.translation.height
+                )
+                offset = clamped(proposed, in: size, at: scale)
             }
-            .onEnded { value in
-                if scale > 1 {
-                    settledOffset = offset
-                } else if shouldDismiss(for: value) {
-                    close()
-                } else {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { resetPosition() }
-                }
+            .onEnded { _ in
+                settledOffset = clamped(offset, in: size, at: scale)
+                offset = settledOffset
             }
     }
 
-    private func shouldDismiss(for value: DragGesture.Value) -> Bool {
-        let isVertical = abs(value.translation.height) > abs(value.translation.width)
-        return isVertical && (value.translation.height > 100 || value.predictedEndTranslation.height > 220)
+    private func clamped(_ value: CGSize, in size: CGSize, at scale: CGFloat) -> CGSize {
+        guard scale > 1 else { return .zero }
+        let maximumX = size.width * (scale - 1) / 2
+        let maximumY = size.height * (scale - 1) / 2
+        return CGSize(
+            width: min(max(value.width, -maximumX), maximumX),
+            height: min(max(value.height, -maximumY), maximumY)
+        )
     }
 
-    private func toggleZoom() {
-        if scale > 1 { scale = 1; settledScale = 1; resetPosition() }
-        else { scale = 2; settledScale = 2 }
-    }
-
-    private func resetPosition() { offset = .zero; settledOffset = .zero }
-
-    private func close() {
-        guard !isClosing else { return }
-        isClosing = true
-        withAnimation(.easeOut(duration: 0.16)) { isPresented = false }
-        Task {
-            try? await Task.sleep(for: .milliseconds(160))
-            dismiss()
+    private func toggleZoom(in size: CGSize) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            if scale > 1 {
+                resetZoom()
+            } else {
+                scale = 2
+                settledScale = 2
+                offset = clamped(offset, in: size, at: 2)
+                settledOffset = offset
+            }
         }
+    }
+
+    private func resetZoom() {
+        scale = 1
+        settledScale = 1
+        offset = .zero
+        settledOffset = .zero
+    }
+}
+
+struct ZoomableImageView: View {
+    let url: URL
+
+    var body: some View {
+        ImageGalleryView(urls: [url])
     }
 }
 
