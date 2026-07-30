@@ -329,6 +329,7 @@ struct WikipediaEntityCard: View {
 
 struct WikipediaReaderView: View {
     let entity: WikipediaEntity
+    var returnTitle = "返回纽约时报文章"
     @Environment(\.dismiss) private var dismiss
     @StateObject private var browser = WikipediaBrowserModel()
 
@@ -358,7 +359,7 @@ struct WikipediaReaderView: View {
             Button { dismiss() } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "doc.text")
-                    Text("返回纽约时报文章")
+                    Text(returnTitle)
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption.bold())
                 }
