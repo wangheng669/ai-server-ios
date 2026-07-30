@@ -30,7 +30,7 @@ struct PostDetailView: View {
     @State private var xCommentsError: String?
     @State private var xTranslations: [String: String] = [:]
     @State private var loadingXTranslationIDs: Set<String> = []
-    @State private var weiboImageSelection: WeiboImageSelection?
+    @State private var weiboImageSelection: ImageGallerySelection?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -66,12 +66,7 @@ struct PostDetailView: View {
         .fullScreenCover(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
         }
-        .fullScreenCover(item: $weiboImageSelection) { selection in
-            ImageGalleryView(
-                urls: post.weiboFollowingImageURLs,
-                initialIndex: selection.index
-            )
-        }
+        .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
         // navigation pop recognizer on this screen prevents a scrub from popping
         // the detail view; the visible back button remains available.
@@ -371,7 +366,10 @@ struct PostDetailView: View {
                                 count: 1,
                                 initialAspectRatio: post.weiboImageAspectRatio(for: url)
                             ) {
-                                weiboImageSelection = .init(index: 0)
+                                weiboImageSelection = ImageGallerySelection(
+                                    urls: post.weiboFollowingImageURLs,
+                                    initialIndex: 0
+                                )
                             }
                         } else if !post.weiboFollowingImageURLs.isEmpty {
                             LazyVGrid(columns: weiboImageColumns, spacing: 4) {
@@ -384,7 +382,10 @@ struct PostDetailView: View {
                                         compactHeight: weiboGridImageHeight,
                                         initialAspectRatio: post.weiboImageAspectRatio(for: url)
                                     ) {
-                                        weiboImageSelection = .init(index: index)
+                                        weiboImageSelection = ImageGallerySelection(
+                                            urls: post.weiboFollowingImageURLs,
+                                            initialIndex: index
+                                        )
                                     }
                                 }
                             }
@@ -2763,11 +2764,6 @@ private extension NSString {
     }
 }
 
-private struct WeiboImageSelection: Identifiable {
-    let index: Int
-    var id: Int { index }
-}
-
 private struct WeiboDetailImage: View {
     let url: URL
     let index: Int
@@ -2840,13 +2836,15 @@ private struct NewYorkTimesArticleImage: View {
     var caption: String? = nil
     var credit: String? = nil
     var height: CGFloat
-    @State private var previewURL: URL?
+    @State private var gallerySelection: ImageGallerySelection?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             RemoteImage(url: url, height: height, contentMode: .fit)
                 .contentShape(Rectangle())
-                .onTapGesture { previewURL = url }
+                .onTapGesture {
+                    gallerySelection = ImageGallerySelection(urls: [url], initialIndex: 0)
+                }
 
             if let caption, !caption.isEmpty {
                 Text(caption)
@@ -2860,7 +2858,7 @@ private struct NewYorkTimesArticleImage: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .fullScreenCover(item: $previewURL) { ZoomableImageView(url: $0) }
+        .imageGallery(item: $gallerySelection)
     }
 }
 
