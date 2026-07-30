@@ -86,8 +86,12 @@ struct LearningView: View {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview"),
                selectedConcept == nil,
-               let concept = store.conceptLibrary?.concepts.first {
-                selectedConcept = concept
+               let concepts = store.conceptLibrary?.concepts,
+               !concepts.isEmpty {
+                let previewIndex = conceptCardPreviewIndex ?? 0
+                selectedConcept = concepts[
+                    concepts.indices.contains(previewIndex) ? previewIndex : 0
+                ]
             }
             if (ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-video-preview")),
@@ -456,9 +460,9 @@ struct LearningView: View {
                                     KnowledgeConceptCarouselCard(
                                         concept: concept,
                                         index: index,
-                                        count: concepts.count
+                                        count: concepts.count,
+                                        width: max(300, proxy.size.width - 40)
                                     )
-                                    .frame(width: max(300, proxy.size.width - 40))
                                     .frame(width: proxy.size.width)
                                     .id(concept.id)
                                     .onTapGesture {
@@ -499,6 +503,13 @@ struct LearningView: View {
                 if let selectedConceptID, IDs.contains(selectedConceptID) {
                     return
                 }
+                #if DEBUG
+                if let previewIndex = conceptCardPreviewIndex,
+                   IDs.indices.contains(previewIndex) {
+                    self.selectedConceptID = IDs[previewIndex]
+                    return
+                }
+                #endif
                 self.selectedConceptID = IDs.first
             }
         } else if store.isConceptLibraryLoading {
@@ -527,6 +538,18 @@ struct LearningView: View {
             .padding(.top, 36)
         }
     }
+
+    #if DEBUG
+    private var conceptCardPreviewIndex: Int? {
+        let prefix = "--learning-concept-card-index="
+        guard let argument = ProcessInfo.processInfo.arguments.first(where: {
+            $0.hasPrefix(prefix)
+        }) else {
+            return nil
+        }
+        return Int(argument.dropFirst(prefix.count))
+    }
+    #endif
 
     private func conceptFilterButton(_ filter: KnowledgeConceptFilter) -> some View {
         Button {
