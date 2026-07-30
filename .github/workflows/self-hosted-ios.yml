@@ -45,7 +45,9 @@ jobs:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
         run: |
           set -o pipefail
-          xcodebuild test \
+          ./ci/with-ios-simulator-lock.sh \
+            --label "manual install tests $GITHUB_RUN_ID" \
+            -- xcodebuild test \
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \
             -destination 'platform=iOS Simulator,name=iPhone 16e' \
