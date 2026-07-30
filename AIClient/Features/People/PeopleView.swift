@@ -134,13 +134,17 @@ private struct PeopleSwimlaneExplorer: View {
         var result = PeopleRelationshipPlanner.clusters(
             around: focusedPerson,
             allPeople: people,
-            maximumClusters: 4
+            maximumClusters: 3
         )
         var usedIDs = Set(result.flatMap(\.members).map(\.id))
         usedIDs.insert(focusedPerson.id)
 
-        func appendLane(title: String, candidates: [SpecialPerson]) {
-            guard result.count < 4 else { return }
+        func appendLane(
+            title: String,
+            candidates: [SpecialPerson],
+            maximumLaneCount: Int = 3
+        ) {
+            guard result.count < maximumLaneCount else { return }
             let members = candidates
                 .filter { usedIDs.insert($0.id).inserted }
                 .prefix(8)
@@ -179,8 +183,9 @@ private struct PeopleSwimlaneExplorer: View {
             candidates: orderedPeople.filter { $0.topic == focusedPerson.topic }
         )
         appendLane(
-            title: "活跃人物",
-            candidates: orderedPeople
+            title: "更多相关人物",
+            candidates: orderedPeople.filter(\.isCurated) + orderedPeople.filter { !$0.isCurated },
+            maximumLaneCount: 4
         )
         return Array(result.prefix(4))
     }
