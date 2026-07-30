@@ -615,6 +615,7 @@ struct XVideoPlayerView: View {
 
     @State private var player: AVPlayer?
     @State private var thumbnail: UIImage?
+    @State private var preparedAsset: AVURLAsset?
     @State private var playbackState: PlaybackState = .idle
     @State private var isVideoReady = false
     @State private var thumbnailFailed = false
@@ -666,19 +667,14 @@ struct XVideoPlayerView: View {
 
             switch playbackState {
             case .idle:
-                Button(action: startPlayback) {
-                    if chromeStyle == .minimal {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .offset(x: 1)
-                            .frame(width: 52, height: 52)
-                            .background(.black.opacity(0.34), in: Circle())
-                            .overlay {
-                                Circle()
-                                    .stroke(.white.opacity(0.48), lineWidth: 0.75)
-                            }
-                    } else {
+                if chromeStyle == .minimal {
+                    MinimalVideoIdleControls(
+                        onPlay: startPlayback,
+                        onFullscreen: presentFullscreen
+                    )
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                } else {
+                    Button(action: startPlayback) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(.white)
@@ -688,9 +684,9 @@ struct XVideoPlayerView: View {
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                             )
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("播放视频")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("播放视频")
             case .preparing:
                 if chromeStyle == .minimal {
                     MinimalVideoLoadingBar()
@@ -801,6 +797,10 @@ struct XVideoPlayerView: View {
                 await loadThumbnail()
             }
         }
+        .task(id: isPlaybackActive) {
+            guard chromeStyle == .minimal, isPlaybackActive else { return }
+            await preparePlaybackAsset()
+        }
         .onDisappear {
             stopPlayback()
         }
@@ -827,8 +827,9 @@ struct XVideoPlayerView: View {
     private func startPlayback() {
         guard isPlaybackActive else { return }
         activateAudioSession()
-        let item = AVPlayerItem(url: url)
-        item.preferredForwardBufferDuration = 0
+        let asset = preparedAsset ?? AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = 1
         let player = AVPlayer(playerItem: item)
         player.automaticallyWaitsToMinimizeStalling = false
         player.isMuted = isMuted
@@ -836,6 +837,22 @@ struct XVideoPlayerView: View {
         isVideoReady = false
         playbackState = .preparing
         XVideoPlaybackSession.shared.play(player, url: url)
+    }
+
+    @MainActor
+    private func preparePlaybackAsset() async {
+        guard preparedAsset == nil else { return }
+        let asset = AVURLAsset(
+            url: url,
+            options: [AVURLAssetPreferPreciseDurationAndTimingKey: false]
+        )
+        do {
+            let isPlayable = try await asset.load(.isPlayable)
+            guard isPlayable, !Task.isCancelled, isPlaybackActive else { return }
+            preparedAsset = asset
+        } catch {
+            // Playback remains available through the normal tap-to-load path.
+        }
     }
 
     private func stopPlayback() {
@@ -926,6 +943,47 @@ private struct MinimalVideoLoadingBar: View {
             .progressViewStyle(.linear)
             .tint(.white.opacity(0.9))
             .scaleEffect(x: 1, y: 0.55, anchor: .bottom)
+    }
+}
+
+private struct MinimalVideoIdleControls: View {
+    let onPlay: () -> Void
+    let onFullscreen: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: onPlay) {
+                Label("播放", systemImage: "play.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 2)
+                    .frame(height: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("播放视频")
+
+            Spacer()
+
+            Button(action: onFullscreen) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("全屏播放")
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 28)
+        .padding(.bottom, 6)
+        .background(
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.52)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
     }
 }
 
