@@ -2435,6 +2435,7 @@ private struct PersonDetailPage: View {
     let person: SpecialPerson
     let showsNavigationChrome: Bool
     let usesSheetLayout: Bool
+    @ObservedObject private var pushNotifications = PersonPushNotificationManager.shared
     @State private var store = PersonDetailStore()
     @State private var section: PersonDetailSection
     @State private var ownContentSection = PersonOwnContentSection.posts
@@ -2624,6 +2625,10 @@ private struct PersonDetailPage: View {
                 }
                 .scrollIndicators(.hidden)
             }
+
+            if person.id == PersonPushNotificationManager.samAltmanID {
+                samAltmanNotificationControl
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 31)
@@ -2692,8 +2697,12 @@ private struct PersonDetailPage: View {
                         .minimumScaleFactor(0.75)
                         .padding(.horizontal, 12)
                         .frame(height: 32)
-                        .background(Color.secondary.opacity(0.09), in: Capsule())
+                    .background(Color.secondary.opacity(0.09), in: Capsule())
                 }
+            }
+
+            if person.id == PersonPushNotificationManager.samAltmanID {
+                samAltmanNotificationControl
             }
         }
         .padding(.horizontal, 20)
@@ -2703,6 +2712,52 @@ private struct PersonDetailPage: View {
 
     private var personOrganizationLine: String {
         person.organizationName ?? (person.hasXSource ? "X 来源" : "人物资料")
+    }
+
+    private var samAltmanNotificationControl: some View {
+        Button {
+            Task {
+                await pushNotifications.setSamAltmanEnabled(
+                    !pushNotifications.isSamAltmanEnabled
+                )
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: pushNotifications.isSamAltmanEnabled ? "bell.fill" : "bell")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(
+                        pushNotifications.isSamAltmanEnabled ? Color.accentColor : Color.secondary
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pushNotifications.isSamAltmanEnabled ? "已开启本机提醒" : "开启本机提醒")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(pushNotifications.errorMessage ?? "本人动态或新视频访谈发布时通知")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(
+                            pushNotifications.errorMessage == nil ? Color.secondary : Color.red
+                        )
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                if pushNotifications.isUpdating {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .background(Color.secondary.opacity(0.075), in: RoundedRectangle(cornerRadius: 13))
+        }
+        .buttonStyle(.plain)
+        .disabled(pushNotifications.isUpdating)
+        .accessibilityLabel(
+            pushNotifications.isSamAltmanEnabled ? "关闭山姆奥特曼本机提醒" : "开启山姆奥特曼本机提醒"
+        )
     }
 
     private var sectionPicker: some View {
