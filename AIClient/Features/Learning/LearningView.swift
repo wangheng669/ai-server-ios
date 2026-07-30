@@ -574,6 +574,7 @@ private struct LearningVideoLessonDetailView: View {
     @State private var playbackDuration = 0.0
     @State private var timeObserver: Any?
     @State private var showsFullscreenPlayer = false
+    @State private var posterImage: UIImage?
 
     init(seed: LearningVideoLesson) {
         _lesson = State(initialValue: seed)
@@ -627,13 +628,14 @@ private struct LearningVideoLessonDetailView: View {
                 if let player {
                     LearningInlineVideoPlayer(
                         player: player,
+                        posterURL: lesson.coverURL,
+                        posterImage: posterImage,
                         isPlaying: $isPlaying,
                         currentTime: $currentPlaybackTime,
                         duration: $playbackDuration,
                         isFullscreen: true
                     ) {
-                        AppOrientationController.shared.setVideoFullscreen(false)
-                        showsFullscreenPlayer = false
+                        dismissFullscreenPlayer()
                     }
                     .ignoresSafeArea()
                 }
@@ -653,6 +655,13 @@ private struct LearningVideoLessonDetailView: View {
             if let detail = try? await LearningService().fetchVideoLesson(id: lesson.id) {
                 lesson = detail
             }
+        }
+        .task(id: lesson.coverURL) {
+            guard let url = lesson.coverURL else { return }
+            posterImage = await ImageLoader.load(
+                url,
+                targetSize: CGSize(width: 1_200, height: 675)
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
             guard let failedItem = notification.object as? AVPlayerItem,
@@ -676,12 +685,13 @@ private struct LearningVideoLessonDetailView: View {
             if let player {
                 LearningInlineVideoPlayer(
                     player: player,
+                    posterURL: lesson.coverURL,
+                    posterImage: posterImage,
                     isPlaying: $isPlaying,
                     currentTime: $currentPlaybackTime,
                     duration: $playbackDuration
                 ) {
-                    AppOrientationController.shared.setVideoFullscreen(true)
-                    showsFullscreenPlayer = true
+                    presentFullscreenPlayer()
                 }
             } else {
                 AsyncImage(url: lesson.coverURL) { phase in
@@ -768,6 +778,23 @@ private struct LearningVideoLessonDetailView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func presentFullscreenPlayer() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            showsFullscreenPlayer = true
+        }
+    }
+
+    private func dismissFullscreenPlayer() {
+        AppOrientationController.shared.setVideoFullscreen(false)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            showsFullscreenPlayer = false
+        }
     }
 
     private func startPlayback(at seconds: Int = 0) {
@@ -1019,6 +1046,8 @@ private struct LearningVideoLoadingIndicator: View {
 
 private struct LearningInlineVideoPlayer: View {
     let player: AVPlayer
+    let posterURL: URL?
+    let posterImage: UIImage?
     @Binding var isPlaying: Bool
     @Binding var currentTime: Double
     @Binding var duration: Double
@@ -1028,10 +1057,16 @@ private struct LearningInlineVideoPlayer: View {
     @State private var controlsTask: Task<Void, Never>?
     @State private var isSeeking = false
     @State private var seekPreview = 0.0
+    @State private var isVideoReady = false
 
     var body: some View {
         ZStack {
-            LearningPlayerLayer(player: player)
+            LearningPlayerLayer(player: player) {
+                guard !isVideoReady else { return }
+                withAnimation(.easeOut(duration: 0.16)) {
+                    isVideoReady = true
+                }
+            }
                 .contentShape(Rectangle())
                 .onTapGesture {
                     withAnimation(.easeOut(duration: 0.18)) {
@@ -1044,14 +1079,29 @@ private struct LearningInlineVideoPlayer: View {
                     }
                 }
 
-            if showsControls {
-                LinearGradient(
-                    colors: [.black.opacity(0.16), .clear, .black.opacity(0.78)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+            if !isVideoReady {
+                Group {
+                    if let posterImage {
+                        Image(uiImage: posterImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        AsyncImage(url: posterURL) { phase in
+                            if case let .success(image) = phase {
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                Color.clear
+                            }
+                        }
+                    }
+                }
                 .allowsHitTesting(false)
+                .transition(.opacity)
+            }
 
+            if showsControls {
                 HStack(spacing: 28) {
                     seekButton(seconds: -15, symbol: "gobackward.15")
 
@@ -1125,6 +1175,7 @@ private struct LearningInlineVideoPlayer: View {
                     }
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
+                    .shadow(color: .black.opacity(0.72), radius: 2, y: 1)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 10)
                 }
@@ -1206,19 +1257,28 @@ private struct LearningInlineVideoPlayer: View {
 
 private struct LearningPlayerLayer: UIViewRepresentable {
     let player: AVPlayer
+    let onReadyForDisplay: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onReadyForDisplay: onReadyForDisplay)
+    }
 
     func makeUIView(context: Context) -> PlayerView {
         let view = PlayerView()
         view.playerLayer.player = player
+        context.coordinator.observe(view.playerLayer)
         return view
     }
 
     func updateUIView(_ view: PlayerView, context: Context) {
+        context.coordinator.onReadyForDisplay = onReadyForDisplay
         view.playerLayer.player = player
+        context.coordinator.observe(view.playerLayer)
     }
 
-    static func dismantleUIView(_ view: PlayerView, coordinator: Void) {
+    static func dismantleUIView(_ view: PlayerView, coordinator: Coordinator) {
         view.playerLayer.player = nil
+        coordinator.stopObserving()
     }
 
     final class PlayerView: UIView {
@@ -1238,6 +1298,36 @@ private struct LearningPlayerLayer: UIViewRepresentable {
 
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+    }
+
+    final class Coordinator {
+        var onReadyForDisplay: () -> Void
+        private weak var observedLayer: AVPlayerLayer?
+        private var observation: NSKeyValueObservation?
+
+        init(onReadyForDisplay: @escaping () -> Void) {
+            self.onReadyForDisplay = onReadyForDisplay
+        }
+
+        func observe(_ layer: AVPlayerLayer) {
+            guard observedLayer !== layer else { return }
+            stopObserving()
+            observedLayer = layer
+            observation = layer.observe(
+                \.isReadyForDisplay,
+                options: [.initial, .new]
+            ) { [weak self] layer, _ in
+                guard layer.isReadyForDisplay else { return }
+                DispatchQueue.main.async {
+                    self?.onReadyForDisplay()
+                }
+            }
+        }
+
+        func stopObserving() {
+            observation = nil
+            observedLayer = nil
         }
     }
 }
