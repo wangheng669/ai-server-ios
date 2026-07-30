@@ -49,6 +49,8 @@ struct PeopleView: View {
         .sheet(item: $selectedPerson) { person in
             PersonDetailSheet(
                 person: person,
+                people: store.people,
+                onSelectPerson: { selectedPerson = $0 },
                 onClose: { selectedPerson = nil }
             )
             .presentationDetents([.large])
@@ -1805,7 +1807,10 @@ private struct PeopleLoadingTimeline: View {
 
 private struct PersonDetailSheet: View {
     let person: SpecialPerson
+    let people: [SpecialPerson]
+    let onSelectPerson: (SpecialPerson) -> Void
     let onClose: () -> Void
+    @GestureState private var horizontalDragOffset: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -1815,12 +1820,28 @@ private struct PersonDetailSheet: View {
                     showsNavigationChrome: false,
                     usesSheetLayout: true
                 )
+                .id(person.id)
+                .offset(x: horizontalDragOffset)
 
                 closeButton
                     .padding(.top, 12)
                     .padding(.trailing, 15)
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(personSwitchGesture)
+            .accessibilityHint("左右滑动切换人物，下滑关闭人物详情")
         }
+    }
+
+    private var personSwitchGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .updating($horizontalDragOffset) { value, offset, _ in
+                let horizontalDistance = value.translation.width
+                let verticalDistance = value.translation.height
+                guard abs(horizontalDistance) > abs(verticalDistance) * 1.15 else { return }
+                offset = min(max(horizontalDistance * 0.14, -24), 24)
+            }
+            .onEnded(switchPerson)
     }
 
     private var closeButton: some View {
@@ -1838,6 +1859,33 @@ private struct PersonDetailSheet: View {
         }
         .buttonStyle(PeoplePressStyle())
         .accessibilityLabel("关闭人物详情")
+    }
+
+    private func switchPerson(_ value: DragGesture.Value) {
+        let horizontalDistance = value.translation.width
+        let verticalDistance = value.translation.height
+        guard orderedPeople.count > 1,
+              abs(horizontalDistance) >= 64,
+              abs(horizontalDistance) > abs(verticalDistance) * 1.25,
+              let currentIndex = orderedPeople.firstIndex(where: { $0.id == person.id }) else {
+            return
+        }
+
+        let indexOffset = horizontalDistance < 0 ? 1 : -1
+        let nextIndex = (currentIndex + indexOffset + orderedPeople.count) % orderedPeople.count
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        onSelectPerson(orderedPeople[nextIndex])
+    }
+
+    private var orderedPeople: [SpecialPerson] {
+        people.sorted {
+            let lhs = ($0.todayCount, $0.relatedPeople.count, $0.totalCount)
+            let rhs = ($1.todayCount, $1.relatedPeople.count, $1.totalCount)
+            if lhs.0 != rhs.0 { return lhs.0 > rhs.0 }
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            if lhs.2 != rhs.2 { return lhs.2 > rhs.2 }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
     }
 }
 
