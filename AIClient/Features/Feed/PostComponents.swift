@@ -265,15 +265,15 @@ struct PostMediaGrid: View {
 
     private var resolvedVideoHeight: CGFloat {
         let resolvedWidth = availableWidth ?? UIScreen.main.bounds.width - 28
+        if let loadedVideoAspectRatio, loadedVideoAspectRatio > 0 {
+            return resolvedWidth / loadedVideoAspectRatio
+        }
         if let video = post.videos?.first,
            let width = video.width,
            let height = video.height,
            width > 0,
            height > 0 {
             return resolvedWidth * CGFloat(height) / CGFloat(width)
-        }
-        if let loadedVideoAspectRatio, loadedVideoAspectRatio > 0 {
-            return resolvedWidth / loadedVideoAspectRatio
         }
         return resolvedWidth * 9 / 16
     }
@@ -576,7 +576,9 @@ struct XVideoPlayerView: View {
         .frame(maxWidth: .infinity)
         .clipped()
         .task(id: url) {
-            await loadThumbnail()
+            async let thumbnailLoad: Void = loadThumbnail()
+            async let aspectRatioLoad: Void = loadVideoAspectRatio()
+            _ = await (thumbnailLoad, aspectRatioLoad)
         }
         .onDisappear {
             stopPlayback()
@@ -630,17 +632,15 @@ struct XVideoPlayerView: View {
         guard thumbnail == nil else { return }
         if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: url as NSURL) {
             thumbnail = cached
-            reportAspectRatio(of: cached)
             return
         }
         if let thumbnailURL = thumbnailURL ?? MediaURL.videoThumbnail(for: url),
            let remoteThumbnail = await ImageLoader.load(
                thumbnailURL,
                targetSize: CGSize(width: 720, height: 720)
-           ) {
+            ) {
             guard !Task.isCancelled else { return }
             thumbnail = remoteThumbnail
-            reportAspectRatio(of: remoteThumbnail)
             thumbnailFailed = false
             return
         }
@@ -655,7 +655,6 @@ struct XVideoPlayerView: View {
             let result = UIImage(cgImage: image)
             Self.thumbnailCache.setObject(result, forKey: url as NSURL)
             thumbnail = result
-            reportAspectRatio(of: result)
             thumbnailFailed = false
         } catch {
             guard !Task.isCancelled else { return }
@@ -663,9 +662,18 @@ struct XVideoPlayerView: View {
         }
     }
 
-    private func reportAspectRatio(of image: UIImage) {
-        guard image.size.width > 0, image.size.height > 0 else { return }
-        onAspectRatioResolved?(image.size.width / image.size.height)
+    @MainActor
+    private func loadVideoAspectRatio() async {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let naturalSize = try? await track.load(.naturalSize),
+              let preferredTransform = try? await track.load(.preferredTransform),
+              !Task.isCancelled else { return }
+        let displayedSize = naturalSize.applying(preferredTransform)
+        let width = abs(displayedSize.width)
+        let height = abs(displayedSize.height)
+        guard width > 0, height > 0 else { return }
+        onAspectRatioResolved?(width / height)
     }
 }
 
