@@ -123,6 +123,45 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.books.first?.openURL?.scheme, "weread")
     }
 
+    func testDecodesKnowledgeConceptCardAndDetail() throws {
+        let data = Data(
+            """
+            {
+              "data": {
+                "id": "xinhai-revolution",
+                "kind": "event",
+                "title": "辛亥革命",
+                "subtitle": "事件 · 1911",
+                "summary": "推动清帝退位与中华民国建立的革命进程。",
+                "importance": "开启共和政治实践。",
+                "cover_url": "https://commons.wikimedia.org/example.jpg",
+                "image_attribution": "公有领域",
+                "wikipedia_language": "zh",
+                "wikipedia_title": "辛亥革命",
+                "wikipedia_url": "https://zh.wikipedia.org/wiki/辛亥革命",
+                "key_people": ["孙中山", "黄兴"],
+                "content": {
+                  "background": "历史背景",
+                  "timeline": [{
+                    "date": "1911-10-10",
+                    "title": "武昌起义",
+                    "description": "各省随后相继响应。"
+                  }],
+                  "key_points": ["并非单一事件"],
+                  "key_people": ["孙中山", "黄兴"]
+                },
+                "related": []
+              }
+            }
+            """.utf8
+        )
+        let response = try JSONDecoder().decode(KnowledgeConceptDetailResponse.self, from: data)
+        XCTAssertEqual(response.data.kind, .event)
+        XCTAssertEqual(response.data.keyPeople, ["孙中山", "黄兴"])
+        XCTAssertEqual(response.data.content.timeline.first?.title, "武昌起义")
+        XCTAssertEqual(response.data.wikipediaURL?.host, "zh.wikipedia.org")
+    }
+
     func testDecodesIndependentVideoLessonDetail() throws {
         let data = Data(
             """

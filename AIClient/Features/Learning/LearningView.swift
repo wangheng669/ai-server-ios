@@ -16,9 +16,13 @@ struct LearningView: View {
     @State private var repository = LearningContentRepository()
     @State private var progressStore = LearningProgressStore()
     @State private var path: [LearningRoute] = []
+    @State private var selectedConcept: KnowledgeConceptCard?
+    @State private var selectedConceptID: String?
+    @State private var conceptFilter: KnowledgeConceptFilter = .all
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") {
+        if ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview") {
             return .concepts
         }
         if ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
@@ -60,9 +64,15 @@ struct LearningView: View {
             guard rootTabIsActive else { return }
             async let catalog: Void = store.load()
             async let bookshelf: Void = store.loadBookshelf()
+            async let conceptLibrary: Void = store.loadConceptLibrary()
             async let videoLibrary: Void = store.loadVideoLibrary()
-            _ = await (catalog, bookshelf, videoLibrary)
+            _ = await (catalog, bookshelf, conceptLibrary, videoLibrary)
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview"),
+               selectedConcept == nil,
+               let concept = store.conceptLibrary?.concepts.first {
+                selectedConcept = concept
+            }
             if (ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-video-preview")),
                path.isEmpty,
@@ -78,6 +88,9 @@ struct LearningView: View {
                 }
             }
             #endif
+        }
+        .sheet(item: $selectedConcept) { concept in
+            KnowledgeConceptDetailSheet(card: concept)
         }
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty
@@ -131,7 +144,7 @@ struct LearningView: View {
                     case .books:
                         await store.loadBookshelf(force: true)
                     case .concepts:
-                        await store.load(force: true)
+                        await store.loadConceptLibrary(force: true)
                     }
                 }
             }
@@ -369,86 +382,132 @@ struct LearningView: View {
 
     @ViewBuilder
     private var conceptsContent: some View {
-        if let catalog = store.catalog {
-            let sections = catalog.sections.filter { !$0.topics.isEmpty }
+        if let library = store.conceptLibrary {
+            let concepts = conceptFilter.filter(library.concepts)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    ForEach(KnowledgeConceptFilter.allCases) { filter in
+                        conceptFilterButton(filter)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 18)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("概念库")
-                    .font(.system(size: 24, weight: .bold, design: .serif))
-                Text("按主题浏览，随时补上不熟悉的知识点")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 18)
+                if concepts.isEmpty {
+                    ContentUnavailableView(
+                        "暂无相关内容",
+                        systemImage: "rectangle.stack",
+                        description: Text("切换分类或下拉刷新后重试")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 36)
+                } else {
+                    GeometryReader { proxy in
+                        ScrollView(.horizontal) {
+                            LazyHStack(spacing: 12) {
+                                ForEach(Array(concepts.enumerated()), id: \.element.id) { index, concept in
+                                    KnowledgeConceptCarouselCard(
+                                        concept: concept,
+                                        index: index,
+                                        count: concepts.count
+                                    )
+                                    .frame(width: max(292, proxy.size.width - 72))
+                                    .id(concept.id)
+                                    .onTapGesture {
+                                        selectedConcept = concept
+                                    }
+                                }
+                            }
+                            .scrollTargetLayout()
+                            .padding(.horizontal, 36)
+                        }
+                        .scrollIndicators(.hidden)
+                        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                        .scrollPosition(id: $selectedConceptID)
+                    }
+                    .frame(height: 590)
 
-            if sections.isEmpty {
-                ContentUnavailableView(
-                    "暂无概念",
-                    systemImage: "text.book.closed",
-                    description: Text("下拉刷新后重试")
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.top, 36)
-            } else {
-                ForEach(sections) { section in
-                    conceptSection(section)
+                    HStack(spacing: 8) {
+                        ForEach(concepts) { concept in
+                            Circle()
+                                .fill(
+                                    selectedConceptID == concept.id
+                                        ? KnowledgePagePalette.accent
+                                        : Color.secondary.opacity(0.22)
+                                )
+                                .frame(width: selectedConceptID == concept.id ? 9 : 7)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .animation(.snappy(duration: 0.2), value: selectedConceptID)
+
+                    Label("向左滑，继续了解", systemImage: "arrow.left")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 12)
                 }
             }
-        } else if store.isLoading {
-            ProgressView("正在载入概念")
+            .onChange(of: concepts.map(\.id), initial: true) { _, IDs in
+                if let selectedConceptID, IDs.contains(selectedConceptID) {
+                    return
+                }
+                self.selectedConceptID = IDs.first
+            }
+        } else if store.isConceptLibraryLoading {
+            ProgressView("正在载入概念卡片")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 44)
-        } else {
+        } else if store.conceptLibraryErrorMessage != nil {
             ContentUnavailableView {
                 Label("概念载入失败", systemImage: "wifi.exclamationmark")
             } description: {
-                Text(store.errorMessage ?? "请稍后重试")
+                Text(store.conceptLibraryErrorMessage ?? "请稍后重试")
             } actions: {
                 Button("重新载入") {
-                    Task { await store.load(force: true) }
+                    Task { await store.loadConceptLibrary(force: true) }
                 }
             }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+        } else {
+            ContentUnavailableView(
+                "暂无概念",
+                systemImage: "rectangle.stack",
+                description: Text("下拉刷新后重试")
+            )
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
         }
     }
 
-    private func conceptSection(_ section: LearningSection) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(section.name)
-                    .font(.system(size: 19, weight: .bold, design: .serif))
-                Spacer()
-                Text("\(section.topics.count) 个概念")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+    private func conceptFilterButton(_ filter: KnowledgeConceptFilter) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.22)) {
+                conceptFilter = filter
             }
-
-            VStack(spacing: 0) {
-                ForEach(Array(section.topics.enumerated()), id: \.element.id) { index, topic in
-                    Button {
-                        path.append(.topic(topic, nil, nil, nil))
-                    } label: {
-                        LearningTopicRow(topic: topic)
-                    }
-                    .buttonStyle(LearningPressStyle())
-
-                    if index != section.topics.indices.last {
-                        Divider()
-                            .padding(.leading, 112)
+        } label: {
+            Text(filter.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(conceptFilter == filter ? .white : .primary)
+                .padding(.horizontal, 20)
+                .frame(height: 40)
+                .background(
+                    conceptFilter == filter
+                        ? KnowledgePagePalette.accent
+                        : KnowledgePagePalette.surface,
+                    in: Capsule()
+                )
+                .overlay {
+                    if conceptFilter != filter {
+                        Capsule()
+                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
                     }
                 }
-            }
-            .background(KnowledgePagePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
-            }
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 22)
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(conceptFilter == filter ? .isSelected : [])
     }
 
     private func stockTopics(in catalog: LearningCatalog) -> [LearningTopic] {
@@ -498,6 +557,33 @@ private enum KnowledgeSection: String {
         case .investment: "投资"
         case .books: "书籍"
         case .concepts: "概念"
+        }
+    }
+}
+
+private enum KnowledgeConceptFilter: String, CaseIterable, Identifiable {
+    case all
+    case events
+    case people
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .events: "事件"
+        case .people: "人物"
+        }
+    }
+
+    func filter(_ concepts: [KnowledgeConceptCard]) -> [KnowledgeConceptCard] {
+        switch self {
+        case .all:
+            concepts
+        case .events:
+            concepts.filter { $0.kind == .event }
+        case .people:
+            concepts.filter { $0.kind == .person }
         }
     }
 }

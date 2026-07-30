@@ -332,3 +332,129 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
 
     var openURL: URL? { URL(string: openURLValue) }
 }
+
+struct KnowledgeConceptLibrary: Decodable, Equatable {
+    let concepts: [KnowledgeConceptCard]
+}
+
+struct KnowledgeConceptLibraryResponse: Decodable {
+    let data: KnowledgeConceptLibrary
+}
+
+struct KnowledgeConceptDetailResponse: Decodable {
+    let data: KnowledgeConceptDetail
+}
+
+enum KnowledgeConceptKind: String, Decodable, Hashable {
+    case event
+    case person
+    case concept
+
+    var title: String {
+        switch self {
+        case .event: "事件"
+        case .person: "人物"
+        case .concept: "概念"
+        }
+    }
+}
+
+struct KnowledgeConceptCard: Identifiable, Decodable, Hashable {
+    let id: String
+    let kind: KnowledgeConceptKind
+    let title: String
+    let subtitle: String
+    let summary: String
+    let importance: String
+    let coverURLValue: String?
+    let imageAttribution: String
+    let wikipediaLanguage: String
+    let wikipediaTitle: String
+    let wikipediaURLValue: String
+    let keyPeople: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, subtitle, summary, importance
+        case coverURLValue = "cover_url"
+        case imageAttribution = "image_attribution"
+        case wikipediaLanguage = "wikipedia_language"
+        case wikipediaTitle = "wikipedia_title"
+        case wikipediaURLValue = "wikipedia_url"
+        case keyPeople = "key_people"
+    }
+
+    var coverURL: URL? {
+        guard let coverURLValue else { return nil }
+        return URL(string: coverURLValue)
+    }
+
+    var wikipediaURL: URL? { URL(string: wikipediaURLValue) }
+}
+
+struct KnowledgeConceptDetail: Identifiable, Decodable, Hashable {
+    let id: String
+    let kind: KnowledgeConceptKind
+    let title: String
+    let subtitle: String
+    let summary: String
+    let importance: String
+    let coverURLValue: String?
+    let imageAttribution: String
+    let wikipediaLanguage: String
+    let wikipediaTitle: String
+    let wikipediaURLValue: String
+    let keyPeople: [String]
+    let content: KnowledgeConceptContent
+    let related: [KnowledgeRelatedConcept]
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, subtitle, summary, importance, content, related
+        case coverURLValue = "cover_url"
+        case imageAttribution = "image_attribution"
+        case wikipediaLanguage = "wikipedia_language"
+        case wikipediaTitle = "wikipedia_title"
+        case wikipediaURLValue = "wikipedia_url"
+        case keyPeople = "key_people"
+    }
+
+    var coverURL: URL? {
+        guard let coverURLValue else { return nil }
+        return URL(string: coverURLValue)
+    }
+
+    var wikipediaURL: URL? { URL(string: wikipediaURLValue) }
+}
+
+struct KnowledgeConceptContent: Decodable, Hashable {
+    let background: String
+    let timeline: [KnowledgeConceptTimelinePoint]
+    let keyPoints: [String]
+    let keyPeople: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case background, timeline
+        case keyPoints = "key_points"
+        case keyPeople = "key_people"
+    }
+}
+
+struct KnowledgeConceptTimelinePoint: Decodable, Hashable, Identifiable {
+    let date: String
+    let title: String
+    let description: String
+
+    var id: String { "\(date)-\(title)" }
+}
+
+struct KnowledgeRelatedConcept: Decodable, Hashable, Identifiable {
+    let id: String
+    let kind: KnowledgeConceptKind
+    let title: String
+    let subtitle: String
+    let relationType: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, subtitle
+        case relationType = "relation_type"
+    }
+}
