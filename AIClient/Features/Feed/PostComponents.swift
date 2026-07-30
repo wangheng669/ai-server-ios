@@ -228,6 +228,7 @@ struct PostMediaGrid: View {
     var availableWidth: CGFloat? = nil
     var cornerRadius: CGFloat = 8
     var videoContentMode: ContentMode = .fit
+    var videoMaxHeight: CGFloat? = nil
     @State private var gallerySelection: ImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
@@ -263,19 +264,28 @@ struct PostMediaGrid: View {
         return min(resolvedWidth * CGFloat(height) / CGFloat(width), singleImageMaxHeight ?? 560)
     }
 
-    private var resolvedVideoHeight: CGFloat {
-        let resolvedWidth = availableWidth ?? UIScreen.main.bounds.width - 28
+    private var resolvedVideoAspectRatio: CGFloat {
         if let loadedVideoAspectRatio, loadedVideoAspectRatio > 0 {
-            return resolvedWidth / loadedVideoAspectRatio
+            return loadedVideoAspectRatio
         }
         if let video = post.videos?.first,
            let width = video.width,
            let height = video.height,
            width > 0,
            height > 0 {
-            return resolvedWidth * CGFloat(height) / CGFloat(width)
+            return CGFloat(width) / CGFloat(height)
         }
-        return resolvedWidth * 9 / 16
+        return 16 / 9
+    }
+
+    private var resolvedVideoSize: CGSize {
+        let resolvedWidth = availableWidth ?? UIScreen.main.bounds.width - 28
+        if let singleImageHeight {
+            return CGSize(width: resolvedWidth, height: singleImageHeight)
+        }
+        let widthForHeightLimit = videoMaxHeight.map { $0 * resolvedVideoAspectRatio } ?? resolvedWidth
+        let width = min(resolvedWidth, widthForHeightLimit)
+        return CGSize(width: width, height: width / resolvedVideoAspectRatio)
     }
 
     private func recordLoadedImage(_ image: UIImage, at url: URL, isSingleImage: Bool) {
@@ -306,6 +316,20 @@ struct PostMediaGrid: View {
         }
     }
 
+    @MainActor
+    private func loadVideoAspectRatio(for url: URL) async {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let naturalSize = try? await track.load(.naturalSize),
+              let preferredTransform = try? await track.load(.preferredTransform),
+              !Task.isCancelled else { return }
+        let displayedSize = naturalSize.applying(preferredTransform)
+        let width = abs(displayedSize.width)
+        let height = abs(displayedSize.height)
+        guard width > 0, height > 0 else { return }
+        loadedVideoAspectRatio = width / height
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
@@ -313,13 +337,12 @@ struct PostMediaGrid: View {
                 XVideoPlayerView(
                     url: videoURL,
                     thumbnailURL: post.previewURL,
-                    contentMode: videoContentMode,
-                    onAspectRatioResolved: { loadedVideoAspectRatio = $0 }
+                    contentMode: videoContentMode
                 )
                     .id(videoURL)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: resolvedVideoHeight)
+                    .frame(width: resolvedVideoSize.width, height: resolvedVideoSize.height)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else if urls.count == 1, let url = urls.first {
                 Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
                     RemoteImage(
@@ -365,6 +388,10 @@ struct PostMediaGrid: View {
         }
         .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
         .clipped()
+        .task(id: post.videoURLs.first) {
+            guard let videoURL = post.videoURLs.first else { return }
+            await loadVideoAspectRatio(for: videoURL)
+        }
         .imageGallery(item: $gallerySelection)
     }
 }
@@ -492,7 +519,7 @@ struct XVideoPlayerView: View {
             if !isVideoReady, let thumbnail {
                 Image(uiImage: thumbnail)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: contentMode)
             } else if playbackState == .idle, !thumbnailFailed {
                 ProgressView().tint(.white)
             }
