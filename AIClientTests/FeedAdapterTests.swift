@@ -657,4 +657,42 @@ final class FeedAdapterTests: XCTestCase {
         let post = try JSONDecoder().decode(Post.self, from: data)
         XCTAssertEqual(post.xTweetID, "2076997109048308052")
     }
+
+    func testImageDiskCachePersistsAcrossLoaderInstances() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ImageDiskCacheTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try XCTUnwrap(URL(string: "https://images.example.com/persisted.jpg"))
+        let expected = Data("persisted-image-data".utf8)
+
+        let firstCache = ImageDiskCache(directory: directory, maxBytes: 1_024, maxFileCount: 10)
+        await firstCache.store(expected, for: url)
+        let secondCache = ImageDiskCache(directory: directory, maxBytes: 1_024, maxFileCount: 10)
+        let loaded = await secondCache.data(for: url)
+
+        XCTAssertEqual(loaded, expected)
+    }
+
+    func testImageDiskCacheEvictsLeastRecentlyUsedFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ImageDiskCacheTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = ImageDiskCache(directory: directory, maxBytes: 1_024, maxFileCount: 2)
+        let urls = try (1...3).map {
+            try XCTUnwrap(URL(string: "https://images.example.com/\($0).jpg"))
+        }
+
+        for url in urls {
+            await cache.store(Data(url.absoluteString.utf8), for: url)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        await cache.trim()
+
+        let oldest = await cache.data(for: urls[0])
+        let middle = await cache.data(for: urls[1])
+        let newest = await cache.data(for: urls[2])
+        XCTAssertNil(oldest)
+        XCTAssertNotNil(middle)
+        XCTAssertNotNil(newest)
+    }
 }
