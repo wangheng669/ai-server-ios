@@ -3,6 +3,7 @@ import AVKit
 import WebKit
 
 struct PostDetailView: View {
+    private let presentedAsSheet: Bool
     @State private var post: Post
     @State private var player: AVPlayer?
     @State private var detectedVideoAspectRatio: CGFloat?
@@ -34,7 +35,12 @@ struct PostDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
-    init(post: Post, preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil) {
+    init(
+        post: Post,
+        preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil,
+        presentedAsSheet: Bool = false
+    ) {
+        self.presentedAsSheet = presentedAsSheet
         let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
             ? (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
             : nil)
@@ -43,6 +49,20 @@ struct PostDetailView: View {
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
         _isTruthBookmarked = State(initialValue: TruthBookmarkStore.contains(post.id))
         _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
+    }
+
+    private var usesCustomDismissControl: Bool {
+        ["知乎", "Truth", "雪球"].contains(post.sourceName)
+            || post.isYouTube
+            || post.isWeiboRSS
+    }
+
+    private var dismissIconName: String {
+        presentedAsSheet ? "xmark" : "chevron.left"
+    }
+
+    private var dismissAccessibilityLabel: String {
+        presentedAsSheet ? "关闭动态详情" : "返回"
     }
 
     var body: some View {
@@ -79,6 +99,14 @@ struct PostDetailView: View {
             }
         }
         .toolbar {
+            if presentedAsSheet && !usesCustomDismissControl {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("关闭动态详情")
+                }
+            }
             if post.sourceName == "X" {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { openOriginal() } label: { Image(systemName: "bell.slash") }
@@ -440,13 +468,13 @@ struct PostDetailView: View {
         ZStack {
             HStack(spacing: 12) {
                 Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
+                    Image(systemName: dismissIconName)
                         .font(.system(size: 18, weight: .semibold))
                         .frame(width: 40, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("返回")
+                .accessibilityLabel(dismissAccessibilityLabel)
 
                 Spacer()
 
@@ -736,10 +764,11 @@ struct PostDetailView: View {
                 player?.pause()
                 dismiss()
             } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: dismissIconName)
                     .font(.system(size: 22, weight: .medium))
                     .frame(width: 44, height: 44)
             }
+            .accessibilityLabel(dismissAccessibilityLabel)
             Spacer()
             Text("雪球正文")
                 .font(.system(size: 19, weight: .semibold))
@@ -968,12 +997,12 @@ struct PostDetailView: View {
     private var youtubePlayerTopBar: some View {
         HStack {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: dismissIconName)
                     .font(.system(size: 18, weight: .bold))
                     .frame(width: 38, height: 38)
                     .background(.black.opacity(0.45), in: Circle())
             }
-            .accessibilityLabel("返回")
+            .accessibilityLabel(dismissAccessibilityLabel)
 
             Spacer()
 
@@ -1181,12 +1210,12 @@ struct PostDetailView: View {
     private var truthDetailToolbar: some View {
         HStack {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: dismissIconName)
                     .font(.system(size: 20, weight: .semibold))
                     .frame(width: 44, height: 44, alignment: .leading)
             }
             .foregroundStyle(.primary)
-            .accessibilityLabel("返回")
+            .accessibilityLabel(dismissAccessibilityLabel)
 
             Spacer()
             Text("Truth")
@@ -1349,12 +1378,12 @@ struct PostDetailView: View {
     private var zhihuContentToolbar: some View {
         HStack(spacing: 8) {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: dismissIconName)
                     .font(.system(size: 20, weight: .semibold))
                     .frame(width: 36, height: 44, alignment: .leading)
             }
             .foregroundStyle(.primary)
-            .accessibilityLabel("返回")
+            .accessibilityLabel(dismissAccessibilityLabel)
 
             HStack(spacing: 5) {
                 Text("知乎")
