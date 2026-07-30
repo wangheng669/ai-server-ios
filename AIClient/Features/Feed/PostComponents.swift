@@ -231,6 +231,7 @@ struct PostMediaGrid: View {
     @State private var gallerySelection: ImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
+    @State private var loadedVideoAspectRatio: CGFloat?
 
     private var knownCompactImageURLs: Set<URL> {
         guard post.isRSS else { return [] }
@@ -260,6 +261,21 @@ struct PostMediaGrid: View {
             return min(210, singleImageMaxHeight ?? 210)
         }
         return min(resolvedWidth * CGFloat(height) / CGFloat(width), singleImageMaxHeight ?? 560)
+    }
+
+    private var resolvedVideoHeight: CGFloat {
+        let resolvedWidth = availableWidth ?? UIScreen.main.bounds.width - 28
+        if let video = post.videos?.first,
+           let width = video.width,
+           let height = video.height,
+           width > 0,
+           height > 0 {
+            return resolvedWidth * CGFloat(height) / CGFloat(width)
+        }
+        if let loadedVideoAspectRatio, loadedVideoAspectRatio > 0 {
+            return resolvedWidth / loadedVideoAspectRatio
+        }
+        return resolvedWidth * 9 / 16
     }
 
     private func recordLoadedImage(_ image: UIImage, at url: URL, isSingleImage: Bool) {
@@ -297,11 +313,12 @@ struct PostMediaGrid: View {
                 XVideoPlayerView(
                     url: videoURL,
                     thumbnailURL: post.previewURL,
-                    contentMode: videoContentMode
+                    contentMode: videoContentMode,
+                    onAspectRatioResolved: { loadedVideoAspectRatio = $0 }
                 )
                     .id(videoURL)
                     .frame(maxWidth: .infinity)
-                    .frame(height: resolvedSingleImageHeight)
+                    .frame(height: resolvedVideoHeight)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else if urls.count == 1, let url = urls.first {
                 Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
@@ -454,15 +471,18 @@ struct XVideoPlayerView: View {
     private let url: URL
     private let thumbnailURL: URL?
     private let contentMode: ContentMode
+    private let onAspectRatioResolved: ((CGFloat) -> Void)?
 
     init(
         url: URL,
         thumbnailURL: URL? = nil,
-        contentMode: ContentMode = .fit
+        contentMode: ContentMode = .fit,
+        onAspectRatioResolved: ((CGFloat) -> Void)? = nil
     ) {
         self.url = url
         self.thumbnailURL = thumbnailURL
         self.contentMode = contentMode
+        self.onAspectRatioResolved = onAspectRatioResolved
     }
 
     var body: some View {
@@ -610,6 +630,7 @@ struct XVideoPlayerView: View {
         guard thumbnail == nil else { return }
         if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: url as NSURL) {
             thumbnail = cached
+            reportAspectRatio(of: cached)
             return
         }
         if let thumbnailURL = thumbnailURL ?? MediaURL.videoThumbnail(for: url),
@@ -619,6 +640,7 @@ struct XVideoPlayerView: View {
            ) {
             guard !Task.isCancelled else { return }
             thumbnail = remoteThumbnail
+            reportAspectRatio(of: remoteThumbnail)
             thumbnailFailed = false
             return
         }
@@ -633,11 +655,17 @@ struct XVideoPlayerView: View {
             let result = UIImage(cgImage: image)
             Self.thumbnailCache.setObject(result, forKey: url as NSURL)
             thumbnail = result
+            reportAspectRatio(of: result)
             thumbnailFailed = false
         } catch {
             guard !Task.isCancelled else { return }
             thumbnailFailed = true
         }
+    }
+
+    private func reportAspectRatio(of image: UIImage) {
+        guard image.size.width > 0, image.size.height > 0 else { return }
+        onAspectRatioResolved?(image.size.width / image.size.height)
     }
 }
 
