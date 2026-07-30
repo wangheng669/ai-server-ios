@@ -198,6 +198,9 @@ private struct PeopleStarMapExplorer: View {
                 focusedPersonID = defaultCenter.id
             }
         }
+        .task(id: focusedPerson.id) {
+            await PeopleImagePreheater.preheatDetail(for: focusedPerson, baseURL: baseURL)
+        }
     }
 
     private var quickSwitcher: some View {
@@ -1848,6 +1851,14 @@ private struct PersonDetailSheet: View {
                 .accessibilityHint("左右滑动切换人物，下滑关闭人物详情")
             }
         }
+        .task(id: selectedPerson?.id) {
+            guard let selectedPerson else { return }
+            await PeopleImagePreheater.preheatDetail(
+                for: selectedPerson,
+                baseURL: ServerConfiguration.currentURL
+            )
+            await preheatAdjacentPeople(around: selectedPerson)
+        }
     }
 
     private var personTransition: AnyTransition {
@@ -1914,6 +1925,47 @@ private struct PersonDetailSheet: View {
             if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
             if lhs.2 != rhs.2 { return lhs.2 > rhs.2 }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func preheatAdjacentPeople(around person: SpecialPerson) async {
+        guard orderedPeople.count > 1,
+              let currentIndex = orderedPeople.firstIndex(where: { $0.id == person.id }) else {
+            return
+        }
+        let previousIndex = (currentIndex - 1 + orderedPeople.count) % orderedPeople.count
+        let nextIndex = (currentIndex + 1) % orderedPeople.count
+        await withTaskGroup(of: Void.self) { group in
+            for index in Set([previousIndex, nextIndex]) {
+                let adjacentPerson = orderedPeople[index]
+                group.addTask {
+                    await PeopleImagePreheater.preheatDetail(
+                        for: adjacentPerson,
+                        baseURL: ServerConfiguration.currentURL
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum PeopleImagePreheater {
+    @MainActor
+    static func preheatDetail(for person: SpecialPerson, baseURL: URL) async {
+        let avatarURL = person.avatarAssetName == nil ? person.avatarURL(baseURL: baseURL) : nil
+        _ = await ImageLoader.load(
+            avatarURL,
+            targetSize: CGSize(width: 66, height: 66)
+        )
+
+        let thumbnailSize = CGSize(width: UIScreen.main.bounds.width, height: 132)
+        let photoURLs = person.photos.prefix(3).compactMap { $0.imageURL(baseURL: baseURL) }
+        await withTaskGroup(of: Void.self) { group in
+            for url in photoURLs {
+                group.addTask {
+                    _ = await ImageLoader.load(url, targetSize: thumbnailSize)
+                }
+            }
         }
     }
 }

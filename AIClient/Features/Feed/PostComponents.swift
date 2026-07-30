@@ -124,11 +124,14 @@ actor ImageLoader {
     }
 
     private let cache = NSCache<NSString, UIImage>()
+    private let dataCache = NSCache<NSURL, NSData>()
     private var downloads: [URL: Download] = [:]
 
     private init() {
         cache.totalCostLimit = 96 * 1024 * 1024
         cache.countLimit = 240
+        dataCache.totalCostLimit = 48 * 1024 * 1024
+        dataCache.countLimit = 180
     }
 
     static func load(_ url: URL?, targetSize: CGSize? = nil) async -> UIImage? {
@@ -141,17 +144,26 @@ actor ImageLoader {
         let cacheKey = NSString(string: "\(url.absoluteString)|\(Int(pixelLimit ?? 0))")
         if let cached = cache.object(forKey: cacheKey) { return cached }
 
-        let download: Download
-        if let existing = downloads[url] {
-            download = existing
+        let data: Data?
+        if let cachedData = dataCache.object(forKey: url as NSURL) {
+            data = cachedData as Data
         } else {
-            let created = Download(id: UUID(), task: Task { await Self.download(url) })
-            downloads[url] = created
-            download = created
+            let download: Download
+            if let existing = downloads[url] {
+                download = existing
+            } else {
+                let created = Download(id: UUID(), task: Task { await Self.download(url) })
+                downloads[url] = created
+                download = created
+            }
+
+            data = await download.task.value
+            if downloads[url]?.id == download.id { downloads[url] = nil }
+            if let data {
+                dataCache.setObject(data as NSData, forKey: url as NSURL, cost: data.count)
+            }
         }
 
-        let data = await download.task.value
-        if downloads[url]?.id == download.id { downloads[url] = nil }
         guard let data else { return nil }
 
         let image = await Task.detached(priority: .utility) {
