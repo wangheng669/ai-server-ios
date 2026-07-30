@@ -50,6 +50,21 @@ struct LearningService: LearningServing {
         return response.data
     }
 
+    func fetchConcepts() async throws -> KnowledgeConceptLibrary {
+        let response: KnowledgeConceptLibraryResponse = try await fetch(
+            baseURL.appending(path: "api/v1/learning/concepts")
+        )
+        return response.data
+    }
+
+    func fetchConcept(id: String) async throws -> KnowledgeConceptDetail {
+        let response: KnowledgeConceptDetailResponse = try await fetch(
+            baseURL.appending(path: "api/v1/learning/concepts").appending(path: id),
+            cachePolicy: .reloadRevalidatingCacheData
+        )
+        return response.data
+    }
+
     func fetchVideoLessons() async throws -> LearningVideoLibrary {
         let response: LearningVideoLibraryResponse = try await fetch(
             baseURL.appending(path: "api/v1/learning/video-lessons")
@@ -139,12 +154,15 @@ final class LearningContentRepository {
 final class LearningStore {
     private(set) var catalog: LearningCatalog?
     private(set) var bookshelf: LearningBookshelf?
+    private(set) var conceptLibrary: KnowledgeConceptLibrary?
     private(set) var videoLibrary: LearningVideoLibrary?
     private(set) var isLoading = false
     private(set) var isBookshelfLoading = false
+    private(set) var isConceptLibraryLoading = false
     private(set) var isVideoLibraryLoading = false
     private(set) var errorMessage: String?
     private(set) var bookshelfErrorMessage: String?
+    private(set) var conceptLibraryErrorMessage: String?
     private let service: LearningService
 
     init(service: LearningService = LearningService()) { self.service = service }
@@ -174,6 +192,20 @@ final class LearningStore {
             return
         } catch {
             bookshelfErrorMessage = error.localizedDescription
+        }
+    }
+
+    func loadConceptLibrary(force: Bool = false) async {
+        guard force || conceptLibrary == nil else { return }
+        isConceptLibraryLoading = true
+        conceptLibraryErrorMessage = nil
+        defer { isConceptLibraryLoading = false }
+        do {
+            conceptLibrary = try await service.fetchConcepts()
+        } catch is CancellationError {
+            return
+        } catch {
+            conceptLibraryErrorMessage = error.localizedDescription
         }
     }
 

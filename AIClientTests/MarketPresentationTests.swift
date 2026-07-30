@@ -128,6 +128,23 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.crypto.first?.freshnessLabel, "24小时交易")
     }
 
+    func testDashboardDecodesV3RealtimeProxyContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","definitionVersion":"2026-07-29.2","generatedAt":"2026-07-30T07:26:57Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理（SPY）","displayName":"标普500实时代理（SPY）","instrumentType":"realtime-proxy-etf","proxyFor":"^GSPC","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","price":729.46}],"referenceIndices":[{"symbol":"^GSPC","name":"标普500","instrumentType":"reference-index","displayMode":"historical-reference","price":7316.15}],"realtimeProxies":[{"symbol":"SPY","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","displayName":"标普500实时代理（SPY）"}],"metrics":[],"components":[],"crypto":[],"indexSessions":{},"missingSymbols":[],"expectedSymbols":["SPY","^GSPC"],"symbolHealth":[],"regions":[]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+        let proxy = try XCTUnwrap(response.data.coreIndices.first)
+
+        XCTAssertEqual(response.data.dataContract, "market_dashboard_v3")
+        XCTAssertEqual(proxy.symbol, "SPY")
+        XCTAssertEqual(proxy.presentationName, "标普500实时代理（SPY）")
+        XCTAssertEqual(proxy.instrumentType, "realtime-proxy-etf")
+        XCTAssertEqual(proxy.proxyFor, "^GSPC")
+        XCTAssertEqual(proxy.historicalSymbol, "^GSPC")
+        XCTAssertEqual(response.data.referenceIndices.first?.symbol, "^GSPC")
+        XCTAssertEqual(response.data.realtimeProxies.first?.symbol, "SPY")
+        XCTAssertEqual(response.data.quote(symbol: "^GSPC")?.displayMode, "historical-reference")
+    }
+
     func testDashboardDecodesPerSymbolHealthAndRegions() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","definitionVersion":"2026-07-21.1","generatedAt":"2026-07-21T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":["JP10Y"],"expectedSymbols":["JP10Y","KR10Y"],"symbolHealth":[{"symbol":"JP10Y","status":"missing","reason":"quote_unavailable"},{"symbol":"KR10Y","status":"delayed","delaySeconds":15}],"regions":[{"id":"jp","metricSymbols":["USDJPY","JP10Y","^TOPX"]}]}}"#.utf8)
 
