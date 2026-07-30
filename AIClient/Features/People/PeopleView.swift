@@ -2491,7 +2491,6 @@ private struct PersonDetailPage: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
-        .navigationDestination(item: $selectedPost) { post in PostDetailView(post: post) }
         .navigationDestination(item: $selectedVideo) { video in
             PersonVideoDetailView(video: video)
         }
@@ -2500,6 +2499,15 @@ private struct PersonDetailPage: View {
                 articles: store.articles,
                 initialArticleID: article.id
             )
+        }
+        .sheet(item: $selectedPost) { post in
+            NavigationStack {
+                PostDetailView(post: post, presentedAsSheet: true)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .sheet(item: $selectedPhoto) { photo in
             PersonPhotoViewer(photos: person.photos, initialPhotoID: photo.id)
