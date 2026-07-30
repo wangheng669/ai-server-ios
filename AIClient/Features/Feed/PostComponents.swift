@@ -898,7 +898,8 @@ struct ImageGalleryView: View {
                             url: urls[index],
                             isActive: selectedIndex == index,
                             position: index + 1,
-                            count: urls.count
+                            count: urls.count,
+                            onBackgroundTap: { dismiss() }
                         )
                         .tag(index)
                     }
@@ -944,6 +945,7 @@ private struct GalleryImagePage: View {
     let isActive: Bool
     let position: Int
     let count: Int
+    let onBackgroundTap: () -> Void
     @State private var image: UIImage?
     @State private var didFail = false
     @State private var scale: CGFloat = 1
@@ -954,10 +956,18 @@ private struct GalleryImagePage: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onBackgroundTap)
+
                 if let image {
+                    let imageSize = fittedImageSize(image, in: proxy.size)
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFit()
+                        .frame(
+                            width: imageSize.width,
+                            height: imageSize.height
+                        )
                         .scaleEffect(scale)
                         .offset(offset)
                         .contentShape(Rectangle())
@@ -1032,12 +1042,30 @@ private struct GalleryImagePage: View {
     }
 
     private func clamped(_ value: CGSize, in size: CGSize, at scale: CGFloat) -> CGSize {
-        guard scale > 1 else { return .zero }
-        let maximumX = size.width * (scale - 1) / 2
-        let maximumY = size.height * (scale - 1) / 2
+        guard scale > 1, let image else { return .zero }
+        let fittedSize = fittedImageSize(image, in: size)
+        let maximumX = max(0, (fittedSize.width * scale - size.width) / 2)
+        let maximumY = max(0, (fittedSize.height * scale - size.height) / 2)
         return CGSize(
             width: min(max(value.width, -maximumX), maximumX),
             height: min(max(value.height, -maximumY), maximumY)
+        )
+    }
+
+    private func fittedImageSize(_ image: UIImage, in containerSize: CGSize) -> CGSize {
+        guard image.size.width > 0,
+              image.size.height > 0,
+              containerSize.width > 0,
+              containerSize.height > 0 else {
+            return containerSize
+        }
+        let fitScale = min(
+            containerSize.width / image.size.width,
+            containerSize.height / image.size.height
+        )
+        return CGSize(
+            width: image.size.width * fitScale,
+            height: image.size.height * fitScale
         )
     }
 
