@@ -483,6 +483,7 @@ struct InvestorMoodItem: Decodable, Identifiable {
     let description: String
     let url: String
     let coverUrl: String
+    let videoUrl: String
     let createdAt: String?
     let label: String
     let reasons: [String]
@@ -497,6 +498,9 @@ struct InvestorMoodItem: Decodable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case nickname, awemeId, description, url, coverUrl, createdAt, label, reasons
         case transcriptStatus, analysis, evidence, analysisSource, model, stale, ageHours
+        case videoUrl, videoURL, playUrl, playURL
+        case videoUrlSnake = "video_url"
+        case playUrlSnake = "play_url"
     }
 
     init(from decoder: Decoder) throws {
@@ -506,6 +510,16 @@ struct InvestorMoodItem: Decodable, Identifiable {
         description = try values.decodeIfPresent(String.self, forKey: .description) ?? ""
         url = try values.decodeIfPresent(String.self, forKey: .url) ?? ""
         coverUrl = try values.decodeIfPresent(String.self, forKey: .coverUrl) ?? ""
+        videoUrl = [
+            try values.decodeIfPresent(String.self, forKey: .videoUrl),
+            try values.decodeIfPresent(String.self, forKey: .videoURL),
+            try values.decodeIfPresent(String.self, forKey: .playUrl),
+            try values.decodeIfPresent(String.self, forKey: .playURL),
+            try values.decodeIfPresent(String.self, forKey: .videoUrlSnake),
+            try values.decodeIfPresent(String.self, forKey: .playUrlSnake),
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first(where: { !$0.isEmpty }) ?? ""
         createdAt = try values.decodeIfPresent(String.self, forKey: .createdAt)
         label = try values.decodeIfPresent(String.self, forKey: .label) ?? "中性"
         reasons = try values.decodeIfPresent([String].self, forKey: .reasons) ?? []
@@ -516,6 +530,21 @@ struct InvestorMoodItem: Decodable, Identifiable {
         model = try values.decodeIfPresent(String.self, forKey: .model) ?? ""
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale) ?? false
         ageHours = try values.decodeIfPresent(Double.self, forKey: .ageHours)
+    }
+
+    var playbackURL: URL? {
+        guard let source = URL(string: videoUrl),
+              let scheme = source.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return nil }
+        var components = URLComponents(
+            url: ServerConfiguration.currentURL.appending(path: "api/v1/media-proxy"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            .init(name: "url", value: source.absoluteString),
+            .init(name: "context", value: "ios-investor-mood"),
+        ]
+        return components?.url
     }
 }
 
