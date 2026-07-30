@@ -75,10 +75,11 @@ refresh_signing_with_xcode() {
   local build_log
   local max_attempts=${IOS_XCODE_DESTINATION_ATTEMPTS:-12}
   local retry_seconds=${IOS_XCODE_DESTINATION_RETRY_SECONDS:-5}
-  local destination_timeout=${IOS_XCODE_DESTINATION_TIMEOUT_SECONDS:-10}
+  local destination_timeout=${IOS_XCODE_DESTINATION_TIMEOUT_SECONDS:-30}
   build_log=$(mktemp "$RUNNER_TEMP/xcode-signing-refresh.XXXXXX")
 
   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    echo "Waiting for Xcode to finish preparing iPhone $DEVICE_UDID (attempt $attempt/$max_attempts, timeout ${destination_timeout}s)."
     : > "$build_log"
     if xcodebuild build \
       -project AIServerClient.xcodeproj \
@@ -98,13 +99,13 @@ refresh_signing_with_xcode() {
     fi
 
     if ! grep -Eq \
-      "Unable to find a destination matching|requested device could not be found" \
+      "Timed out waiting for all destinations|Preparing .*Xcode will continue|Unable to find a destination matching|requested device could not be found" \
       "$build_log"; then
       return 1
     fi
 
     if [[ "$attempt" -lt "$max_attempts" ]]; then
-      echo "Xcode has not registered iPhone $DEVICE_UDID yet; retrying signing refresh ($attempt/$max_attempts)..."
+      echo "Xcode is still preparing iPhone $DEVICE_UDID; retrying signing refresh after ${retry_seconds}s."
       if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
         ./ci/report-ios-deployment.sh running 0.88 waiting-for-device || true
       fi

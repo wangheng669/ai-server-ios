@@ -234,7 +234,7 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
-      - name: Fall back to remote installation workflow
+      - name: Schedule a fresh installation retry
         if: steps.local_install.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}

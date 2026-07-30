@@ -1,67 +1,41 @@
 # 两台 Mac 的 Codex 协作规则
 
-本仓库以 GitHub 的 `main` 分支作为两台 Mac 之间唯一的稳定代码源。两台 Mac 的主项目目录必须长期保持在 `main`；开发任务默认放在 `~/.codex/worktrees` 下的独立 Git worktree，并通过唯一的 `codex/<简短任务名>` 分支提交。Mac mini 上的中央 AI 合并流程串行整合到 `main`。Mac mini 负责构建；iPhone 已连接 Mac mini 且本机签名有效时，优先由 Mac mini 直接签名并安装，只有本地直装条件不满足时才回退到 GitHub Actions 的跨机器安装流程。
+GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停留在 `main`；开发使用 `~/.codex/worktrees` 下的独立 worktree 和唯一的 `codex/<任务名>` 分支。Mac mini 的中央 AI 流程串行合并、测试，并在 iPhone 可用时直接安装。
 
-## AI Server 服务器
+## AI Server 后端
 
-- 通过 `ssh mac-x` 连接 AI Server 所在服务器。
-- AI Server 主项目的绝对路径是 `/home/wanngheng/home/ai_server`，GitHub 仓库为 `wangheng669/ai_server`。
-- 涉及后端接口、服务器静态资源或部署时，先进入该主项目并检查其 `AGENTS.md`、工作区状态和现有部署约定。
-- 不要把 `/home/wanngheng/actions-runner/ai_server`（Actions Runner）、其 `_work` 目录或 `~/.codex/worktrees` 下的副本当作日常修改入口。
+- 使用 `ssh mac-x`；主项目为 `/home/wanngheng/home/ai_server`，仓库为 `wangheng669/ai_server`。
+- 修改后端接口、静态资源或部署前，先检查该项目的 `AGENTS.md`、工作区状态和部署约定。
+- 不要把 Actions Runner、其 `_work` 目录或 `~/.codex/worktrees` 副本当作日常修改入口。
 
 ## 开始任务
 
-1. 先运行 `git status --short`。
-2. 如果当前目录是主项目目录且工作区干净，运行 `./ci/safe-sync.sh main`，使主项目目录保持在最新 `main`。
-3. 从最新 `main` 为任务创建独立 worktree；默认放在 `~/.codex/worktrees/ai_server_ios/<任务名>`，并在该 worktree 中创建唯一的 `codex/<简短任务名>` 分支。不要在主项目目录中切换到任务分支。
-4. 如果当前目录已经是某个任务 worktree，则理解并继续该任务，不要重复创建 worktree。
-5. 如果任何相关工作区有改动，视为当前未完成任务；不要自动拉取、切换分支、删除 worktree 或覆盖文件。
-6. 两台 Mac 同时开发时，尽量修改不同页面或模块，避免同时编辑项目配置文件。
-7. 分支名应能区分任务；不要让两台 Mac 共用同一个任务分支，必要时加入 `macmini` 或 `macbookair` 后缀。
+1. 运行 `git status --short`。
+2. 主项目工作区干净时运行 `./ci/safe-sync.sh main`。
+3. 从最新 `main` 创建 `~/.codex/worktrees/ai_server_ios/<任务名>` 和唯一的 `codex/<任务名>` 分支；不要在主项目切任务分支。已在任务 worktree 时直接继续。
+4. 任何相关工作区有改动都视为未完成任务：不得自动拉取、切换、重置、清理或覆盖。
+5. 两台 Mac 尽量修改不同模块，不共用任务分支；必要时在分支名加入机器名。
 
-## 自动同步与清理
+## 完成、同步与清理
 
-- GitHub 的 `Sync developer Macs to main` 工作流在每次 `main` 更新后通知两台 Mac 的自托管 Runner（Mac mini 使用 `office-builder`，MacBook Air 使用 `home-installer`）。Mac 在线时立即同步，离线任务等待该 Mac 的 Runner 上线后执行。
-- 每台 Mac 每天 03:10 的本地任务作为 GitHub 事件之外的低频兜底；Codex 在开始新任务时也必须先安全同步。用户不需要手动执行同步脚本。
-- 后台任务只有在工作区干净时才会操作。当前任务分支尚未进入 `origin/main`、存在未提交内容、`main` 出现分叉或处于未知分支时，必须保持原状。
-- 确认任务分支已经进入 `origin/main` 后，后台任务可以把旧式主项目工作区安全切回 `main`；随后快进同步 `main`、清理远程跟踪引用，并删除已经合并且干净的 Codex worktree 和本地 `codex/*` 分支。
-- 后台同步只是一层兜底。Codex 完成任务后仍须等待中央合并结果，并确认远程 `main` 已更新。
+可用改动通过相关验证后，除非用户明确要求仅保留本地，否则必须：
 
-## 用户说“完成并同步”或“提交并同步”
+1. 检查改动并提交任务工作区的全部内容，包括未跟踪文件；禁止直接提交或推送 `main`。
+2. 推送 `codex/*` 任务分支，等待 `AI merge task branch into main` 完成。中央流程必须语义化解决冲突并通过完整测试后才能更新 `main`。
+3. 确认任务提交已进入 `origin/main`；失败时停止并说明冲突或测试错误。
+4. 工作区干净且分支已合并后，可同步主项目并删除任务 worktree 和本地分支。不得强制同步另一台存在改动的电脑。
 
-只要 Codex 完成了一个可用的功能改动并通过相关验证，即使用户没有再次说“提交并推送”，也必须主动按本节流程提交并推送任务分支，等待中央 AI 合并完成。验证失败、改动尚未完成或用户明确要求只保留本地时不得推送。
+后台同步会在 Mac 在线且工作区安全时快进 `main`、清理已合并任务；它只是兜底，不能替代上述确认。
 
-1. 检查改动范围并运行与改动相关的测试，然后提交当前工作区的全部改动（包括未跟踪文件）；用户明确说“提交推送”时同样适用，不得只提交 Codex 本次修改的文件。
-2. 确认当前位于本任务的 `codex/<简短任务名>` 分支；禁止直接推送 `main`。
-3. 推送当前任务分支。中央 AI 合并流程会在 Mac mini 上依次合并到最新 `main`；无冲突时直接合并，有冲突时由 Codex 语义化解决。
-4. 等待 `AI merge task branch into main` 完成。只有完整测试通过后才会更新 `main`，随后自动触发真机安装。
-5. 如果中央 AI 无法可靠解决冲突或测试失败，`main` 保持不变，停止并向用户说明具体冲突。
-6. 合并完成后，如果当前任务位于独立 worktree 且工作区干净，允许删除该 worktree 和本地已合并分支；主项目目录继续保持在 `main`。
-7. 不要在另一台机器的工作区不干净时强制同步；另一台电脑的后台任务或 Codex 会在安全条件满足时同步 `main`。
+## 真机与模拟器
 
-## 用户说“安装到真机”
-
-默认含义是把当前 `main` 作为两台 Mac 的最新稳定版本安装：
-
-1. 如果存在未提交改动，按“完成并同步”的流程提交并推送任务分支，等待中央 AI 合并到 `main`。
-2. 当前电脑是 Mac mini，且 `xcrun devicectl` 能识别目标 iPhone、存在匹配的有效开发证书和描述文件时，先运行完整测试，再从最新 `main` 本地完成真机构建、签名与 `devicectl` 安装；此时不要为了安装而额外触发 GitHub 构建工作流。
-3. Mac mini 无法识别 iPhone、签名材料不可用或用户指定另一台安装机时，手动触发 `Build on Mac mini and install on iPhone`，将 `git_ref` 设为 `main`，并等待构建与安装任务完成。
-4. 只有目标 iPhone 上的安装命令成功后才报告安装完成；不能把“构建成功”当作“安装成功”。
-5. 当前电脑工作区干净时，运行 `./ci/safe-sync.sh main`，使它停留在最新稳定代码。
-
-如果用户明确要求只临时测试一个尚未合并的分支，则不要改动 `main`；使用 GitHub Actions 的手动入口并将 `git_ref` 设置为该分支或提交 SHA。
-
-## 模拟器使用
-
-- 需要使用 iOS Simulator 时，优先复用此前一直使用的现有 `iPhone 16e` 模拟器，不要仅因为调试工具配置了其他默认设备就切换模拟器。
-- 不要在已有可用 `iPhone 16e` 模拟器的情况下创建新模拟器；只有用户明确要求或现有模拟器确实无法完成任务时，才考虑使用其他设备，并先说明原因。
-- 日志中的 boot/启动现有模拟器不等于创建模拟器；向用户汇报时应明确区分。
+- “安装到真机”默认安装最新稳定 `main`。有未提交改动时先完成上述合并流程。
+- Mac mini 能识别目标 iPhone 且签名有效时，先测试，再本地构建、签名并用 `devicectl` 安装。设备处于 Xcode `Preparing` 时应等待并重试，不要把构建成功或回退任务已触发当作安装成功。
+- 本地直装失败或用户指定重新安装时，触发 `Build on Mac mini and install on iPhone`，`git_ref` 使用 `main`，并等待安装命令成功。临时测试未合并分支时使用该分支或提交 SHA，不改动 `main`。
+- 模拟器优先复用现有 `iPhone 16e`，不要无故创建或切换设备；汇报时区分启动现有模拟器与创建新模拟器。
 
 ## 安全边界
 
-- 禁止对有未提交改动的工作区自动执行拉取、切换、重置或清理。
-- 禁止使用强制推送、`git reset --hard` 或覆盖另一台电脑的提交。
-- 禁止开发任务直接推送 `main`；只有中央 AI 合并流程可以在测试通过后更新 `main`。
-- `main` 推送会自动安装到真机；已经同步且没有新提交时，可通过手动入口重新安装。
-- 中央 AI 不得通过整段选择 ours/theirs、删除任一功能或跳过测试来规避冲突。
-- Mac mini 的 `office-builder` Runner 必须与已登录 Codex 的本地用户运行；本地 Codex 未登录时工作流会安全失败且不更新 `main`。
+- 禁止强制推送、`git reset --hard`、覆盖其他任务，或用整段 ours/theirs、删功能、跳过测试来规避冲突。
+- 只有中央 AI 流程可以更新 `main`；`main` 更新会触发真机安装。
+- `office-builder` 必须由已登录 Codex 的本地用户运行；未登录时工作流应安全失败且不得更新 `main`。
