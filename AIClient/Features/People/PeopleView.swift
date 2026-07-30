@@ -202,7 +202,6 @@ private struct PeopleSwimlaneExplorer: View {
 
             VStack(spacing: 0) {
                 utilityBar
-                focusHeader
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -213,6 +212,9 @@ private struct PeopleSwimlaneExplorer: View {
                     .padding(.bottom, 18)
                 }
                 .scrollIndicators(.hidden)
+
+                focusDock
+                    .padding(.bottom, 56)
             }
 
             if showsSearch {
@@ -273,15 +275,15 @@ private struct PeopleSwimlaneExplorer: View {
         .frame(height: 48)
     }
 
-    private var focusHeader: some View {
-        VStack(spacing: 7) {
-            HStack {
-                sidePerson(previousPerson)
-                Spacer()
+    private var focusDock: some View {
+        HStack(spacing: 14) {
+            sidePerson(previousPerson)
+
+            HStack(spacing: 11) {
                 AvatarView(
                     url: focusedPerson.avatarURL(baseURL: baseURL),
                     name: focusedPerson.name,
-                    size: 72,
+                    size: 48,
                     assetName: focusedPerson.avatarAssetName
                 )
                 .overlay {
@@ -289,30 +291,38 @@ private struct PeopleSwimlaneExplorer: View {
                         .stroke(Color.accentColor.opacity(0.55), lineWidth: 2)
                         .padding(-3)
                 }
-                Spacer()
-                sidePerson(nextPerson)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(focusedPerson.name)
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
-            .padding(.horizontal, 34)
-            .offset(x: focusPreviewOffset)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(focusedPerson.name)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-
-            Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
+            sidePerson(nextPerson)
+        }
+        .padding(.horizontal, 22)
+        .offset(x: focusPreviewOffset)
+        .frame(maxWidth: .infinity)
+        .frame(height: 78)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+        .overlay(alignment: .top) {
             Capsule()
                 .fill(Color.secondary.opacity(0.2))
-                .frame(width: 28, height: 3)
-                .padding(.top, 3)
+                .frame(width: 24, height: 3)
+                .offset(y: 6)
+                .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 4)
-        .padding(.bottom, 14)
         .contentShape(Rectangle())
         .clipped()
         .highPriorityGesture(focusGesture)
@@ -328,10 +338,10 @@ private struct PeopleSwimlaneExplorer: View {
         AvatarView(
             url: person.avatarURL(baseURL: baseURL),
             name: person.name,
-            size: 34,
+            size: 30,
             assetName: person.avatarAssetName
         )
-        .opacity(0.32)
+        .opacity(0.28)
         .accessibilityHidden(true)
     }
 
