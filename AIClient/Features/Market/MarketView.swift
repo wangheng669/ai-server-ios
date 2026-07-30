@@ -2117,6 +2117,9 @@ private struct MarketIndexDetailView: View {
     let onSelectSymbol: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedRange = MarketRange.day
+    @State private var isScrollAtTop = true
+    @State private var isTrackingDismissalDrag = false
+    @State private var dismissalDragStartedAtTop = false
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
     private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
@@ -2148,6 +2151,16 @@ private struct MarketIndexDetailView: View {
                 detailNavigation
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        Color.clear
+                            .frame(height: 1)
+                            .background {
+                                GeometryReader { geometry in
+                                    Color.clear.preference(
+                                        key: MarketDetailScrollTopPreferenceKey.self,
+                                        value: geometry.frame(in: .named("market-detail-scroll")).minY
+                                    )
+                                }
+                            }
                         detailHeader
                         MarketDetailChart(selectedRange: $selectedRange, symbol: symbol, store: store)
                         keyData
@@ -2169,9 +2182,13 @@ private struct MarketIndexDetailView: View {
                         Color.clear.frame(height: 28)
                     }
                 }
+                .modifier(MarketDetailScrollTopTracker(isAtTop: $isScrollAtTop))
                 .scrollIndicators(.hidden)
             }
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(oneHandDismissGesture)
+        .accessibilityHint("在详情内容区域向下滑动即可收起")
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .task {
@@ -2188,6 +2205,29 @@ private struct MarketIndexDetailView: View {
             if showsCompanyProfile { await store.loadCompanyFinancials(symbol: symbol, force: true) }
             await store.loadChart(symbol: symbol, range: selectedRange, force: true)
         }
+    }
+
+    private var oneHandDismissGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { _ in
+                guard !isTrackingDismissalDrag else { return }
+                isTrackingDismissalDrag = true
+                dismissalDragStartedAtTop = isScrollAtTop
+            }
+            .onEnded { value in
+                let startedAtTop = dismissalDragStartedAtTop
+                isTrackingDismissalDrag = false
+                dismissalDragStartedAtTop = false
+
+                let verticalDistance = value.translation.height
+                let projectedDistance = value.predictedEndTranslation.height
+                guard startedAtTop,
+                      verticalDistance > abs(value.translation.width) * 1.2,
+                      verticalDistance >= 88 || projectedDistance >= 180 else {
+                    return
+                }
+                dismiss()
+            }
     }
 
     private var detailNavigation: some View {
@@ -2437,6 +2477,35 @@ private struct MarketIndexDetailView: View {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
         let timestamp = quote.timestamp.map(marketTimestamp) ?? "时间未知"
         return "\(quote.name)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(timestamp)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
+    }
+}
+
+private struct MarketDetailScrollTopPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct MarketDetailScrollTopTracker: ViewModifier {
+    @Binding var isAtTop: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top <= 4
+            } action: { _, newValue in
+                isAtTop = newValue
+            }
+        } else {
+            content
+                .coordinateSpace(name: "market-detail-scroll")
+                .onPreferenceChange(MarketDetailScrollTopPreferenceKey.self) { offset in
+                    isAtTop = offset >= -4
+                }
+        }
     }
 }
 
