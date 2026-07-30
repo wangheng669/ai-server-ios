@@ -632,12 +632,19 @@ private struct LearningVideoLessonDetailView: View {
                         duration: $playbackDuration,
                         isFullscreen: true
                     ) {
+                        AppOrientationController.shared.setVideoFullscreen(false)
                         showsFullscreenPlayer = false
                     }
                     .ignoresSafeArea()
                 }
             }
             .persistentSystemOverlays(.hidden)
+            .onAppear {
+                AppOrientationController.shared.setVideoFullscreen(true)
+            }
+            .onDisappear {
+                AppOrientationController.shared.setVideoFullscreen(false)
+            }
         }
         .task(id: lesson.id) {
             guard lesson.chapters.isEmpty else { return }
@@ -673,6 +680,7 @@ private struct LearningVideoLessonDetailView: View {
                     currentTime: $currentPlaybackTime,
                     duration: $playbackDuration
                 ) {
+                    AppOrientationController.shared.setVideoFullscreen(true)
                     showsFullscreenPlayer = true
                 }
             } else {
@@ -689,11 +697,13 @@ private struct LearningVideoLessonDetailView: View {
                 }
                 .clipped()
 
-                LinearGradient(
-                    colors: [.black.opacity(0.20), .clear, .black.opacity(0.48)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                if playbackState != .loading {
+                    LinearGradient(
+                        colors: [.black.opacity(0.20), .clear, .black.opacity(0.48)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
             }
 
             switch playbackState {
@@ -985,46 +995,22 @@ private struct LearningVideoLoadingIndicator: View {
     @State private var rotates = false
 
     var body: some View {
-        VStack(spacing: 11) {
-            ZStack {
-                Circle()
-                    .stroke(.white.opacity(0.14), lineWidth: 3)
-                Circle()
-                    .trim(from: 0.08, to: 0.78)
-                    .stroke(
-                        AngularGradient(
-                            colors: [
-                                .white.opacity(0.2),
-                                KnowledgePagePalette.accent,
-                                Color(red: 1, green: 0.68, blue: 0.38),
-                                .white.opacity(0.2)
-                            ],
-                            center: .center
-                        ),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(rotates ? 360 : 0))
-                Circle()
-                    .fill(.white)
-                    .frame(width: 5, height: 5)
-                    .shadow(color: .white.opacity(0.8), radius: 4)
-            }
-            .frame(width: 36, height: 36)
-
-            Text("正在载入视频")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
-                .tracking(0.4)
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.36), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: 0.26)
+                .stroke(
+                    .white,
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(rotates ? 360 : 0))
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 15)
-        .background(.black.opacity(0.46), in: RoundedRectangle(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(.white.opacity(0.10), lineWidth: 0.8)
-        }
+        .frame(width: 32, height: 32)
+        .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        .accessibilityLabel("正在载入视频")
         .onAppear {
-            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+            withAnimation(.linear(duration: 0.72).repeatForever(autoreverses: false)) {
                 rotates = true
             }
         }
