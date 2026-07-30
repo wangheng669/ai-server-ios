@@ -131,63 +131,11 @@ private struct PeopleSwimlaneExplorer: View {
     }
 
     private var lanes: [PeopleRelationshipCluster] {
-        var result = PeopleRelationshipPlanner.clusters(
+        PeopleRelationshipPlanner.clusters(
             around: focusedPerson,
             allPeople: people,
-            maximumClusters: 3
+            maximumClusters: 4
         )
-        var usedIDs = Set(result.flatMap(\.members).map(\.id))
-        usedIDs.insert(focusedPerson.id)
-
-        func appendLane(
-            title: String,
-            candidates: [SpecialPerson],
-            maximumLaneCount: Int = 3
-        ) {
-            guard result.count < maximumLaneCount else { return }
-            let members = candidates
-                .filter { usedIDs.insert($0.id).inserted }
-                .prefix(8)
-                .map {
-                    PeopleRelationshipMember(
-                        id: $0.id,
-                        name: $0.name,
-                        relationship: PeopleRelationshipPlanner.relationshipLabel(
-                            from: focusedPerson,
-                            to: $0
-                        ),
-                        person: $0,
-                        avatarURLValue: $0.avatarPath,
-                        avatarAssetName: $0.avatarAssetName
-                    )
-                }
-            guard !members.isEmpty else { return }
-            result.append(
-                PeopleRelationshipCluster(
-                    id: "swimlane-\(title)",
-                    title: title,
-                    members: Array(members)
-                )
-            )
-        }
-
-        let organization = PeopleRelationshipPlanner.primaryOrganization(for: focusedPerson)
-        appendLane(
-            title: organization,
-            candidates: orderedPeople.filter {
-                PeopleRelationshipPlanner.primaryOrganization(for: $0) == organization
-            }
-        )
-        appendLane(
-            title: "\(focusedPerson.topic.rawValue)同行",
-            candidates: orderedPeople.filter { $0.topic == focusedPerson.topic }
-        )
-        appendLane(
-            title: "更多相关人物",
-            candidates: orderedPeople.filter(\.isCurated) + orderedPeople.filter { !$0.isCurated },
-            maximumLaneCount: 4
-        )
-        return Array(result.prefix(4))
     }
 
     private var searchResults: [SpecialPerson] {
@@ -210,8 +158,12 @@ private struct PeopleSwimlaneExplorer: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
-                            relationshipLane(lane, index: index)
+                        if lanes.isEmpty {
+                            emptyRelationships
+                        } else {
+                            ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
+                                relationshipLane(lane, index: index)
+                            }
                         }
                     }
                     .padding(.bottom, 18)
@@ -278,6 +230,31 @@ private struct PeopleSwimlaneExplorer: View {
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
         .frame(height: 48)
+    }
+
+    private var emptyRelationships: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "person.2.slash")
+                .font(.system(size: 28, weight: .regular))
+                .foregroundStyle(.tertiary)
+
+            Text("暂无已核实关系")
+                .font(.system(size: 16, weight: .semibold))
+
+            Text("服务器尚未提供可核实的直接关系")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+
+            Button("搜索其他人物") {
+                withAnimation(animation) { showsSearch = true }
+                Task { @MainActor in searchIsFocused = true }
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+        .accessibilityElement(children: .combine)
     }
 
     private var focusDock: some View {
@@ -923,35 +900,6 @@ private struct PeopleOrbitCanvas: View {
             }
         }
 
-        let supplementaryPeople = allPeople
-            .filter { $0.id != focusedPerson.id && !seen.contains($0.id) }
-            .sorted {
-                let lhs = ($0.topic == focusedPerson.topic, $0.todayCount, $0.relatedPeople.count, $0.totalCount)
-                let rhs = ($1.topic == focusedPerson.topic, $1.todayCount, $1.relatedPeople.count, $1.totalCount)
-                if lhs.0 != rhs.0 { return lhs.0 && !rhs.0 }
-                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
-                if lhs.2 != rhs.2 { return lhs.2 > rhs.2 }
-                if lhs.3 != rhs.3 { return lhs.3 > rhs.3 }
-                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            }
-
-        for person in supplementaryPeople where items.count < maximumVisiblePeople {
-            seen.insert(person.id)
-            items.append(
-                OrbitItem(
-                    member: PeopleRelationshipMember(
-                        id: person.id,
-                        name: person.name,
-                        relationship: "同属\(focusedPerson.topic.rawValue)领域",
-                        person: person,
-                        avatarURLValue: person.avatarPath,
-                        avatarAssetName: person.avatarAssetName
-                    ),
-                    relationshipGroup: "同领域",
-                    colorIndex: clusters.count
-                )
-            )
-        }
         return Array(items.prefix(maximumVisiblePeople))
     }
 

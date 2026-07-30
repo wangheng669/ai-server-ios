@@ -260,14 +260,20 @@ final class PostDecodingTests: XCTestCase {
         )
 
         XCTAssertEqual(lenses.first, PeopleRelationshipLens(title: "OpenAI", memberCount: 2))
-        XCTAssertEqual(focused.first?.id, "satya")
-        XCTAssertTrue(focused.contains { $0.id == "greg" })
+        XCTAssertEqual(focused.map(\.id), ["satya"])
         XCTAssertEqual(Set(openAI.map(\.id)), Set(["sam", "greg"]))
         XCTAssertEqual(clusters.first?.title, "合作")
         XCTAssertEqual(clusters.first?.members.map(\.id), ["satya"])
         XCTAssertEqual(
             PeopleRelationshipPlanner.relationshipLabel(from: people[0], to: people[2]),
             "战略合作伙伴"
+        )
+        XCTAssertEqual(
+            PeopleRelationshipPlanner.relationshipLabel(from: people[0], to: people[1]),
+            "暂无已核实关系"
+        )
+        XCTAssertTrue(
+            PeopleRelationshipPlanner.clusters(around: people[1], allPeople: people).isEmpty
         )
     }
 
