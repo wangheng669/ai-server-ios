@@ -668,6 +668,7 @@ struct PostDetailView: View {
                         .font(.system(size: 20))
                         .lineSpacing(10)
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     if post.xueqiuQuoteBody != nil {
@@ -687,6 +688,8 @@ struct PostDetailView: View {
                                 .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody))
                                 .font(.system(size: 16.5))
                                 .lineSpacing(7)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
                             HStack(spacing: 4) {
                                 Text("相关讨论")
@@ -697,6 +700,7 @@ struct PostDetailView: View {
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
@@ -715,6 +719,7 @@ struct PostDetailView: View {
                     xueqiuDetailStats
                     Color.clear.frame(height: 8)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
                 .padding(.bottom, 24)
@@ -777,13 +782,17 @@ struct PostDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(post.authorName)
                     .font(.system(size: 18, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(xueqiuDetailMetadata)
                     .font(.system(size: 13.5))
                     .foregroundStyle(Color(uiColor: .tertiaryLabel))
                     .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var xueqiuDetailMetadata: String {
