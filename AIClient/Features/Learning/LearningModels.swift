@@ -59,6 +59,7 @@ struct LearningDetail: Decodable, Hashable {
     let videoDuration: Int?
     let blocks: [LearningBlock]
     let companyExamples: [LearningCompanyExample]?
+    let videoReferences: [LearningVideoReference]?
 
     enum CodingKeys: String, CodingKey {
         case title, subtitle, views, blocks
@@ -68,6 +69,65 @@ struct LearningDetail: Decodable, Hashable {
         case videoPosterURLValue = "video_poster_url"
         case videoDuration = "video_duration_seconds"
         case companyExamples = "company_examples"
+        case videoReferences = "video_references"
+    }
+}
+
+struct LearningVideoReference: Decodable, Hashable, Identifiable {
+    let id: Int
+    let platform: String
+    let creator: String
+    let title: String
+    let externalID: String?
+    let watchURLValue: String
+    let coverURLValue: String?
+    let durationSeconds: Int?
+    let startSeconds: Int?
+    let endSeconds: Int?
+    let recommendation: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, platform, creator, title, recommendation
+        case externalID = "external_id"
+        case watchURLValue = "watch_url"
+        case coverURLValue = "cover_url"
+        case durationSeconds = "duration_seconds"
+        case startSeconds = "start_seconds"
+        case endSeconds = "end_seconds"
+    }
+
+    var watchURL: URL? {
+        guard var components = URLComponents(string: watchURLValue) else { return nil }
+        if let startSeconds, startSeconds > 0 {
+            var items = components.queryItems ?? []
+            items.removeAll { $0.name == "t" }
+            items.append(URLQueryItem(name: "t", value: String(startSeconds)))
+            components.queryItems = items
+        }
+        return components.url
+    }
+
+    var coverURL: URL? {
+        guard let coverURLValue else { return nil }
+        return URL(string: coverURLValue)
+    }
+
+    var clipDurationText: String {
+        let seconds: Int
+        if let startSeconds, let endSeconds, endSeconds > startSeconds {
+            seconds = endSeconds - startSeconds
+        } else {
+            seconds = durationSeconds ?? 0
+        }
+        guard seconds > 0 else { return "精选讲解" }
+        return "\(max(1, Int(ceil(Double(seconds) / 60)))) 分钟"
+    }
+
+    var recommendationItems: [String] {
+        recommendation?
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.isEmpty } ?? []
     }
 }
 

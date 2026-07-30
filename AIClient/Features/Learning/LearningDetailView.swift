@@ -261,6 +261,11 @@ private struct LearningArticleView: View {
                         .padding(.bottom, 28)
                 }
 
+                if let references = detail.videoReferences, !references.isEmpty {
+                    LearningExternalVideoSection(reference: references[0])
+                        .padding(.bottom, 28)
+                }
+
                 if let videoURL = topic.mediaURL(detail.videoURLValue) {
                     video(url: videoURL)
                         .padding(.bottom, 28)
@@ -467,6 +472,125 @@ private struct LearningArticleView: View {
                 .padding(.vertical, 6)
                 .background(.black.opacity(0.55), in: Capsule())
                 .padding(10)
+        }
+    }
+}
+
+private struct LearningExternalVideoSection: View {
+    let reference: LearningVideoReference
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Rectangle()
+                    .fill(LearningDetailPalette.accent)
+                    .frame(width: 28, height: 2)
+                Text("换一种方式理解")
+                    .font(.system(size: 18, weight: .bold, design: .serif))
+                Spacer(minLength: 0)
+            }
+
+            Button {
+                if let url = reference.watchURL {
+                    openURL(url)
+                }
+            } label: {
+                HStack(spacing: 0) {
+                    videoCover
+                        .frame(width: 132, height: 132)
+                        .clipped()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(reference.creator)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(LearningDetailPalette.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(LearningDetailPalette.accent.opacity(0.10), in: Capsule())
+
+                        Text(reference.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+
+                        Text("相关片段 · \(reference.clipDurationText)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+
+                        Spacer(minLength: 0)
+
+                        HStack(spacing: 4) {
+                            Text(reference.platform == "bilibili" ? "B站观看" : "观看视频")
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(LearningDetailPalette.accent)
+                    }
+                    .padding(13)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 132)
+                .background(LearningDetailPalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(LearningDetailPalette.accent.opacity(0.22), lineWidth: 0.9)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("在B站观看\(reference.creator)的视频：\(reference.title)")
+
+            if !reference.recommendationItems.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("看视频时重点关注")
+                        .font(.system(size: 13, weight: .semibold))
+                    ForEach(reference.recommendationItems, id: \.self) { item in
+                        HStack(alignment: .top, spacing: 9) {
+                            Circle()
+                                .fill(LearningDetailPalette.accent)
+                                .frame(width: 5, height: 5)
+                                .padding(.top, 6)
+                            Text(item)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(3)
+                        }
+                    }
+                }
+                .padding(.horizontal, 3)
+            }
+        }
+    }
+
+    private var videoCover: some View {
+        AsyncImage(url: reference.coverURL) { phase in
+            if let image = phase.image {
+                image
+                    .resizable()
+                    .scaledToFill()
+                    .overlay {
+                        LinearGradient(
+                            colors: [.clear, .black.opacity(0.20)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+            } else {
+                LearningDetailPalette.accent.opacity(0.10)
+            }
+        }
+        .overlay {
+            Image(systemName: "play.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(.black.opacity(0.62), in: Circle())
+                .overlay {
+                    Circle().stroke(.white.opacity(0.72), lineWidth: 1)
+                }
         }
     }
 }
