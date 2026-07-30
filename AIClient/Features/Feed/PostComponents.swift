@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import ImageIO
 import AVKit
+import CryptoKit
 
 struct PostAuthorHeader: View {
     let post: Post
@@ -145,8 +146,14 @@ actor ImageLoader {
         if let cached = cache.object(forKey: cacheKey) { return cached }
 
         let data: Data?
+        var downloadedData = false
+        var loadedFromDisk = false
         if let cachedData = dataCache.object(forKey: url as NSURL) {
             data = cachedData as Data
+        } else if let cachedData = await ImageDiskCache.shared.data(for: url) {
+            data = cachedData
+            loadedFromDisk = true
+            dataCache.setObject(cachedData as NSData, forKey: url as NSURL, cost: cachedData.count)
         } else {
             let download: Download
             if let existing = downloads[url] {
@@ -160,19 +167,32 @@ actor ImageLoader {
             data = await download.task.value
             if downloads[url]?.id == download.id { downloads[url] = nil }
             if let data {
+                downloadedData = true
                 dataCache.setObject(data as NSData, forKey: url as NSURL, cost: data.count)
             }
         }
 
         guard let data else { return nil }
 
-        let image = await Task.detached(priority: .utility) {
+        let decodedImage = await Task.detached(priority: .utility) {
             Self.decode(data, pixelLimit: pixelLimit, scale: scale)
         }.value
-        guard let image else { return nil }
-        let cost = max(1, image.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(image.size.width * image.size.height * scale * scale * 4))
-        cache.setObject(image, forKey: cacheKey, cost: cost)
-        return image
+        guard let decodedImage else {
+            if loadedFromDisk {
+                dataCache.removeObject(forKey: url as NSURL)
+                await ImageDiskCache.shared.removeData(for: url)
+                return await image(for: url, targetSize: targetSize, scale: scale)
+            }
+            return nil
+        }
+        let cost = max(1, decodedImage.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(decodedImage.size.width * decodedImage.size.height * scale * scale * 4))
+        cache.setObject(decodedImage, forKey: cacheKey, cost: cost)
+        if downloadedData {
+            Task(priority: .utility) {
+                await ImageDiskCache.shared.store(data, for: url)
+            }
+        }
+        return decodedImage
     }
 
     private static func download(_ url: URL) async -> Data? {
@@ -216,6 +236,105 @@ actor ImageLoader {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         let image = UIImage(cgImage: cgImage, scale: scale, orientation: .up)
         return image.size.width > 1 && image.size.height > 1 ? image : nil
+    }
+}
+
+actor ImageDiskCache {
+    static let shared = ImageDiskCache(
+        directory: ImageDiskCache.defaultDirectory,
+        maxBytes: 256 * 1024 * 1024,
+        maxFileCount: 1_200
+    )
+
+    private let directory: URL
+    private let maxBytes: Int
+    private let maxFileCount: Int
+    private var isPrepared = false
+    private var writesSinceTrim = 0
+
+    init(directory: URL, maxBytes: Int, maxFileCount: Int) {
+        self.directory = directory
+        self.maxBytes = max(1, maxBytes)
+        self.maxFileCount = max(1, maxFileCount)
+    }
+
+    func data(for url: URL) -> Data? {
+        prepareIfNeeded()
+        let fileURL = cachedFileURL(for: url)
+        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe), !data.isEmpty else {
+            return nil
+        }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
+        return data
+    }
+
+    func store(_ data: Data, for url: URL) {
+        guard !data.isEmpty else { return }
+        prepareIfNeeded()
+        let fileURL = cachedFileURL(for: url)
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            var resourceValues = URLResourceValues()
+            resourceValues.isExcludedFromBackup = true
+            var mutableFileURL = fileURL
+            try? mutableFileURL.setResourceValues(resourceValues)
+            writesSinceTrim += 1
+            if writesSinceTrim >= 24 {
+                trim()
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    func removeData(for url: URL) {
+        prepareIfNeeded()
+        try? FileManager.default.removeItem(at: cachedFileURL(for: url))
+    }
+
+    func trim() {
+        prepareIfNeeded()
+        writesSinceTrim = 0
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        var entries = files.compactMap { fileURL -> (url: URL, size: Int, date: Date)? in
+            guard let values = try? fileURL.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else { return nil }
+            return (fileURL, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
+        }
+        var totalBytes = entries.reduce(0) { $0 + $1.size }
+        guard totalBytes > maxBytes || entries.count > maxFileCount else { return }
+
+        entries.sort { $0.date < $1.date }
+        while (totalBytes > maxBytes || entries.count > maxFileCount), !entries.isEmpty {
+            let oldest = entries.removeFirst()
+            try? FileManager.default.removeItem(at: oldest.url)
+            totalBytes -= oldest.size
+        }
+    }
+
+    private func prepareIfNeeded() {
+        guard !isPrepared else { return }
+        isPrepared = true
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        trim()
+    }
+
+    private func cachedFileURL(for url: URL) -> URL {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+        let filename = digest.map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(filename, isDirectory: false)
+    }
+
+    private static var defaultDirectory: URL {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return root.appendingPathComponent("FeedImageCache", isDirectory: true)
     }
 }
 
