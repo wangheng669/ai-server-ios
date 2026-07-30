@@ -40,6 +40,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     private let milestonesValue: [PersonMilestone]?
     private let relatedPeopleValue: [RelatedPerson]?
     private let photosValue: [PersonPhoto]?
+    private let socialAccountsValue: [PersonSocialAccount]?
     private let profileUpdatedAtValue: String?
     private let lifeYearsValue: String?
 
@@ -86,6 +87,20 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var milestones: [PersonMilestone] { milestonesValue ?? [] }
     var relatedPeople: [RelatedPerson] { relatedPeopleValue ?? [] }
     var photos: [PersonPhoto] { photosValue ?? [] }
+    var socialAccounts: [PersonSocialAccount] {
+        var accounts = socialAccountsValue?.filter { $0.profileURL != nil } ?? []
+        if let xProfileURL,
+           !accounts.contains(where: { $0.profileURL == xProfileURL }) {
+            accounts.append(
+                PersonSocialAccount(
+                    platform: "X",
+                    handle: xHandle ?? "X",
+                    profileURLValue: xProfileURL.absoluteString
+                )
+            )
+        }
+        return accounts
+    }
     var profileUpdatedAt: String? { nonempty(profileUpdatedAtValue) }
     var lifeYears: String? { nonempty(lifeYearsValue) }
     var summary: String {
@@ -120,6 +135,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         case milestonesValue = "milestones"
         case relatedPeopleValue = "related_people"
         case photosValue = "photos"
+        case socialAccountsValue = "social_accounts"
         case profileUpdatedAtValue = "profile_updated_at"
         case lifeYearsValue = "life_years"
     }
@@ -153,6 +169,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         milestonesValue = nil
         relatedPeopleValue = nil
         photosValue = nil
+        socialAccountsValue = nil
         profileUpdatedAtValue = nil
         lifeYearsValue = nil
     }
@@ -195,6 +212,23 @@ struct PersonRole: Decodable, Hashable {
 struct PersonMilestone: Decodable, Hashable {
     let year: String
     let title: String
+}
+
+struct PersonSocialAccount: Decodable, Hashable, Identifiable {
+    let platform: String
+    let handle: String
+    let profileURLValue: String
+
+    var id: String { "\(platform)|\(profileURLValue)" }
+    var profileURL: URL? { URL(string: profileURLValue) }
+    var displayHandle: String {
+        handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? platform : handle
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case platform, handle
+        case profileURLValue = "profile_url"
+    }
 }
 
 struct PeopleArticlesResponse: Decodable {
