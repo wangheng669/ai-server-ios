@@ -11,6 +11,8 @@ struct MarketDashboard: Codable {
     let generatedAt: String
     let refreshIntervalMs: Int
     var coreIndices: [MarketQuote]
+    var referenceIndices: [MarketQuote]
+    let realtimeProxies: [MarketRealtimeProxyDefinition]
     var metrics: [MarketQuote]
     var components: [MarketQuote]
     var crypto: [MarketQuote]
@@ -31,7 +33,8 @@ struct MarketDashboard: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, metrics, components, crypto
+        case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, referenceIndices, realtimeProxies
+        case metrics, components, crypto
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
         case ashareOverview, marketStructure, sentiment
     }
@@ -43,6 +46,8 @@ struct MarketDashboard: Codable {
         generatedAt = try values.decode(String.self, forKey: .generatedAt)
         refreshIntervalMs = try values.decode(Int.self, forKey: .refreshIntervalMs)
         coreIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .coreIndices) ?? []
+        referenceIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .referenceIndices) ?? []
+        realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
         metrics = try values.decodeIfPresent([MarketQuote].self, forKey: .metrics) ?? []
         components = try values.decodeIfPresent([MarketQuote].self, forKey: .components) ?? []
         crypto = try values.decodeIfPresent([MarketQuote].self, forKey: .crypto) ?? []
@@ -60,6 +65,7 @@ struct MarketDashboard: Codable {
 
     mutating func replace(_ quote: MarketQuote) {
         replace(quote, in: &coreIndices)
+        replace(quote, in: &referenceIndices)
         replace(quote, in: &metrics)
         replace(quote, in: &components)
         replace(quote, in: &crypto)
@@ -72,6 +78,7 @@ struct MarketDashboard: Codable {
 
     func quote(symbol: String) -> MarketQuote? {
         coreIndices.first(where: { $0.symbol == symbol })
+            ?? referenceIndices.first(where: { $0.symbol == symbol })
             ?? metrics.first(where: { $0.symbol == symbol })
             ?? components.first(where: { $0.symbol == symbol })
             ?? crypto.first(where: { $0.symbol == symbol })
@@ -88,6 +95,13 @@ struct MarketDashboard: Codable {
         }
         quotes[index] = next
     }
+}
+
+struct MarketRealtimeProxyDefinition: Codable, Hashable {
+    let symbol: String
+    let referenceSymbol: String
+    let historicalSymbol: String
+    let displayName: String
 }
 
 struct MarketSymbolHealth: Codable, Hashable {
@@ -181,6 +195,12 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     var id: String { symbol }
     let symbol: String
     let name: String
+    let displayName: String?
+    let instrumentType: String?
+    let proxyFor: String?
+    let referenceSymbol: String?
+    let historicalSymbol: String?
+    let displayMode: String?
     let price: Double
     let openPrice: Double?
     let previousClose: Double?
@@ -237,7 +257,8 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case symbol, name, price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
+        case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode
+        case price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
         case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, trend, nightTrend, stale
     }
@@ -245,6 +266,12 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     init(
         symbol: String,
         name: String,
+        displayName: String?,
+        instrumentType: String?,
+        proxyFor: String?,
+        referenceSymbol: String?,
+        historicalSymbol: String?,
+        displayMode: String?,
         price: Double,
         openPrice: Double?,
         previousClose: Double?,
@@ -269,6 +296,12 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     ) {
         self.symbol = symbol
         self.name = name
+        self.displayName = displayName
+        self.instrumentType = instrumentType
+        self.proxyFor = proxyFor
+        self.referenceSymbol = referenceSymbol
+        self.historicalSymbol = historicalSymbol
+        self.displayMode = displayMode
         self.price = price
         self.openPrice = openPrice
         self.previousClose = previousClose
@@ -296,6 +329,12 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         symbol = try values.decode(String.self, forKey: .symbol)
         name = try values.decodeIfPresent(String.self, forKey: .name) ?? symbol
+        displayName = try values.decodeIfPresent(String.self, forKey: .displayName)
+        instrumentType = try values.decodeIfPresent(String.self, forKey: .instrumentType)
+        proxyFor = try values.decodeIfPresent(String.self, forKey: .proxyFor)
+        referenceSymbol = try values.decodeIfPresent(String.self, forKey: .referenceSymbol)
+        historicalSymbol = try values.decodeIfPresent(String.self, forKey: .historicalSymbol)
+        displayMode = try values.decodeIfPresent(String.self, forKey: .displayMode)
         price = try values.decode(Double.self, forKey: .price)
         openPrice = try values.decodeIfPresent(Double.self, forKey: .openPrice)
         previousClose = try values.decodeIfPresent(Double.self, forKey: .previousClose)
@@ -353,6 +392,12 @@ struct MarketQuoteUpdate: Decodable {
         return MarketQuote(
             symbol: symbol,
             name: name,
+            displayName: current?.displayName,
+            instrumentType: current?.instrumentType,
+            proxyFor: current?.proxyFor,
+            referenceSymbol: current?.referenceSymbol,
+            historicalSymbol: current?.historicalSymbol,
+            displayMode: current?.displayMode,
             price: price,
             openPrice: openPrice ?? current?.openPrice,
             previousClose: previousClose ?? current?.previousClose,
@@ -862,6 +907,10 @@ func marketAppendingLiveValue(_ value: Double, to values: [Double], limit: Int =
 }
 
 extension MarketQuote {
+    var presentationName: String {
+        displayName ?? name
+    }
+
     var freshnessLabel: String {
         if marketSession == "always-open" { return "24小时交易" }
         if marketSession == "closed" {
