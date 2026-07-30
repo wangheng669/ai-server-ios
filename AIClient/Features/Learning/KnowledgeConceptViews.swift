@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private enum KnowledgeConceptPalette {
     static let accent = Color(red: 0.76, green: 0.29, blue: 0.12)
@@ -10,6 +11,66 @@ private enum KnowledgeConceptPalette {
         }
     )
     static let line = Color.primary.opacity(0.10)
+}
+
+enum KnowledgeConceptImageLoading {
+    static let targetSize = CGSize(width: 430, height: 250)
+
+    static func prefetch(_ concepts: [KnowledgeConceptCard]) async {
+        let urls = Set(concepts.compactMap(\.coverURL))
+        await withTaskGroup(of: Void.self) { group in
+            for url in urls {
+                group.addTask {
+                    _ = await ImageLoader.load(url, targetSize: targetSize)
+                }
+            }
+        }
+    }
+}
+
+private struct KnowledgeConceptCachedImage<Success: View, Placeholder: View>: View {
+    let url: URL?
+    let success: (Image) -> Success
+    let placeholder: (Bool) -> Placeholder
+
+    @State private var image: UIImage?
+    @State private var isLoading = true
+
+    init(
+        url: URL?,
+        @ViewBuilder success: @escaping (Image) -> Success,
+        @ViewBuilder placeholder: @escaping (Bool) -> Placeholder
+    ) {
+        self.url = url
+        self.success = success
+        self.placeholder = placeholder
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                success(Image(uiImage: image))
+            } else {
+                placeholder(isLoading)
+            }
+        }
+        .task(id: url) {
+            image = nil
+            guard let url else {
+                isLoading = false
+                return
+            }
+
+            isLoading = true
+            let loadedImage = await ImageLoader.load(
+                url,
+                targetSize: KnowledgeConceptImageLoading.targetSize
+            )
+            guard !Task.isCancelled else { return }
+            image = loadedImage
+            isLoading = false
+        }
+    }
 }
 
 struct KnowledgeConceptCarouselCard: View {
@@ -136,25 +197,22 @@ struct KnowledgeConceptCarouselCard: View {
 
     @ViewBuilder
     private var conceptImage: some View {
-        AsyncImage(url: concept.coverURL) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .saturation(0.72)
-                    .contrast(0.96)
-                    .overlay(Color(red: 0.55, green: 0.34, blue: 0.14).opacity(0.05))
-            case .failure:
-                imageFallback
-            case .empty:
-                imageFallback
-                    .overlay { ProgressView().controlSize(.small) }
-            @unknown default:
-                imageFallback
-            }
+        KnowledgeConceptCachedImage(url: concept.coverURL) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .saturation(0.72)
+                .contrast(0.96)
+                .overlay(Color(red: 0.55, green: 0.34, blue: 0.14).opacity(0.05))
+        } placeholder: { isLoading in
+            imageFallback
+                .overlay {
+                    if isLoading {
+                        ProgressView().controlSize(.small)
+                    }
+                }
         }
     }
 
@@ -287,21 +345,19 @@ private struct KnowledgeConceptDetailPage: View {
     }
 
     private var hero: some View {
-        AsyncImage(url: card.coverURL) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .scaledToFill()
-                    .saturation(0.45)
-                    .contrast(0.94)
-            case .failure:
-                heroFallback
-            case .empty:
-                heroFallback.overlay { ProgressView() }
-            @unknown default:
-                heroFallback
-            }
+        KnowledgeConceptCachedImage(url: card.coverURL) { image in
+            image
+                .resizable()
+                .scaledToFill()
+                .saturation(0.45)
+                .contrast(0.94)
+        } placeholder: { isLoading in
+            heroFallback
+                .overlay {
+                    if isLoading {
+                        ProgressView()
+                    }
+                }
         }
         .frame(height: 250)
         .clipped()
