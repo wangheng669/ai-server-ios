@@ -2379,6 +2379,26 @@ private enum PeopleImagePreheater {
     }
 }
 
+enum PersonWikipediaPresentation {
+    static func entity(
+        for person: SpecialPerson,
+        account: PersonSocialAccount
+    ) -> WikipediaEntity? {
+        guard let url = account.profileURL,
+              let host = url.host?.lowercased(),
+              host == "wikipedia.org" || host.hasSuffix(".wikipedia.org") else {
+            return nil
+        }
+        return WikipediaEntity(
+            id: account.id,
+            term: person.name,
+            title: account.displayHandle,
+            summary: person.summary,
+            url: url
+        )
+    }
+}
+
 private struct PersonDetailPage: View {
     let person: SpecialPerson
     let showsNavigationChrome: Bool
@@ -2392,6 +2412,7 @@ private struct PersonDetailPage: View {
     @State private var selectedVideo: PersonVideo?
     @State private var selectedArticle: PersonArticle?
     @State private var selectedPhoto: PersonPhoto?
+    @State private var presentedWikipediaEntity: WikipediaEntity?
 
     init(
         person: SpecialPerson,
@@ -2424,7 +2445,16 @@ private struct PersonDetailPage: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         ForEach(person.socialAccounts) { account in
-                            if let url = account.profileURL {
+                            if let entity = PersonWikipediaPresentation.entity(
+                                for: person,
+                                account: account
+                            ) {
+                                Button {
+                                    presentedWikipediaEntity = entity
+                                } label: {
+                                    Label("在应用内查看维基百科", systemImage: "book.pages")
+                                }
+                            } else if let url = account.profileURL {
                                 Link(destination: url) {
                                     Label("在 \(account.platform) 中打开", systemImage: "arrow.up.right.square")
                                 }
@@ -2465,6 +2495,9 @@ private struct PersonDetailPage: View {
         }
         .sheet(item: $selectedPhoto) { photo in
             PersonPhotoViewer(photos: person.photos, initialPhotoID: photo.id)
+        }
+        .fullScreenCover(item: $presentedWikipediaEntity) { entity in
+            WikipediaReaderView(entity: entity, returnTitle: "返回人物详情")
         }
         .task(id: person.id) {
             await store.load(person: person)
@@ -2533,9 +2566,8 @@ private struct PersonDetailPage: View {
                             .frame(height: 25)
                             .background(Color.accentColor.opacity(0.11), in: Capsule())
 
-                        if let account = person.socialAccounts.first,
-                           let url = account.profileURL {
-                            Link(destination: url) {
+                        if let account = person.socialAccounts.first {
+                            socialAccountDestination(account) {
                                 HStack(spacing: 3) {
                                     Image(systemName: "at")
                                         .font(.system(size: 10, weight: .semibold))
@@ -2620,9 +2652,8 @@ private struct PersonDetailPage: View {
                     Text("\(person.topic.rawValue) · \(person.focusTags.first ?? "人物")")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Color.accentColor)
-                    if let account = person.socialAccounts.first,
-                       let url = account.profileURL {
-                        Link(destination: url) {
+                    if let account = person.socialAccounts.first {
+                        socialAccountDestination(account) {
                             HStack(spacing: 4) {
                                 Text("\(account.platform) · \(account.displayHandle)")
                                 Image(systemName: "arrow.up.right")
@@ -2660,6 +2691,24 @@ private struct PersonDetailPage: View {
 
     private var personOrganizationLine: String {
         person.organizationName ?? (person.hasXSource ? "X 来源" : "人物资料")
+    }
+
+    @ViewBuilder
+    private func socialAccountDestination<Label: View>(
+        _ account: PersonSocialAccount,
+        @ViewBuilder label: () -> Label
+    ) -> some View {
+        if let entity = PersonWikipediaPresentation.entity(for: person, account: account) {
+            Button {
+                presentedWikipediaEntity = entity
+            } label: {
+                label()
+            }
+        } else if let url = account.profileURL {
+            Link(destination: url) {
+                label()
+            }
+        }
     }
 
     private var samAltmanNotificationControl: some View {
@@ -2740,7 +2789,9 @@ private struct PersonDetailPage: View {
     @ViewBuilder
     private var sectionContent: some View {
         if section == .profile {
-            PersonProfileView(person: person)
+            PersonProfileView(person: person) {
+                presentedWikipediaEntity = $0
+            }
         } else if section == .discussions {
             relatedContent
         } else if hasArticleSection {
@@ -4005,6 +4056,7 @@ private struct PersonPostTimelineRow: View {
 
 private struct PersonProfileView: View {
     let person: SpecialPerson
+    let openWikipedia: (WikipediaEntity) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -4046,31 +4098,7 @@ private struct PersonProfileView: View {
                 profileSection("社交媒体") {
                     VStack(spacing: 0) {
                         ForEach(Array(person.socialAccounts.enumerated()), id: \.element.id) { index, account in
-                            if let url = account.profileURL {
-                                Link(destination: url) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: socialIcon(for: account.platform))
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(Color.accentColor)
-                                            .frame(width: 28, height: 28)
-                                            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(account.platform)
-                                                .font(.system(size: 15, weight: .medium))
-                                                .foregroundStyle(.primary)
-                                            Text(account.displayHandle)
-                                                .font(.system(size: 13))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "arrow.up.right")
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                    .padding(.vertical, 9)
-                                }
-                                .accessibilityLabel("在\(account.platform)中打开\(account.displayHandle)")
-                            }
+                            socialAccountDestination(account)
                             if index < person.socialAccounts.count - 1 { Divider() }
                         }
                     }
@@ -4128,6 +4156,51 @@ private struct PersonProfileView: View {
                     .padding(.bottom, 28)
             }
         }
+    }
+
+    @ViewBuilder
+    private func socialAccountDestination(_ account: PersonSocialAccount) -> some View {
+        if let entity = PersonWikipediaPresentation.entity(for: person, account: account) {
+            Button {
+                openWikipedia(entity)
+            } label: {
+                socialAccountRow(account, opensInApp: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("在应用内查看\(account.displayHandle)的维基百科词条")
+        } else if let url = account.profileURL {
+            Link(destination: url) {
+                socialAccountRow(account, opensInApp: false)
+            }
+            .accessibilityLabel("在\(account.platform)中打开\(account.displayHandle)")
+        }
+    }
+
+    private func socialAccountRow(
+        _ account: PersonSocialAccount,
+        opensInApp: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: socialIcon(for: account.platform))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28, height: 28)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(account.platform)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.primary)
+                Text(account.displayHandle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: opensInApp ? "chevron.right" : "arrow.up.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
     }
 
     private var presentedMilestones: [PersonMilestone] {
