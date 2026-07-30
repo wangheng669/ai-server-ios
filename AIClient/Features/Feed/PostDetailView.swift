@@ -67,7 +67,7 @@ struct PostDetailView: View {
             WikipediaReaderView(entity: entity)
         }
         .fullScreenCover(item: $weiboImageSelection) { selection in
-            WeiboImageGallery(
+            ImageGalleryView(
                 urls: post.weiboFollowingImageURLs,
                 initialIndex: selection.index
             )
@@ -2832,116 +2832,6 @@ private struct WeiboDetailImage: View {
         .onTapGesture(perform: onOpen)
         .accessibilityLabel("微博配图，第 \(index + 1) 张，共 \(count) 张")
         .accessibilityHint(count > 1 ? "双击全屏查看并左右滑动切换" : "双击全屏查看")
-    }
-}
-
-private struct WeiboImageGallery: View {
-    let urls: [URL]
-    @Environment(\.dismiss) private var dismiss
-    @State private var selectedIndex: Int
-
-    init(urls: [URL], initialIndex: Int) {
-        self.urls = urls
-        _selectedIndex = State(initialValue: min(max(initialIndex, 0), max(urls.count - 1, 0)))
-    }
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
-
-            TabView(selection: $selectedIndex) {
-                ForEach(urls.indices, id: \.self) { index in
-                    WeiboGalleryImagePage(url: urls[index])
-                        .tag(index)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background(.black.opacity(0.52), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭图片")
-
-                Spacer()
-
-                if urls.count > 1 {
-                    Text("\(selectedIndex + 1) / \(urls.count)")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .frame(height: 36)
-                        .background(.black.opacity(0.52), in: Capsule())
-                        .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(urls.count) 张")
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-        }
-        .statusBarHidden()
-        .interactiveDismissDisabled()
-    }
-}
-
-private struct WeiboGalleryImagePage: View {
-    let url: URL
-    @State private var image: UIImage?
-    @State private var scale: CGFloat = 1
-    @State private var settledScale: CGFloat = 1
-
-    var body: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .scaleEffect(scale)
-                    .gesture(magnificationGesture)
-                    .onTapGesture(count: 2) { toggleZoom() }
-            } else {
-                ProgressView()
-                    .tint(.white)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
-        .task(id: url) {
-            image = await ImageLoader.load(url)
-            resetZoom()
-        }
-        .accessibilityLabel("微博图片")
-        .accessibilityHint("左右滑动切换图片，双击放大")
-    }
-
-    private var magnificationGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                scale = min(max(settledScale * value.magnification, 1), 5)
-            }
-            .onEnded { _ in
-                settledScale = scale
-            }
-    }
-
-    private func toggleZoom() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-            if scale > 1 {
-                resetZoom()
-            } else {
-                scale = 2
-                settledScale = 2
-            }
-        }
-    }
-
-    private func resetZoom() {
-        scale = 1
-        settledScale = 1
     }
 }
 
