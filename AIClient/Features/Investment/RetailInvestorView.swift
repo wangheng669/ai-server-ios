@@ -877,9 +877,10 @@ private struct InvestorMoodVideoCard: View {
 
     @ViewBuilder
     private var media: some View {
-        if let playbackURL = item.playbackURL {
+        if let playbackURL = item.directPlaybackURL ?? item.playbackURL {
             XVideoPlayerView(
                 url: playbackURL,
+                fallbackURL: item.directPlaybackURL == nil ? nil : item.playbackURL,
                 thumbnailURL: item.coverPlaybackURL,
                 contentMode: .fill,
                 chromeStyle: .minimal,

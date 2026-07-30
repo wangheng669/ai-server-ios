@@ -617,11 +617,13 @@ struct XVideoPlayerView: View {
     @State private var thumbnail: UIImage?
     @State private var preparedAsset: AVURLAsset?
     @State private var playbackState: PlaybackState = .idle
+    @State private var playbackURL: URL
+    @State private var hasUsedFallback = false
     @State private var isVideoReady = false
     @State private var thumbnailFailed = false
     @State private var isFullscreenPresented = false
     @AppStorage("x.video.isMuted") private var isMuted = false
-    private let url: URL
+    private let fallbackURL: URL?
     private let thumbnailURL: URL?
     private let contentMode: ContentMode
     private let chromeStyle: XVideoPlayerChromeStyle
@@ -630,13 +632,15 @@ struct XVideoPlayerView: View {
 
     init(
         url: URL,
+        fallbackURL: URL? = nil,
         thumbnailURL: URL? = nil,
         contentMode: ContentMode = .fit,
         chromeStyle: XVideoPlayerChromeStyle = .standard,
         isPlaybackActive: Bool = true,
         onAspectRatioResolved: ((CGFloat) -> Void)? = nil
     ) {
-        self.url = url
+        _playbackURL = State(initialValue: url)
+        self.fallbackURL = fallbackURL == url ? nil : fallbackURL
         self.thumbnailURL = thumbnailURL
         self.contentMode = contentMode
         self.chromeStyle = chromeStyle
@@ -788,7 +792,7 @@ struct XVideoPlayerView: View {
         }
         .frame(maxWidth: .infinity)
         .clipped()
-        .task(id: url) {
+        .task(id: playbackURL) {
             if onAspectRatioResolved != nil {
                 async let thumbnailLoad: Void = loadThumbnail()
                 async let aspectRatioLoad: Void = loadVideoAspectRatio()
@@ -797,7 +801,7 @@ struct XVideoPlayerView: View {
                 await loadThumbnail()
             }
         }
-        .task(id: isPlaybackActive) {
+        .task(id: "\(isPlaybackActive):\(playbackURL.absoluteString)") {
             guard chromeStyle == .minimal, isPlaybackActive else { return }
             await preparePlaybackAsset()
         }
@@ -825,9 +829,13 @@ struct XVideoPlayerView: View {
     }
 
     private func startPlayback() {
+        beginPlayback(with: playbackURL)
+    }
+
+    private func beginPlayback(with sourceURL: URL) {
         guard isPlaybackActive else { return }
         activateAudioSession()
-        let asset = preparedAsset ?? AVURLAsset(url: url)
+        let asset = preparedAsset ?? AVURLAsset(url: sourceURL)
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 1
         let player = AVPlayer(playerItem: item)
@@ -836,14 +844,14 @@ struct XVideoPlayerView: View {
         self.player = player
         isVideoReady = false
         playbackState = .preparing
-        XVideoPlaybackSession.shared.play(player, url: url)
+        XVideoPlaybackSession.shared.play(player, url: sourceURL)
     }
 
     @MainActor
     private func preparePlaybackAsset() async {
         guard preparedAsset == nil else { return }
         let asset = AVURLAsset(
-            url: url,
+            url: playbackURL,
             options: [AVURLAssetPreferPreciseDurationAndTimingKey: false]
         )
         do {
@@ -857,7 +865,7 @@ struct XVideoPlayerView: View {
 
     private func stopPlayback() {
         guard let player else { return }
-        XVideoPlaybackSession.shared.pause(player, url: url)
+        XVideoPlaybackSession.shared.pause(player, url: playbackURL)
         self.player = nil
         isVideoReady = false
         playbackState = .idle
@@ -873,6 +881,14 @@ struct XVideoPlayerView: View {
 
     private func markPlaybackFailed() {
         guard playbackState == .preparing || playbackState == .playing else { return }
+        if let fallbackURL, !hasUsedFallback, playbackURL != fallbackURL {
+            stopPlayback()
+            preparedAsset = nil
+            hasUsedFallback = true
+            playbackURL = fallbackURL
+            beginPlayback(with: fallbackURL)
+            return
+        }
         stopPlayback()
         isVideoReady = false
         playbackState = .failed
@@ -889,23 +905,23 @@ struct XVideoPlayerView: View {
     @MainActor
     private func loadThumbnail(ignoringCache: Bool = false) async {
         guard thumbnail == nil else { return }
-        if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: url as NSURL) {
+        if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: playbackURL as NSURL) {
             thumbnail = cached
             return
         }
-        if let thumbnailURL = thumbnailURL ?? MediaURL.videoThumbnail(for: url),
+        if let thumbnailURL = thumbnailURL ?? MediaURL.videoThumbnail(for: playbackURL),
            let remoteThumbnail = await ImageLoader.load(
                thumbnailURL,
                targetSize: CGSize(width: 720, height: 720)
             ) {
             guard !Task.isCancelled else { return }
-            Self.thumbnailCache.setObject(remoteThumbnail, forKey: url as NSURL)
+            Self.thumbnailCache.setObject(remoteThumbnail, forKey: playbackURL as NSURL)
             thumbnail = remoteThumbnail
             thumbnailFailed = false
             return
         }
         guard !Task.isCancelled else { return }
-        let asset = AVURLAsset(url: url)
+        let asset = AVURLAsset(url: playbackURL)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 1_200, height: 1_200)
@@ -913,7 +929,7 @@ struct XVideoPlayerView: View {
             let (image, _) = try await generator.image(at: .zero)
             guard !Task.isCancelled else { return }
             let result = UIImage(cgImage: image)
-            Self.thumbnailCache.setObject(result, forKey: url as NSURL)
+            Self.thumbnailCache.setObject(result, forKey: playbackURL as NSURL)
             thumbnail = result
             thumbnailFailed = false
         } catch {
@@ -924,7 +940,7 @@ struct XVideoPlayerView: View {
 
     @MainActor
     private func loadVideoAspectRatio() async {
-        let asset = AVURLAsset(url: url)
+        let asset = AVURLAsset(url: playbackURL)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,
               let naturalSize = try? await track.load(.naturalSize),
               let preferredTransform = try? await track.load(.preferredTransform),
