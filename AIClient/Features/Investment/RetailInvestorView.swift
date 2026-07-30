@@ -855,8 +855,9 @@ private struct InvestorMoodVideoCard: View {
         if let playbackURL = item.playbackURL {
             XVideoPlayerView(
                 url: playbackURL,
-                thumbnailURL: URL(string: item.coverUrl),
-                contentMode: .fill
+                thumbnailURL: item.coverPlaybackURL,
+                contentMode: .fill,
+                chromeStyle: .minimal
             )
         } else {
             ZStack {
