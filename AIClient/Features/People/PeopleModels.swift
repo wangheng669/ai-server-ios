@@ -492,12 +492,6 @@ enum PeopleRelationshipPlanner {
             for person in allPeople where person.relatedPeople.contains(where: { $0.id == focused.id }) {
                 append(person)
             }
-            for person in topicPeople where primaryOrganization(for: person) == primaryOrganization(for: focused) {
-                append(person)
-            }
-            for person in ranked(topicPeople) {
-                append(person)
-            }
             return Array(result.prefix(limit))
         }
 
@@ -519,11 +513,7 @@ enum PeopleRelationshipPlanner {
         if let relation = other.relatedPeople.first(where: { $0.id == center.id })?.relationship {
             return relation
         }
-        let organization = primaryOrganization(for: center)
-        if organization == primaryOrganization(for: other) {
-            return "同属\(organization)"
-        }
-        return "同属\(center.topic.rawValue)领域"
+        return "暂无已核实关系"
     }
 
     static func clusters(
@@ -556,22 +546,6 @@ enum PeopleRelationshipPlanner {
                     id: person.id,
                     name: person.name,
                     relationship: inbound.relationship,
-                    person: person,
-                    avatarURLValue: person.avatarPath,
-                    avatarAssetName: person.avatarAssetName
-                )
-            }
-        }
-
-        if membersByID.isEmpty {
-            let fallbackPeople = ranked(
-                allPeople.filter { $0.id != center.id && $0.topic == center.topic }
-            )
-            for person in fallbackPeople {
-                membersByID[person.id] = PeopleRelationshipMember(
-                    id: person.id,
-                    name: person.name,
-                    relationship: "同属\(center.topic.rawValue)领域",
                     person: person,
                     avatarURLValue: person.avatarPath,
                     avatarAssetName: person.avatarAssetName
@@ -633,11 +607,14 @@ enum PeopleRelationshipPlanner {
     ) -> String {
         let value = relationship.trimmingCharacters(in: .whitespacesAndNewlines)
         let mappings: [(title: String, keywords: [String])] = [
-            ("同事", ["同事", "团队", "任职", "高管", "下属", "创始"]),
-            ("行业同行", ["同行", "同业"]),
-            ("合作", ["合作", "伙伴", "客户", "供应", "生态", "联盟"]),
-            ("投资", ["投资", "股东", "资本", "基金", "出资"]),
             ("竞争", ["竞争", "对手", "竞品"]),
+            ("访谈", ["访谈", "播客", "受访"]),
+            ("投资", ["投资", "股东", "资本", "基金", "出资"]),
+            ("合作", ["合作", "伙伴", "客户", "供应", "生态", "联盟"]),
+            ("同事", ["同事", "团队", "任职", "高管", "下属", "创始"]),
+            ("学术", ["学术", "教授", "研究"]),
+            ("历史关联", ["历史", "国共", "革命", "改革开放", "国家建设"]),
+            ("行业同行", ["同行", "同业"]),
             ("师友", ["导师", "学生", "师生", "前辈", "好友", "朋友"]),
             ("家庭", ["家人", "家庭", "夫妻", "父亲", "母亲", "兄弟", "姐妹", "亲属"])
         ]
