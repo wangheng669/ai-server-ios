@@ -123,6 +123,48 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.books.first?.openURL?.scheme, "weread")
     }
 
+    func testDecodesIndependentVideoLessonDetail() throws {
+        let data = Data(
+            """
+            {
+              "data": {
+                "id": "xiaolin-short-selling",
+                "platform": "bilibili",
+                "creator": "小Lin说",
+                "title": "真正的做空",
+                "summary": "理解做空的机制与风险。",
+                "external_id": "BV1v34y1j7Nu",
+                "watch_url": "https://www.bilibili.com/video/BV1v34y1j7Nu/",
+                "cover_url": "https://i0.hdslb.com/cover.jpg",
+                "duration_seconds": 2150,
+                "description": "从交易结构出发理解做空。",
+                "watch_points": ["做空为什么是先卖后买", "损失为什么可能没有上限"],
+                "chapters": [{
+                  "id": 1,
+                  "title": "做空是什么",
+                  "start_seconds": 48
+                }],
+                "related_topics": [{
+                  "id": "56810",
+                  "title": "什么是卖空？",
+                  "category": "股票"
+                }]
+              }
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(LearningVideoLessonResponse.self, from: data)
+        XCTAssertEqual(response.data.creator, "小Lin说")
+        XCTAssertEqual(response.data.durationText, "36 分钟")
+        XCTAssertEqual(response.data.chapters.first?.timestampText, "0:48")
+        XCTAssertEqual(
+            response.data.watchURL(at: 48)?.absoluteString,
+            "https://www.bilibili.com/video/BV1v34y1j7Nu/?t=48"
+        )
+        XCTAssertEqual(response.data.relatedTopics.first?.id, "56810")
+    }
+
     @MainActor
     func testLearningProgressPersistsRealCompletionDates() {
         let suiteName = "LearningProgressStoreTests.\(UUID().uuidString)"
