@@ -245,6 +245,7 @@ struct KnowledgeConceptDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedID: String
     @State private var wikipediaEntity: WikipediaEntity?
+    @State private var selectedDetent: PresentationDetent = .medium
 
     init(cards: [KnowledgeConceptCard], initialID: String) {
         self.cards = cards
@@ -293,8 +294,9 @@ struct KnowledgeConceptDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.large])
+        .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.resizes)
         .sheet(item: $wikipediaEntity) { entity in
             WikipediaReaderView(entity: entity, returnTitle: "返回概念详情")
                 .presentationDetents([.large])
