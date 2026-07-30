@@ -29,7 +29,7 @@ struct MarketView: View {
             return MarketDetailRoute(symbol: "^VIX")
         }
         return ProcessInfo.processInfo.arguments.contains("--market-detail-preview")
-            ? MarketDetailRoute(symbol: "^NDX")
+            ? MarketDetailRoute(symbol: "QQQ")
             : nil
         #else
         nil
@@ -243,7 +243,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
 
     var symbols: [String] {
         switch self {
-        case .unitedStates: ["^GSPC", "^NDX", "^DJI", "^VIX"]
+        case .unitedStates: ["SPY", "QQQ", "DIA", "^VIX"]
         case .china: ["000001.SS", "000300.SS", "000688.SS", "^HSTECH", "^HSI"]
         case .japan: ["^N225"]
         case .korea: ["^KS11"]
@@ -309,7 +309,7 @@ private struct MarketTerminalHero: View {
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name)
+                        Text(quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name)
                             .font(.system(size: 22, weight: .semibold))
                             .lineLimit(1)
                             .layoutPriority(1)
@@ -439,7 +439,7 @@ private struct MarketTerminalHero: View {
     private func cryptoMetric(symbol: String) -> some View {
         let value = store.quote(symbol: symbol)
         return MarketTerminalMetric(
-            title: value?.name ?? CoreDescriptor(symbol: symbol).name,
+            title: value?.presentationName ?? CoreDescriptor(symbol: symbol).name,
             value: value.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—",
             change: value?.formattedPercent ?? "—",
             tint: quoteTint(value),
@@ -453,7 +453,7 @@ private struct MarketTerminalHero: View {
     }
 
     private var heroAccessibilityLabel: String {
-        let name = quote?.name ?? CoreDescriptor(symbol: region.primarySymbol).name
+        let name = quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
         guard let displayedQuote else { return "\(name)，等待行情" }
         return "\(name)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
     }
@@ -1254,7 +1254,7 @@ private struct MarketIndexTableRow: View {
                     Circle().fill(sessionTint).frame(width: 5, height: 5)
                     Text(sessionLabel).font(.caption2).foregroundStyle(.secondary)
                 }
-                Text(quote.name).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
+                Text(quote.presentationName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
                 Text(quote.displayCode).font(.caption2).foregroundStyle(.secondary)
             }
             .frame(width: 112, alignment: .leading)
@@ -1869,7 +1869,7 @@ private struct MarketCoreIndexCard: View {
     var body: some View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(quote?.name ?? descriptor.name).font(.caption.weight(.medium)).lineLimit(1)
+                Text(quote?.presentationName ?? descriptor.name).font(.caption.weight(.medium)).lineLimit(1)
                 Text(descriptor.code).font(.caption2).foregroundStyle(.secondary.opacity(0.85))
                 Spacer(minLength: 1)
                 Text(quote.map { number($0.price, digits: 2) } ?? "—")
@@ -1905,7 +1905,7 @@ private struct GlobalMarketOverviewGrid: View {
                 country: "美国",
                 city: "纽约",
                 timeZone: "America/New_York",
-                symbol: "^GSPC",
+                symbol: "SPY",
                 auxiliary: store.quote(symbol: "^VIX")
             )
             countryButton(country: "日本", city: "东京", timeZone: "Asia/Tokyo", symbol: "^N225")
@@ -1957,7 +1957,7 @@ private struct MarketCountryCard: View {
             }
             HStack(alignment: .lastTextBaseline, spacing: 5) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(quote?.name ?? "等待行情").font(.caption.weight(.medium)).lineLimit(1)
+                    Text(quote?.presentationName ?? "等待行情").font(.caption.weight(.medium)).lineLimit(1)
                     Text(quote.map { number($0.price, digits: 2) } ?? "—")
                         .font(.system(size: 16, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
                 }
@@ -2126,6 +2126,7 @@ private struct MarketIndexDetailView: View {
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
     private var financials: MarketCompanyFinancials? { store.companyFinancials[symbol] }
+    private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
     private var isIndex: Bool {
         store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
             || CoreDescriptor(symbol: symbol).isIndex
@@ -2137,7 +2138,7 @@ private struct MarketIndexDetailView: View {
         if isAShareIndex {
             return store.dashboard?.currentAShareBreadth
         }
-        guard let items = store.indexConstituents[symbol]?.items, !items.isEmpty else { return nil }
+        guard let items = store.indexConstituents[historicalSymbol]?.items, !items.isEmpty else { return nil }
         let up = items.filter { $0.quote.percentValue > 0.005 }.count
         let down = items.filter { $0.quote.percentValue < -0.005 }.count
         let flat = max(items.count - up - down, 0)
@@ -2162,7 +2163,8 @@ private struct MarketIndexDetailView: View {
                                 }
                             }
                         detailHeader
-                        MarketDetailChart(selectedRange: $selectedRange, symbol: symbol, store: store)
+                        MarketDetailChart(selectedRange: $selectedRange, symbol: historicalSymbol, store: store)
+                            .id(historicalSymbol)
                         keyData
                         if showsCompanyProfile { companyProfile }
                         if isIndex {
@@ -2191,19 +2193,19 @@ private struct MarketIndexDetailView: View {
         .accessibilityHint("在详情内容区域向下滑动即可收起")
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .task {
-            if isIndex { await store.loadIndexConstituents(symbol: symbol) }
+        .task(id: historicalSymbol) {
+            if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol) }
             if showsCompanyProfile, let quote {
-                async let logo: Void = store.loadCompanyLogo(symbol: quote.symbol, name: quote.name)
+                async let logo: Void = store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
                 async let companyFinancials: Void = store.loadCompanyFinancials(symbol: quote.symbol)
                 _ = await (logo, companyFinancials)
             }
         }
         .refreshable {
             await store.refresh(force: false)
-            if isIndex { await store.loadIndexConstituents(symbol: symbol, force: true) }
+            if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol, force: true) }
             if showsCompanyProfile { await store.loadCompanyFinancials(symbol: symbol, force: true) }
-            await store.loadChart(symbol: symbol, range: selectedRange, force: true)
+            await store.loadChart(symbol: historicalSymbol, range: selectedRange, force: true)
         }
     }
 
@@ -2263,7 +2265,7 @@ private struct MarketIndexDetailView: View {
                         .frame(width: 36, height: 36)
                         .background(MarketStyle.accent, in: RoundedRectangle(cornerRadius: 9))
                 }
-                Text(quote?.name ?? CoreDescriptor(symbol: symbol).name)
+                Text(quote?.presentationName ?? CoreDescriptor(symbol: symbol).name)
                     .font(.system(size: 22, weight: .semibold))
                     .tracking(-0.35)
                     .lineLimit(1)
@@ -2361,7 +2363,7 @@ private struct MarketIndexDetailView: View {
             HStack(alignment: .top, spacing: 12) {
                 if let quote { CompanyLogo(quote: quote, path: companyLogoPath) }
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(quote?.name ?? symbol).font(.subheadline.weight(.semibold))
+                    Text(quote?.presentationName ?? symbol).font(.subheadline.weight(.semibold))
                     Text("股票代码  \(quote?.displayCode ?? symbol)")
                     Text("上市市场  \(companyMarketLabel(symbol))")
                     if let marketCap = quote?.marketCap { Text("总市值  \(compactNumber(marketCap))") }
@@ -2412,17 +2414,17 @@ private struct MarketIndexDetailView: View {
     private var componentStocks: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(store.indexConstituents[symbol]?.label ?? "主要成分股")
+                Text(store.indexConstituents[historicalSymbol]?.label ?? "主要成分股")
                     .font(.system(size: 19, weight: .semibold))
                 Spacer()
-                if let asOf = store.indexConstituents[symbol]?.asOf {
+                if let asOf = store.indexConstituents[historicalSymbol]?.asOf {
                     Text("截至 \(asOf)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
             VStack(spacing: 0) {
-                let items = store.indexConstituents[symbol]?.items ?? []
+                let items = store.indexConstituents[historicalSymbol]?.items ?? []
                 ForEach(items) { item in
                     Button {
                         onSelectSymbol(item.quote.symbol)
@@ -2432,9 +2434,9 @@ private struct MarketIndexDetailView: View {
                     .buttonStyle(.plain)
                     if item.id != items.last?.id { Divider().padding(.leading, 52) }
                 }
-                if let error = store.constituentErrors[symbol] {
+                if let error = store.constituentErrors[historicalSymbol] {
                     Text(error).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 72)
-                } else if store.indexConstituents[symbol] == nil {
+                } else if store.indexConstituents[historicalSymbol] == nil {
                     ProgressView().frame(maxWidth: .infinity, minHeight: 72)
                 }
             }
@@ -2459,7 +2461,7 @@ private struct MarketIndexDetailView: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
         .background(MarketStyle.purple.opacity(0.08), in: Capsule())
-        .accessibilityLabel("\(title)，\(quote.name)，\(number(quote.price, digits: 2))，\(quote.formattedPercent)")
+        .accessibilityLabel("\(title)，\(quote.presentationName)，\(number(quote.price, digits: 2))，\(quote.formattedPercent)")
     }
 
     private var sessionText: String {
@@ -2476,7 +2478,7 @@ private struct MarketIndexDetailView: View {
     private var shareText: String {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
         let timestamp = quote.timestamp.map(marketTimestamp) ?? "时间未知"
-        return "\(quote.name)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(timestamp)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
+        return "\(quote.presentationName)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(timestamp)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
     }
 }
 
@@ -2648,7 +2650,7 @@ private struct MarketDetailChart: View {
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 10)
-        .task(id: selectedRange) {
+        .task(id: ChartKey(symbol: symbol, range: selectedRange)) {
             inspectedPoint = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
         }
@@ -3076,7 +3078,7 @@ private struct MarketConstituentRow: View {
         HStack(spacing: 10) {
             CompanyLogo(quote: quote, path: item.logoPath)
             VStack(alignment: .leading, spacing: 4) {
-                Text(quote.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                Text(quote.presentationName).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 HStack(spacing: 5) {
                     Text(quote.symbol)
                     if let weight = item.weight {
@@ -3104,7 +3106,7 @@ private struct MarketConstituentRow: View {
         }
         .frame(minHeight: 64)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(quote.name)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)，点按查看详情")
+        .accessibilityLabel("\(quote.presentationName)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)，点按查看详情")
     }
 }
 
@@ -3190,7 +3192,7 @@ private struct CoreRegion: Identifiable {
     let symbols: [String]
     var id: String { title }
     static let all = [
-        CoreRegion(title: "美国", symbols: ["^GSPC", "^NDX", "^DJI"]),
+        CoreRegion(title: "美国", symbols: ["SPY", "QQQ", "DIA"]),
         CoreRegion(title: "中国 / 香港", symbols: ["000001.SS", "000300.SS", "000688.SS", "^HSTECH", "^HSI"]),
         CoreRegion(title: "日本 / 韩国", symbols: ["^N225", "^KS11"]),
         CoreRegion(title: "欧洲", symbols: ["^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]),
@@ -3201,7 +3203,7 @@ private struct CoreDescriptor {
     let symbol: String
     var isIndex: Bool {
         switch symbol {
-        case "^GSPC", "^NDX", "^DJI", "000001.SS", "000016.SS", "000300.SS", "399006.SZ",
+        case "SPY", "QQQ", "DIA", "000001.SS", "000016.SS", "000300.SS", "399006.SZ",
              "000688.SS", "000905.SS", "000852.SS", "932000.SS", "THS:883418", "^HSTECH",
              "^HSI", "^N225", "^KS11", "^STOXX50E", "^GDAXI", "^FTSE", "^FCHI":
             true
@@ -3209,9 +3211,9 @@ private struct CoreDescriptor {
             false
         }
     }
-    var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "000001.SS": "上证指数"; case "000016.SS": "上证50"; case "000300.SS": "沪深300"; case "399006.SZ": "创业板指"; case "000688.SS": "科创50"; case "000905.SS": "中证500"; case "000852.SS": "中证1000"; case "932000.SS": "中证2000"; case "THS:883418": "微盘股"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; default: symbol } }
-    var code: String { switch symbol { case "^GSPC": "SPX"; case "^NDX": "NDX"; case "^DJI": "DJI"; case "000001.SS": "000001.SH"; case "000300.SS": "000300.SH"; case "000688.SS": "000688.SH"; case "^HSTECH": "HSTECH"; case "^HSI": "HSI"; case "^N225": "N225"; case "^KS11": "KOSPI"; case "^STOXX50E": "SX5E"; case "^GDAXI": "DAX"; case "^FTSE": "FTSE"; case "^FCHI": "CAC40"; default: symbol } }
-    var icon: String { switch symbol { case "^NDX": "n.circle.fill"; case "^DJI": "building.columns.fill"; case "000001.SS", "000300.SS": "building.2.fill"; case "000688.SS": "cpu.fill"; case "^HSTECH": "asterisk"; case "^HSI": "h.circle.fill"; case "^N225": "yensign.circle.fill"; case "^KS11": "k.circle.fill"; case "^STOXX50E": "globe.europe.africa.fill"; case "^GDAXI": "shield.fill"; case "^FTSE": "sterlingsign.circle.fill"; case "^FCHI": "f.circle.fill"; default: "star.fill" } }
+    var name: String { switch symbol { case "SPY": "标普500实时代理（SPY）"; case "QQQ": "纳斯达克100实时代理（QQQ）"; case "DIA": "道琼斯实时代理（DIA）"; case "000001.SS": "上证指数"; case "000016.SS": "上证50"; case "000300.SS": "沪深300"; case "399006.SZ": "创业板指"; case "000688.SS": "科创50"; case "000905.SS": "中证500"; case "000852.SS": "中证1000"; case "932000.SS": "中证2000"; case "THS:883418": "微盘股"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; default: symbol } }
+    var code: String { switch symbol { case "SPY", "QQQ", "DIA": symbol; case "000001.SS": "000001.SH"; case "000300.SS": "000300.SH"; case "000688.SS": "000688.SH"; case "^HSTECH": "HSTECH"; case "^HSI": "HSI"; case "^N225": "N225"; case "^KS11": "KOSPI"; case "^STOXX50E": "SX5E"; case "^GDAXI": "DAX"; case "^FTSE": "FTSE"; case "^FCHI": "CAC40"; default: symbol } }
+    var icon: String { switch symbol { case "QQQ": "q.circle.fill"; case "DIA": "building.columns.fill"; case "000001.SS", "000300.SS": "building.2.fill"; case "000688.SS": "cpu.fill"; case "^HSTECH": "asterisk"; case "^HSI": "h.circle.fill"; case "^N225": "yensign.circle.fill"; case "^KS11": "k.circle.fill"; case "^STOXX50E": "globe.europe.africa.fill"; case "^GDAXI": "shield.fill"; case "^FTSE": "sterlingsign.circle.fill"; case "^FCHI": "f.circle.fill"; default: "star.fill" } }
 }
 
 private func marketLocalTime(_ timestamp: Int64?, city: String, timeZone: String) -> String {
