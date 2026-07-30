@@ -533,7 +533,15 @@ struct InvestorMoodItem: Decodable, Identifiable {
     }
 
     var playbackURL: URL? {
-        guard let source = URL(string: videoUrl),
+        proxiedMediaURL(from: videoUrl)
+    }
+
+    var coverPlaybackURL: URL? {
+        proxiedMediaURL(from: coverUrl)
+    }
+
+    private func proxiedMediaURL(from value: String) -> URL? {
+        guard let source = URL(string: value),
               let scheme = source.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else { return nil }
         var components = URLComponents(

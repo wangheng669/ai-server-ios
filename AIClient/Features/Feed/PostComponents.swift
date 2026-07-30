@@ -598,6 +598,11 @@ final class XVideoPlaybackSession {
     }
 }
 
+enum XVideoPlayerChromeStyle {
+    case standard
+    case minimal
+}
+
 struct XVideoPlayerView: View {
     private enum PlaybackState {
         case idle
@@ -618,17 +623,20 @@ struct XVideoPlayerView: View {
     private let url: URL
     private let thumbnailURL: URL?
     private let contentMode: ContentMode
+    private let chromeStyle: XVideoPlayerChromeStyle
     private let onAspectRatioResolved: ((CGFloat) -> Void)?
 
     init(
         url: URL,
         thumbnailURL: URL? = nil,
         contentMode: ContentMode = .fit,
+        chromeStyle: XVideoPlayerChromeStyle = .standard,
         onAspectRatioResolved: ((CGFloat) -> Void)? = nil
     ) {
         self.url = url
         self.thumbnailURL = thumbnailURL
         self.contentMode = contentMode
+        self.chromeStyle = chromeStyle
         self.onAspectRatioResolved = onAspectRatioResolved
     }
 
@@ -640,7 +648,7 @@ struct XVideoPlayerView: View {
                 Image(uiImage: thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
-            } else if playbackState == .idle, !thumbnailFailed {
+            } else if playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {
                 ProgressView().tint(.white)
             }
 
@@ -656,29 +664,61 @@ struct XVideoPlayerView: View {
             switch playbackState {
             case .idle:
                 Button(action: startPlayback) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 52, height: 40)
-                        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    if chromeStyle == .minimal {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .offset(x: 1)
+                            .frame(width: 52, height: 52)
+                            .background(.black.opacity(0.34), in: Circle())
+                            .overlay {
+                                Circle()
+                                    .stroke(.white.opacity(0.48), lineWidth: 0.75)
+                            }
+                    } else {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 52, height: 40)
+                            .background(
+                                .black.opacity(0.62),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("播放视频")
             case .preparing:
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(.white)
-                    .padding(14)
-                    .background(.black.opacity(0.56), in: Circle())
-                    .accessibilityLabel("正在加载视频")
+                if chromeStyle == .minimal {
+                    MinimalVideoLoadingBar()
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 12)
+                        .accessibilityLabel("正在加载视频")
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                        .padding(14)
+                        .background(.black.opacity(0.56), in: Circle())
+                        .accessibilityLabel("正在加载视频")
+                }
             case .failed:
                 Button(action: startPlayback) {
-                    Label("重试播放", systemImage: "arrow.clockwise")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(.black.opacity(0.68), in: Capsule())
+                    if chromeStyle == .minimal {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.black.opacity(0.42), in: Circle())
+                    } else {
+                        Label("重试播放", systemImage: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(0.68), in: Capsule())
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("重试播放视频")
@@ -692,10 +732,16 @@ struct XVideoPlayerView: View {
                     player?.isMuted = isMuted
                 } label: {
                     Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: chromeStyle == .minimal ? 12 : 13, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 34, height: 30)
-                        .background(.black.opacity(0.62), in: Capsule())
+                        .frame(
+                            width: chromeStyle == .minimal ? 30 : 34,
+                            height: chromeStyle == .minimal ? 30 : 30
+                        )
+                        .background(
+                            .black.opacity(chromeStyle == .minimal ? 0.38 : 0.62),
+                            in: chromeStyle == .minimal ? AnyShape(Circle()) : AnyShape(Capsule())
+                        )
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -703,7 +749,7 @@ struct XVideoPlayerView: View {
                 .accessibilityLabel(isMuted ? "打开声音" : "静音")
             }
 
-            if thumbnailFailed, playbackState == .idle {
+            if thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
                 Button {
                     thumbnailFailed = false
                     Task { await loadThumbnail(ignoringCache: true) }
@@ -722,10 +768,16 @@ struct XVideoPlayerView: View {
 
             Button(action: presentFullscreen) {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: chromeStyle == .minimal ? 12 : 13, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 30)
-                    .background(.black.opacity(0.62), in: Capsule())
+                    .frame(
+                        width: chromeStyle == .minimal ? 30 : 34,
+                        height: chromeStyle == .minimal ? 30 : 30
+                    )
+                    .background(
+                        .black.opacity(chromeStyle == .minimal ? 0.38 : 0.62),
+                        in: chromeStyle == .minimal ? AnyShape(Circle()) : AnyShape(Capsule())
+                    )
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -735,9 +787,13 @@ struct XVideoPlayerView: View {
         .frame(maxWidth: .infinity)
         .clipped()
         .task(id: url) {
-            async let thumbnailLoad: Void = loadThumbnail()
-            async let aspectRatioLoad: Void = loadVideoAspectRatio()
-            _ = await (thumbnailLoad, aspectRatioLoad)
+            if onAspectRatioResolved != nil {
+                async let thumbnailLoad: Void = loadThumbnail()
+                async let aspectRatioLoad: Void = loadVideoAspectRatio()
+                _ = await (thumbnailLoad, aspectRatioLoad)
+            } else {
+                await loadThumbnail()
+            }
         }
         .onDisappear {
             stopPlayback()
@@ -811,6 +867,7 @@ struct XVideoPlayerView: View {
                targetSize: CGSize(width: 720, height: 720)
             ) {
             guard !Task.isCancelled else { return }
+            Self.thumbnailCache.setObject(remoteThumbnail, forKey: url as NSURL)
             thumbnail = remoteThumbnail
             thumbnailFailed = false
             return
@@ -845,6 +902,30 @@ struct XVideoPlayerView: View {
         let height = abs(displayedSize.height)
         guard width > 0, height > 0 else { return }
         onAspectRatioResolved?(width / height)
+    }
+}
+
+private struct MinimalVideoLoadingBar: View {
+    @State private var travelsRight = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let segmentWidth = max(proxy.size.width * 0.26, 36)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.18))
+                Capsule()
+                    .fill(.white.opacity(0.9))
+                    .frame(width: segmentWidth)
+                    .offset(x: travelsRight ? proxy.size.width - segmentWidth : 0)
+            }
+        }
+        .frame(height: 2)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) {
+                travelsRight = true
+            }
+        }
     }
 }
 
