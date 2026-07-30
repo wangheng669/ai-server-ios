@@ -4,6 +4,8 @@ import Observation
 protocol LearningServing {
     func fetchCatalog() async throws -> LearningCatalog
     func fetchTopic(id: String) async throws -> LearningTopic
+    func fetchVideoLessons() async throws -> LearningVideoLibrary
+    func fetchVideoLesson(id: String) async throws -> LearningVideoLesson
 }
 
 struct LearningService: LearningServing {
@@ -44,6 +46,21 @@ struct LearningService: LearningServing {
         let response: LearningBookshelfResponse = try await fetch(
             baseURL.appending(path: "api/v1/learning/bookshelf"),
             cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        return response.data
+    }
+
+    func fetchVideoLessons() async throws -> LearningVideoLibrary {
+        let response: LearningVideoLibraryResponse = try await fetch(
+            baseURL.appending(path: "api/v1/learning/video-lessons")
+        )
+        return response.data
+    }
+
+    func fetchVideoLesson(id: String) async throws -> LearningVideoLesson {
+        let response: LearningVideoLessonResponse = try await fetch(
+            baseURL.appending(path: "api/v1/learning/video-lessons").appending(path: id),
+            cachePolicy: .reloadRevalidatingCacheData
         )
         return response.data
     }
@@ -122,8 +139,10 @@ final class LearningContentRepository {
 final class LearningStore {
     private(set) var catalog: LearningCatalog?
     private(set) var bookshelf: LearningBookshelf?
+    private(set) var videoLibrary: LearningVideoLibrary?
     private(set) var isLoading = false
     private(set) var isBookshelfLoading = false
+    private(set) var isVideoLibraryLoading = false
     private(set) var errorMessage: String?
     private(set) var bookshelfErrorMessage: String?
     private let service: LearningService
@@ -155,6 +174,19 @@ final class LearningStore {
             return
         } catch {
             bookshelfErrorMessage = error.localizedDescription
+        }
+    }
+
+    func loadVideoLibrary(force: Bool = false) async {
+        guard force || videoLibrary == nil else { return }
+        isVideoLibraryLoading = true
+        defer { isVideoLibraryLoading = false }
+        do {
+            videoLibrary = try await service.fetchVideoLessons()
+        } catch is CancellationError {
+            return
+        } catch {
+            // Investment articles remain usable when the optional video shelf is offline.
         }
     }
 }

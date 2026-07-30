@@ -34,21 +34,27 @@ struct LearningView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: LearningRoute.self) { route in
-                LearningDetailView(
-                    topic: route.topic,
-                    repository: repository,
-                    progressStore: progressStore,
-                    lessonTitle: route.lessonTitle,
-                    lessonNumber: route.lessonNumber,
-                    lessonCount: route.lessonCount
-                )
+                switch route {
+                case let .topic(topic, lessonTitle, lessonNumber, lessonCount):
+                    LearningDetailView(
+                        topic: topic,
+                        repository: repository,
+                        progressStore: progressStore,
+                        lessonTitle: lessonTitle,
+                        lessonNumber: lessonNumber,
+                        lessonCount: lessonCount
+                    )
+                case let .videoLesson(lesson):
+                    LearningVideoLessonDetailView(seed: lesson)
+                }
             }
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             async let catalog: Void = store.load()
             async let bookshelf: Void = store.loadBookshelf()
-            _ = await (catalog, bookshelf)
+            async let videoLibrary: Void = store.loadVideoLibrary()
+            _ = await (catalog, bookshelf, videoLibrary)
             #if DEBUG
             if (ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-video-preview")),
@@ -61,7 +67,7 @@ struct LearningView: View {
                 if let index = milestones.firstIndex(where: { $0.topic.id == topic.id }) {
                     path = [route(for: milestones[index], at: index, total: milestones.count)]
                 } else {
-                    path = [LearningRoute(topic: topic)]
+                    path = [.topic(topic, nil, nil, nil)]
                 }
             }
             #endif
@@ -110,7 +116,9 @@ struct LearningView: View {
                 .refreshable {
                     switch selectedSection {
                     case .investment:
-                        await store.load(force: true)
+                        async let catalog: Void = store.load(force: true)
+                        async let videoLibrary: Void = store.loadVideoLibrary(force: true)
+                        _ = await (catalog, videoLibrary)
                     case .books:
                         await store.loadBookshelf(force: true)
                     }
@@ -159,6 +167,7 @@ struct LearningView: View {
             WeeklyStudyCard(studiedDays: progressStore.studyDays())
                 .padding(.horizontal, 20)
 
+            videoLessons
             learningPath(topics)
             savedTopics(in: catalog, excluding: Set(topics.prefix(4).map(\.id)))
         } else if store.isLoading {
@@ -173,6 +182,42 @@ struct LearningView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 60)
+        }
+    }
+
+    @ViewBuilder
+    private var videoLessons: some View {
+        if let lessons = store.videoLibrary?.lessons, !lessons.isEmpty {
+            HStack(alignment: .firstTextBaseline) {
+                Text("小林说视频课")
+                    .font(.system(size: 24, weight: .bold, design: .serif))
+                Spacer()
+                Text("\(lessons.count) 堂精选")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 26)
+            .padding(.bottom, 13)
+
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 13) {
+                    ForEach(lessons) { lesson in
+                        Button {
+                            path.append(.videoLesson(lesson))
+                        } label: {
+                            LearningVideoLessonCard(lesson: lesson)
+                        }
+                        .buttonStyle(LearningPressStyle())
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .scrollIndicators(.hidden)
+        } else if store.isVideoLibraryLoading {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 24)
         }
     }
 
@@ -245,7 +290,7 @@ struct LearningView: View {
             VStack(spacing: 0) {
                 ForEach(topics) { topic in
                     Button {
-                        path.append(LearningRoute(topic: topic))
+                        path.append(.topic(topic, nil, nil, nil))
                     } label: {
                         LearningTopicRow(topic: topic)
                     }
@@ -343,12 +388,7 @@ struct LearningView: View {
         at index: Int,
         total: Int
     ) -> LearningRoute {
-        LearningRoute(
-            topic: milestone.topic,
-            lessonTitle: milestone.title,
-            lessonNumber: index + 1,
-            lessonCount: total
-        )
+        .topic(milestone.topic, milestone.title, index + 1, total)
     }
 }
 
@@ -364,11 +404,9 @@ private enum KnowledgeSection: String {
     }
 }
 
-private struct LearningRoute: Hashable {
-    let topic: LearningTopic
-    var lessonTitle: String?
-    var lessonNumber: Int?
-    var lessonCount: Int?
+private enum LearningRoute: Hashable {
+    case topic(LearningTopic, String?, Int?, Int?)
+    case videoLesson(LearningVideoLesson)
 }
 
 private enum KnowledgePagePalette {
@@ -448,6 +486,310 @@ private struct WeeklyStudyCard: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("本周学习\(studiedDays.count)天")
+    }
+}
+
+private struct LearningVideoLessonCard: View {
+    let lesson: LearningVideoLesson
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                AsyncImage(url: lesson.coverURL) { phase in
+                    if case let .success(image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.22, green: 0.16, blue: 0.13),
+                                KnowledgePagePalette.accent.opacity(0.78)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    }
+                }
+                .frame(width: 276, height: 154)
+                .clipped()
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.64)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+
+                HStack(spacing: 7) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(lesson.durationText)
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .frame(height: 27)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(12)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(lesson.creator)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(KnowledgePagePalette.accent)
+                Text(lesson.title)
+                    .font(.system(size: 17, weight: .bold, design: .serif))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text(lesson.summary)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(14)
+        }
+        .frame(width: 276)
+        .background(KnowledgePagePalette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("打开视频课")
+    }
+}
+
+private struct LearningVideoLessonDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var lesson: LearningVideoLesson
+    @State private var isLoadingDetail = false
+
+    init(seed: LearningVideoLesson) {
+        _lesson = State(initialValue: seed)
+    }
+
+    var body: some View {
+        ZStack {
+            KnowledgePagePalette.canvas.ignoresSafeArea()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    hero
+                    introduction
+                    watchPoints
+                    chapters
+                    relatedTopics
+                    sourceNote
+                }
+                .padding(.bottom, 44)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .task(id: lesson.id) {
+            guard lesson.chapters.isEmpty else { return }
+            isLoadingDetail = true
+            defer { isLoadingDetail = false }
+            if let detail = try? await LearningService().fetchVideoLesson(id: lesson.id) {
+                lesson = detail
+            }
+        }
+    }
+
+    private var hero: some View {
+        ZStack(alignment: .topLeading) {
+            AsyncImage(url: lesson.coverURL) { phase in
+                if case let .success(image) = phase {
+                    image.resizable().scaledToFill()
+                } else {
+                    LinearGradient(
+                        colors: [.black, KnowledgePagePalette.accent.opacity(0.7)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+            }
+            .frame(height: 292)
+            .clipped()
+
+            LinearGradient(
+                colors: [.black.opacity(0.28), .clear, .black.opacity(0.84)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(.black.opacity(0.32), in: Circle())
+                    .contentShape(Circle())
+            }
+            .padding(.leading, 16)
+            .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 7) {
+                    Text(lesson.creator)
+                    Text("·")
+                    Text(lesson.durationText)
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.82))
+
+                Text(lesson.title)
+                    .font(.system(size: 29, weight: .bold, design: .serif))
+                    .foregroundStyle(.white)
+                    .lineLimit(3)
+
+                Button {
+                    if let url = lesson.watchURL() { openURL(url) }
+                } label: {
+                    Label("在哔哩哔哩观看", systemImage: "play.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 15)
+                        .frame(height: 38)
+                        .background(KnowledgePagePalette.accent, in: Capsule())
+                }
+                .buttonStyle(LearningPressStyle())
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+        .frame(height: 292)
+    }
+
+    private var introduction: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("这堂课讲什么")
+            Text(lesson.description.isEmpty ? lesson.summary : lesson.description)
+                .font(.system(size: 15.5))
+                .foregroundStyle(.primary.opacity(0.86))
+                .lineSpacing(6)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 26)
+    }
+
+    @ViewBuilder
+    private var watchPoints: some View {
+        if !lesson.watchPoints.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                sectionTitle("带着问题看")
+                VStack(alignment: .leading, spacing: 13) {
+                    ForEach(Array(lesson.watchPoints.enumerated()), id: \.offset) { index, point in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .frame(width: 23, height: 23)
+                                .background(KnowledgePagePalette.accent, in: Circle())
+                            Text(point)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.primary.opacity(0.88))
+                                .padding(.top, 2)
+                        }
+                    }
+                }
+                .padding(16)
+                .background(KnowledgePagePalette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+        }
+    }
+
+    @ViewBuilder
+    private var chapters: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                sectionTitle("章节")
+                Spacer()
+                if isLoadingDetail { ProgressView().controlSize(.small) }
+            }
+
+            if !lesson.chapters.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(lesson.chapters.enumerated()), id: \.element.id) { index, chapter in
+                        Button {
+                            if let url = lesson.watchURL(at: chapter.startSeconds) { openURL(url) }
+                        } label: {
+                            HStack(spacing: 13) {
+                                Text(chapter.timestampText)
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(KnowledgePagePalette.accent)
+                                    .frame(width: 42, alignment: .leading)
+                                Text(chapter.title)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer()
+                                Image(systemName: "play.circle")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 14)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if index != lesson.chapters.indices.last {
+                            Divider().padding(.leading, 55)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 28)
+    }
+
+    @ViewBuilder
+    private var relatedTopics: some View {
+        if !lesson.relatedTopics.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("顺着学")
+                Text("这些概念能帮你把视频里的方法落到具体知识上。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(lesson.relatedTopics) { topic in
+                            Text(topic.title)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(KnowledgePagePalette.accent)
+                                .padding(.horizontal, 11)
+                                .frame(height: 32)
+                                .background(KnowledgePagePalette.accent.opacity(0.09), in: Capsule())
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+        }
+    }
+
+    private var sourceNote: some View {
+        Text("视频版权归原作者所有，本页提供学习导览与外部观看入口。")
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 20)
+            .padding(.top, 30)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 21, weight: .bold, design: .serif))
     }
 }
 

@@ -163,6 +163,88 @@ struct LearningBlock: Decodable, Hashable, Identifiable {
 struct LearningCatalogResponse: Decodable { let data: LearningCatalog }
 struct LearningTopicResponse: Decodable { let data: LearningTopic }
 
+struct LearningVideoLibrary: Decodable, Equatable {
+    let lessons: [LearningVideoLesson]
+}
+
+struct LearningVideoLibraryResponse: Decodable {
+    let data: LearningVideoLibrary
+}
+
+struct LearningVideoLessonResponse: Decodable {
+    let data: LearningVideoLesson
+}
+
+struct LearningVideoLesson: Decodable, Identifiable, Hashable {
+    let id: String
+    let platform: String
+    let creator: String
+    let title: String
+    let summary: String
+    let externalID: String?
+    let watchURLValue: String
+    let coverURLValue: String?
+    let durationSeconds: Int?
+    let description: String
+    let watchPoints: [String]
+    let chapters: [LearningVideoChapter]
+    let relatedTopics: [LearningVideoRelatedTopic]
+
+    enum CodingKeys: String, CodingKey {
+        case id, platform, creator, title, summary, description, chapters
+        case externalID = "external_id"
+        case watchURLValue = "watch_url"
+        case coverURLValue = "cover_url"
+        case durationSeconds = "duration_seconds"
+        case watchPoints = "watch_points"
+        case relatedTopics = "related_topics"
+    }
+
+    var coverURL: URL? {
+        guard let coverURLValue else { return nil }
+        return URL(string: coverURLValue)
+    }
+
+    var durationText: String {
+        guard let durationSeconds, durationSeconds > 0 else { return "视频课" }
+        return "\(max(1, Int(ceil(Double(durationSeconds) / 60)))) 分钟"
+    }
+
+    func watchURL(at seconds: Int = 0) -> URL? {
+        guard var components = URLComponents(string: watchURLValue) else { return nil }
+        if seconds > 0 {
+            var items = components.queryItems ?? []
+            items.removeAll { $0.name == "t" }
+            items.append(URLQueryItem(name: "t", value: String(seconds)))
+            components.queryItems = items
+        }
+        return components.url
+    }
+}
+
+struct LearningVideoChapter: Decodable, Identifiable, Hashable {
+    let id: Int
+    let title: String
+    let startSeconds: Int
+    let endSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case startSeconds = "start_seconds"
+        case endSeconds = "end_seconds"
+    }
+
+    var timestampText: String {
+        String(format: "%d:%02d", startSeconds / 60, startSeconds % 60)
+    }
+}
+
+struct LearningVideoRelatedTopic: Decodable, Identifiable, Hashable {
+    let id: String
+    let title: String
+    let category: String
+}
+
 @MainActor
 @Observable
 final class LearningProgressStore {
