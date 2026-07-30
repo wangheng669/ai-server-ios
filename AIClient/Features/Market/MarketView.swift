@@ -12,18 +12,27 @@ private enum MarketStyle {
     static let purple = accent
 }
 
+private struct MarketDetailRoute: Identifiable, Equatable {
+    let symbol: String
+    var id: String { symbol }
+}
+
 struct MarketView: View {
     @Binding private var showsDetail: Bool
     private let store: MarketStore
-    @State private var path: [String] = {
+    @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
-            return [String(argument.dropFirst("--market-detail-symbol=".count))]
+            return MarketDetailRoute(symbol: String(argument.dropFirst("--market-detail-symbol=".count)))
         }
-        if ProcessInfo.processInfo.arguments.contains("--market-vix-detail-preview") { return ["^VIX"] }
-        return ProcessInfo.processInfo.arguments.contains("--market-detail-preview") ? ["^NDX"] : []
+        if ProcessInfo.processInfo.arguments.contains("--market-vix-detail-preview") {
+            return MarketDetailRoute(symbol: "^VIX")
+        }
+        return ProcessInfo.processInfo.arguments.contains("--market-detail-preview")
+            ? MarketDetailRoute(symbol: "^NDX")
+            : nil
         #else
-        []
+        nil
         #endif
     }()
     @Environment(\.scenePhase) private var scenePhase
@@ -41,16 +50,22 @@ struct MarketView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            MarketHomeView(store: store) { path.append($0) }
-                .navigationDestination(for: String.self) { symbol in
-                    MarketIndexDetailView(
-                        symbol: symbol,
-                        store: store,
-                        onSelectSymbol: { path.append($0) }
-                    )
+        MarketHomeView(store: store) {
+            selectedDetail = MarketDetailRoute(symbol: $0)
+        }
+        .sheet(item: $selectedDetail) { route in
+            MarketIndexDetailView(
+                symbol: route.symbol,
+                store: store,
+                onSelectSymbol: {
+                    selectedDetail = MarketDetailRoute(symbol: $0)
                 }
-                .toolbar(.hidden, for: .navigationBar)
+            )
+            .id(route.symbol)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(MarketStyle.surface)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -60,8 +75,8 @@ struct MarketView: View {
             guard rootTabIsActive, phase == .active else { return }
             Task { await store.resumeUpdates() }
         }
-        .onChange(of: path) { _, path in showsDetail = !path.isEmpty }
-        .onAppear { showsDetail = !path.isEmpty }
+        .onChange(of: selectedDetail) { _, route in showsDetail = route != nil }
+        .onAppear { showsDetail = selectedDetail != nil }
         .onDisappear { showsDetail = false }
     }
 }
@@ -2159,7 +2174,6 @@ private struct MarketIndexDetailView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .background(InteractivePopGestureEnabler())
         .task {
             if isIndex { await store.loadIndexConstituents(symbol: symbol) }
             if showsCompanyProfile, let quote {
@@ -2179,11 +2193,11 @@ private struct MarketIndexDetailView: View {
     private var detailNavigation: some View {
         HStack {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 21, weight: .medium))
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
                     .frame(width: 44, height: 44, alignment: .leading)
             }
-            .accessibilityLabel("返回市场")
+            .accessibilityLabel("关闭行情详情")
             Spacer()
             ShareLink(item: shareText) {
                 Image(systemName: "square.and.arrow.up")
