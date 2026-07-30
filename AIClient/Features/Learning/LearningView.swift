@@ -20,7 +20,7 @@ struct LearningView: View {
     @State private var selectedIdeologyPerson: SpecialPerson?
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
-    @State private var conceptFilter: KnowledgeConceptFilter = .all
+    @State private var shuffledConcepts: [KnowledgeConceptCard] = []
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") {
@@ -111,7 +111,9 @@ struct LearningView: View {
         }
         .sheet(item: $selectedConcept) { concept in
             KnowledgeConceptDetailSheet(
-                cards: conceptFilter.filter(store.conceptLibrary?.concepts ?? [concept]),
+                cards: shuffledConcepts.isEmpty
+                    ? (store.conceptLibrary?.concepts ?? [concept])
+                    : shuffledConcepts,
                 initialID: concept.id
             )
         }
@@ -433,22 +435,13 @@ struct LearningView: View {
     @ViewBuilder
     private var conceptsContent: some View {
         if let library = store.conceptLibrary {
-            let concepts = conceptFilter.filter(library.concepts)
+            let concepts = shuffledConcepts.isEmpty ? library.concepts : shuffledConcepts
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 10) {
-                    ForEach(KnowledgeConceptFilter.allCases) { filter in
-                        conceptFilterButton(filter)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 18)
-
                 if concepts.isEmpty {
                     ContentUnavailableView(
-                        "暂无相关内容",
+                        "暂无概念",
                         systemImage: "rectangle.stack",
-                        description: Text("切换分类或下拉刷新后重试")
+                        description: Text("下拉刷新后重试")
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.top, 36)
@@ -477,32 +470,12 @@ struct LearningView: View {
                         .scrollPosition(id: $selectedConceptID)
                     }
                     .frame(height: 452)
-
-                    HStack(spacing: 8) {
-                        ForEach(concepts) { concept in
-                            Circle()
-                                .fill(
-                                    selectedConceptID == concept.id
-                                        ? KnowledgePagePalette.accent
-                                        : Color.secondary.opacity(0.22)
-                                )
-                                .frame(width: selectedConceptID == concept.id ? 9 : 7)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .animation(.snappy(duration: 0.2), value: selectedConceptID)
-
-                    Label("向左滑，继续了解", systemImage: "arrow.left")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 12)
                 }
             }
-            .onChange(of: concepts.map(\.id), initial: true) { _, IDs in
-                if let selectedConceptID, IDs.contains(selectedConceptID) {
-                    return
-                }
+            .onChange(of: library.concepts, initial: true) { _, loadedConcepts in
+                let shuffled = loadedConcepts.shuffled()
+                shuffledConcepts = shuffled
+                let IDs = shuffled.map(\.id)
                 #if DEBUG
                 if let previewIndex = conceptCardPreviewIndex,
                    IDs.indices.contains(previewIndex) {
@@ -550,34 +523,6 @@ struct LearningView: View {
         return Int(argument.dropFirst(prefix.count))
     }
     #endif
-
-    private func conceptFilterButton(_ filter: KnowledgeConceptFilter) -> some View {
-        Button {
-            withAnimation(.snappy(duration: 0.22)) {
-                conceptFilter = filter
-            }
-        } label: {
-            Text(filter.title)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(conceptFilter == filter ? .white : .primary)
-                .padding(.horizontal, 20)
-                .frame(height: 40)
-                .background(
-                    conceptFilter == filter
-                        ? KnowledgePagePalette.accent
-                        : KnowledgePagePalette.surface,
-                    in: Capsule()
-                )
-                .overlay {
-                    if conceptFilter != filter {
-                        Capsule()
-                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(conceptFilter == filter ? .isSelected : [])
-    }
 
     @ViewBuilder
     private var ideologyContent: some View {
@@ -698,33 +643,6 @@ private enum KnowledgeSection: String {
         case .books: "书籍"
         case .concepts: "概念"
         case .ideology: "意识形态"
-        }
-    }
-}
-
-private enum KnowledgeConceptFilter: String, CaseIterable, Identifiable {
-    case all
-    case events
-    case people
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: "全部"
-        case .events: "事件"
-        case .people: "人物"
-        }
-    }
-
-    func filter(_ concepts: [KnowledgeConceptCard]) -> [KnowledgeConceptCard] {
-        switch self {
-        case .all:
-            concepts
-        case .events:
-            concepts.filter { $0.kind == .event }
-        case .people:
-            concepts.filter { $0.kind == .person }
         }
     }
 }
