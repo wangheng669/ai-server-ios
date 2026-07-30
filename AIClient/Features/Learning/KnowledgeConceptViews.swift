@@ -19,98 +19,119 @@ struct KnowledgeConceptCarouselCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(concept.subtitle.isEmpty ? concept.kind.title : concept.subtitle)
-                    .font(.system(size: 13, weight: .semibold, design: .serif))
-                    .foregroundStyle(KnowledgeConceptPalette.accent)
-                    .padding(.horizontal, 11)
-                    .frame(height: 31)
-                    .background(KnowledgeConceptPalette.accent.opacity(0.08), in: Capsule())
-                Spacer()
-                Text(String(format: "%02d / %02d", index + 1, count))
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
+            hero
 
-            Text(concept.title)
-                .font(.system(size: 35, weight: .bold, design: .serif))
-                .foregroundStyle(.primary)
-                .padding(.top, 17)
+            VStack(alignment: .leading, spacing: 15) {
+                Text(concept.summary)
+                    .font(.system(size: 15.5, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.88))
+                    .lineSpacing(4)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            conceptImage
-                .frame(height: 225)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .padding(.top, 16)
+                HStack(alignment: .top, spacing: 11) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(KnowledgeConceptPalette.accent)
+                        .frame(width: 28, height: 28)
+                        .background(KnowledgeConceptPalette.accent.opacity(0.09), in: Circle())
 
-            Text(concept.summary)
-                .font(.system(size: 15, weight: .medium, design: .serif))
-                .foregroundStyle(.primary.opacity(0.84))
-                .lineSpacing(4)
-                .lineLimit(3)
-                .padding(.top, 15)
-
-            Divider()
-                .padding(.vertical, 14)
-
-            Text("为什么重要")
-                .font(.system(size: 17, weight: .bold, design: .serif))
-                .foregroundStyle(KnowledgeConceptPalette.accent)
-            Text(concept.importance)
-                .font(.system(size: 14, design: .serif))
-                .foregroundStyle(.secondary)
-                .lineSpacing(3)
-                .lineLimit(3)
-                .padding(.top, 6)
-
-            if !concept.keyPeople.isEmpty {
-                Text("关键人物")
-                    .font(.system(size: 15, weight: .bold, design: .serif))
-                    .foregroundStyle(KnowledgeConceptPalette.accent)
-                    .padding(.top, 13)
-                ScrollView(.horizontal) {
-                    HStack(spacing: 7) {
-                        ForEach(concept.keyPeople.prefix(4), id: \.self) { person in
-                            Text(person)
-                                .font(.system(size: 12.5, weight: .medium))
-                                .padding(.horizontal, 10)
-                                .frame(height: 29)
-                                .background(Color.primary.opacity(0.055), in: Capsule())
-                        }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("理解要点")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(KnowledgeConceptPalette.accent)
+                        Text(concept.importance)
+                            .font(.system(size: 13.5))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(3)
+                            .lineLimit(3)
                     }
                 }
-                .scrollIndicators(.hidden)
-                .padding(.top, 7)
-            }
 
-            Spacer(minLength: 12)
+                Spacer(minLength: 0)
 
-            HStack(spacing: 8) {
-                Text("W")
-                    .font(.system(size: 15, weight: .bold, design: .serif))
-                    .frame(width: 29, height: 29)
-                    .background(Color.primary.opacity(0.045), in: Circle())
-                Text("资料来源：维基百科")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 7) {
+                    ForEach(concept.keyPeople.prefix(3), id: \.self) { person in
+                        Text(person)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary.opacity(0.72))
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(Color.primary.opacity(0.05), in: Capsule())
+                    }
+
+                    Spacer(minLength: 4)
+
+                    HStack(spacing: 5) {
+                        Text("查看详情")
+                        Image(systemName: "arrow.right")
+                    }
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(KnowledgeConceptPalette.accent)
+                }
             }
+            .padding(18)
         }
-        .padding(20)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(height: 452, alignment: .top)
         .background(KnowledgeConceptPalette.paper)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(KnowledgeConceptPalette.line, lineWidth: 0.8)
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(KnowledgeConceptPalette.line, lineWidth: 0.7)
         }
-        .shadow(color: .black.opacity(0.07), radius: 16, y: 8)
-        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.08), radius: 20, y: 10)
+        .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(concept.title)，\(concept.summary)")
         .accessibilityHint("打开详细内容")
+    }
+
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            conceptImage
+                .frame(maxWidth: .infinity)
+                .frame(height: 196)
+                .clipped()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.72)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Text(concept.subtitle.isEmpty ? concept.kind.title : concept.subtitle)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(.ultraThinMaterial, in: Capsule())
+
+                    Spacer()
+
+                    Text("\(index + 1) / \(count)")
+                        .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+
+                Spacer(minLength: 0)
+
+                Text(concept.kind.title.uppercased())
+                    .font(.system(size: 10.5, weight: .bold))
+                    .tracking(2)
+                    .foregroundStyle(.white.opacity(0.72))
+
+                Text(concept.title)
+                    .font(.system(size: 31, weight: .bold, design: .serif))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .padding(17)
+        }
+        .frame(height: 196)
     }
 
     @ViewBuilder
@@ -120,10 +141,12 @@ struct KnowledgeConceptCarouselCard: View {
             case .success(let image):
                 image
                     .resizable()
-                    .scaledToFill()
-                    .saturation(0.42)
-                    .contrast(0.93)
-                    .overlay(Color(red: 0.55, green: 0.34, blue: 0.14).opacity(0.08))
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .saturation(0.72)
+                    .contrast(0.96)
+                    .overlay(Color(red: 0.55, green: 0.34, blue: 0.14).opacity(0.05))
             case .failure:
                 imageFallback
             case .empty:
@@ -137,10 +160,17 @@ struct KnowledgeConceptCarouselCard: View {
 
     private var imageFallback: some View {
         ZStack {
-            Color.primary.opacity(0.045)
+            LinearGradient(
+                colors: [
+                    KnowledgeConceptPalette.accent.opacity(0.24),
+                    Color.primary.opacity(0.06)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
             Image(systemName: concept.kind == .person ? "person.crop.rectangle" : "building.columns")
                 .font(.system(size: 44, weight: .light))
-                .foregroundStyle(KnowledgeConceptPalette.accent.opacity(0.55))
+                .foregroundStyle(.white.opacity(0.8))
         }
     }
 }
