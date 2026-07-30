@@ -67,6 +67,7 @@ struct CountryGDPDetailView: View {
     @State private var history: CountryGDPHistory?
     @State private var isLoading = true
     @State private var loadFailed = false
+    @State private var selectedYear: String?
 
     private var localizedName: String {
         if route.iso2Code == "CN" { return "中国" }
@@ -122,7 +123,7 @@ struct CountryGDPDetailView: View {
                 .padding(InvestmentDesign.pageInset)
             }
         }
-        .background(InvestmentDesign.canvas)
+        .background(GDPDesign.porcelain)
         .safeAreaInset(edge: .top, spacing: 0) {
             detailHeader
         }
@@ -147,7 +148,12 @@ struct CountryGDPDetailView: View {
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
         .frame(height: 52)
-        .background(.bar)
+        .background(GDPDesign.porcelain)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(InvestmentDesign.divider)
+                .frame(height: 0.5)
+        }
     }
 
     private func hero(_ history: CountryGDPHistory?) -> some View {
@@ -203,7 +209,16 @@ struct CountryGDPDetailView: View {
             metricCell("数据区间", period, tint: .primary)
         }
         .padding(.vertical, 14)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(InvestmentDesign.divider)
+                .frame(height: 0.5)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(InvestmentDesign.divider)
+                .frame(height: 0.5)
+        }
     }
 
     private func metricCell(_ label: String, _ value: String, tint: Color) -> some View {
@@ -246,7 +261,14 @@ struct CountryGDPDetailView: View {
     }
 
     private func trendSection(_ history: CountryGDPHistory) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        let selectedPoint = selectedYear.flatMap { year in
+            history.points.first(where: { String($0.year) == year })
+        }
+        let focusedPoint = selectedPoint ?? history.points.last
+        let yMaximum = chartMaximum(history)
+        let yTicks = chartTicks(maximum: yMaximum)
+
+        return VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("长期走势")
@@ -256,7 +278,17 @@ struct CountryGDPDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if let first = history.points.first, let last = history.points.last, first.gdpCurrentUSD > 0 {
+                if let selectedPoint {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(String(selectedPoint.year))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(CountryGDPFormat.ranking(selectedPoint.gdpCurrentUSD))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .monospacedDigit()
+                    }
+                } else if let first = history.points.first, let last = history.points.last, first.gdpCurrentUSD > 0 {
                     let totalGrowth = (last.gdpCurrentUSD / first.gdpCurrentUSD - 1) * 100
                     Text("\(totalGrowth >= 0 ? "+" : "")\(totalGrowth, specifier: "%.0f")%")
                         .font(.subheadline.weight(.semibold))
@@ -270,34 +302,38 @@ struct CountryGDPDetailView: View {
                 )
                 .foregroundStyle(
                     .linearGradient(
-                        colors: [InvestmentDesign.accent.opacity(0.22), InvestmentDesign.accent.opacity(0.015)],
+                        colors: [InvestmentDesign.accent.opacity(0.18), InvestmentDesign.accent.opacity(0.01)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
+
                 LineMark(
                     x: .value("年份", String(point.year)),
                     y: .value("GDP", point.gdpCurrentUSD)
                 )
                 .foregroundStyle(InvestmentDesign.accent)
-                .lineStyle(StrokeStyle(lineWidth: 2.25, lineCap: .round, lineJoin: .round))
-                PointMark(
-                    x: .value("年份", String(point.year)),
-                    y: .value("GDP", point.gdpCurrentUSD)
-                )
-                .foregroundStyle(InvestmentDesign.accent)
-                .symbolSize(point.id == history.points.last?.id ? 42 : 0)
+                .lineStyle(StrokeStyle(lineWidth: 2.15, lineCap: .round, lineJoin: .round))
 
-                if point.id == history.points.last?.id {
-                    RuleMark(x: .value("最新年份", String(point.year)))
-                        .foregroundStyle(InvestmentDesign.accent.opacity(0.18))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                if point.id == focusedPoint?.id, let focusedPoint {
+                    RuleMark(x: .value("选中年份", String(focusedPoint.year)))
+                        .foregroundStyle(InvestmentDesign.accent.opacity(0.24))
+                        .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+
+                    PointMark(
+                        x: .value("选中年份", String(focusedPoint.year)),
+                        y: .value("GDP", focusedPoint.gdpCurrentUSD)
+                    )
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .symbolSize(48)
                 }
             }
+            .chartYScale(domain: 0...yMaximum)
             .chartXScale(range: .plotDimension(startPadding: 18, endPadding: 18))
             .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine().foregroundStyle(InvestmentDesign.divider)
+                AxisMarks(position: .leading, values: yTicks) { value in
+                    AxisGridLine()
+                        .foregroundStyle(InvestmentDesign.divider.opacity(0.65))
                     AxisValueLabel {
                         if let amount = value.as(Double.self) {
                             Text(CountryGDPFormat.axis(amount))
@@ -306,19 +342,46 @@ struct CountryGDPDetailView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: history.points.enumerated().compactMap { index, point in
-                    index.isMultiple(of: 3) || point.id == history.points.last?.id ? String(point.year) : nil
-                }) { value in
-                    AxisValueLabel {
-                        if let year = value.as(String.self) {
-                            Text(year)
-                        }
-                    }
+                AxisMarks(values: chartYears(history)) {
+                    AxisValueLabel()
                 }
             }
-            .frame(height: 194)
+            .chartXSelection(value: $selectedYear)
+            .frame(height: 208)
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
+    }
+
+    private func chartMaximum(_ history: CountryGDPHistory) -> Double {
+        let maximum = history.points.map(\.gdpCurrentUSD).max() ?? 1
+        let step = chartStep(for: maximum)
+        return max(step, ceil(maximum / step) * step)
+    }
+
+    private func chartStep(for maximum: Double) -> Double {
+        switch maximum {
+        case 10_000_000_000_000...: return 5_000_000_000_000
+        case 2_000_000_000_000...: return 1_000_000_000_000
+        case 500_000_000_000...: return 250_000_000_000
+        case 100_000_000_000...: return 50_000_000_000
+        default: return max(1, maximum / 4)
+        }
+    }
+
+    private func chartTicks(maximum: Double) -> [Double] {
+        let step = chartStep(for: maximum)
+        return stride(from: 0, through: maximum, by: step).map { $0 }
+    }
+
+    private func chartYears(_ history: CountryGDPHistory) -> [String] {
+        let points = history.points
+        guard points.count > 4 else { return points.map { String($0.year) } }
+        return [
+            String(points[0].year),
+            String(points[points.count / 3].year),
+            String(points[(points.count * 2) / 3].year),
+            String(points[points.count - 1].year)
+        ]
     }
 
     private func annualHistory(_ history: CountryGDPHistory) -> some View {
