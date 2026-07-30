@@ -117,6 +117,10 @@ struct InvestmentView: View {
 private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
 
+    private var usesDarkStyle: Bool {
+        selection == .gdp
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
@@ -131,7 +135,11 @@ private struct InvestmentHeader: View {
                             VStack(spacing: 0) {
                                 Text(section.rawValue)
                                     .font(.system(size: 14, weight: selection == section ? .semibold : .regular))
-                                    .foregroundStyle(selection == section ? Color.primary : Color.secondary)
+                                    .foregroundStyle(
+                                        usesDarkStyle
+                                            ? (selection == section ? Color.white : Color.white.opacity(0.6))
+                                            : (selection == section ? Color.primary : Color.secondary)
+                                    )
                                     .frame(height: 42)
                                 Capsule()
                                     .fill(selection == section ? InvestmentDesign.accent : .clear)
@@ -154,11 +162,12 @@ private struct InvestmentHeader: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 6)
-        .background(InvestmentDesign.surface)
+        .background(usesDarkStyle ? GDPDesign.midnight : InvestmentDesign.surface)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(InvestmentDesign.divider)
+                .fill(usesDarkStyle ? Color.white.opacity(0.08) : InvestmentDesign.divider)
                 .frame(height: 0.5)
         }
+        .animation(.easeOut(duration: 0.18), value: usesDarkStyle)
     }
 }

@@ -1,5 +1,12 @@
 import SwiftUI
 
+enum GDPDesign {
+    static let midnight = Color(red: 0.025, green: 0.105, blue: 0.22)
+    static let midnightLight = Color(red: 0.045, green: 0.18, blue: 0.36)
+    static let porcelain = Color(uiColor: .systemBackground)
+    static let search = Color(uiColor: .secondarySystemBackground)
+}
+
 struct CountryGDPRankingResponse: Decodable {
     let success: Bool
     let data: CountryGDPRanking
@@ -132,45 +139,22 @@ struct CountryGDPRankingView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             overview(ranking)
-                                .padding(.horizontal, InvestmentDesign.pageInset)
+
+                            rankingHeader(ranking)
                                 .padding(.top, 18)
-                                .padding(.bottom, 24)
 
                             searchField
                                 .padding(.horizontal, InvestmentDesign.pageInset)
-                                .padding(.bottom, 22)
+                                .padding(.bottom, 10)
 
-                            rankingHeader(ranking)
-
-                            if visibleCountries.isEmpty {
-                                ContentUnavailableView("没有匹配的国家", systemImage: "magnifyingglass")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 220)
-                            } else {
-                                LazyVStack(spacing: 0) {
-                                    ForEach(Array(visibleCountries.enumerated()), id: \.element.id) { index, country in
-                                        Button {
-                                            selectedCountry = CountryGDPRoute(country: country)
-                                        } label: {
-                                            countryRow(country)
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        if index < visibleCountries.count - 1 {
-                                            Divider()
-                                                .overlay(InvestmentDesign.divider)
-                                                .padding(.leading, 66)
-                                        }
-                                    }
-                                }
-                                .background(InvestmentDesign.surface)
-                            }
+                            countries(ranking)
 
                             sourceFooter(ranking)
                                 .padding(.horizontal, InvestmentDesign.pageInset)
-                                .padding(.vertical, 24)
+                                .padding(.vertical, 22)
                         }
                     }
+                    .background(GDPDesign.porcelain)
                     .scrollIndicators(.hidden)
                     .scrollDismissesKeyboard(.interactively)
                     .refreshable { await load() }
@@ -180,7 +164,7 @@ struct CountryGDPRankingView: View {
                     errorState
                 }
             }
-            .background(InvestmentDesign.canvas)
+            .background(GDPDesign.porcelain)
             .toolbar(.hidden, for: .navigationBar)
         }
         .sheet(item: $selectedCountry) { route in
@@ -188,50 +172,95 @@ struct CountryGDPRankingView: View {
                 .presentationDetents([.fraction(0.72), .large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationBackground(InvestmentDesign.canvas)
+                .presentationBackground(GDPDesign.porcelain)
         }
         .task { await load() }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
     }
 
-    private func overview(_ ranking: CountryGDPRanking) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("全球经济")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Spacer()
-                Text(verbatim: "\(ranking.year)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(InvestmentDesign.accentSoft, in: Capsule())
-            }
-
-            if let leader = ranking.countries.first {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("最大经济体")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(alignment: .lastTextBaseline, spacing: 8) {
-                        Text(leader.flag)
-                            .font(.system(size: 28))
-                        Text(leader.localizedName)
-                            .font(.title3.weight(.semibold))
-                        Spacer()
-                        Text(CountryGDPFormat.compact(leader.gdpCurrentUSD))
-                            .font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.primary)
-                            .minimumScaleFactor(0.8)
-                            .lineLimit(1)
+    @ViewBuilder
+    private func countries(_ ranking: CountryGDPRanking) -> some View {
+        if visibleCountries.isEmpty {
+            ContentUnavailableView("没有匹配的国家", systemImage: "magnifyingglass")
+                .frame(maxWidth: .infinity)
+                .frame(height: 220)
+        } else {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(visibleCountries.enumerated()), id: \.element.id) { index, country in
+                    Button {
+                        selectedCountry = CountryGDPRoute(country: country)
+                    } label: {
+                        countryRow(country)
                     }
-                    Text("名义 GDP · 现价美元")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
+                    .buttonStyle(.plain)
+
+                    if index < visibleCountries.count - 1 {
+                        Divider()
+                            .overlay(InvestmentDesign.divider)
+                            .padding(.leading, 60)
+                    }
                 }
             }
+            .background(GDPDesign.porcelain)
+        }
+    }
+
+    private func overview(_ ranking: CountryGDPRanking) -> some View {
+        ZStack(alignment: .trailing) {
+            LinearGradient(
+                colors: [GDPDesign.midnight, GDPDesign.midnightLight],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            Image(systemName: "globe.asia.australia.fill")
+                .font(.system(size: 132, weight: .thin))
+                .foregroundStyle(.white.opacity(0.045))
+                .offset(x: 34, y: 18)
+
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("全球经济")
+                        .font(.system(size: 27, weight: .bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Text(verbatim: "\(ranking.year)")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.75))
+                }
+
+                if let leader = ranking.countries.first {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("最大经济体")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
+
+                        HStack(spacing: 10) {
+                            Text(leader.flag)
+                                .font(.system(size: 27))
+                            Text(leader.localizedName)
+                                .font(.title3.weight(.semibold))
+                            Spacer()
+                            Text(CountryGDPFormat.compact(leader.gdpCurrentUSD))
+                                .font(.system(size: 21, weight: .semibold, design: .rounded))
+                                .minimumScaleFactor(0.74)
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.white)
+                    }
+                }
+            }
+            .padding(.horizontal, InvestmentDesign.pageInset)
+            .padding(.top, 20)
+            .padding(.bottom, 22)
         }
     }
 
@@ -254,8 +283,8 @@ struct CountryGDPRankingView: View {
         }
         .font(.subheadline)
         .padding(.horizontal, 12)
-        .frame(height: 38)
-        .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(height: 36)
+        .background(GDPDesign.search, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     private func rankingHeader(_ ranking: CountryGDPRanking) -> some View {
@@ -272,59 +301,37 @@ struct CountryGDPRankingView: View {
     }
 
     private func countryRow(_ country: CountryGDP) -> some View {
-        HStack(spacing: 11) {
-            rankView(country.rank)
+        HStack(spacing: 10) {
+            Text("\(country.rank)")
+                .font(.caption.monospacedDigit().weight(country.rank <= 3 ? .semibold : .regular))
+                .foregroundStyle(country.rank <= 3 ? .primary : .secondary)
+                .frame(width: 24)
 
             Text(country.flag)
-                .font(.system(size: 24))
-                .frame(width: 31)
+                .font(.system(size: 22))
+                .frame(width: 30)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(country.localizedName)
-                    .font(.body.weight(.semibold))
-                    .lineLimit(1)
-                Text(country.countryCode)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.tertiary)
-                    .tracking(0.5)
-            }
-            Spacer(minLength: 14)
-            VStack(alignment: .trailing, spacing: 3) {
+            Text(country.localizedName)
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 2) {
                 Text(CountryGDPFormat.ranking(country.gdpCurrentUSD))
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                     .minimumScaleFactor(0.75)
                     .lineLimit(1)
                 changeSummary(country)
             }
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.quaternary)
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
-        .frame(minHeight: 66)
+        .frame(minHeight: 58)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(country))
-    }
-
-    @ViewBuilder
-    private func rankView(_ rank: Int) -> some View {
-        if rank <= 3 {
-            Text("\(rank)")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(rank == 1 ? Color.orange : InvestmentDesign.accent)
-                .frame(width: 26, height: 26)
-                .background(
-                    (rank == 1 ? Color.orange : InvestmentDesign.accent).opacity(0.11),
-                    in: Circle()
-                )
-        } else {
-            Text("\(rank)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 26)
-        }
     }
 
     @ViewBuilder
