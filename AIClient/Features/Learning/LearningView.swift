@@ -15,7 +15,9 @@ struct LearningView: View {
     @State private var store = LearningStore()
     @State private var repository = LearningContentRepository()
     @State private var progressStore = LearningProgressStore()
+    @State private var peopleStore = PeopleStore()
     @State private var path: [LearningRoute] = []
+    @State private var selectedIdeologyPerson: SpecialPerson?
     @State private var selectedSection: KnowledgeSection = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") {
@@ -59,6 +61,17 @@ struct LearningView: View {
                 }
             }
         }
+        .sheet(isPresented: ideologyPersonIsPresented) {
+            PersonDetailSheet(
+                selectedPerson: $selectedIdeologyPerson,
+                people: ideologyPeople,
+                onClose: { selectedIdeologyPerson = nil }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
+        }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             async let catalog: Void = store.load()
@@ -83,7 +96,10 @@ struct LearningView: View {
             #endif
         }
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
-            showsDetail = !isEmpty
+            showsDetail = !isEmpty || selectedIdeologyPerson != nil
+        }
+        .onChange(of: selectedIdeologyPerson) { _, person in
+            showsDetail = !path.isEmpty || person != nil
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
@@ -94,6 +110,10 @@ struct LearningView: View {
                 return
             }
             await repository.prefetch(section.topics.prefix(10))
+        }
+        .task(id: "\(rootTabIsActive)-\(selectedSection)") {
+            guard rootTabIsActive, selectedSection == .ideology else { return }
+            await peopleStore.load()
         }
         .onDisappear { showsDetail = false }
     }
@@ -138,7 +158,7 @@ struct LearningView: View {
                     case .concepts:
                         await store.load(force: true)
                     case .ideology:
-                        return
+                        await peopleStore.load(force: true)
                     }
                 }
             }
@@ -461,24 +481,72 @@ struct LearningView: View {
 
     @ViewBuilder
     private var ideologyContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("意识形态")
-                .font(.system(size: 24, weight: .bold, design: .serif))
-            Text("理解塑造社会与公共生活的观念体系")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 18)
+        if peopleStore.isLoading && peopleStore.people.isEmpty {
+            ProgressView("正在载入人物")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 44)
+        } else if let error = peopleStore.errorMessage, peopleStore.people.isEmpty {
+            ContentUnavailableView {
+                Label("人物载入失败", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("重新载入") {
+                    Task { await peopleStore.load(force: true) }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+        } else if ideologyPeople.isEmpty {
+            ContentUnavailableView(
+                "暂无人物",
+                systemImage: "person.2",
+                description: Text("人物资料正在整理中")
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(ideologyPeople.enumerated()), id: \.element.id) { index, person in
+                    Button {
+                        selectedIdeologyPerson = person
+                    } label: {
+                        IdeologyPersonRow(person: person, baseURL: peopleStore.baseURL)
+                    }
+                    .buttonStyle(LearningPressStyle())
 
-        ContentUnavailableView(
-            "暂无意识形态内容",
-            systemImage: "point.3.connected.trianglepath.dotted",
-            description: Text("相关内容会在这里展示")
+                    if index != ideologyPeople.indices.last {
+                        Divider()
+                            .padding(.leading, 90)
+                    }
+                }
+            }
+            .background(KnowledgePagePalette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private var ideologyPeople: [SpecialPerson] {
+        let names = ["胡锡进", "王冰冰"]
+        return names.compactMap { name in
+            peopleStore.people.first { $0.name == name }
+        }
+    }
+
+    private var ideologyPersonIsPresented: Binding<Bool> {
+        Binding(
+            get: { selectedIdeologyPerson != nil },
+            set: { isPresented in
+                if !isPresented {
+                    selectedIdeologyPerson = nil
+                }
+            }
         )
-        .frame(maxWidth: .infinity)
-        .padding(.top, 36)
     }
 
     private func stockTopics(in catalog: LearningCatalog) -> [LearningTopic] {
@@ -564,6 +632,47 @@ private struct LearningMilestone: Identifiable {
     let topic: LearningTopic
 
     var id: String { "\(title)-\(topic.id)" }
+}
+
+private struct IdeologyPersonRow: View {
+    let person: SpecialPerson
+    let baseURL: URL
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            AvatarView(
+                url: person.avatarURL(baseURL: baseURL),
+                name: person.name,
+                size: 56,
+                assetName: person.avatarAssetName
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(person.name)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(person.organizationName ?? person.topic.rawValue)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(person.summary)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.primary)
+                    .lineSpacing(2)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 22)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+    }
 }
 
 private struct WeeklyStudyCard: View {
