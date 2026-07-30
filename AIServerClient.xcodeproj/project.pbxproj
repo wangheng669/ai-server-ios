@@ -38,6 +38,7 @@
 		98C37AD5B7A82018DFF1B291 /* MarketModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF6BC692002C20D456E9D73 /* MarketModels.swift */; };
 		9C0435A43070CEEF7C5977E8 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4451E467F4556EF68A32271 /* PeopleView.swift */; };
 		A12DB4EFD18F02485AC3A268 /* PeopleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905EA06C318F52C44CED7F0E /* PeopleModels.swift */; };
+		B55F6FF2942E844AB7A7C342 /* KnowledgeConceptViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5CF07B6B532341EA1E9FFC /* KnowledgeConceptViews.swift */; };
 		BCE08613AAF3FE8AE92F8724 /* WikipediaArticleSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3686E2A6A6443140E186A435 /* WikipediaArticleSupport.swift */; };
 		C844C5ED835C1B08C94DC464 /* NewsFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B9ED3C144483DC5D1DFAA3A /* NewsFeedViewModel.swift */; };
 		D146819617D52DA2230A9506 /* PostDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */; };
@@ -106,6 +107,7 @@
 		D9D7B5B9A81B19337F41D31D /* FamousHoldingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsTests.swift; sourceTree = "<group>"; };
 		DEBD6D31DCEDA25975180F41 /* FamousHoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsView.swift; sourceTree = "<group>"; };
 		F4451E467F4556EF68A32271 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
+		FF5CF07B6B532341EA1E9FFC /* KnowledgeConceptViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeConceptViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -143,6 +145,7 @@
 		4E38F52FD860529B0FC42DEA /* Learning */ = {
 			isa = PBXGroup;
 			children = (
+				FF5CF07B6B532341EA1E9FFC /* KnowledgeConceptViews.swift */,
 				07CD0E8186D0B14FE290474A /* LearningDetailView.swift */,
 				17DC4FBD3DC2E026FF2278B2 /* LearningModels.swift */,
 				5D7DCAC8CCF496B338DF783E /* LearningService.swift */,
@@ -380,6 +383,7 @@
 				F8D3287EB5936C8F9BA30ECB /* FamousHoldingsView.swift in Sources */,
 				4A2C39B8984DD9FAF7E37AC2 /* IndustryPanoramaView.swift in Sources */,
 				3AC230E32369C12C743332AD /* InvestmentView.swift in Sources */,
+				B55F6FF2942E844AB7A7C342 /* KnowledgeConceptViews.swift in Sources */,
 				E75E054E3F18A9E8EA88AD66 /* LearningDetailView.swift in Sources */,
 				37F017F6121304BAF106D46C /* LearningModels.swift in Sources */,
 				19D96E271C5B8E031ED23EE1 /* LearningService.swift in Sources */,
