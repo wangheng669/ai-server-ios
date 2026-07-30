@@ -217,6 +217,7 @@ struct PostMediaGrid: View {
     var cornerRadius: CGFloat = 8
     @State private var previewURL: URL?
     @State private var compactImageURLs: Set<URL> = []
+    @State private var loadedSingleImageAspectRatio: CGFloat?
 
     private var knownCompactImageURLs: Set<URL> {
         guard post.isRSS else { return [] }
@@ -230,7 +231,10 @@ struct PostMediaGrid: View {
 
     private var resolvedSingleImageHeight: CGFloat {
         if let singleImageHeight { return singleImageHeight }
-        let availableWidth = availableWidth ?? UIScreen.main.bounds.width - 28
+        let resolvedWidth = availableWidth ?? UIScreen.main.bounds.width - 28
+        if let loadedSingleImageAspectRatio, loadedSingleImageAspectRatio > 0 {
+            return min(resolvedWidth / loadedSingleImageAspectRatio, singleImageMaxHeight ?? 560)
+        }
         guard let image = post.images?.first(where: { !post.isRSS || !$0.isKnownInlineAsset }),
               let width = image.width,
               let height = image.height,
@@ -238,10 +242,14 @@ struct PostMediaGrid: View {
               height > 0 else {
             return min(210, singleImageMaxHeight ?? 210)
         }
-        return min(availableWidth * CGFloat(height) / CGFloat(width), singleImageMaxHeight ?? 560)
+        return min(resolvedWidth * CGFloat(height) / CGFloat(width), singleImageMaxHeight ?? 560)
     }
 
-    private func classifyInlineAsset(_ image: UIImage, at url: URL) {
+    private func recordLoadedImage(_ image: UIImage, at url: URL, isSingleImage: Bool) {
+        if isSingleImage, image.size.width > 0, image.size.height > 0 {
+            loadedSingleImageAspectRatio = image.size.width / image.size.height
+        }
+
         guard post.isRSS, let cgImage = image.cgImage else { return }
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
@@ -276,9 +284,10 @@ struct PostMediaGrid: View {
                         height: resolvedSingleImageHeight,
                         cornerRadius: cornerRadius,
                         contentMode: singleImageContentMode,
-                        onImageLoaded: { classifyInlineAsset($0, at: url) }
+                        onImageLoaded: { recordLoadedImage($0, at: url, isSingleImage: true) }
                     )
                 }
+                .frame(maxWidth: .infinity)
                 .buttonStyle(.plain)
                 .accessibilityLabel("查看图片")
             } else if !urls.isEmpty {
@@ -290,7 +299,7 @@ struct PostMediaGrid: View {
                                 height: multiImageHeight,
                                 cornerRadius: 6,
                                 contentMode: .fit,
-                                onImageLoaded: { classifyInlineAsset($0, at: url) }
+                                onImageLoaded: { recordLoadedImage($0, at: url, isSingleImage: false) }
                             )
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         }
@@ -311,6 +320,8 @@ struct PostMediaGrid: View {
                 .accessibilityLabel("查看图片")
             }
         }
+        .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
+        .clipped()
         .fullScreenCover(item: $previewURL) { url in ZoomableImageView(url: url) }
     }
 }

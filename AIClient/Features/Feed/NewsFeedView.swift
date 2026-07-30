@@ -2386,7 +2386,7 @@ private struct NewsCardView: View {
                 PostMediaGrid(
                     post: post,
                     singleImageMaxHeight: 220,
-                    singleImageContentMode: .fill,
+                    singleImageContentMode: .fit,
                     multiImageHeight: 148,
                     availableWidth: max(UIScreen.main.bounds.width - 64, 240)
                 )
