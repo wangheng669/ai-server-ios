@@ -18,6 +18,7 @@ struct LearningView: View {
     @State private var peopleStore = PeopleStore()
     @State private var path: [LearningRoute] = []
     @State private var selectedIdeologyPerson: SpecialPerson?
+    @State private var ideologyCampFilter: IdeologyCampFilter = .all
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
     @State private var shuffledConcepts: [KnowledgeConceptCard] = []
@@ -551,33 +552,126 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
         } else {
-            VStack(spacing: 0) {
-                ForEach(Array(ideologyPeople.enumerated()), id: \.element.id) { index, person in
-                    Button {
-                        selectedIdeologyPerson = person
-                    } label: {
-                        IdeologyPersonRow(person: person, baseURL: peopleStore.baseURL)
-                    }
-                    .buttonStyle(LearningPressStyle())
+            VStack(alignment: .leading, spacing: 18) {
+                ideologyCampPicker
 
-                    if index != ideologyPeople.indices.last {
-                        Divider()
-                            .padding(.leading, 90)
-                    }
+                ForEach(visibleIdeologyCamps) { camp in
+                    ideologyCampSection(
+                        title: camp.title,
+                        color: camp.color,
+                        people: ideologyPeople.filter { IdeologyCamp(person: $0) == camp }
+                    )
                 }
-            }
-            .background(KnowledgePagePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+
+                if ideologyCampFilter == .all, !unassignedIdeologyPeople.isEmpty {
+                    ideologyCampSection(
+                        title: "未分组",
+                        color: .secondary,
+                        people: unassignedIdeologyPeople
+                    )
+                }
+
+                Text("阵营仅为内容整理标签")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 20)
         }
     }
 
+    private var ideologyCampPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(IdeologyCampFilter.allCases) { filter in
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        ideologyCampFilter = filter
+                    }
+                } label: {
+                    Text(filter.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(ideologyCampFilter == filter ? Color.primary : Color.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background {
+                            if ideologyCampFilter == filter {
+                                Capsule()
+                                    .fill(KnowledgePagePalette.surface)
+                                    .overlay {
+                                        Capsule()
+                                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+                                    }
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color.primary.opacity(0.035), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+        }
+    }
+
+    private func ideologyCampSection(
+        title: String,
+        color: Color,
+        people: [SpecialPerson]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                Text("\(people.count)")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.flexible(), spacing: 10, alignment: .top),
+                    count: 4
+                ),
+                alignment: .leading,
+                spacing: 14
+            ) {
+                ForEach(people) { person in
+                    Button {
+                        selectedIdeologyPerson = person
+                    } label: {
+                        IdeologyPersonGridCell(
+                            person: person,
+                            baseURL: peopleStore.baseURL
+                        )
+                    }
+                    .buttonStyle(LearningPressStyle())
+                }
+            }
+        }
+    }
+
+    private var visibleIdeologyCamps: [IdeologyCamp] {
+        switch ideologyCampFilter {
+        case .all:
+            IdeologyCamp.allCases
+        case .loyalist:
+            [.loyalist]
+        case .rebel:
+            [.rebel]
+        }
+    }
+
     private var ideologyPeople: [SpecialPerson] {
         peopleStore.people.filter { $0.topic == .ideology }
+    }
+
+    private var unassignedIdeologyPeople: [SpecialPerson] {
+        ideologyPeople.filter { IdeologyCamp(person: $0) == nil }
     }
 
     private var ideologyPersonIsPresented: Binding<Bool> {
@@ -669,6 +763,39 @@ private enum KnowledgePagePalette {
     static let stroke = Color.primary.opacity(0.10)
 }
 
+enum IdeologyCamp: String, CaseIterable, Identifiable {
+    case loyalist = "忠臣"
+    case rebel = "反贼"
+
+    var id: Self { self }
+    var title: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .loyalist:
+            KnowledgePagePalette.accent
+        case .rebel:
+            Color(red: 0.20, green: 0.38, blue: 0.58)
+        }
+    }
+
+    init?(person: SpecialPerson) {
+        guard let camp = Self.allCases.first(where: { person.focusTags.contains($0.rawValue) }) else {
+            return nil
+        }
+        self = camp
+    }
+}
+
+private enum IdeologyCampFilter: String, CaseIterable, Identifiable {
+    case all = "全部"
+    case loyalist = "忠臣"
+    case rebel = "反贼"
+
+    var id: Self { self }
+    var title: String { rawValue }
+}
+
 private struct LearningMilestone: Identifiable {
     let title: String
     let topic: LearningTopic
@@ -676,44 +803,28 @@ private struct LearningMilestone: Identifiable {
     var id: String { "\(title)-\(topic.id)" }
 }
 
-private struct IdeologyPersonRow: View {
+private struct IdeologyPersonGridCell: View {
     let person: SpecialPerson
     let baseURL: URL
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        VStack(spacing: 7) {
             AvatarView(
                 url: person.avatarURL(baseURL: baseURL),
                 name: person.name,
-                size: 56,
+                size: 62,
                 assetName: person.avatarAssetName
             )
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(person.name)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(person.organizationName ?? person.topic.rawValue)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(person.summary)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.primary)
-                    .lineSpacing(2)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .padding(.top, 22)
+            Text(person.name)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
