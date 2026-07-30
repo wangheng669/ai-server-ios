@@ -167,6 +167,37 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(payload.users.first?.xProfileURL?.absoluteString, "https://x.com/peterthiel")
     }
 
+    func testDecodesServerManagedIdeologyTopic() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "categories": [
+                {"id": "ideology", "title": "意识形态", "sort_order": 40}
+              ],
+              "users": [{
+                "user_id": "curated:zhang-weiwei",
+                "user_name": "张维为",
+                "user_desc": "关注中国道路、中国模式与国际秩序。",
+                "organization_name": "复旦大学中国研究院院长",
+                "topic": "ideology",
+                "discussion_keywords": ["张维为", "这就是中国"],
+                "has_own_post_source": false,
+                "today_count": 0,
+                "total_count": 0,
+                "last_post_time": null
+              }]
+            }
+            """.utf8
+        )
+
+        let payload = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data)
+
+        XCTAssertEqual(payload.categories?.compactMap(\.topic), [.ideology])
+        XCTAssertEqual(payload.users.first?.topic, .ideology)
+        XCTAssertEqual(payload.users.first?.name, "张维为")
+    }
+
     func testRelationshipPlannerBuildsServerDrivenLocalGraph() throws {
         let data = Data(
             """

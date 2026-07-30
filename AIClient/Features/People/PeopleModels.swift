@@ -729,6 +729,7 @@ enum PeopleTopic: String, CaseIterable, Identifiable {
     case business = "商业"
     case investment = "投资"
     case politics = "政治"
+    case ideology = "意识形态"
     case history = "历史"
 
     var id: Self { self }
@@ -739,6 +740,7 @@ enum PeopleTopic: String, CaseIterable, Identifiable {
         case "business": self = .business
         case "investment": self = .investment
         case "politics": self = .politics
+        case "ideology": self = .ideology
         case "history": self = .history
         default: return nil
         }
