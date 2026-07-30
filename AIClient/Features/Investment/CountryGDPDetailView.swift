@@ -346,10 +346,49 @@ struct CountryGDPDetailView: View {
                     AxisValueLabel()
                 }
             }
-            .chartXSelection(value: $selectedYear)
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    selectNearestYear(
+                                        at: value.location.x,
+                                        proxy: proxy,
+                                        geometry: geometry,
+                                        history: history
+                                    )
+                                }
+                        )
+                        .accessibilityLabel("GDP 历年趋势")
+                        .accessibilityHint("在图表上左右滑动查看不同年份")
+                }
+            }
             .frame(height: 208)
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
+    }
+
+    private func selectNearestYear(
+        at locationX: CGFloat,
+        proxy: ChartProxy,
+        geometry: GeometryProxy,
+        history: CountryGDPHistory
+    ) {
+        guard !history.points.isEmpty,
+              let plotFrame = proxy.plotFrame else { return }
+
+        let frame = geometry[plotFrame]
+        guard frame.width > 0 else { return }
+        let relativeX = min(max(locationX - frame.minX, 0), frame.width)
+        let progress = relativeX / frame.width
+        guard let index = CountryGDPChartInteraction.nearestIndex(
+            progress: progress,
+            count: history.points.count
+        ) else { return }
+        selectedYear = String(history.points[index].year)
     }
 
     private func chartMaximum(_ history: CountryGDPHistory) -> Double {
@@ -375,11 +414,10 @@ struct CountryGDPDetailView: View {
 
     private func chartYears(_ history: CountryGDPHistory) -> [String] {
         let points = history.points
-        guard points.count > 4 else { return points.map { String($0.year) } }
+        guard points.count > 3 else { return points.map { String($0.year) } }
         return [
             String(points[0].year),
-            String(points[points.count / 3].year),
-            String(points[(points.count * 2) / 3].year),
+            String(points[points.count / 2].year),
             String(points[points.count - 1].year)
         ]
     }
@@ -439,5 +477,13 @@ extension CountryGDPFormat {
             return String(format: "%.0f万亿", value / 1_000_000_000_000)
         }
         return String(format: "%.0f亿", value / 100_000_000)
+    }
+}
+
+enum CountryGDPChartInteraction {
+    static func nearestIndex(progress: CGFloat, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        let clampedProgress = min(max(progress, 0), 1)
+        return Int((clampedProgress * CGFloat(count - 1)).rounded())
     }
 }

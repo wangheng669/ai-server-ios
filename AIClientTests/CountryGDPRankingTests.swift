@@ -69,4 +69,14 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(payload.data.points.count, 2)
         XCTAssertEqual(payload.data.points.last?.rank, 2)
     }
+
+    func testChartDragMapsToNearestYearAndClampsEdges() {
+        XCTAssertNil(CountryGDPChartInteraction.nearestIndex(progress: 0.5, count: 0))
+        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: -0.2, count: 12), 0)
+        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 0, count: 12), 0)
+        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 0.49, count: 12), 5)
+        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 0.51, count: 12), 6)
+        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 1, count: 12), 11)
+        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 1.2, count: 12), 11)
+    }
 }
