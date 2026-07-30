@@ -77,6 +77,7 @@ struct KnowledgeConceptCarouselCard: View {
     let concept: KnowledgeConceptCard
     let index: Int
     let count: Int
+    let width: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -133,7 +134,7 @@ struct KnowledgeConceptCarouselCard: View {
             }
             .padding(18)
         }
-        .frame(height: 452, alignment: .top)
+        .frame(width: width, height: 452, alignment: .top)
         .background(KnowledgeConceptPalette.paper)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay {
@@ -148,51 +149,55 @@ struct KnowledgeConceptCarouselCard: View {
     }
 
     private var hero: some View {
-        ZStack(alignment: .bottomLeading) {
-            conceptImage
-                .frame(maxWidth: .infinity)
-                .frame(height: 196)
-                .clipped()
+        GeometryReader { proxy in
+            ZStack(alignment: .bottomLeading) {
+                conceptImage
+                    .frame(width: proxy.size.width, height: 196)
+                    .clipped()
 
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.72)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.72)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
 
-            VStack(alignment: .leading, spacing: 9) {
-                HStack {
-                    Text(concept.subtitle.isEmpty ? concept.kind.title : concept.subtitle)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(.ultraThinMaterial, in: Capsule())
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text(concept.subtitle.isEmpty ? concept.kind.title : concept.subtitle)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(.ultraThinMaterial, in: Capsule())
 
-                    Spacer()
+                        Spacer()
 
-                    Text("\(index + 1) / \(count)")
-                        .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(.ultraThinMaterial, in: Capsule())
+                        Text("\(index + 1) / \(count)")
+                            .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Text(concept.kind.title.uppercased())
+                        .font(.system(size: 10.5, weight: .bold))
+                        .tracking(2)
+                        .foregroundStyle(.white.opacity(0.72))
+
+                    Text(concept.title)
+                        .font(.system(size: 31, weight: .bold, design: .serif))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
                 }
-
-                Spacer(minLength: 0)
-
-                Text(concept.kind.title.uppercased())
-                    .font(.system(size: 10.5, weight: .bold))
-                    .tracking(2)
-                    .foregroundStyle(.white.opacity(0.72))
-
-                Text(concept.title)
-                    .font(.system(size: 31, weight: .bold, design: .serif))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                .padding(17)
             }
-            .padding(17)
+            .frame(width: proxy.size.width, height: 196)
+            .clipped()
         }
         .frame(height: 196)
+        .clipped()
     }
 
     @ViewBuilder
@@ -345,41 +350,45 @@ private struct KnowledgeConceptDetailPage: View {
     }
 
     private var hero: some View {
-        KnowledgeConceptCachedImage(url: card.coverURL) { image in
-            image
-                .resizable()
-                .scaledToFill()
-                .saturation(0.45)
-                .contrast(0.94)
-        } placeholder: { isLoading in
-            heroFallback
-                .overlay {
-                    if isLoading {
-                        ProgressView()
+        GeometryReader { proxy in
+            KnowledgeConceptCachedImage(url: card.coverURL) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+                    .saturation(0.45)
+                    .contrast(0.94)
+            } placeholder: { isLoading in
+                heroFallback
+                    .overlay {
+                        if isLoading {
+                            ProgressView()
+                        }
                     }
+            }
+            .frame(width: proxy.size.width, height: 250)
+            .clipped()
+            .overlay(alignment: .bottomLeading) {
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.56)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 120)
+                .overlay(alignment: .bottomLeading) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(card.subtitle.isEmpty ? card.kind.title : card.subtitle)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.82))
+                        Text(card.title)
+                            .font(.system(size: 34, weight: .bold, design: .serif))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(20)
                 }
+            }
         }
         .frame(height: 250)
         .clipped()
-        .overlay(alignment: .bottomLeading) {
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.56)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 120)
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(card.subtitle.isEmpty ? card.kind.title : card.subtitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                    Text(card.title)
-                        .font(.system(size: 34, weight: .bold, design: .serif))
-                        .foregroundStyle(.white)
-                }
-                .padding(20)
-            }
-        }
     }
 
     private var heroFallback: some View {
