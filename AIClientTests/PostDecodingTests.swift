@@ -2,6 +2,21 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testWikipediaReaderStyleHidesChromeAndKeepsArticleContentStyled() {
+        let script = WikipediaReaderStyle.script
+
+        XCTAssertTrue(script.contains(".mw-header"))
+        XCTAssertTrue(script.contains(".vector-page-toolbar"))
+        XCTAssertTrue(script.contains("#p-lang-btn"))
+        XCTAssertTrue(script.contains(".mw-editsection"))
+        XCTAssertTrue(script.contains(".vector-toc"))
+        XCTAssertTrue(script.contains(".mw-footer-container"))
+        XCTAssertTrue(script.contains("#firstHeading"))
+        XCTAssertTrue(script.contains(".mw-parser-output"))
+        XCTAssertTrue(script.contains("来自维基百科，自由的百科全书"))
+        XCTAssertTrue(script.contains("font-size: 18px"))
+    }
+
     func testPersonArticleDecoding() throws {
         let data = Data(
             """
