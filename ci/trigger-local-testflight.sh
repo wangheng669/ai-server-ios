@@ -52,6 +52,7 @@ require_local_credentials() {
   : "${APP_STORE_CONNECT_ISSUER_ID:?missing APP_STORE_CONNECT_ISSUER_ID}"
   : "${DEPLOYMENT_STATUS_API_KEY:?missing DEPLOYMENT_STATUS_API_KEY}"
   export APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID
+  export APP_STORE_CONNECT_KEY_PATH="$private_key_path"
   export DEPLOYMENT_STATUS_API_KEY
 }
 
@@ -136,12 +137,12 @@ export DEVELOPER_DIR="$developer_dir"
 export GITHUB_SHA="$main_sha"
 GITHUB_RUN_ID="local-$(date +%Y%m%d%H%M%S)"
 export GITHUB_RUN_ID
-export GITHUB_SERVER_URL="https://github.com"
-export GITHUB_REPOSITORY="wangheng669/ai-server-ios"
-export GITHUB_RUN_URL="local://$GITHUB_RUN_ID"
 builds_before="$work_dir/TestFlightBuildsBeforeUpload.json"
 archive_path="$work_dir/AIServerClient.xcarchive"
 export_path="$work_dir/TestFlightExport"
+GITHUB_ENV="$work_dir/local-release.env"
+export GITHUB_ENV
+: > "$GITHUB_ENV"
 
 log "Preparing the next TestFlight version from main $main_sha."
 TESTFLIGHT_BASE_MARKETING_VERSION="$(
@@ -149,6 +150,10 @@ TESTFLIGHT_BASE_MARKETING_VERSION="$(
 )"
 export TESTFLIGHT_BASE_MARKETING_VERSION
 ruby ci/testflight-processing-notify.rb prepare "$builds_before"
+# The preparation helper writes the selected version using the same
+# environment-file contract as GitHub Actions.
+# shellcheck disable=SC1090
+source "$GITHUB_ENV"
 plutil -replace CFBundleShortVersionString \
   -string "$TESTFLIGHT_MARKETING_VERSION" Config/Info.plist
 
