@@ -87,6 +87,55 @@ struct XCommentsResponse: Decodable {
     }
 }
 
+struct XTweetDetailResponse: Decodable {
+    let success: Bool
+    let data: Payload
+
+    struct Payload: Decodable {
+        let item: XTweetDetailItem
+    }
+}
+
+struct XTweetDetailItem: Decodable, Equatable {
+    let id: String
+    let text: String
+    let noteText: String?
+    let shortText: String?
+
+    var fullText: String {
+        [noteText, text, shortText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .max(by: { $0.count < $1.count }) ?? text
+    }
+}
+
+enum XPostTextFormatter {
+    static func detailText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(
+                of: #"[ \t]+\*(?=\S)"#,
+                with: "\n• ",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"(^|\n)[ \t]*\*(?=\S)"#,
+                with: "$1• ",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: #"\n[ \t]+"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func isTruncated(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
+    }
+}
+
 struct XComment: Decodable, Identifiable, Equatable {
     let id: String
     let text: String
@@ -226,6 +275,11 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
+    var xStoredOriginalContent: String {
+        [meta?.noteText, meta?.rawText, originalDisplayContent]
+            .compactMap(clean)
+            .max(by: { $0.count < $1.count }) ?? originalDisplayContent
+    }
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
     var needsXTranslation: Bool {
         guard sourceName == "X", !hasTranslation, xTweetID != nil else { return false }
@@ -840,6 +894,8 @@ struct PostMeta: Decodable, Hashable {
     let metrics: PostMetrics?
     let lang: String?
     let urls: [String]?
+    let rawText: String?
+    let noteText: String?
     let quotedTweet: XQuotedPost?
     let photoCredit: String?
     let zhihuRank: Int?
@@ -863,6 +919,8 @@ struct PostMeta: Decodable, Hashable {
     let flashPlatforms: [String]?
     enum CodingKeys: String, CodingKey {
         case metrics, lang, urls
+        case rawText = "raw_text"
+        case noteText = "note_text"
         case quotedTweet = "quoted_tweet"
         case photoCredit = "photo_credit"
         case zhihuRank = "zhihu_rank"
@@ -890,7 +948,8 @@ struct PostMeta: Decodable, Hashable {
         platforms: [String]?
     ) -> PostMeta {
         PostMeta(
-            metrics: nil, lang: nil, urls: nil, quotedTweet: nil, photoCredit: nil,
+            metrics: nil, lang: nil, urls: nil, rawText: nil, noteText: nil,
+            quotedTweet: nil, photoCredit: nil,
             zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
             zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
             zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,

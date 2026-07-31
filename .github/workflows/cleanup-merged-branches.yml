@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - office-builder
     steps:
       - name: Check out main with full history
         uses: actions/checkout@v7

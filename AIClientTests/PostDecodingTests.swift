@@ -298,6 +298,26 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.meta?.quotedTweet?.media?.first?.displayURL?.absoluteString, "https://example.com/t.jpg")
     }
 
+    func testXDetailUsesStoredLongTextAndFormatsBullets() throws {
+        let data = #"{"id":7,"source":"x","content":"short…","post_link":"https://x.com/example/status/123","meta":{"raw_text":"价格调整： *第一项 *第二项","note_text":"第一段\n\n价格调整： *第一项 *第二项"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertEqual(post.xStoredOriginalContent, "第一段\n\n价格调整： *第一项 *第二项")
+        XCTAssertEqual(
+            XPostTextFormatter.detailText(post.xStoredOriginalContent),
+            "第一段\n\n价格调整：\n• 第一项\n• 第二项"
+        )
+        XCTAssertFalse(XPostTextFormatter.isTruncated(post.xStoredOriginalContent))
+        XCTAssertTrue(XPostTextFormatter.isTruncated("上游摘要…"))
+    }
+
+    func testDecodesLiveXTweetDetailResponse() throws {
+        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段"}}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(XTweetDetailResponse.self, from: data)
+
+        XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
+    }
+
     func testProtectsModelNamesInXTranslation() {
         XCTAssertEqual(
             PersonDetailStore.presentedTranslation("双子座是谁？格罗克也来了。", original: "Gemini who? Grok is here."),
