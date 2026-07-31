@@ -2,15 +2,41 @@ import XCTest
 @testable import AIServerClient
 
 final class CountryGDPRankingTests: XCTestCase {
-    func testGlobalRankingCategoriesAndSourceURL() {
+    func testGlobalRankingCategories() {
         XCTAssertEqual(
             GlobalRankingCategory.allCases.map(\.rawValue),
             ["国家 GDP", "全球资产"]
         )
-        XCTAssertEqual(
-            GlobalAssetsPage.url.absoluteString,
-            "https://www.coinglass.com/zh/global-assets"
-        )
+    }
+
+    func testDecodesDatabaseBackedGlobalAssetsRanking() throws {
+        let json = """
+        {
+          "success": true,
+          "data": {
+            "source_name": "CoinGlass",
+            "source_url": "https://www.coinglass.com/zh/global-assets",
+            "unit": "USD",
+            "fetched_at": "2026-07-31T12:00:00Z",
+            "assets": [{
+              "rank": 1,
+              "symbol": "GOLD",
+              "name": "黄金",
+              "market_cap_usd": 28510000000000,
+              "price_usd": 4100.9,
+              "change_24h_percent": -1.43,
+              "change_7d_percent": 1.11,
+              "icon_url": "https://cdn.coinglasscdn.com/marketCap/rank/GOLD.png"
+            }]
+          }
+        }
+        """
+        let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: Data(json.utf8))
+        XCTAssertTrue(payload.success)
+        XCTAssertEqual(payload.data.sourceName, "CoinGlass")
+        XCTAssertEqual(payload.data.assets.first?.symbol, "GOLD")
+        XCTAssertEqual(payload.data.assets.first?.marketCapUSD, 28_510_000_000_000)
+        XCTAssertEqual(GlobalAssetsFormat.marketCap(28_510_000_000_000), "$28.51 万亿")
     }
 
     func testDecodesRankingAndLocalizesCountry() throws {

@@ -1,5 +1,4 @@
 import SwiftUI
-import WebKit
 
 enum GDPDesign {
     static let midnight = Color(red: 0.025, green: 0.105, blue: 0.22)
@@ -108,6 +107,73 @@ struct CountryGDPService {
         }
         let payload = try JSONDecoder().decode(CountryGDPHistoryResponse.self, from: data)
         guard payload.success, !payload.data.points.isEmpty else {
+            throw URLError(.cannotParseResponse)
+        }
+        return payload.data
+    }
+}
+
+struct GlobalAssetsRankingResponse: Decodable {
+    let success: Bool
+    let data: GlobalAssetsRanking
+}
+
+struct GlobalAssetsRanking: Decodable {
+    let sourceName: String
+    let sourceURL: URL
+    let unit: String
+    let fetchedAt: String
+    let assets: [GlobalAsset]
+
+    enum CodingKeys: String, CodingKey {
+        case unit, assets
+        case sourceName = "source_name"
+        case sourceURL = "source_url"
+        case fetchedAt = "fetched_at"
+    }
+}
+
+struct GlobalAsset: Decodable, Identifiable {
+    let rank: Int
+    let symbol: String
+    let name: String
+    let marketCapUSD: Double
+    let priceUSD: Double
+    let change24HPercent: Double
+    let change7DPercent: Double
+    let iconURL: URL?
+
+    var id: String { symbol }
+
+    enum CodingKeys: String, CodingKey {
+        case rank, symbol, name
+        case marketCapUSD = "market_cap_usd"
+        case priceUSD = "price_usd"
+        case change24HPercent = "change_24h_percent"
+        case change7DPercent = "change_7d_percent"
+        case iconURL = "icon_url"
+    }
+}
+
+struct GlobalAssetsService {
+    let baseURL: URL
+    let session: URLSession
+
+    init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession = .shared) {
+        self.baseURL = baseURL
+        self.session = session
+    }
+
+    func ranking() async throws -> GlobalAssetsRanking {
+        let url = baseURL.appending(path: "api/v1/economy/global-assets")
+        var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: data)
+        guard payload.success, !payload.data.assets.isEmpty else {
             throw URLError(.cannotParseResponse)
         }
         return payload.data
@@ -473,154 +539,6 @@ enum GlobalRankingCategory: String, CaseIterable, Identifiable {
     case globalAssets = "全球资产"
 
     var id: Self { self }
-}
-
-enum GlobalAssetsPage {
-    static let url = URL(string: "https://www.coinglass.com/zh/global-assets")!
-}
-
-private struct GlobalAssetsRankingView: View {
-    @StateObject private var model = GlobalAssetsWebViewModel()
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            GlobalAssetsWebView(url: GlobalAssetsPage.url, model: model)
-
-            if model.loadFailed {
-                ContentUnavailableView {
-                    Label("全球资产排名暂不可用", systemImage: "globe")
-                } description: {
-                    Text("无法加载 CoinGlass 全球资产页面")
-                } actions: {
-                    Button("重新加载") {
-                        model.reload()
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Link("在浏览器中打开", destination: GlobalAssetsPage.url)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(GDPDesign.porcelain)
-            } else if model.isLoading {
-                ProgressView()
-                    .progressViewStyle(.linear)
-                    .tint(InvestmentDesign.accent)
-                    .accessibilityLabel("正在读取全球资产排名")
-            }
-        }
-        .background(GDPDesign.porcelain)
-    }
-}
-
-@MainActor
-private final class GlobalAssetsWebViewModel: ObservableObject {
-    @Published var isLoading = true
-    @Published var loadFailed = false
-    weak var webView: WKWebView?
-
-    func reload() {
-        isLoading = true
-        loadFailed = false
-        webView?.reloadFromOrigin()
-    }
-}
-
-private struct GlobalAssetsWebView: UIViewRepresentable {
-    let url: URL
-    @ObservedObject var model: GlobalAssetsWebViewModel
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(model: model)
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        model.webView = webView
-        webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData))
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        model.webView = webView
-    }
-
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
-        coordinator.model.webView = nil
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        let model: GlobalAssetsWebViewModel
-
-        init(model: GlobalAssetsWebViewModel) {
-            self.model = model
-        }
-
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            Task { @MainActor in
-                model.isLoading = true
-                model.loadFailed = false
-            }
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { @MainActor in
-                model.isLoading = false
-                model.loadFailed = false
-            }
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            didFail navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            finishWithError(error)
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            didFailProvisionalNavigation navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            finishWithError(error)
-        }
-
-        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            Task { @MainActor in
-                model.isLoading = false
-                model.loadFailed = true
-            }
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            createWebViewWith configuration: WKWebViewConfiguration,
-            for navigationAction: WKNavigationAction,
-            windowFeatures: WKWindowFeatures
-        ) -> WKWebView? {
-            if navigationAction.targetFrame == nil {
-                webView.load(navigationAction.request)
-            }
-            return nil
-        }
-
-        private func finishWithError(_ error: Error) {
-            if (error as? URLError)?.code == .cancelled { return }
-            Task { @MainActor in
-                model.isLoading = false
-                model.loadFailed = true
-            }
-        }
-    }
 }
 
 enum CountryGDPFormat {
