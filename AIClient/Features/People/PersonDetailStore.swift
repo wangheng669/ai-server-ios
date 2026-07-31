@@ -18,6 +18,8 @@ final class PersonDetailStore {
     private(set) var discussionsError: String?
     private(set) var relatedVideosError: String?
     private(set) var articlesError: String?
+    private(set) var articleSearchTextByID: [PersonArticle.ID: String] = [:]
+    private(set) var isIndexingArticleContent = false
     private(set) var canLoadMoreOwnPosts = true
     private(set) var xTranslations: [Int: String] = [:]
     private var loadingXTranslationIDs: Set<Int> = []
@@ -42,6 +44,7 @@ final class PersonDetailStore {
     private func loadArticles(for person: SpecialPerson) async {
         isLoadingArticles = true
         articlesError = nil
+        articleSearchTextByID = [:]
         defer { isLoadingArticles = false }
         do {
             articles = try await service.articles(personID: person.id)
@@ -50,6 +53,36 @@ final class PersonDetailStore {
         } catch {
             articles = []
             articlesError = error.localizedDescription
+        }
+    }
+
+    func prepareArticleContentSearch() async {
+        guard !articles.isEmpty else { return }
+        let missingArticles = articles.filter { articleSearchTextByID[$0.id] == nil }
+        guard !missingArticles.isEmpty else { return }
+
+        isIndexingArticleContent = true
+        defer { isIndexingArticleContent = false }
+
+        for article in missingArticles {
+            guard !Task.isCancelled else { return }
+            do {
+                let detail = try await service.article(id: article.id)
+                guard !Task.isCancelled else { return }
+                articleSearchTextByID[article.id] = [
+                    detail.displayTitle,
+                    detail.displaySummary,
+                    detail.displayContent,
+                    detail.sourceName
+                ]
+                .joined(separator: "\n")
+            } catch is CancellationError {
+                return
+            } catch {
+                // Keep indexing the remaining articles. Metadata search remains
+                // available even when one article detail is temporarily offline.
+                articleSearchTextByID[article.id] = ""
+            }
         }
     }
 
