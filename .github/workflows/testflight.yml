@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      install_local_credentials:
+        description: One-time migration of release credentials to the office Mac
+        required: false
+        default: false
+        type: boolean
 
 run-name: Upload ${{ inputs.git_ref || 'main' }} to TestFlight
 
@@ -25,8 +30,42 @@ permissions:
   contents: read
 
 jobs:
+  migrate-local-credentials:
+    name: Install local TestFlight credentials
+    if: inputs.install_local_credentials == true
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - office-builder
+    steps:
+      - name: Store credentials for the local scheduler
+        env:
+          APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64"
+          test -n "$APP_STORE_CONNECT_KEY_ID"
+          test -n "$APP_STORE_CONNECT_ISSUER_ID"
+          test -n "$DEPLOYMENT_STATUS_API_KEY"
+          umask 077
+          credentials_dir="$HOME/Library/Application Support/ai-server-ios/credentials"
+          mkdir -p "$credentials_dir"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" |
+            base64 --decode > "$credentials_dir/AuthKey.p8"
+          {
+            printf 'APP_STORE_CONNECT_KEY_ID=%s\n' "$APP_STORE_CONNECT_KEY_ID"
+            printf 'APP_STORE_CONNECT_ISSUER_ID=%s\n' "$APP_STORE_CONNECT_ISSUER_ID"
+            printf 'DEPLOYMENT_STATUS_API_KEY=%s\n' "$DEPLOYMENT_STATUS_API_KEY"
+          } > "$credentials_dir/release.env"
+          chmod 600 "$credentials_dir/AuthKey.p8" "$credentials_dir/release.env"
+
   check:
     name: Check for a new main revision
+    if: inputs.install_local_credentials != true
     runs-on:
       - self-hosted
       - macOS
@@ -74,7 +113,7 @@ jobs:
   upload:
     name: Test, archive, and upload
     needs: check
-    if: needs.check.outputs.should_upload == 'true'
+    if: inputs.install_local_credentials != true && needs.check.outputs.should_upload == 'true'
     runs-on:
       - self-hosted
       - macOS
