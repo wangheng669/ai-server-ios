@@ -1,5 +1,32 @@
 import Foundation
 
+struct KnownAccountIdentity: Hashable {
+    let canonicalName: String
+    let platform: String
+    let accountName: String
+    let aliases: [String]
+
+    var accountLabel: String { "\(platform) · \(accountName)" }
+}
+
+enum AccountIdentityResolver {
+    // Curated identities are keyed only by stable server/platform IDs. Never infer a
+    // real person from a mutable nickname, because unrelated accounts may share it.
+    private static let identitiesByUserID: [String: KnownAccountIdentity] = [
+        "rss:14": KnownAccountIdentity(
+            canonicalName: "段永平",
+            platform: "雪球",
+            accountName: "大道无形我有型",
+            aliases: ["段永平", "大道无形我有型"]
+        )
+    ]
+
+    static func knownIdentity(userID: String?) -> KnownAccountIdentity? {
+        guard let userID = nonempty(userID) else { return nil }
+        return identitiesByUserID[userID.lowercased()]
+    }
+}
+
 struct SpecialPeopleResponse: Decodable {
     let success: Bool
     let categories: [PeopleCategory]?
@@ -50,7 +77,12 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var hasOwnPostSource: Bool { hasOwnPostSourceValue ?? !isCurated }
     var hasXSource: Bool { nonempty(xScreenName) != nil }
     var isOrganizationAccount: Bool { false }
-    var name: String { nonempty(userName) ?? nonempty(userScreenName) ?? "未知用户" }
+    private var knownIdentity: KnownAccountIdentity? {
+        AccountIdentityResolver.knownIdentity(userID: userID)
+    }
+    var name: String {
+        knownIdentity?.canonicalName ?? nonempty(userName) ?? nonempty(userScreenName) ?? "未知用户"
+    }
     var xHandle: String? {
         nonempty(xScreenName).map { $0.hasPrefix("@") ? $0 : "@\($0)" }
     }
@@ -63,7 +95,9 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         }
         return URL(string: "https://x.com")?.appending(path: screenName)
     }
-    var secondaryLabel: String? { isCurated ? nonempty(userScreenName) : handle }
+    var secondaryLabel: String? {
+        knownIdentity?.accountLabel ?? (isCurated ? nonempty(userScreenName) : handle)
+    }
     var organizationName: String? {
         nonempty(organizationNameValue) ?? (isCurated ? nonempty(userScreenName) : nil)
     }
@@ -75,12 +109,15 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         return nonempty(avatarAssetNameValue)
     }
     var discussionKeywords: [String] {
-        guard let keywords = discussionKeywordsValue?.filter({
+        let serverKeywords = discussionKeywordsValue?.filter({
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }), !keywords.isEmpty else {
-            return [name]
+        }) ?? []
+        let identityKeywords = knownIdentity?.aliases ?? []
+        let keywords = (serverKeywords + identityKeywords).reduce(into: [String]()) { result, keyword in
+            guard !result.contains(keyword) else { return }
+            result.append(keyword)
         }
-        return keywords
+        return keywords.isEmpty ? [name] : keywords
     }
     var focusTags: [String] {
         let tags = focusTagsValue?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? []
