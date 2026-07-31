@@ -111,6 +111,16 @@ struct XTweetDetailItem: Decodable, Equatable {
 }
 
 enum XPostTextFormatter {
+    static func longestText(_ values: String?...) -> String? {
+        values
+            .compactMap { value in
+                value?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .nilIfEmpty
+            }
+            .max(by: { $0.count < $1.count })
+    }
+
     static func detailText(_ value: String) -> String {
         value
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -133,6 +143,12 @@ enum XPostTextFormatter {
     static func isTruncated(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

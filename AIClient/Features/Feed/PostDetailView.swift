@@ -1749,7 +1749,10 @@ struct PostDetailView: View {
         if showsOriginal {
             value = xLiveDetail?.fullText ?? post.xStoredOriginalContent
         } else {
-            value = xLiveTranslationText ?? post.displayContent
+            value = XPostTextFormatter.longestText(
+                xLiveTranslationText,
+                post.hasTranslation ? post.displayContent : nil
+            ) ?? post.displayContent
         }
         return XPostTextFormatter.detailText(value)
     }
