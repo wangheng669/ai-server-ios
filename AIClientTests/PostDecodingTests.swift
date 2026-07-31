@@ -367,6 +367,20 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
     }
 
+    func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
+        let storedBody = "这是已经存储的完整中文正文，包含第一段和第二段。"
+        let liveSummary = "中文摘要…"
+
+        XCTAssertEqual(
+            XPostTextFormatter.longestText(liveSummary, storedBody),
+            storedBody
+        )
+        XCTAssertEqual(
+            XPostTextFormatter.longestText("  \(storedBody)  ", nil),
+            storedBody
+        )
+    }
+
     func testProtectsModelNamesInXTranslation() {
         XCTAssertEqual(
             PersonDetailStore.presentedTranslation("双子座是谁？格罗克也来了。", original: "Gemini who? Grok is here."),
