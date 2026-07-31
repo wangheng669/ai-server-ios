@@ -44,6 +44,44 @@ struct XPersonImportResponse: Decodable {
     let person: SpecialPerson
 }
 
+struct WikipediaPeopleSearchResponse: Decodable {
+    let success: Bool
+    let results: [WikipediaPersonSearchResult]
+}
+
+struct WikipediaPersonImportResponse: Decodable {
+    let success: Bool
+    let added: Bool
+    let person: SpecialPerson
+}
+
+struct WikipediaPersonSearchResult: Decodable, Identifiable, Hashable {
+    let id: String
+    let pageID: Int64
+    let language: String
+    let title: String
+    let description: String?
+    let extract: String?
+    let avatarURLValue: String?
+    let articleURLValue: String
+    let alreadyInDirectory: Bool
+    let personID: String?
+
+    var name: String { title }
+    var avatarURL: URL? { avatarURLValue.flatMap(MediaURL.image) }
+    var articleURL: URL? { URL(string: articleURLValue) }
+    var sourceLabel: String { language == "en" ? "英文维基百科" : "中文维基百科" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, language, title, description, extract
+        case pageID = "page_id"
+        case avatarURLValue = "avatar_url"
+        case articleURLValue = "article_url"
+        case alreadyInDirectory = "already_in_directory"
+        case personID = "person_id"
+    }
+}
+
 struct XPersonSearchResult: Decodable, Identifiable, Hashable {
     let id: String
     let name: String

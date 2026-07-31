@@ -55,6 +55,45 @@ struct PeopleService {
         return payload
     }
 
+    func searchWikipediaPeople(query: String, limit: Int = 8) async throws -> [WikipediaPersonSearchResult] {
+        let endpoint = baseURL.appending(path: "api/v1/people/wikipedia/search")
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            .init(name: "query", value: query),
+            .init(name: "limit", value: String(limit))
+        ]
+        guard let url = components?.url else { throw PeopleServiceError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: 25)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PeopleServiceError.invalidResponse
+        }
+        let payload = try JSONDecoder().decode(WikipediaPeopleSearchResponse.self, from: data)
+        guard payload.success else { throw PeopleServiceError.invalidResponse }
+        return payload.results
+    }
+
+    func importWikipediaPerson(_ result: WikipediaPersonSearchResult) async throws -> WikipediaPersonImportResponse {
+        let url = baseURL.appending(path: "api/v1/people/wikipedia/import")
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "language": result.language,
+            "title": result.title,
+            "wikidata_id": result.id
+        ])
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PeopleServiceError.invalidResponse
+        }
+        let payload = try JSONDecoder().decode(WikipediaPersonImportResponse.self, from: data)
+        guard payload.success else { throw PeopleServiceError.invalidResponse }
+        return payload
+    }
+
     func latestPost(userID: String) async throws -> Post? {
         try await posts(userID: userID, limit: 1).first
     }

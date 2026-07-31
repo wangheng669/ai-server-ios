@@ -11,6 +11,10 @@ final class PeopleStore {
     private(set) var isSearchingX = false
     private(set) var xSearchErrorMessage: String?
     private(set) var importingXUserIDs: Set<String> = []
+    private(set) var wikipediaSearchResults: [WikipediaPersonSearchResult] = []
+    private(set) var isSearchingWikipedia = false
+    private(set) var wikipediaSearchErrorMessage: String?
+    private(set) var importingWikipediaIDs: Set<String> = []
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     let baseURL: URL
@@ -18,6 +22,7 @@ final class PeopleStore {
     private var loadingLatestPostIDs: Set<String> = []
     private var loadedLatestPostIDs: Set<String> = []
     private var activeXSearchQuery = ""
+    private var activeWikipediaSearchQuery = ""
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         self.baseURL = baseURL
@@ -130,6 +135,71 @@ final class PeopleStore {
             return nil
         } catch {
             xSearchErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func searchWikipediaPeople(query: String) async {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 2 else {
+            activeWikipediaSearchQuery = ""
+            wikipediaSearchResults = []
+            wikipediaSearchErrorMessage = nil
+            isSearchingWikipedia = false
+            return
+        }
+        activeWikipediaSearchQuery = query
+        isSearchingWikipedia = true
+        wikipediaSearchErrorMessage = nil
+        defer {
+            if activeWikipediaSearchQuery == query {
+                isSearchingWikipedia = false
+            }
+        }
+        do {
+            let results = try await service.searchWikipediaPeople(query: query)
+            guard !Task.isCancelled, activeWikipediaSearchQuery == query else { return }
+            wikipediaSearchResults = results
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, activeWikipediaSearchQuery == query else { return }
+            wikipediaSearchResults = []
+            wikipediaSearchErrorMessage = error.localizedDescription
+        }
+    }
+
+    func importWikipediaPerson(_ result: WikipediaPersonSearchResult) async -> SpecialPerson? {
+        if let personID = result.personID,
+           let existing = people.first(where: { $0.id == personID }) {
+            return existing
+        }
+        guard importingWikipediaIDs.insert(result.id).inserted else { return nil }
+        wikipediaSearchErrorMessage = nil
+        defer { importingWikipediaIDs.remove(result.id) }
+        do {
+            let payload = try await service.importWikipediaPerson(result)
+            await load(force: true)
+            wikipediaSearchResults = wikipediaSearchResults.map { item in
+                guard item.id == result.id else { return item }
+                return WikipediaPersonSearchResult(
+                    id: item.id,
+                    pageID: item.pageID,
+                    language: item.language,
+                    title: item.title,
+                    description: item.description,
+                    extract: item.extract,
+                    avatarURLValue: item.avatarURLValue,
+                    articleURLValue: item.articleURLValue,
+                    alreadyInDirectory: true,
+                    personID: payload.person.id
+                )
+            }
+            return people.first(where: { $0.id == payload.person.id }) ?? payload.person
+        } catch is CancellationError {
+            return nil
+        } catch {
+            wikipediaSearchErrorMessage = error.localizedDescription
             return nil
         }
     }
