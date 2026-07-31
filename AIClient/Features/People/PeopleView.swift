@@ -2921,6 +2921,12 @@ private struct PersonDetailPage: View {
             }
             #endif
         }
+        .task(id: articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            guard !articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            await store.prepareArticleContentSearch()
+        }
     }
 
     @ViewBuilder
@@ -3340,7 +3346,7 @@ private struct PersonDetailPage: View {
                 .padding(.top, 8)
 
                 HStack(alignment: .firstTextBaseline) {
-                    Text(articleSearchText.isEmpty ? "文章 \(store.articles.count)" : "找到 \(filteredArticles.count) 篇")
+                    Text(articleSearchStatus)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -3353,7 +3359,17 @@ private struct PersonDetailPage: View {
                 .padding(.top, 8)
                 .padding(.bottom, 14)
 
-                if filteredArticles.isEmpty {
+                if filteredArticles.isEmpty && store.isIndexingArticleContent {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在搜索文章正文…")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 42)
+                } else if filteredArticles.isEmpty {
                     ContentUnavailableView.search(text: articleSearchText)
                         .padding(.vertical, 32)
                 } else {
@@ -3387,10 +3403,21 @@ private struct PersonDetailPage: View {
                 article.displayTitle,
                 article.displaySummary,
                 article.displayContent,
-                article.sourceName
+                article.sourceName,
+                store.articleSearchTextByID[article.id] ?? ""
             ]
             .contains { $0.localizedCaseInsensitiveContains(query) }
         }
+    }
+
+    private var articleSearchStatus: String {
+        guard !articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "文章 \(store.articles.count)"
+        }
+        if store.isIndexingArticleContent {
+            return "已匹配 \(filteredArticles.count) 篇 · 正在检查正文"
+        }
+        return "找到 \(filteredArticles.count) 篇"
     }
 
     private var relatedContent: some View {
