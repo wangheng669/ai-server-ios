@@ -101,6 +101,7 @@ struct PeopleView: View {
 
 private struct PeopleSwimlaneExplorer: View {
     private enum SearchSource: String, CaseIterable, Identifiable {
+        case all
         case directory
         case x
         case wikipedia
@@ -109,6 +110,7 @@ private struct PeopleSwimlaneExplorer: View {
 
         var title: String {
             switch self {
+            case .all: "全部"
             case .directory: "人物库"
             case .x: "X"
             case .wikipedia: "维基百科"
@@ -117,6 +119,7 @@ private struct PeopleSwimlaneExplorer: View {
 
         var prompt: String {
             switch self {
+            case .all: "搜索人物、公司或领域"
             case .directory: "搜索人物、公司或领域"
             case .x: "搜索 X 平台账号"
             case .wikipedia: "搜索维基百科人物"
@@ -146,7 +149,7 @@ private struct PeopleSwimlaneExplorer: View {
     @GestureState private var focusTranslation: CGSize = .zero
     @State private var focusedPersonID: String?
     @State private var searchText = ""
-    @State private var searchSource: SearchSource = .directory
+    @State private var searchSource: SearchSource = .all
     @State private var showsSearch = false
     @State private var isRefreshing = false
 
@@ -247,6 +250,11 @@ private struct PeopleSwimlaneExplorer: View {
                 return
             }
             switch searchSource {
+            case .all:
+                let xTask = Task { await onSearchX(searchText) }
+                let wikipediaTask = Task { await onSearchWikipedia(searchText) }
+                await xTask.value
+                await wikipediaTask.value
             case .directory:
                 break
             case .x:
@@ -541,6 +549,8 @@ private struct PeopleSwimlaneExplorer: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     switch searchSource {
+                    case .all:
+                        allSourcesSearchContent
                     case .directory:
                         directorySearchContent
                     case .x:
@@ -563,6 +573,29 @@ private struct PeopleSwimlaneExplorer: View {
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.12), radius: 22, y: 8)
+    }
+
+    @ViewBuilder
+    private var allSourcesSearchContent: some View {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.count < 2 {
+            directorySearchContent
+            if !query.isEmpty {
+                Text("再输入一个字符，即可同时搜索 X 和维基百科")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 16)
+            }
+        } else {
+            searchSectionHeader("人物库")
+            directorySearchContent
+            searchSectionHeader("X 平台")
+            xPlatformSearchContent
+            searchSectionHeader("维基百科")
+            wikipediaSearchContent
+        }
     }
 
     @ViewBuilder
@@ -626,6 +659,17 @@ private struct PeopleSwimlaneExplorer: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 16)
         }
+    }
+
+    private func searchSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .background(Color.primary.opacity(0.025))
     }
 
     @ViewBuilder
