@@ -82,8 +82,8 @@ struct PostDetailView: View {
         }
         .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar((["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
-        .navigationBarBackButtonHidden(["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
+        .toolbar((["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
@@ -1641,92 +1641,103 @@ struct PostDetailView: View {
     }
 
     private var xDetail: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 11) {
-                    xAuthorHeader
-                    if !post.isChineseXSource,
-                       post.hasTranslation || xLiveTranslationText != nil {
-                        HStack(spacing: 5) {
-                            Image(systemName: "character.bubble")
-                            Text(showsOriginal ? xOriginalLanguageLabel : "翻译自英语")
-                            Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
-                                .foregroundStyle(.blue)
+        VStack(spacing: 0) {
+            xNavigationBar
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        xAuthorHeader
+                        if !post.isChineseXSource,
+                           post.hasTranslation || xLiveTranslationText != nil {
+                            HStack(spacing: 5) {
+                                Image(systemName: "character.bubble")
+                                Text(showsOriginal ? xOriginalLanguageLabel : "翻译自英语")
+                                Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
+                                    .foregroundStyle(.blue)
+                            }
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 16)
                         }
-                        .font(.system(size: 13))
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                                Text(xStyledParagraph(paragraph))
+                                    .font(.system(size: 17, weight: .regular))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.top, 24)
+                        .textSelection(.enabled)
+
+                        if XPostTextFormatter.isTruncated(xDisplayedDetailText),
+                           post.linkURL != nil {
+                            Button { openOriginal() } label: {
+                                Label("X 源仅返回了摘要，前往 X 查看全文", systemImage: "arrow.up.right.square")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 16)
+                        }
+
+                        if let link = post.externalURL {
+                            Button { openURL(link) } label: {
+                                Text("阅读更多：\(link.host() ?? link.absoluteString)")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 16)
+                        }
+
+                        if let credit = post.photoCredit {
+                            Text(credit.hasPrefix("📷") ? credit : "📷：\(credit)")
+                                .font(.system(size: 15, weight: .medium))
+                                .padding(.top, 16)
+                        }
+
+                        xMedia
+                            .padding(.top, post.images?.isEmpty == false || !post.videoURLs.isEmpty ? 16 : 0)
+
+                        HStack(spacing: 4) {
+                            Text(xTimestamp)
+                            if let views = post.meta?.metrics?.views {
+                                Text("·")
+                                Text("\(compactCount(views)) 次查看").fontWeight(.semibold).foregroundStyle(.primary)
+                            }
+                        }
+                        .font(.system(size: 15))
                         .foregroundStyle(.secondary)
+                        .padding(.top, 18)
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 18)
+                    .padding(.bottom, 12)
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                            Text(paragraph)
-                                .font(.system(size: 17, weight: .regular))
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                    Divider()
+                    xEngagementRow
+                        .padding(.horizontal, 15)
+                        .frame(height: 44)
+                    Divider()
+
+                    HStack {
+                        Text("相关").font(.subheadline.weight(.semibold))
+                        Image(systemName: "chevron.down").font(.caption2)
+                        Spacer()
+                        Button("查看引用") { openOriginal() }
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
                     }
-                    .textSelection(.enabled)
-
-                    if XPostTextFormatter.isTruncated(xDisplayedDetailText),
-                       post.linkURL != nil {
-                        Button { openOriginal() } label: {
-                            Label("X 源仅返回了摘要，前往 X 查看全文", systemImage: "arrow.up.right.square")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(.blue)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if let link = post.externalURL {
-                        Button { openURL(link) } label: {
-                            Text("阅读更多：\(link.host() ?? link.absoluteString)")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.blue)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if let credit = post.photoCredit {
-                        Text(credit.hasPrefix("📷") ? credit : "📷：\(credit)")
-                            .font(.system(size: 15, weight: .medium))
-                    }
-
-                    xMedia
-
-                    HStack(spacing: 4) {
-                        Text(xTimestamp)
-                        if let views = post.meta?.metrics?.views {
-                            Text("·")
-                            Text("\(compactCount(views)) 次查看").fontWeight(.semibold).foregroundStyle(.primary)
-                        }
-                    }
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 10)
-
-                Divider()
-                xEngagementRow
                     .padding(.horizontal, 15)
-                    .frame(height: 44)
-                Divider()
+                    .frame(height: 48)
+                    Divider()
 
-                HStack {
-                    Text("相关").font(.subheadline.weight(.semibold))
-                    Image(systemName: "chevron.down").font(.caption2)
-                    Spacer()
-                    Button("查看引用") { openOriginal() }
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                    Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                    xCommentsSection
                 }
-                .padding(.horizontal, 15)
-                .frame(height: 48)
-                Divider()
-
-                xCommentsSection
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -1737,15 +1748,48 @@ struct PostDetailView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
-                .padding(.horizontal, 14)
-                .frame(height: 38)
+                .padding(.horizontal, 18)
+                .frame(height: 42)
                 .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-                .padding(.horizontal, 15)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
             }
             .buttonStyle(.plain)
-            .background(.bar)
+            .background(Color(uiColor: .systemBackground))
         }
+    }
+
+    private var xNavigationBar: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: dismissIconName)
+                    .font(.system(size: 22, weight: .semibold))
+                    .frame(width: 36, height: 44)
+            }
+            .accessibilityLabel(dismissAccessibilityLabel)
+
+            Spacer()
+            Text("帖子")
+                .font(.system(size: 20, weight: .bold))
+            Spacer()
+
+            Menu {
+                if let link = post.linkURL {
+                    ShareLink(item: link) {
+                        Label("分享帖子", systemImage: "square.and.arrow.up")
+                    }
+                }
+                Button("在 X 中打开") { openOriginal() }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 21, weight: .bold))
+                    .frame(width: 36, height: 44)
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .frame(height: 54)
+        .background(Color(uiColor: .systemBackground))
     }
 
     private var xDisplayedDetailText: String {
@@ -1770,11 +1814,11 @@ struct PostDetailView: View {
     }
 
     private var xAuthorHeader: some View {
-        HStack(spacing: 9) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 40)
+        HStack(spacing: 10) {
+            AvatarView(url: post.avatarURL, name: post.authorName, size: 38)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(post.authorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
+                    Text(post.authorName).font(.system(size: 16, weight: .bold)).lineLimit(1)
                     Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
                 }
                 if let handle = post.authorHandle {
@@ -1782,7 +1826,26 @@ struct PostDetailView: View {
                 }
             }
             Spacer()
+            Button { openOriginal() } label: {
+                Text("X.com")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
         }
+    }
+
+    private func xStyledParagraph(_ paragraph: String) -> AttributedString {
+        var result = AttributedString(paragraph)
+        let pattern = #"(?:\$[A-Za-z]{1,8}\b)|(?:@[A-Za-z0-9_]{1,15}\b)|(?:https?://\S+)"#
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return result }
+        let fullRange = NSRange(paragraph.startIndex..<paragraph.endIndex, in: paragraph)
+        for match in expression.matches(in: paragraph, range: fullRange) {
+            guard let stringRange = Range(match.range, in: paragraph),
+                  let attributedRange = Range(stringRange, in: result) else { continue }
+            result[attributedRange].foregroundColor = .blue
+        }
+        return result
     }
 
     @ViewBuilder
