@@ -85,8 +85,9 @@ struct PostDetailView: View {
         .toolbar((["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
         .toolbar(.hidden, for: .tabBar)
-        .fullScreenCover(item: $presentedWikipediaEntity) { entity in
+        .sheet(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
+                .wikipediaReaderPresentation()
         }
         .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the

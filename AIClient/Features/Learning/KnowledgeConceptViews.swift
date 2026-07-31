@@ -278,9 +278,8 @@ struct KnowledgeConceptDetailSheet: View {
         .presentationDragIndicator(.visible)
         .presentationContentInteraction(.resizes)
         .sheet(item: $wikipediaEntity) { entity in
-            WikipediaReaderView(entity: entity, returnTitle: "返回概念详情")
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+            WikipediaReaderView(entity: entity)
+                .wikipediaReaderPresentation()
         }
     }
 }

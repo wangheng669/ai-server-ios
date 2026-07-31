@@ -2876,8 +2876,9 @@ private struct PersonDetailPage: View {
         .sheet(item: $selectedPhoto) { photo in
             PersonPhotoViewer(photos: person.photos, initialPhotoID: photo.id)
         }
-        .fullScreenCover(item: $presentedWikipediaEntity) { entity in
-            WikipediaReaderView(entity: entity, returnTitle: "返回人物详情")
+        .sheet(item: $presentedWikipediaEntity) { entity in
+            WikipediaReaderView(entity: entity)
+                .wikipediaReaderPresentation()
         }
         .task(id: person.id) {
             await store.load(person: person)
