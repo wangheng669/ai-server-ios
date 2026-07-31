@@ -100,6 +100,30 @@ struct PeopleView: View {
 }
 
 private struct PeopleSwimlaneExplorer: View {
+    private enum SearchSource: String, CaseIterable, Identifiable {
+        case directory
+        case x
+        case wikipedia
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .directory: "人物库"
+            case .x: "X"
+            case .wikipedia: "维基百科"
+            }
+        }
+
+        var prompt: String {
+            switch self {
+            case .directory: "搜索人物、公司或领域"
+            case .x: "搜索 X 平台账号"
+            case .wikipedia: "搜索维基百科人物"
+            }
+        }
+    }
+
     let people: [SpecialPerson]
     let baseURL: URL
     let xSearchResults: [XPersonSearchResult]
@@ -122,6 +146,7 @@ private struct PeopleSwimlaneExplorer: View {
     @GestureState private var focusTranslation: CGSize = .zero
     @State private var focusedPersonID: String?
     @State private var searchText = ""
+    @State private var searchSource: SearchSource = .directory
     @State private var showsSearch = false
     @State private var isRefreshing = false
 
@@ -213,17 +238,22 @@ private struct PeopleSwimlaneExplorer: View {
         .task(id: focusedPerson.id) {
             await PeopleImagePreheater.preheatDetail(for: focusedPerson, baseURL: baseURL)
         }
-        .task(id: searchText) {
+        .task(id: "\(searchSource.rawValue)\u{0}\(searchText)") {
             guard showsSearch else { return }
+            guard searchSource != .directory else { return }
             do {
                 try await Task.sleep(for: .milliseconds(350))
             } catch {
                 return
             }
-            let xTask = Task { await onSearchX(searchText) }
-            let wikipediaTask = Task { await onSearchWikipedia(searchText) }
-            await xTask.value
-            await wikipediaTask.value
+            switch searchSource {
+            case .directory:
+                break
+            case .x:
+                await onSearchX(searchText)
+            case .wikipedia:
+                await onSearchWikipedia(searchText)
+            }
         }
     }
 
@@ -475,7 +505,7 @@ private struct PeopleSwimlaneExplorer: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("搜索人物、公司或领域", text: $searchText)
+                TextField(searchSource.prompt, text: $searchText)
                     .focused($searchIsFocused)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -496,58 +526,31 @@ private struct PeopleSwimlaneExplorer: View {
             .padding(.horizontal, 14)
             .frame(height: 50)
 
+            Picker("搜索来源", selection: $searchSource) {
+                ForEach(SearchSource.allCases) { source in
+                    Text(source.title).tag(source)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
+            .accessibilityLabel("搜索来源")
+
             Divider()
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if !searchResults.isEmpty {
-                        searchSectionHeader(searchText.isEmpty ? "人物库" : "人物库匹配")
-                        ForEach(searchResults) { person in
-                            Button {
-                                focus(on: person)
-                                dismissSearch()
-                            } label: {
-                                HStack(spacing: 11) {
-                                    AvatarView(
-                                        url: person.avatarURL(baseURL: baseURL),
-                                        name: person.name,
-                                        size: 38,
-                                        assetName: person.avatarAssetName
-                                    )
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(person.name)
-                                            .font(.system(size: 15, weight: .semibold))
-                                        Text(person.organizationName ?? person.topic.rawValue)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 14)
-                                .frame(height: 54)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                    switch searchSource {
+                    case .directory:
+                        directorySearchContent
+                    case .x:
+                        externalSearchContent(sourceName: "X 平台") {
+                            xPlatformSearchContent
                         }
-                    }
-
-                    if searchText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 {
-                        searchSectionHeader("X 平台")
-                        xPlatformSearchContent
-                        searchSectionHeader("维基百科")
-                        wikipediaSearchContent
-                    } else if !searchText.isEmpty {
-                        Text("再输入一些内容，即可同时搜索 X 平台和维基百科")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 16)
+                    case .wikipedia:
+                        externalSearchContent(sourceName: "维基百科") {
+                            wikipediaSearchContent
+                        }
                     }
                 }
             }
@@ -560,6 +563,69 @@ private struct PeopleSwimlaneExplorer: View {
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.12), radius: 22, y: 8)
+    }
+
+    @ViewBuilder
+    private var directorySearchContent: some View {
+        if searchResults.isEmpty {
+            Text("人物库没有找到相关人物")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 16)
+        } else {
+            ForEach(searchResults) { person in
+                Button {
+                    focus(on: person)
+                    dismissSearch()
+                } label: {
+                    HStack(spacing: 11) {
+                        AvatarView(
+                            url: person.avatarURL(baseURL: baseURL),
+                            name: person.name,
+                            size: 38,
+                            assetName: person.avatarAssetName
+                        )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(person.name)
+                                .font(.system(size: 15, weight: .semibold))
+                            Text(person.organizationName ?? person.topic.rawValue)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .frame(height: 54)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func externalSearchContent<Content: View>(
+        sourceName: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.count >= 2 {
+            content()
+        } else {
+            Text(query.isEmpty ? "输入至少 2 个字符搜索\(sourceName)" : "再输入一个字符开始搜索\(sourceName)")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 16)
+        }
     }
 
     @ViewBuilder
@@ -737,17 +803,6 @@ private struct PeopleSwimlaneExplorer: View {
                 )
             }
         }
-    }
-
-    private func searchSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .textCase(.uppercase)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .frame(height: 30)
-            .background(Color.primary.opacity(0.025))
     }
 
     private func selectXSearchResult(_ result: XPersonSearchResult) {
