@@ -2791,6 +2791,8 @@ private struct PersonDetailPage: View {
     @State private var selectedPost: Post?
     @State private var selectedVideo: PersonVideo?
     @State private var selectedArticle: PersonArticle?
+    @State private var articleSearchText = ""
+    @State private var articleSheetDetent: PresentationDetent = .large
     @State private var selectedPhoto: PersonPhoto?
     @State private var presentedWikipediaEntity: WikipediaEntity?
 
@@ -2871,11 +2873,22 @@ private struct PersonDetailPage: View {
         .navigationDestination(item: $selectedVideo) { video in
             PersonVideoDetailView(video: video)
         }
-        .navigationDestination(item: $selectedArticle) { article in
-            PersonArticleDetailView(
-                articles: store.articles,
-                initialArticleID: article.id
-            )
+        .sheet(item: $selectedArticle) { article in
+            NavigationStack {
+                PersonArticleDetailView(
+                    articles: filteredArticles,
+                    initialArticleID: article.id
+                )
+            }
+            .presentationDetents([.medium, .large], selection: $articleSheetDetent)
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
+        }
+        .onChange(of: selectedArticle) { _, article in
+            if article != nil {
+                articleSheetDetent = .large
+            }
         }
         .sheet(item: $selectedPost) { post in
             NavigationStack {
@@ -3300,8 +3313,34 @@ private struct PersonDetailPage: View {
             .padding(.top, 30)
         } else {
             LazyVStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("搜索文章文字", text: $articleSearchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !articleSearchText.isEmpty {
+                        Button {
+                            articleSearchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("清除文章搜索")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 42)
+                .background(
+                    Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+
                 HStack(alignment: .firstTextBaseline) {
-                    Text("文章 \(store.articles.count)")
+                    Text(articleSearchText.isEmpty ? "文章 \(store.articles.count)" : "找到 \(filteredArticles.count) 篇")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -3314,24 +3353,43 @@ private struct PersonDetailPage: View {
                 .padding(.top, 8)
                 .padding(.bottom, 14)
 
-                ForEach(Array(store.articles.enumerated()), id: \.element.id) { index, article in
-                    PersonArticleRow(
-                        article: article,
-                        featured: index == 0,
-                        portraitURL: person.avatarURL(baseURL: ServerConfiguration.currentURL),
-                        portraitAssetName: person.avatarAssetName,
-                        personName: person.name
-                    ) {
-                        selectedArticle = article
-                    }
+                if filteredArticles.isEmpty {
+                    ContentUnavailableView.search(text: articleSearchText)
+                        .padding(.vertical, 32)
+                } else {
+                    ForEach(Array(filteredArticles.enumerated()), id: \.element.id) { index, article in
+                        PersonArticleRow(
+                            article: article,
+                            featured: articleSearchText.isEmpty && index == 0,
+                            portraitURL: person.avatarURL(baseURL: ServerConfiguration.currentURL),
+                            portraitAssetName: person.avatarAssetName,
+                            personName: person.name
+                        ) {
+                            selectedArticle = article
+                        }
 
-                    if index < store.articles.count - 1 {
-                        Divider()
-                            .padding(.leading, 20)
+                        if index < filteredArticles.count - 1 {
+                            Divider()
+                                .padding(.leading, 20)
+                        }
                     }
                 }
             }
             .padding(.bottom, 28)
+        }
+    }
+
+    private var filteredArticles: [PersonArticle] {
+        let query = articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return store.articles }
+        return store.articles.filter { article in
+            [
+                article.displayTitle,
+                article.displaySummary,
+                article.displayContent,
+                article.sourceName
+            ]
+            .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
 
@@ -4209,6 +4267,7 @@ private struct PersonArticleDetailView: View {
     let articles: [PersonArticle]
     let initialArticleID: PersonArticle.ID
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int
     @State private var loadedArticle: PersonArticle?
     @State private var errorMessage: String?
@@ -4254,6 +4313,14 @@ private struct PersonArticleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("收起", systemImage: "chevron.down")
+                }
+                .accessibilityHint("收起文章阅读弹窗")
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if let url = article.canonicalURL {
                     ShareLink(item: url) {
