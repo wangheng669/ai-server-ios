@@ -1645,7 +1645,8 @@ struct PostDetailView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 11) {
                     xAuthorHeader
-                    if post.hasTranslation || xLiveTranslationText != nil {
+                    if !post.isChineseXSource,
+                       post.hasTranslation || xLiveTranslationText != nil {
                         HStack(spacing: 5) {
                             Image(systemName: "character.bubble")
                             Text(showsOriginal ? xOriginalLanguageLabel : "翻译自英语")
@@ -1749,7 +1750,7 @@ struct PostDetailView: View {
 
     private var xDisplayedDetailText: String {
         let value: String
-        if showsOriginal {
+        if showsOriginal || post.isChineseXSource {
             value = xLiveDetail?.fullText ?? post.xStoredOriginalContent
         } else {
             value = XPostTextFormatter.longestText(
@@ -1761,7 +1762,7 @@ struct PostDetailView: View {
     }
 
     private var xOriginalLanguageLabel: String {
-        post.meta?.lang?.lowercased().hasPrefix("zh") == true ? "原文" : "英语原文"
+        post.isChineseXSource ? "原文" : "英语原文"
     }
 
     private var xDisplayedDetailParagraphs: [String] {

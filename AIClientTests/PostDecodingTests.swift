@@ -409,6 +409,15 @@ final class PostDecodingTests: XCTestCase {
         )
     }
 
+    func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
+        let data = #"{"id":7,"source":"x","content":"列表摘要…","content_zh":"被压平的完整中文正文","post_link":"https://x.com/example/status/123","meta":{"lang":"zh","note_text":"第一段。\n\n第二段。"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertTrue(post.isChineseXSource)
+        XCTAssertEqual(post.xStoredOriginalContent, "第一段。\n\n第二段。")
+        XCTAssertEqual(XPostTextFormatter.paragraphs(post.xStoredOriginalContent), ["第一段。", "第二段。"])
+    }
+
     func testProtectsModelNamesInXTranslation() {
         XCTAssertEqual(
             PersonDetailStore.presentedTranslation("双子座是谁？格罗克也来了。", original: "Gemini who? Grok is here."),
