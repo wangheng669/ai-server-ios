@@ -56,4 +56,4 @@ plutil -lint "$plist_path"
 launchctl bootout "gui/$(id -u)" "$plist_path" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$plist_path"
 
-echo "Installed $label. It will trigger TestFlight every day at 04:30 local time."
+echo "Installed $label. It will publish to TestFlight locally every day at 04:30."

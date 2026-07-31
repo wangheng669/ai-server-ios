@@ -1,10 +1,10 @@
 # TestFlight 发布配置
 
-仓库提供工作流 `Upload iOS app to TestFlight`。它会在 Mac mini 的 `office-builder` 上运行测试、生成 Release Archive，并上传到 App Store Connect。
+日常 TestFlight 发布由 Mac 本地完成：运行测试、生成 Release Archive、上传到 App Store Connect，并在 Apple 处理完成后发送钉钉通知。GitHub Actions 工作流 `Upload iOS app to TestFlight` 仅保留为手动应急入口。
 
-Mac mini 使用本地 `launchd` 每天北京时间 04:30 触发工作流，避免 GitHub 托管 cron 的不确定延迟。仅当 `main` 相比上一次成功发布出现新提交时才启动构建和上传；没有新提交时会快速结束。如果 GitHub 临时不可达，本地任务会每 5 分钟重试，最长持续 12 小时。也可以从 GitHub Actions 手动运行，手动运行始终会执行上传。工作流仍会等待 `office-builder` Runner 上线后开始构建。
+Mac 使用本地 `launchd` 每天北京时间 04:30 直接执行发布，不创建 GitHub Actions 任务。仅当 `main` 相比上一次本地成功发布出现新提交时才构建和上传；没有新提交时会快速结束。同步 `main` 临时失败时每 5 分钟重试，最长持续 12 小时。构建过程不依赖 Actions Runner。
 
-在 Mac mini 的 `main` 工作区运行 `./ci/install-local-testflight-schedule.sh` 可安装或更新本地任务。安装器会把触发脚本复制到 `~/Library/Application Support/ai-server-ios/`，避免 macOS 阻止后台任务访问 `Desktop` 下的项目目录。任务标识为 `com.wangheng.ai-server-ios.testflight-upload`，日志位于 `~/Library/Logs/ai-server-ios/testflight-upload*.log`。
+在 Mac 的 `main` 工作区运行 `./ci/install-local-testflight-schedule.sh` 可安装或更新本地任务。安装器会把触发脚本复制到 `~/Library/Application Support/ai-server-ios/`，源码镜像、发布状态和 App Store Connect 凭据也保存在该目录的受限子目录中，避免 macOS 阻止后台任务访问 `Desktop`。任务标识为 `com.wangheng.ai-server-ios.testflight-upload`，日志位于 `~/Library/Logs/ai-server-ios/testflight-upload*.log`。
 
 Mac mini 运行 macOS 27 Beta，Xcode 26.6 正式版不兼容该系统，因此 TestFlight 构建使用 `/Applications/Xcode-beta.app`。工作流会在测试和归档前校验当前允许上传的 Xcode Build Number；Apple 发布新 Beta 并停止接受旧版本时，必须先升级 Mac mini 上的 Xcode，再同步更新工作流中的 `EXPECTED_XCODE_BUILD`。
 
