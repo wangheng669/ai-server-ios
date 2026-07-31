@@ -2869,9 +2869,9 @@ private struct PersonDetailPage: View {
             .onChange(of: articleSearchIsFocused) { _, isFocused in
                 guard isFocused else { return }
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(80))
+                    try? await Task.sleep(for: .milliseconds(180))
                     withAnimation(.snappy(duration: 0.28)) {
-                        reader.scrollTo(Self.articleSearchAnchor, anchor: .top)
+                        reader.scrollTo(Self.articleSearchAnchor, anchor: .center)
                     }
                 }
             }
@@ -3437,8 +3437,12 @@ private struct PersonDetailPage: View {
                     )
                     .padding(.vertical, 28)
                 } else if filteredArticles.isEmpty {
-                    ContentUnavailableView.search(text: articleSearchText)
-                        .padding(.vertical, 32)
+                    ContentUnavailableView(
+                        "没有找到相关文章",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("没有包含“\(articleSearchText)”的文章，试试其他关键词")
+                    )
+                    .padding(.vertical, 32)
                 } else {
                     ForEach(Array(filteredArticles.enumerated()), id: \.element.id) { index, article in
                         PersonArticleRow(

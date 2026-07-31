@@ -112,6 +112,23 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(article.canonicalURL?.host, "blog.samaltman.com")
     }
 
+    func testPersonArticleSearchResponseConfirmsQueryWasApplied() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "person_id": "1605",
+              "query_applied": true,
+              "articles": []
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(PeopleArticlesResponse.self, from: data)
+        XCTAssertTrue(response.queryApplied == true)
+        XCTAssertTrue(response.articles.isEmpty)
+    }
+
     func testPersonArticleTranslationPreservesProductNames() {
         XCTAssertEqual(
             PersonArticleTranslationService.preserveProductNames(

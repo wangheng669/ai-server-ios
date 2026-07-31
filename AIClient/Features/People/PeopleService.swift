@@ -164,6 +164,9 @@ struct PeopleService {
         }
         let payload = try JSONDecoder().decode(PeopleArticlesResponse.self, from: data)
         guard payload.success else { throw PeopleServiceError.invalidResponse }
+        if let query, !query.isEmpty, payload.queryApplied != true {
+            throw PeopleServiceError.invalidResponse
+        }
         return payload.articles
     }
 
