@@ -2,8 +2,7 @@
 
 set -uo pipefail
 
-repo_dir="${1:-$(git rev-parse --show-toplevel)}"
-mode="${2:-}"
+mode="${1:-}"
 repo_slug="wangheng669/ai-server-ios"
 retry_seconds="${TESTFLIGHT_TRIGGER_RETRY_SECONDS:-300}"
 timeout_seconds="${TESTFLIGHT_TRIGGER_TIMEOUT_SECONDS:-43200}"
@@ -25,11 +24,6 @@ log() {
 
 if [[ -z "$gh_bin" ]]; then
   log "GitHub CLI is not installed."
-  exit 1
-fi
-
-if ! cd "$repo_dir"; then
-  log "Repository directory is unavailable: $repo_dir"
   exit 1
 fi
 
