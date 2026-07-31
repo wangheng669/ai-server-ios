@@ -331,12 +331,14 @@ struct WikipediaReaderView: View {
     let entity: WikipediaEntity
     @Environment(\.dismiss) private var dismiss
     @StateObject private var browser = WikipediaBrowserModel()
+    @State private var presentedLink: WikipediaEntity?
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                Text("维基百科")
+                Text(entity.url.isWikipediaURL ? "维基百科" : (entity.url.host ?? "网页"))
                     .font(.headline)
+                    .lineLimit(1)
 
                 HStack {
                     Spacer()
@@ -347,7 +349,7 @@ struct WikipediaReaderView: View {
                             .frame(width: 40, height: 40)
                             .background(Color.secondary.opacity(0.1), in: Circle())
                     }
-                    .accessibilityLabel("关闭维基百科")
+                    .accessibilityLabel(entity.url.isWikipediaURL ? "关闭维基百科" : "关闭网页")
                 }
             }
             .padding(.horizontal, 16)
@@ -360,7 +362,9 @@ struct WikipediaReaderView: View {
             }
 
             ZStack(alignment: .bottomLeading) {
-                WikipediaWebView(url: entity.url, model: browser)
+                WikipediaWebView(url: entity.url, model: browser) {
+                    presentedLink = $0
+                }
 
                 if browser.canGoBack {
                     Button { browser.goBack() } label: {
@@ -379,6 +383,12 @@ struct WikipediaReaderView: View {
             .animation(.easeOut(duration: 0.18), value: browser.canGoBack)
         }
         .background(Color(uiColor: .systemBackground))
+        .sheet(item: $presentedLink) { linkedEntity in
+            AnyView(
+                WikipediaReaderView(entity: linkedEntity)
+                    .wikipediaReaderPresentation()
+            )
+        }
     }
 }
 
@@ -414,6 +424,8 @@ extension View {
 enum WikipediaReaderStyle {
     static let script = #"""
     (() => {
+      if (!/(^|\.)wikipedia\.org$/i.test(window.location.hostname)) return;
+
       const styleID = "aiserver-wikipedia-reader-style";
 
       const installReaderStyle = () => {
@@ -612,11 +624,59 @@ enum WikipediaReaderStyle {
     """#
 }
 
+extension URL {
+    var isWikipediaURL: Bool {
+        guard let host = host?.lowercased() else { return false }
+        return host == "wikipedia.org" || host.hasSuffix(".wikipedia.org")
+    }
+}
+
+enum WikipediaLinkPresentation {
+    static func entity(for destinationURL: URL, currentURL: URL?) -> WikipediaEntity? {
+        guard ["http", "https"].contains(destinationURL.scheme?.lowercased() ?? "") else {
+            return nil
+        }
+        guard !isSameDocument(destinationURL, currentURL) else { return nil }
+
+        let encodedPathTitle = destinationURL.path
+            .split(separator: "/")
+            .last
+            .map(String.init)
+        let decodedPathTitle = encodedPathTitle?.removingPercentEncoding ?? encodedPathTitle ?? ""
+        let pathTitle = decodedPathTitle
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = (pathTitle.isEmpty ? nil : pathTitle)
+            ?? destinationURL.host
+            ?? "链接"
+
+        return WikipediaEntity(
+            id: destinationURL.absoluteString,
+            term: title,
+            title: title,
+            summary: "",
+            url: destinationURL
+        )
+    }
+
+    private static func isSameDocument(_ destinationURL: URL, _ currentURL: URL?) -> Bool {
+        guard let currentURL else { return false }
+        var destination = URLComponents(url: destinationURL, resolvingAgainstBaseURL: false)
+        var current = URLComponents(url: currentURL, resolvingAgainstBaseURL: false)
+        destination?.fragment = nil
+        current?.fragment = nil
+        return destination?.url == current?.url
+    }
+}
+
 private struct WikipediaWebView: UIViewRepresentable {
     let url: URL
     @ObservedObject var model: WikipediaBrowserModel
+    let openLink: (WikipediaEntity) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(model: model, openLink: openLink)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -651,9 +711,13 @@ private struct WikipediaWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         private let model: WikipediaBrowserModel
+        private let openLink: (WikipediaEntity) -> Void
         private var progressObservation: NSKeyValueObservation?
 
-        init(model: WikipediaBrowserModel) { self.model = model }
+        init(model: WikipediaBrowserModel, openLink: @escaping (WikipediaEntity) -> Void) {
+            self.model = model
+            self.openLink = openLink
+        }
 
         func observe(_ webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self, weak webView] _, _ in
@@ -663,6 +727,24 @@ private struct WikipediaWebView: UIViewRepresentable {
         }
 
         func stopObserving() { progressObservation?.invalidate() }
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard navigationAction.navigationType == .linkActivated,
+                  let destinationURL = navigationAction.request.url,
+                  let entity = WikipediaLinkPresentation.entity(
+                    for: destinationURL,
+                    currentURL: webView.url
+                  ) else {
+                decisionHandler(.allow)
+                return
+            }
+
+            openLink(entity)
+            decisionHandler(.cancel)
+        }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { model.update(from: webView) }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { model.update(from: webView) }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { model.update(from: webView) }

@@ -5,6 +5,7 @@ final class PostDecodingTests: XCTestCase {
     func testWikipediaReaderStyleHidesChromeAndKeepsArticleContentStyled() {
         let script = WikipediaReaderStyle.script
 
+        XCTAssertTrue(script.contains("wikipedia\\.org"))
         XCTAssertTrue(script.contains(".mw-header"))
         XCTAssertTrue(script.contains(".vector-page-toolbar"))
         XCTAssertTrue(script.contains("#p-lang-btn"))
@@ -15,6 +16,39 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(script.contains(".mw-parser-output"))
         XCTAssertTrue(script.contains("来自维基百科，自由的百科全书"))
         XCTAssertTrue(script.contains("font-size: 18px"))
+    }
+
+    func testWikipediaLinkOpensInNestedPresentationWithoutReplacingCurrentPage() throws {
+        let currentURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能"))
+        let destinationURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/机器学习"))
+
+        let entity = try XCTUnwrap(
+            WikipediaLinkPresentation.entity(for: destinationURL, currentURL: currentURL)
+        )
+
+        XCTAssertEqual(entity.title, "机器学习")
+        XCTAssertEqual(entity.url, destinationURL)
+    }
+
+    func testWikipediaSamePageAnchorRemainsInsideCurrentPresentation() throws {
+        let currentURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能"))
+        let anchorURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能#历史"))
+
+        XCTAssertNil(
+            WikipediaLinkPresentation.entity(for: anchorURL, currentURL: currentURL)
+        )
+    }
+
+    func testExternalWikipediaReferenceAlsoOpensWithoutReplacingCurrentPage() throws {
+        let currentURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能"))
+        let referenceURL = try XCTUnwrap(URL(string: "https://example.com/research/paper"))
+
+        let entity = try XCTUnwrap(
+            WikipediaLinkPresentation.entity(for: referenceURL, currentURL: currentURL)
+        )
+
+        XCTAssertEqual(entity.title, "paper")
+        XCTAssertFalse(entity.url.isWikipediaURL)
     }
 
     func testPersonArticleDecoding() throws {
