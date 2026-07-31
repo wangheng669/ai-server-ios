@@ -31,6 +31,8 @@ struct PostDetailView: View {
     @State private var xCommentsError: String?
     @State private var xTranslations: [String: String] = [:]
     @State private var loadingXTranslationIDs: Set<String> = []
+    @State private var xLiveDetail: XTweetDetailItem?
+    @State private var xLiveTranslationText: String?
     @State private var weiboImageSelection: ImageGallerySelection?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -1642,7 +1644,7 @@ struct PostDetailView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 11) {
                     xAuthorHeader
-                    if post.hasTranslation {
+                    if post.hasTranslation || xLiveTranslationText != nil {
                         HStack(spacing: 5) {
                             Image(systemName: "character.bubble")
                             Text(showsOriginal ? "英语原文" : "翻译自英语")
@@ -1653,10 +1655,22 @@ struct PostDetailView: View {
                         .foregroundStyle(.secondary)
                     }
 
-                    Text(showsOriginal ? post.originalDisplayContent : post.displayContent)
+                    Text(xDisplayedDetailText)
                         .font(.system(size: 17))
-                        .lineSpacing(3)
+                        .lineSpacing(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
+
+                    if XPostTextFormatter.isTruncated(xDisplayedDetailText),
+                       post.linkURL != nil {
+                        Button { openOriginal() } label: {
+                            Label("X 源仅返回了摘要，前往 X 查看全文", systemImage: "arrow.up.right.square")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     if let link = post.externalURL {
                         Button { openURL(link) } label: {
@@ -1727,6 +1741,16 @@ struct PostDetailView: View {
             .buttonStyle(.plain)
             .background(.bar)
         }
+    }
+
+    private var xDisplayedDetailText: String {
+        let value: String
+        if showsOriginal {
+            value = xLiveDetail?.fullText ?? post.xStoredOriginalContent
+        } else {
+            value = xLiveTranslationText ?? post.displayContent
+        }
+        return XPostTextFormatter.detailText(value)
     }
 
     private var xAuthorHeader: some View {
@@ -1934,6 +1958,17 @@ struct PostDetailView: View {
                 post = detail
             } else {
                 post = detail.replacingTranslation(with: post.displayContent)
+            }
+        }
+        if post.sourceName == "X", let tweetID = post.xTweetID {
+            var translationTweetID = tweetID
+            if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
+                xLiveDetail = liveDetail
+                translationTweetID = liveDetail.id
+            }
+            if post.meta?.lang?.lowercased().hasPrefix("zh") != true,
+               let translation = try? await client.fetchXTranslation(tweetID: translationTweetID) {
+                xLiveTranslationText = translation.text
             }
         }
         if post.isYouTube || post.isBilibili || post.isWeiboRSS {

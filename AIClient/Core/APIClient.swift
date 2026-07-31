@@ -238,6 +238,15 @@ struct APIClient {
         return response.data.items
     }
 
+    func fetchXTweetDetail(tweetID: String) async throws -> XTweetDetailItem {
+        var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/tweet"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [.init(name: "tweet_id", value: tweetID)]
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: XTweetDetailResponse = try await get(url)
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data.item
+    }
+
     func fetchXTranslation(tweetID: String) async throws -> XTranslation {
         var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/translation"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
