@@ -15,6 +15,7 @@ repo_url="https://github.com/wangheng669/ai-server-ios.git"
 developer_dir="/Applications/Xcode-beta.app/Contents/Developer"
 expected_xcode_build="27A5228h"
 run_lock="/tmp/ai-server-ios-local-testflight.lock"
+run_lock_owner="$run_lock/pid"
 retry_seconds="${TESTFLIGHT_SYNC_RETRY_SECONDS:-300}"
 timeout_seconds="${TESTFLIGHT_SYNC_TIMEOUT_SECONDS:-43200}"
 started_at="$(date +%s)"
@@ -32,7 +33,11 @@ cleanup() {
   if [[ -n "$work_dir" && -d "$work_dir" ]]; then
     rm -rf "$work_dir"
   fi
-  rmdir "$run_lock" 2>/dev/null || true
+  if [[ -f "$run_lock_owner" ]] &&
+    [[ "$(tr -d '[:space:]' < "$run_lock_owner")" == "$$" ]]; then
+    rm -f "$run_lock_owner"
+    rmdir "$run_lock" 2>/dev/null || true
+  fi
 }
 
 require_local_credentials() {
@@ -74,9 +79,20 @@ sync_main() {
 }
 
 if ! mkdir "$run_lock" 2>/dev/null; then
-  log "Another local TestFlight release is already running."
-  exit 0
+  existing_pid=""
+  if [[ -f "$run_lock_owner" ]]; then
+    existing_pid="$(tr -d '[:space:]' < "$run_lock_owner")"
+  fi
+  if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
+    log "Another local TestFlight release is already running as pid $existing_pid."
+    exit 0
+  fi
+  log "Recovering a stale local TestFlight lock."
+  rm -f "$run_lock_owner"
+  rmdir "$run_lock"
+  mkdir "$run_lock"
 fi
+printf '%s\n' "$$" > "$run_lock_owner"
 trap cleanup EXIT INT TERM
 
 umask 077
