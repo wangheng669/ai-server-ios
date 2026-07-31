@@ -2780,6 +2780,8 @@ enum PersonWikipediaPresentation {
 }
 
 private struct PersonDetailPage: View {
+    private static let articleSearchAnchor = "person-article-search"
+
     let person: SpecialPerson
     let showsNavigationChrome: Bool
     let usesSheetLayout: Bool
@@ -2809,20 +2811,31 @@ private struct PersonDetailPage: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                personHeader
-                if !person.photos.isEmpty {
-                    if usesSheetLayout {
-                        CompactPersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
-                    } else {
-                        PersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
+        ScrollViewReader { reader in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    personHeader
+                    if !person.photos.isEmpty {
+                        if usesSheetLayout {
+                            CompactPersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
+                        } else {
+                            PersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
+                        }
+                    }
+                    Section {
+                        sectionContent
+                    } header: {
+                        sectionPicker
                     }
                 }
-                Section {
-                    sectionContent
-                } header: {
-                    sectionPicker
+            }
+            .onChange(of: articleSearchIsFocused) { _, isFocused in
+                guard isFocused else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(80))
+                    withAnimation(.snappy(duration: 0.28)) {
+                        reader.scrollTo(Self.articleSearchAnchor, anchor: .top)
+                    }
                 }
             }
         }
@@ -3349,6 +3362,7 @@ private struct PersonDetailPage: View {
                 )
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
+                .id(Self.articleSearchAnchor)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     articleSearchIsFocused = true
