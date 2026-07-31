@@ -81,6 +81,7 @@ final class PeopleStore {
             return
         }
         activeXSearchQuery = query
+        xSearchResults = []
         isSearchingX = true
         xSearchErrorMessage = nil
         defer {
@@ -149,6 +150,7 @@ final class PeopleStore {
             return
         }
         activeWikipediaSearchQuery = query
+        wikipediaSearchResults = []
         isSearchingWikipedia = true
         wikipediaSearchErrorMessage = nil
         defer {

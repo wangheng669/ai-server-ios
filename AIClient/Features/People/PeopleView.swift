@@ -99,34 +99,56 @@ struct PeopleView: View {
     }
 }
 
-private struct PeopleSwimlaneExplorer: View {
-    private enum SearchSource: String, CaseIterable, Identifiable {
-        case all
-        case directory
-        case x
-        case wikipedia
+enum PeopleSearchSource: String, CaseIterable, Identifiable {
+    case all
+    case directory
+    case x
+    case wikipedia
 
-        var id: String { rawValue }
+    var id: String { rawValue }
 
-        var title: String {
-            switch self {
-            case .all: "全部"
-            case .directory: "人物库"
-            case .x: "X"
-            case .wikipedia: "维基百科"
-            }
-        }
-
-        var prompt: String {
-            switch self {
-            case .all: "搜索人物、公司或领域"
-            case .directory: "搜索人物、公司或领域"
-            case .x: "搜索 X 平台账号"
-            case .wikipedia: "搜索维基百科人物"
-            }
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .directory: "人物库"
+        case .x: "X"
+        case .wikipedia: "维基百科"
         }
     }
 
+    var prompt: String {
+        switch self {
+        case .all: "搜索人物、公司或领域"
+        case .directory: "搜索人物、公司或领域"
+        case .x: "搜索 X 平台账号"
+        case .wikipedia: "搜索维基百科人物"
+        }
+    }
+}
+
+struct PeopleSearchRequest: Hashable {
+    let isPresented: Bool
+    let source: PeopleSearchSource
+    let query: String
+    let revision: Int
+
+    init(isPresented: Bool, source: PeopleSearchSource, query: String, revision: Int = 0) {
+        self.isPresented = isPresented
+        self.source = source
+        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.revision = revision
+    }
+
+    var searchesX: Bool {
+        isPresented && query.count >= 2 && (source == .all || source == .x)
+    }
+
+    var searchesWikipedia: Bool {
+        isPresented && query.count >= 2 && (source == .all || source == .wikipedia)
+    }
+}
+
+private struct PeopleSwimlaneExplorer: View {
     let people: [SpecialPerson]
     let baseURL: URL
     let xSearchResults: [XPersonSearchResult]
@@ -149,7 +171,8 @@ private struct PeopleSwimlaneExplorer: View {
     @GestureState private var focusTranslation: CGSize = .zero
     @State private var focusedPersonID: String?
     @State private var searchText = ""
-    @State private var searchSource: SearchSource = .all
+    @State private var searchSource: PeopleSearchSource = .all
+    @State private var searchRevision = 0
     @State private var showsSearch = false
     @State private var isRefreshing = false
 
@@ -200,6 +223,15 @@ private struct PeopleSwimlaneExplorer: View {
         return Array(source.prefix(query.isEmpty ? 7 : 5))
     }
 
+    private var searchRequest: PeopleSearchRequest {
+        PeopleSearchRequest(
+            isPresented: showsSearch,
+            source: searchSource,
+            query: searchText,
+            revision: searchRevision
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             Color(uiColor: .systemBackground)
@@ -241,26 +273,23 @@ private struct PeopleSwimlaneExplorer: View {
         .task(id: focusedPerson.id) {
             await PeopleImagePreheater.preheatDetail(for: focusedPerson, baseURL: baseURL)
         }
-        .task(id: "\(searchSource.rawValue)\u{0}\(searchText)") {
-            guard showsSearch else { return }
-            guard searchSource != .directory else { return }
+        .task(id: searchRequest) {
+            let request = searchRequest
+            guard request.searchesX || request.searchesWikipedia else { return }
             do {
                 try await Task.sleep(for: .milliseconds(350))
             } catch {
                 return
             }
-            switch searchSource {
-            case .all:
-                let xTask = Task { await onSearchX(searchText) }
-                let wikipediaTask = Task { await onSearchWikipedia(searchText) }
-                await xTask.value
-                await wikipediaTask.value
-            case .directory:
-                break
-            case .x:
-                await onSearchX(searchText)
-            case .wikipedia:
-                await onSearchWikipedia(searchText)
+            guard !Task.isCancelled, request == searchRequest else { return }
+            if request.searchesX, request.searchesWikipedia {
+                async let xSearch: Void = onSearchX(request.query)
+                async let wikipediaSearch: Void = onSearchWikipedia(request.query)
+                _ = await (xSearch, wikipediaSearch)
+            } else if request.searchesX {
+                await onSearchX(request.query)
+            } else if request.searchesWikipedia {
+                await onSearchWikipedia(request.query)
             }
         }
     }
@@ -517,6 +546,10 @@ private struct PeopleSwimlaneExplorer: View {
                     .focused($searchIsFocused)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .onSubmit {
+                        searchRevision &+= 1
+                    }
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
@@ -535,7 +568,7 @@ private struct PeopleSwimlaneExplorer: View {
             .frame(height: 50)
 
             Picker("搜索来源", selection: $searchSource) {
-                ForEach(SearchSource.allCases) { source in
+                ForEach(PeopleSearchSource.allCases) { source in
                     Text(source.title).tag(source)
                 }
             }
@@ -897,7 +930,11 @@ private struct PeopleSwimlaneExplorer: View {
 
     private func dismissSearch() {
         searchIsFocused = false
-        withAnimation(animation) { showsSearch = false }
+        withAnimation(animation) {
+            showsSearch = false
+            searchText = ""
+            searchSource = .all
+        }
     }
 
     private var animation: Animation? {
