@@ -140,6 +140,13 @@ enum XPostTextFormatter {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    static func paragraphs(_ value: String) -> [String] {
+        detailText(value)
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
     static func isTruncated(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
