@@ -411,6 +411,207 @@ extension View {
     }
 }
 
+enum WikipediaReaderStyle {
+    static let script = #"""
+    (() => {
+      const styleID = "aiserver-wikipedia-reader-style";
+
+      const installReaderStyle = () => {
+        if (!document.documentElement || document.getElementById(styleID)) {
+          if (!document.documentElement) requestAnimationFrame(installReaderStyle);
+          return;
+        }
+
+        const style = document.createElement("style");
+        style.id = styleID;
+        style.textContent = `
+          :root {
+            color-scheme: light !important;
+            --aiserver-link: #3366cc;
+            --aiserver-rule: rgba(60, 60, 67, 0.18);
+          }
+
+          html, body {
+            background: #fff !important;
+            color: #1c1c1e !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+              "PingFang SC", "Helvetica Neue", sans-serif !important;
+            font-size: 18px !important;
+            line-height: 1.65 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow-x: hidden !important;
+          }
+
+          header, footer,
+          .mw-header, .minerva-header, .vector-header-container,
+          .vector-page-toolbar, .page-actions-menu, .page-actions-menu__list,
+          .mw-footer-container, .minerva-footer, #footer,
+          #p-lang-btn, #p-lang, .mw-portlet-lang, .uls-language-list,
+          .mw-indicators, .mw-editsection, .mw-jump-link,
+          .vector-toc, .sidebar-toc, .toc, #toc,
+          .shortdescription, .noprint, .nomobile,
+          .banner-container, .centralNotice, #siteNotice,
+          .post-content, .printfooter, .catlinks,
+          #mw-mf-page-center__mask, #mw-mf-page-left,
+          .vector-sticky-header, .vector-column-start,
+          .vector-column-end, .vector-page-tools {
+            display: none !important;
+          }
+
+          .mw-page-container,
+          .mw-page-container-inner,
+          .mw-content-container,
+          .mw-body,
+          .mw-body-content,
+          main,
+          #content {
+            background: #fff !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            display: block !important;
+            float: none !important;
+            grid-area: auto !important;
+            margin: 0 !important;
+            max-width: none !important;
+            min-width: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            width: auto !important;
+          }
+
+          #content, .mw-body {
+            padding: 18px 20px 48px !important;
+          }
+
+          #firstHeading {
+            border-bottom: 1px solid var(--aiserver-rule) !important;
+            color: #111 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+              "PingFang SC", sans-serif !important;
+            font-size: 2rem !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.025em !important;
+            line-height: 1.2 !important;
+            margin: 0 0 20px !important;
+            padding: 0 0 16px !important;
+          }
+
+          #firstHeading::before {
+            color: #8e8e93;
+            content: "来自维基百科，自由的百科全书";
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 400;
+            letter-spacing: 0;
+            line-height: 1.4;
+            margin-bottom: 12px;
+          }
+
+          .mw-parser-output {
+            color: #1c1c1e !important;
+            font-size: 1rem !important;
+            line-height: 1.65 !important;
+          }
+
+          .mw-parser-output p {
+            margin: 0 0 1.15em !important;
+          }
+
+          .mw-parser-output h2 {
+            border-bottom: 1px solid var(--aiserver-rule) !important;
+            color: #111 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+              "PingFang SC", sans-serif !important;
+            font-size: 1.55rem !important;
+            font-weight: 700 !important;
+            line-height: 1.3 !important;
+            margin: 1.65em 0 0.8em !important;
+            padding-bottom: 0.35em !important;
+          }
+
+          .mw-parser-output h3,
+          .mw-parser-output h4 {
+            color: #111 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+              "PingFang SC", sans-serif !important;
+            font-weight: 650 !important;
+            line-height: 1.35 !important;
+            margin: 1.45em 0 0.65em !important;
+          }
+
+          a, a:visited {
+            color: var(--aiserver-link) !important;
+            text-decoration: none !important;
+          }
+
+          figure, .thumb, .thumbinner, .mw-halign-right, .mw-halign-left {
+            background: transparent !important;
+            border: 0 !important;
+            box-sizing: border-box !important;
+            float: none !important;
+            margin: 1.2em 0 !important;
+            max-width: 100% !important;
+            padding: 0 !important;
+            width: 100% !important;
+          }
+
+          figure img, .thumb img, img.mw-file-element {
+            border: 0 !important;
+            border-radius: 12px !important;
+            box-sizing: border-box !important;
+            height: auto !important;
+            max-width: 100% !important;
+          }
+
+          figcaption, .thumbcaption {
+            color: #8e8e93 !important;
+            font-size: 0.78rem !important;
+            line-height: 1.45 !important;
+            padding: 8px 2px 0 !important;
+          }
+
+          table {
+            border-collapse: collapse !important;
+            display: block !important;
+            font-size: 0.88rem !important;
+            max-width: 100% !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .infobox {
+            background: #f7f7f8 !important;
+            border: 0 !important;
+            border-radius: 14px !important;
+            box-sizing: border-box !important;
+            float: none !important;
+            margin: 1.25em 0 !important;
+            padding: 12px !important;
+            width: 100% !important;
+          }
+
+          blockquote {
+            border-left: 3px solid var(--aiserver-link) !important;
+            color: #48484a !important;
+            margin: 1.2em 0 !important;
+            padding: 0.1em 0 0.1em 1em !important;
+          }
+
+          sup.reference {
+            font-size: 0.7em !important;
+            line-height: 0 !important;
+          }
+        `;
+
+        document.documentElement.appendChild(style);
+      };
+
+      installReaderStyle();
+    })();
+    """#
+}
+
 private struct WikipediaWebView: UIViewRepresentable {
     let url: URL
     @ObservedObject var model: WikipediaBrowserModel
@@ -420,6 +621,13 @@ private struct WikipediaWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: WikipediaReaderStyle.script,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
