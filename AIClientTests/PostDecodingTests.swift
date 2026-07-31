@@ -381,6 +381,21 @@ final class PostDecodingTests: XCTestCase {
         )
     }
 
+    func testXDetailSwitchesFromTruncatedSummaryToLiveFullOriginal() {
+        XCTAssertTrue(
+            XPostTextFormatter.shouldPreferFullOriginal(
+                displayed: "这是列表接口返回的摘要…",
+                fullOriginal: "这是 X 详情接口返回的完整正文，包含摘要中缺少的后续内容。"
+            )
+        )
+        XCTAssertFalse(
+            XPostTextFormatter.shouldPreferFullOriginal(
+                displayed: "这已经是完整正文。",
+                fullOriginal: "这是另一份完整正文。"
+            )
+        )
+    }
+
     func testProtectsModelNamesInXTranslation() {
         XCTAssertEqual(
             PersonDetailStore.presentedTranslation("双子座是谁？格罗克也来了。", original: "Gemini who? Grok is here."),

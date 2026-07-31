@@ -144,6 +144,14 @@ enum XPostTextFormatter {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
     }
+
+    static func shouldPreferFullOriginal(displayed: String, fullOriginal: String) -> Bool {
+        let displayed = detailText(displayed)
+        let fullOriginal = detailText(fullOriginal)
+        return isTruncated(displayed)
+            && !isTruncated(fullOriginal)
+            && fullOriginal.count > displayed.count
+    }
 }
 
 private extension String {
