@@ -1657,8 +1657,7 @@ struct PostDetailView: View {
                     }
 
                     Text(xDisplayedDetailText)
-                        .font(.system(size: 17))
-                        .lineSpacing(6)
+                        .font(.system(size: 17, weight: .regular))
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
@@ -1696,10 +1695,10 @@ struct PostDetailView: View {
                             Text("\(compactCount(views)) 次查看").fontWeight(.semibold).foregroundStyle(.primary)
                         }
                     }
-                    .font(.system(size: 13))
+                    .font(.system(size: 15))
                     .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 15)
+                .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 10)
 
@@ -1763,14 +1762,14 @@ struct PostDetailView: View {
 
     private var xAuthorHeader: some View {
         HStack(spacing: 9) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 38)
+            AvatarView(url: post.avatarURL, name: post.authorName, size: 40)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(post.authorName).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                    Text(post.authorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
                     Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
                 }
                 if let handle = post.authorHandle {
-                    Text(handle).font(.system(size: 13)).foregroundStyle(.secondary)
+                    Text(handle).font(.system(size: 15)).foregroundStyle(.secondary)
                 }
             }
             Spacer()
