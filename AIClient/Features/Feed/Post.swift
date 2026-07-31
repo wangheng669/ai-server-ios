@@ -311,6 +311,9 @@ struct Post: Decodable, Identifiable, Hashable {
             .compactMap(clean)
             .max(by: { $0.count < $1.count }) ?? originalDisplayContent
     }
+    var isChineseXSource: Bool {
+        sourceName == "X" && meta?.lang?.lowercased().hasPrefix("zh") == true
+    }
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
     var needsXTranslation: Bool {
         guard sourceName == "X", !hasTranslation, xTweetID != nil else { return false }
