@@ -2606,9 +2606,7 @@ private struct PersonDetailPage: View {
                 .scrollIndicators(.hidden)
             }
 
-            if person.id == PersonPushNotificationManager.samAltmanID {
-                samAltmanNotificationControl
-            }
+            personNotificationControl
         }
         .padding(.horizontal, 20)
         .padding(.top, 31)
@@ -2680,9 +2678,7 @@ private struct PersonDetailPage: View {
                 }
             }
 
-            if person.id == PersonPushNotificationManager.samAltmanID {
-                samAltmanNotificationControl
-            }
+            personNotificationControl
         }
         .padding(.horizontal, 20)
         .padding(.top, 5)
@@ -2711,22 +2707,21 @@ private struct PersonDetailPage: View {
         }
     }
 
-    private var samAltmanNotificationControl: some View {
-        Button {
+    private var personNotificationControl: some View {
+        let isEnabled = pushNotifications.isEnabled(for: person.id)
+        return Button {
             Task {
-                await pushNotifications.setSamAltmanEnabled(
-                    !pushNotifications.isSamAltmanEnabled
-                )
+                await pushNotifications.setEnabled(!isEnabled, for: person.id)
             }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: pushNotifications.isSamAltmanEnabled ? "bell.fill" : "bell")
+                Image(systemName: isEnabled ? "bell.fill" : "bell")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(
-                        pushNotifications.isSamAltmanEnabled ? Color.accentColor : Color.secondary
+                        isEnabled ? Color.accentColor : Color.secondary
                     )
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(pushNotifications.isSamAltmanEnabled ? "已开启本机提醒" : "开启本机提醒")
+                    Text(isEnabled ? "已开启本机提醒" : "开启本机提醒")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.primary)
                     Text(pushNotifications.errorMessage ?? "本人动态或新视频访谈发布时通知")
@@ -2753,7 +2748,7 @@ private struct PersonDetailPage: View {
         .buttonStyle(.plain)
         .disabled(pushNotifications.isUpdating)
         .accessibilityLabel(
-            pushNotifications.isSamAltmanEnabled ? "关闭山姆奥特曼本机提醒" : "开启山姆奥特曼本机提醒"
+            isEnabled ? "关闭\(person.name)本机提醒" : "开启\(person.name)本机提醒"
         )
     }
 

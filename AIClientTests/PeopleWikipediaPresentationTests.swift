@@ -29,4 +29,31 @@ final class PeopleWikipediaPresentationTests: XCTestCase {
         XCTAssertEqual(entity.url.host, "zh.wikipedia.org")
         XCTAssertNil(PersonWikipediaPresentation.entity(for: person, account: xAccount))
     }
+
+    @MainActor
+    func testPersonPushPreferencesMigrateLegacySamAltmanSetting() {
+        let suiteName = "PersonPushNotificationManagerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: "personPush.samAltman.enabled")
+
+        let manager = PersonPushNotificationManager(defaults: defaults)
+
+        XCTAssertTrue(manager.isEnabled(for: "1605"))
+        XCTAssertEqual(defaults.stringArray(forKey: "personPush.enabledPersonIDs"), ["1605"])
+    }
+
+    @MainActor
+    func testPersonPushPreferencesRestoreIndependentSubscriptions() {
+        let suiteName = "PersonPushNotificationManagerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(["1605", "44196397"], forKey: "personPush.enabledPersonIDs")
+
+        let manager = PersonPushNotificationManager(defaults: defaults)
+
+        XCTAssertTrue(manager.isEnabled(for: "1605"))
+        XCTAssertTrue(manager.isEnabled(for: "44196397"))
+        XCTAssertFalse(manager.isEnabled(for: "missing"))
+    }
 }
