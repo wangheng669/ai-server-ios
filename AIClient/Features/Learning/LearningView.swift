@@ -166,39 +166,52 @@ struct LearningView: View {
 
             VStack(spacing: 0) {
                 sectionPicker
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        switch selectedSection {
-                        case .investment:
-                            investmentContent
-                        case .books:
-                            booksContent
-                        case .concepts:
-                            conceptsContent
-                        case .ideology:
-                            ideologyContent
-                        }
-                    }
-                    .padding(.top, 12)
-                    .padding(.bottom, 32)
+                TabView(selection: $selectedSection) {
+                    knowledgeSectionPage(.investment)
+                        .tag(KnowledgeSection.investment)
+                    knowledgeSectionPage(.books)
+                        .tag(KnowledgeSection.books)
+                    knowledgeSectionPage(.concepts)
+                        .tag(KnowledgeSection.concepts)
+                    knowledgeSectionPage(.ideology)
+                        .tag(KnowledgeSection.ideology)
                 }
-                .id(selectedSection)
-                .scrollIndicators(.hidden)
-                .safeAreaPadding(.bottom, 90)
-                .refreshable {
-                    switch selectedSection {
-                    case .investment:
-                        async let catalog: Void = store.load(force: true)
-                        async let videoLibrary: Void = store.loadVideoLibrary(force: true)
-                        _ = await (catalog, videoLibrary)
-                    case .books:
-                        await store.loadBookshelf(force: true)
-                    case .concepts:
-                        await store.loadConceptLibrary(force: true)
-                    case .ideology:
-                        await peopleStore.load(force: true)
-                    }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+        }
+    }
+
+    private func knowledgeSectionPage(_ section: KnowledgeSection) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                switch section {
+                case .investment:
+                    investmentContent
+                case .books:
+                    booksContent
+                case .concepts:
+                    conceptsContent
+                case .ideology:
+                    ideologyContent
                 }
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 32)
+        }
+        .scrollIndicators(.hidden)
+        .safeAreaPadding(.bottom, 90)
+        .refreshable {
+            switch section {
+            case .investment:
+                async let catalog: Void = store.load(force: true)
+                async let videoLibrary: Void = store.loadVideoLibrary(force: true)
+                _ = await (catalog, videoLibrary)
+            case .books:
+                await store.loadBookshelf(force: true)
+            case .concepts:
+                await store.loadConceptLibrary(force: true)
+            case .ideology:
+                await peopleStore.load(force: true)
             }
         }
     }
