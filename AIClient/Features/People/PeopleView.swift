@@ -2807,16 +2807,29 @@ private struct PersonDetailPage: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 personHeader
                 if !person.photos.isEmpty {
-                    PersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
+                    if usesSheetLayout {
+                        CompactPersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
+                    } else {
+                        PersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
+                    }
                 }
-                sectionPicker
-                sectionContent
+                Section {
+                    sectionContent
+                } header: {
+                    sectionPicker
+                }
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(
+            Color(
+                uiColor: usesSheetLayout
+                    ? .systemGroupedBackground
+                    : .systemBackground
+            )
+        )
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(showsNavigationChrome ? .visible : .hidden, for: .navigationBar)
@@ -2907,12 +2920,12 @@ private struct PersonDetailPage: View {
     }
 
     private var sheetPersonHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 14) {
                 AvatarView(
                     url: person.avatarURL(baseURL: ServerConfiguration.currentURL),
                     name: person.name,
-                    size: 66,
+                    size: 72,
                     assetName: person.avatarAssetName
                 )
                 .overlay {
@@ -2964,7 +2977,11 @@ private struct PersonDetailPage: View {
                         }
                     }
                 }
-                .padding(.trailing, 36)
+
+                Spacer(minLength: 2)
+
+                compactNotificationControl
+                    .padding(.trailing, 38)
             }
 
             if !person.focusTags.isEmpty {
@@ -2986,18 +3003,16 @@ private struct PersonDetailPage: View {
                 }
                 .scrollIndicators(.hidden)
             }
-
-            personNotificationControl
         }
         .padding(.horizontal, 20)
-        .padding(.top, 31)
-        .padding(.bottom, 15)
+        .padding(.top, 30)
+        .padding(.bottom, 14)
         .background(alignment: .topLeading) {
             LinearGradient(
                 colors: [
-                    Color.accentColor.opacity(0.085),
-                    Color.accentColor.opacity(0.018),
-                    Color.clear
+                    Color(uiColor: .systemBackground),
+                    Color.accentColor.opacity(0.055),
+                    Color(uiColor: .systemBackground)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -3133,6 +3148,45 @@ private struct PersonDetailPage: View {
         )
     }
 
+    private var compactNotificationControl: some View {
+        let isEnabled = pushNotifications.isEnabled(for: person.id)
+        return Button {
+            Task {
+                await pushNotifications.setEnabled(!isEnabled, for: person.id)
+            }
+        } label: {
+            Group {
+                if pushNotifications.isUpdating {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: isEnabled ? "bell.fill" : "bell")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+            .foregroundStyle(
+                pushNotifications.errorMessage == nil
+                    ? (isEnabled ? Color.accentColor : Color.secondary)
+                    : Color.red
+            )
+            .frame(width: 36, height: 36)
+            .background(
+                (isEnabled ? Color.accentColor : Color.secondary).opacity(0.1),
+                in: Circle()
+            )
+            .overlay {
+                Circle()
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+            }
+        }
+        .buttonStyle(PeoplePressStyle())
+        .disabled(pushNotifications.isUpdating)
+        .accessibilityLabel(
+            isEnabled ? "关闭\(person.name)本机提醒" : "开启\(person.name)本机提醒"
+        )
+        .accessibilityHint("本人动态或新视频访谈发布时通知")
+    }
+
     private var sectionPicker: some View {
         HStack(spacing: 0) {
             ForEach(detailSections) { item in
@@ -3151,6 +3205,8 @@ private struct PersonDetailPage: View {
             }
         }
         .overlay(alignment: .bottom) { Divider() }
+        .padding(.top, usesSheetLayout ? 18 : 0)
+        .background(.regularMaterial)
     }
 
     private var detailSections: [PersonDetailSection] {
@@ -3165,7 +3221,7 @@ private struct PersonDetailPage: View {
     @ViewBuilder
     private var sectionContent: some View {
         if section == .profile {
-            PersonProfileView(person: person) {
+            PersonProfileView(person: person, usesCardLayout: usesSheetLayout) {
                 presentedWikipediaEntity = $0
             }
         } else if section == .discussions {
@@ -3441,6 +3497,67 @@ private struct PersonPhotoGallery: View {
         }
         .padding(.top, 2)
         .padding(.bottom, 20)
+    }
+}
+
+private struct CompactPersonPhotoGallery: View {
+    let photos: [PersonPhoto]
+    let onSelect: (PersonPhoto) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("人物影像")
+                    .font(.system(size: 18, weight: .bold))
+                Spacer()
+                Text("\(photos.count) 张")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 10) {
+                    ForEach(photos) { photo in
+                        Button {
+                            onSelect(photo)
+                        } label: {
+                            Group {
+                                if let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
+                                    RemoteImage(
+                                        url: url,
+                                        height: 96,
+                                        cornerRadius: 13,
+                                        contentMode: .fill
+                                    )
+                                } else {
+                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                        .fill(Color.secondary.opacity(0.1))
+                                        .overlay {
+                                            Image(systemName: "photo")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                }
+                            }
+                            .frame(width: 154, height: 96)
+                            .background(
+                                Color(uiColor: .secondarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        }
+                        .buttonStyle(PeoplePressStyle())
+                        .accessibilityLabel(photo.title)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 16)
+        .background(Color(uiColor: .systemBackground))
     }
 }
 
@@ -4432,6 +4549,7 @@ private struct PersonPostTimelineRow: View {
 
 private struct PersonProfileView: View {
     let person: SpecialPerson
+    let usesCardLayout: Bool
     let openWikipedia: (WikipediaEntity) -> Void
 
     var body: some View {
@@ -4600,14 +4718,27 @@ private struct PersonProfileView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(title).font(.system(size: 17, weight: .bold))
+            Text(title).font(.system(size: usesCardLayout ? 18 : 17, weight: .bold))
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 14)
-        .overlay(alignment: .bottom) { Divider().padding(.leading, 20) }
+        .padding(.horizontal, usesCardLayout ? 16 : 20)
+        .padding(.vertical, usesCardLayout ? 16 : 0)
+        .padding(.top, usesCardLayout ? 0 : 16)
+        .padding(.bottom, usesCardLayout ? 0 : 14)
+        .background(
+            usesCardLayout
+                ? Color(uiColor: .secondarySystemGroupedBackground)
+                : Color.clear,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .padding(.horizontal, usesCardLayout ? 16 : 0)
+        .padding(.top, usesCardLayout ? 10 : 0)
+        .overlay(alignment: .bottom) {
+            if !usesCardLayout {
+                Divider().padding(.leading, 20)
+            }
+        }
     }
 }
 
