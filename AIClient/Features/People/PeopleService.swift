@@ -20,6 +20,41 @@ struct PeopleService {
         return payload
     }
 
+    func searchXPeople(query: String, limit: Int = 8) async throws -> [XPersonSearchResult] {
+        let endpoint = baseURL.appending(path: "api/v1/people/x/search")
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            .init(name: "query", value: query),
+            .init(name: "limit", value: String(limit))
+        ]
+        guard let url = components?.url else { throw PeopleServiceError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PeopleServiceError.invalidResponse
+        }
+        let payload = try JSONDecoder().decode(XPeopleSearchResponse.self, from: data)
+        guard payload.success else { throw PeopleServiceError.invalidResponse }
+        return payload.results
+    }
+
+    func importXPerson(screenName: String) async throws -> XPersonImportResponse {
+        let url = baseURL.appending(path: "api/v1/people/x/import")
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["screen_name": screenName])
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PeopleServiceError.invalidResponse
+        }
+        let payload = try JSONDecoder().decode(XPersonImportResponse.self, from: data)
+        guard payload.success else { throw PeopleServiceError.invalidResponse }
+        return payload
+    }
+
     func latestPost(userID: String) async throws -> Post? {
         try await posts(userID: userID, limit: 1).first
     }

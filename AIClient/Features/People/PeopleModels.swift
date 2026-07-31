@@ -33,6 +33,43 @@ struct SpecialPeopleResponse: Decodable {
     let users: [SpecialPerson]
 }
 
+struct XPeopleSearchResponse: Decodable {
+    let success: Bool
+    let results: [XPersonSearchResult]
+}
+
+struct XPersonImportResponse: Decodable {
+    let success: Bool
+    let added: Bool
+    let person: SpecialPerson
+}
+
+struct XPersonSearchResult: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let screenName: String
+    let description: String?
+    let avatarURLValue: String?
+    let verified: Bool
+    let followersCount: Int64
+    let followingCount: Int64
+    let alreadyInDirectory: Bool
+    let personID: String?
+
+    var handle: String { screenName.hasPrefix("@") ? screenName : "@\(screenName)" }
+    var avatarURL: URL? { avatarURLValue.flatMap(MediaURL.image) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, verified
+        case screenName = "screen_name"
+        case avatarURLValue = "avatar_url"
+        case followersCount = "followers_count"
+        case followingCount = "following_count"
+        case alreadyInDirectory = "already_in_directory"
+        case personID = "person_id"
+    }
+}
+
 struct PeopleCategory: Decodable, Identifiable {
     let id: String
     let title: String

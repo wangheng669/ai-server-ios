@@ -36,8 +36,14 @@ struct PeopleView: View {
                         PeopleSwimlaneExplorer(
                             people: store.people,
                             baseURL: store.baseURL,
+                            xSearchResults: store.xSearchResults,
+                            isSearchingX: store.isSearchingX,
+                            xSearchErrorMessage: store.xSearchErrorMessage,
+                            importingXUserIDs: store.importingXUserIDs,
                             onOpenPerson: { selectedPerson = $0 },
-                            onRefresh: { await store.load(force: true) }
+                            onRefresh: { await store.load(force: true) },
+                            onSearchX: { await store.searchXPeople(query: $0) },
+                            onImportX: { await store.importXPerson($0) }
                         )
                     }
                 }
@@ -90,8 +96,14 @@ struct PeopleView: View {
 private struct PeopleSwimlaneExplorer: View {
     let people: [SpecialPerson]
     let baseURL: URL
+    let xSearchResults: [XPersonSearchResult]
+    let isSearchingX: Bool
+    let xSearchErrorMessage: String?
+    let importingXUserIDs: Set<String>
     let onOpenPerson: (SpecialPerson) -> Void
     let onRefresh: () async -> Void
+    let onSearchX: (String) async -> Void
+    let onImportX: (XPersonSearchResult) async -> SpecialPerson?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchIsFocused: Bool
@@ -145,7 +157,7 @@ private struct PeopleSwimlaneExplorer: View {
                 ($0.organizationName?.localizedCaseInsensitiveContains(query) ?? false) ||
                 $0.focusTags.contains { $0.localizedCaseInsensitiveContains(query) }
         }
-        return Array(source.prefix(7))
+        return Array(source.prefix(query.isEmpty ? 7 : 5))
     }
 
     var body: some View {
@@ -188,6 +200,15 @@ private struct PeopleSwimlaneExplorer: View {
         }
         .task(id: focusedPerson.id) {
             await PeopleImagePreheater.preheatDetail(for: focusedPerson, baseURL: baseURL)
+        }
+        .task(id: searchText) {
+            guard showsSearch else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
+            await onSearchX(searchText)
         }
     }
 
@@ -462,35 +483,59 @@ private struct PeopleSwimlaneExplorer: View {
 
             Divider()
 
-            ForEach(searchResults) { person in
-                Button {
-                    focus(on: person)
-                    dismissSearch()
-                } label: {
-                    HStack(spacing: 11) {
-                        AvatarView(
-                            url: person.avatarURL(baseURL: baseURL),
-                            name: person.name,
-                            size: 38,
-                            assetName: person.avatarAssetName
-                        )
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(person.name)
-                                .font(.system(size: 15, weight: .semibold))
-                            Text(person.organizationName ?? person.topic.rawValue)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if !searchResults.isEmpty {
+                        searchSectionHeader(searchText.isEmpty ? "人物库" : "人物库匹配")
+                        ForEach(searchResults) { person in
+                            Button {
+                                focus(on: person)
+                                dismissSearch()
+                            } label: {
+                                HStack(spacing: 11) {
+                                    AvatarView(
+                                        url: person.avatarURL(baseURL: baseURL),
+                                        name: person.name,
+                                        size: 38,
+                                        assetName: person.avatarAssetName
+                                    )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(person.name)
+                                            .font(.system(size: 15, weight: .semibold))
+                                        Text(person.organizationName ?? person.topic.rawValue)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 14)
+                                .frame(height: 54)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
-                        Spacer()
                     }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 14)
-                    .frame(height: 54)
-                    .contentShape(Rectangle())
+
+                    if searchText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 {
+                        searchSectionHeader("X 平台")
+                        xPlatformSearchContent
+                    } else if !searchText.isEmpty {
+                        Text("再输入一些内容，即可同时搜索 X 平台账号")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 16)
+                    }
                 }
-                .buttonStyle(.plain)
             }
+            .scrollIndicators(.hidden)
+            .frame(maxHeight: 430)
         }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
@@ -498,6 +543,126 @@ private struct PeopleSwimlaneExplorer: View {
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.12), radius: 22, y: 8)
+    }
+
+    @ViewBuilder
+    private var xPlatformSearchContent: some View {
+        if isSearchingX {
+            HStack(spacing: 9) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在搜索 X 平台…")
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+        } else if let xSearchErrorMessage {
+            Label(xSearchErrorMessage, systemImage: "exclamationmark.triangle")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+        } else if xSearchResults.isEmpty {
+            Text("X 平台没有找到相关账号")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+        } else {
+            ForEach(xSearchResults) { result in
+                Button {
+                    selectXSearchResult(result)
+                } label: {
+                    HStack(spacing: 11) {
+                        ZStack(alignment: .bottomTrailing) {
+                            AvatarView(url: result.avatarURL, name: result.name, size: 40)
+                            if !result.alreadyInDirectory {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 17, height: 17)
+                                    .background(Color.accentColor, in: Circle())
+                                    .overlay { Circle().stroke(.background, lineWidth: 2) }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text(result.name)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .lineLimit(1)
+                                if result.verified {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            Text(
+                                result.alreadyInDirectory
+                                    ? "\(result.handle) · 已在人物库"
+                                    : "\(result.handle) · 点击头像加入人物库"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
+
+                        Spacer()
+                        if importingXUserIDs.contains(result.id) {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(result.alreadyInDirectory ? "查看" : "加入")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(result.alreadyInDirectory ? .secondary : Color.accentColor)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .frame(height: 58)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(importingXUserIDs.contains(result.id))
+                .accessibilityLabel(
+                    result.alreadyInDirectory
+                        ? "查看人物库中的 \(result.name)"
+                        : "将 \(result.name) 加入人物库"
+                )
+            }
+        }
+    }
+
+    private func searchSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .background(Color.primary.opacity(0.025))
+    }
+
+    private func selectXSearchResult(_ result: XPersonSearchResult) {
+        if let existing = people.first(where: { person in
+            (result.personID.map { $0 == person.id } ?? false) ||
+                person.xUserID == result.id ||
+                person.xScreenName?.caseInsensitiveCompare(result.screenName) == .orderedSame
+        }) {
+            focus(on: existing)
+            dismissSearch()
+            return
+        }
+        Task {
+            guard let person = await onImportX(result) else { return }
+            focus(on: person)
+            dismissSearch()
+        }
     }
 
     private func moveFocus(by offset: Int) {

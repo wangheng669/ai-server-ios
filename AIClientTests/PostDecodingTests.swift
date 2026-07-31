@@ -323,6 +323,19 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(person.discussionKeywords, ["大道无形我有型", "段永平"])
     }
 
+    func testDecodesXPeopleSearchAndImportResponses() throws {
+        let searchData = #"{"success":true,"results":[{"id":"1605","name":"Sam Altman","screen_name":"sama","description":"OpenAI","avatar_url":"https://example.com/avatar.jpg","verified":true,"followers_count":100,"following_count":10,"already_in_directory":false}]}"#.data(using: .utf8)!
+        let importData = #"{"success":true,"added":true,"person":{"user_id":"1605","user_name":"Sam Altman","user_screen_name":"sama","x_user_id":"1605","x_screen_name":"sama","today_count":0,"total_count":0}}"#.data(using: .utf8)!
+        let search = try JSONDecoder().decode(XPeopleSearchResponse.self, from: searchData)
+        let imported = try JSONDecoder().decode(XPersonImportResponse.self, from: importData)
+
+        XCTAssertEqual(search.results.first?.handle, "@sama")
+        XCTAssertEqual(search.results.first?.avatarURL?.absoluteString, "https://example.com/avatar.jpg")
+        XCTAssertTrue(search.results.first?.verified == true)
+        XCTAssertEqual(imported.person.id, "1605")
+        XCTAssertTrue(imported.added)
+    }
+
     func testCuratedPersonWithoutAccountDoesNotRequestOwnPostFeed() {
         let person = SpecialPerson(
             id: "xi-jinping",
