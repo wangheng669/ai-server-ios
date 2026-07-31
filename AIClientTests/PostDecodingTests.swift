@@ -356,6 +356,21 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(imported.added)
     }
 
+    func testDecodesWikipediaPeopleSearchAndImportResponses() throws {
+        let searchData = #"{"success":true,"results":[{"id":"Q1137062","page_id":123,"language":"zh","title":"马云","description":"中国企业家","extract":"阿里巴巴集团主要创始人。","avatar_url":"https://example.com/jack-ma.jpg","article_url":"https://zh.wikipedia.org/wiki/%E9%A9%AC%E4%BA%91","already_in_directory":false}]}"#.data(using: .utf8)!
+        let importData = #"{"success":true,"added":true,"person":{"user_id":"curated:wikidata:q1137062","user_name":"马云","user_screen_name":"维基百科","user_description":"阿里巴巴集团主要创始人。","avatar_url":"https://example.com/jack-ma.jpg","organization_name":"中国企业家","today_count":0,"total_count":0,"has_own_post_source":false}}"#.data(using: .utf8)!
+        let search = try JSONDecoder().decode(WikipediaPeopleSearchResponse.self, from: searchData)
+        let imported = try JSONDecoder().decode(WikipediaPersonImportResponse.self, from: importData)
+
+        XCTAssertEqual(search.results.first?.name, "马云")
+        XCTAssertEqual(search.results.first?.sourceLabel, "中文维基百科")
+        XCTAssertEqual(search.results.first?.avatarURL?.absoluteString, "https://example.com/jack-ma.jpg")
+        XCTAssertEqual(search.results.first?.articleURL?.host, "zh.wikipedia.org")
+        XCTAssertEqual(imported.person.id, "curated:wikidata:q1137062")
+        XCTAssertFalse(imported.person.hasOwnPostSource)
+        XCTAssertTrue(imported.added)
+    }
+
     func testCuratedPersonWithoutAccountDoesNotRequestOwnPostFeed() {
         let person = SpecialPerson(
             id: "xi-jinping",

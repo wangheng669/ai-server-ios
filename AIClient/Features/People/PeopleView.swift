@@ -40,10 +40,16 @@ struct PeopleView: View {
                             isSearchingX: store.isSearchingX,
                             xSearchErrorMessage: store.xSearchErrorMessage,
                             importingXUserIDs: store.importingXUserIDs,
+                            wikipediaSearchResults: store.wikipediaSearchResults,
+                            isSearchingWikipedia: store.isSearchingWikipedia,
+                            wikipediaSearchErrorMessage: store.wikipediaSearchErrorMessage,
+                            importingWikipediaIDs: store.importingWikipediaIDs,
                             onOpenPerson: { selectedPerson = $0 },
                             onRefresh: { await store.load(force: true) },
                             onSearchX: { await store.searchXPeople(query: $0) },
-                            onImportX: { await store.importXPerson($0) }
+                            onImportX: { await store.importXPerson($0) },
+                            onSearchWikipedia: { await store.searchWikipediaPeople(query: $0) },
+                            onImportWikipedia: { await store.importWikipediaPerson($0) }
                         )
                     }
                 }
@@ -100,10 +106,16 @@ private struct PeopleSwimlaneExplorer: View {
     let isSearchingX: Bool
     let xSearchErrorMessage: String?
     let importingXUserIDs: Set<String>
+    let wikipediaSearchResults: [WikipediaPersonSearchResult]
+    let isSearchingWikipedia: Bool
+    let wikipediaSearchErrorMessage: String?
+    let importingWikipediaIDs: Set<String>
     let onOpenPerson: (SpecialPerson) -> Void
     let onRefresh: () async -> Void
     let onSearchX: (String) async -> Void
     let onImportX: (XPersonSearchResult) async -> SpecialPerson?
+    let onSearchWikipedia: (String) async -> Void
+    let onImportWikipedia: (WikipediaPersonSearchResult) async -> SpecialPerson?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchIsFocused: Bool
@@ -208,7 +220,10 @@ private struct PeopleSwimlaneExplorer: View {
             } catch {
                 return
             }
-            await onSearchX(searchText)
+            let xTask = Task { await onSearchX(searchText) }
+            let wikipediaTask = Task { await onSearchWikipedia(searchText) }
+            await xTask.value
+            await wikipediaTask.value
         }
     }
 
@@ -524,8 +539,10 @@ private struct PeopleSwimlaneExplorer: View {
                     if searchText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 {
                         searchSectionHeader("X 平台")
                         xPlatformSearchContent
+                        searchSectionHeader("维基百科")
+                        wikipediaSearchContent
                     } else if !searchText.isEmpty {
-                        Text("再输入一些内容，即可同时搜索 X 平台账号")
+                        Text("再输入一些内容，即可同时搜索 X 平台和维基百科")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -535,7 +552,7 @@ private struct PeopleSwimlaneExplorer: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .frame(maxHeight: 430)
+            .frame(maxHeight: 520)
         }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
@@ -637,6 +654,91 @@ private struct PeopleSwimlaneExplorer: View {
         }
     }
 
+    @ViewBuilder
+    private var wikipediaSearchContent: some View {
+        if isSearchingWikipedia {
+            HStack(spacing: 9) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在搜索维基百科人物…")
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+        } else if let wikipediaSearchErrorMessage {
+            Label(wikipediaSearchErrorMessage, systemImage: "exclamationmark.triangle")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+        } else if wikipediaSearchResults.isEmpty {
+            Text("维基百科没有找到相关人物")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+        } else {
+            ForEach(wikipediaSearchResults) { result in
+                Button {
+                    selectWikipediaSearchResult(result)
+                } label: {
+                    HStack(spacing: 11) {
+                        ZStack(alignment: .bottomTrailing) {
+                            AvatarView(url: result.avatarURL, name: result.name, size: 40)
+                            if !result.alreadyInDirectory {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 17, height: 17)
+                                    .background(Color.accentColor, in: Circle())
+                                    .overlay { Circle().stroke(.background, lineWidth: 2) }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.name)
+                                .font(.system(size: 15, weight: .semibold))
+                                .lineLimit(1)
+                            Text(
+                                result.alreadyInDirectory
+                                    ? "\(result.sourceLabel) · 已在人物库"
+                                    : "\(result.description ?? result.sourceLabel) · 点击头像加入人物库"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
+
+                        Spacer()
+                        if importingWikipediaIDs.contains(result.id) {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(result.alreadyInDirectory ? "查看" : "加入")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(result.alreadyInDirectory ? .secondary : Color.accentColor)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .frame(height: 58)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(importingWikipediaIDs.contains(result.id))
+                .accessibilityLabel(
+                    result.alreadyInDirectory
+                        ? "查看人物库中的 \(result.name)"
+                        : "将维基百科人物 \(result.name) 加入人物库"
+                )
+            }
+        }
+    }
+
     private func searchSectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 11, weight: .semibold))
@@ -660,6 +762,20 @@ private struct PeopleSwimlaneExplorer: View {
         }
         Task {
             guard let person = await onImportX(result) else { return }
+            focus(on: person)
+            dismissSearch()
+        }
+    }
+
+    private func selectWikipediaSearchResult(_ result: WikipediaPersonSearchResult) {
+        if let personID = result.personID,
+           let existing = people.first(where: { $0.id == personID }) {
+            focus(on: existing)
+            dismissSearch()
+            return
+        }
+        Task {
+            guard let person = await onImportWikipedia(result) else { return }
             focus(on: person)
             dismissSearch()
         }
