@@ -3380,6 +3380,9 @@ private struct PersonDetailPage: View {
                         .autocorrectionDisabled()
                         .focused($articleSearchIsFocused)
                         .submitLabel(.search)
+                        .onSubmit {
+                            articleSearchIsFocused = false
+                        }
                     if !articleSearchText.isEmpty {
                         Button {
                             articleSearchText = ""
