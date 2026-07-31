@@ -1648,7 +1648,7 @@ struct PostDetailView: View {
                     if post.hasTranslation || xLiveTranslationText != nil {
                         HStack(spacing: 5) {
                             Image(systemName: "character.bubble")
-                            Text(showsOriginal ? "英语原文" : "翻译自英语")
+                            Text(showsOriginal ? xOriginalLanguageLabel : "翻译自英语")
                             Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
                                 .foregroundStyle(.blue)
                         }
@@ -1755,6 +1755,10 @@ struct PostDetailView: View {
             ) ?? post.displayContent
         }
         return XPostTextFormatter.detailText(value)
+    }
+
+    private var xOriginalLanguageLabel: String {
+        post.meta?.lang?.lowercased().hasPrefix("zh") == true ? "原文" : "英语原文"
     }
 
     private var xAuthorHeader: some View {
@@ -1969,6 +1973,12 @@ struct PostDetailView: View {
             if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 xLiveDetail = liveDetail
                 translationTweetID = liveDetail.id
+                if XPostTextFormatter.shouldPreferFullOriginal(
+                    displayed: xDisplayedDetailText,
+                    fullOriginal: liveDetail.fullText
+                ) {
+                    showsOriginal = true
+                }
             }
             if post.meta?.lang?.lowercased().hasPrefix("zh") != true,
                let translation = try? await client.fetchXTranslation(tweetID: translationTweetID) {
