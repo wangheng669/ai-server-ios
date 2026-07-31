@@ -353,10 +353,12 @@ struct PeopleArticlesResponse: Decodable {
     let success: Bool
     let personID: String
     let articles: [PersonArticle]
+    let queryApplied: Bool?
 
     enum CodingKeys: String, CodingKey {
         case success, articles
         case personID = "person_id"
+        case queryApplied = "query_applied"
     }
 }
 
