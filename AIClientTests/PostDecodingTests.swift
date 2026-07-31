@@ -2,6 +2,41 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testPeopleSearchRequestRetriggersAndRoutesSourcesReliably() {
+        let hidden = PeopleSearchRequest(
+            isPresented: false,
+            source: .all,
+            query: " 爱因斯坦 "
+        )
+        XCTAssertEqual(hidden.query, "爱因斯坦")
+        XCTAssertFalse(hidden.searchesX)
+        XCTAssertFalse(hidden.searchesWikipedia)
+
+        let allSources = PeopleSearchRequest(
+            isPresented: true,
+            source: .all,
+            query: "爱因斯坦"
+        )
+        XCTAssertTrue(allSources.searchesX)
+        XCTAssertTrue(allSources.searchesWikipedia)
+
+        let wikipediaOnly = PeopleSearchRequest(
+            isPresented: true,
+            source: .wikipedia,
+            query: "爱因斯坦"
+        )
+        XCTAssertFalse(wikipediaOnly.searchesX)
+        XCTAssertTrue(wikipediaOnly.searchesWikipedia)
+
+        let submittedAgain = PeopleSearchRequest(
+            isPresented: true,
+            source: .wikipedia,
+            query: "爱因斯坦",
+            revision: 1
+        )
+        XCTAssertNotEqual(wikipediaOnly, submittedAgain)
+    }
+
     func testWikipediaReaderStyleHidesChromeAndKeepsArticleContentStyled() {
         let script = WikipediaReaderStyle.script
 
