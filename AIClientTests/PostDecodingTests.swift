@@ -396,6 +396,19 @@ final class PostDecodingTests: XCTestCase {
         )
     }
 
+    func testXDetailKeepsParagraphsSeparateAndSingleLineBreaksInsideParagraphs() {
+        XCTAssertEqual(
+            XPostTextFormatter.paragraphs(
+                "第一段。\n\n第二段第一行。\n第二段第二行。\n\n\n第三段。"
+            ),
+            [
+                "第一段。",
+                "第二段第一行。\n第二段第二行。",
+                "第三段。"
+            ]
+        )
+    }
+
     func testProtectsModelNamesInXTranslation() {
         XCTAssertEqual(
             PersonDetailStore.presentedTranslation("双子座是谁？格罗克也来了。", original: "Gemini who? Grok is here."),

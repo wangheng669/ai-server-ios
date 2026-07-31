@@ -1656,11 +1656,15 @@ struct PostDetailView: View {
                         .foregroundStyle(.secondary)
                     }
 
-                    Text(xDisplayedDetailText)
-                        .font(.system(size: 17, weight: .regular))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .font(.system(size: 17, weight: .regular))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .textSelection(.enabled)
 
                     if XPostTextFormatter.isTruncated(xDisplayedDetailText),
                        post.linkURL != nil {
@@ -1758,6 +1762,10 @@ struct PostDetailView: View {
 
     private var xOriginalLanguageLabel: String {
         post.meta?.lang?.lowercased().hasPrefix("zh") == true ? "原文" : "英语原文"
+    }
+
+    private var xDisplayedDetailParagraphs: [String] {
+        XPostTextFormatter.paragraphs(xDisplayedDetailText)
     }
 
     private var xAuthorHeader: some View {
