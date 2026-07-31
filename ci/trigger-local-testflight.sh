@@ -67,9 +67,10 @@ sync_main() {
   if [[ ! -d "$mirror_dir" ]]; then
     git clone --mirror "$repo_url" "$mirror_dir"
   else
-    git --git-dir="$mirror_dir" fetch --prune origin main
+    git --git-dir="$mirror_dir" fetch --prune origin \
+      '+refs/heads/main:refs/heads/main'
   fi
-  git --git-dir="$mirror_dir" rev-parse refs/remotes/origin/main
+  git --git-dir="$mirror_dir" rev-parse refs/heads/main
 }
 
 if ! mkdir "$run_lock" 2>/dev/null; then
