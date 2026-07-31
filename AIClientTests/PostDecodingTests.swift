@@ -314,6 +314,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(person.hasOwnPostSource)
     }
 
+    func testKnownAccountIdentityUsesCanonicalPersonNameAndKeepsPlatformAlias() throws {
+        let data = #"{"success":true,"users":[{"user_id":"rss:14","user_name":"大道无形我有型","user_screen_name":"雪球-大道无形我有型","today_count":1,"total_count":20,"discussion_keywords":["大道无形我有型"]}]}"#.data(using: .utf8)!
+        let person = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data).users[0]
+
+        XCTAssertEqual(person.name, "段永平")
+        XCTAssertEqual(person.secondaryLabel, "雪球 · 大道无形我有型")
+        XCTAssertEqual(person.discussionKeywords, ["大道无形我有型", "段永平"])
+    }
+
     func testCuratedPersonWithoutAccountDoesNotRequestOwnPostFeed() {
         let person = SpecialPerson(
             id: "xi-jinping",
@@ -417,6 +426,25 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.first?.authorName, "示例来源")
         XCTAssertEqual(response.data.first?.photoCredit, "VCG/Getty Images")
         XCTAssertEqual(response.data.first?.externalURL?.absoluteString, "https://example.com/story")
+    }
+
+    func testKnownPostAccountUsesCanonicalNameWithoutLosingOriginalAccount() throws {
+        let json = #"{"data":[{"id":14,"source":"rss:14","user":{"user_id":"rss:14","user_name":"大道无形我有型","user_screen_name":"大道无形我有型"}}]}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostListResponse.self, from: json).data[0]
+
+        XCTAssertEqual(post.authorName, "段永平")
+        XCTAssertEqual(post.authorHandle, "雪球 · 大道无形我有型")
+    }
+
+    func testConfirmedServerIdentityIsShownButUnconfirmedClaimIsIgnored() throws {
+        let confirmedJSON = #"{"data":[{"id":15,"source":"weibo","user":{"user_id":"weibo:123","user_name":"平台昵称","canonical_name":"真实人物","platform_display_name":"平台昵称","platform":"微博","identity_status":"verified"}}]}"#.data(using: .utf8)!
+        let unconfirmedJSON = #"{"data":[{"id":16,"source":"weibo","user":{"user_id":"weibo:456","user_name":"另一个昵称","canonical_name":"不应展示的人物","identity_status":"unconfirmed"}}]}"#.data(using: .utf8)!
+        let confirmed = try JSONDecoder().decode(PostListResponse.self, from: confirmedJSON).data[0]
+        let unconfirmed = try JSONDecoder().decode(PostListResponse.self, from: unconfirmedJSON).data[0]
+
+        XCTAssertEqual(confirmed.authorName, "真实人物")
+        XCTAssertEqual(confirmed.authorHandle, "微博 · 平台昵称")
+        XCTAssertEqual(unconfirmed.authorName, "另一个昵称")
     }
 
     func testYouTubePostBuildsCoverFromVideoLink() throws {
