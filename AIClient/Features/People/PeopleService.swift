@@ -148,11 +148,16 @@ struct PeopleService {
         return payload.videos
     }
 
-    func articles(personID: String) async throws -> [PersonArticle] {
-        let url = baseURL
+    func articles(personID: String, query: String? = nil) async throws -> [PersonArticle] {
+        let endpoint = baseURL
             .appending(path: "api/v1/people")
             .appending(path: personID)
             .appending(path: "articles")
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        if let query, !query.isEmpty {
+            components?.queryItems = [.init(name: "q", value: query)]
+        }
+        guard let url = components?.url else { throw PeopleServiceError.invalidURL }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw PeopleServiceError.invalidResponse

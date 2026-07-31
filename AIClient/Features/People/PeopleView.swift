@@ -2793,6 +2793,7 @@ private struct PersonDetailPage: View {
     @State private var selectedArticle: PersonArticle?
     @State private var articleSearchText = ""
     @State private var articleSheetDetent: PresentationDetent = .large
+    @FocusState private var articleSearchIsFocused: Bool
     @State private var selectedPhoto: PersonPhoto?
     @State private var presentedWikipediaEntity: WikipediaEntity?
 
@@ -2922,10 +2923,12 @@ private struct PersonDetailPage: View {
             #endif
         }
         .task(id: articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            guard !articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
+            let query = articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                try? await Task.sleep(for: .milliseconds(250))
             }
-            await store.prepareArticleContentSearch()
+            guard !Task.isCancelled else { return }
+            await store.searchArticles(personID: person.id, query: query)
         }
     }
 
@@ -3325,6 +3328,8 @@ private struct PersonDetailPage: View {
                     TextField("搜索文章文字", text: $articleSearchText)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .focused($articleSearchIsFocused)
+                        .submitLabel(.search)
                     if !articleSearchText.isEmpty {
                         Button {
                             articleSearchText = ""
@@ -3344,6 +3349,10 @@ private struct PersonDetailPage: View {
                 )
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    articleSearchIsFocused = true
+                }
 
                 HStack(alignment: .firstTextBaseline) {
                     Text(articleSearchStatus)
@@ -3359,7 +3368,7 @@ private struct PersonDetailPage: View {
                 .padding(.top, 8)
                 .padding(.bottom, 14)
 
-                if filteredArticles.isEmpty && store.isIndexingArticleContent {
+                if filteredArticles.isEmpty && store.isSearchingArticles {
                     HStack(spacing: 10) {
                         ProgressView()
                             .controlSize(.small)
@@ -3369,6 +3378,13 @@ private struct PersonDetailPage: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 42)
+                } else if let error = store.articleSearchError {
+                    ContentUnavailableView(
+                        "搜索失败",
+                        systemImage: "wifi.exclamationmark",
+                        description: Text(error)
+                    )
+                    .padding(.vertical, 28)
                 } else if filteredArticles.isEmpty {
                     ContentUnavailableView.search(text: articleSearchText)
                         .padding(.vertical, 32)
@@ -3398,24 +3414,15 @@ private struct PersonDetailPage: View {
     private var filteredArticles: [PersonArticle] {
         let query = articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return store.articles }
-        return store.articles.filter { article in
-            [
-                article.displayTitle,
-                article.displaySummary,
-                article.displayContent,
-                article.sourceName,
-                store.articleSearchTextByID[article.id] ?? ""
-            ]
-            .contains { $0.localizedCaseInsensitiveContains(query) }
-        }
+        return store.articleSearchResults ?? []
     }
 
     private var articleSearchStatus: String {
         guard !articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "文章 \(store.articles.count)"
         }
-        if store.isIndexingArticleContent {
-            return "已匹配 \(filteredArticles.count) 篇 · 正在检查正文"
+        if store.isSearchingArticles {
+            return "正在搜索标题、摘要和正文…"
         }
         return "找到 \(filteredArticles.count) 篇"
     }

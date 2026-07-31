@@ -18,8 +18,9 @@ final class PersonDetailStore {
     private(set) var discussionsError: String?
     private(set) var relatedVideosError: String?
     private(set) var articlesError: String?
-    private(set) var articleSearchTextByID: [PersonArticle.ID: String] = [:]
-    private(set) var isIndexingArticleContent = false
+    private(set) var articleSearchResults: [PersonArticle]?
+    private(set) var isSearchingArticles = false
+    private(set) var articleSearchError: String?
     private(set) var canLoadMoreOwnPosts = true
     private(set) var xTranslations: [Int: String] = [:]
     private var loadingXTranslationIDs: Set<Int> = []
@@ -44,7 +45,8 @@ final class PersonDetailStore {
     private func loadArticles(for person: SpecialPerson) async {
         isLoadingArticles = true
         articlesError = nil
-        articleSearchTextByID = [:]
+        articleSearchResults = nil
+        articleSearchError = nil
         defer { isLoadingArticles = false }
         do {
             articles = try await service.articles(personID: person.id)
@@ -56,33 +58,28 @@ final class PersonDetailStore {
         }
     }
 
-    func prepareArticleContentSearch() async {
-        guard !articles.isEmpty else { return }
-        let missingArticles = articles.filter { articleSearchTextByID[$0.id] == nil }
-        guard !missingArticles.isEmpty else { return }
+    func searchArticles(personID: String, query: String) async {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            articleSearchResults = nil
+            articleSearchError = nil
+            isSearchingArticles = false
+            return
+        }
 
-        isIndexingArticleContent = true
-        defer { isIndexingArticleContent = false }
-
-        for article in missingArticles {
+        isSearchingArticles = true
+        articleSearchError = nil
+        defer { isSearchingArticles = false }
+        do {
+            let results = try await service.articles(personID: personID, query: normalized)
             guard !Task.isCancelled else { return }
-            do {
-                let detail = try await service.article(id: article.id)
-                guard !Task.isCancelled else { return }
-                articleSearchTextByID[article.id] = [
-                    detail.displayTitle,
-                    detail.displaySummary,
-                    detail.displayContent,
-                    detail.sourceName
-                ]
-                .joined(separator: "\n")
-            } catch is CancellationError {
-                return
-            } catch {
-                // Keep indexing the remaining articles. Metadata search remains
-                // available even when one article detail is temporarily offline.
-                articleSearchTextByID[article.id] = ""
-            }
+            articleSearchResults = results
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            articleSearchResults = []
+            articleSearchError = error.localizedDescription
         }
     }
 
