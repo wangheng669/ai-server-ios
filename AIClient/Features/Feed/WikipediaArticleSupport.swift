@@ -329,26 +329,29 @@ struct WikipediaEntityCard: View {
 
 struct WikipediaReaderView: View {
     let entity: WikipediaEntity
-    var returnTitle = "返回纽约时报文章"
     @Environment(\.dismiss) private var dismiss
     @StateObject private var browser = WikipediaBrowserModel()
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                }
-                Spacer()
-                Text("维基百科").font(.headline)
-                Spacer()
-                ShareLink(item: entity.url) {
-                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+            ZStack {
+                Text("维基百科")
+                    .font(.headline)
+
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 40)
+                            .background(Color.secondary.opacity(0.1), in: Circle())
+                    }
+                    .accessibilityLabel("关闭维基百科")
                 }
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 16)
+            .frame(height: 58)
 
             if browser.isLoading {
                 ProgressView(value: browser.progress).progressViewStyle(.linear)
@@ -356,61 +359,26 @@ struct WikipediaReaderView: View {
                 Divider()
             }
 
-            Button { dismiss() } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "doc.text")
-                    Text(returnTitle)
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption.bold())
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .frame(height: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            Divider()
+            ZStack(alignment: .bottomLeading) {
+                WikipediaWebView(url: entity.url, model: browser)
 
-            WikipediaWebView(url: entity.url, model: browser)
-
-            Divider()
-            HStack {
-                browserButton("chevron.left", enabled: browser.canGoBack) { browser.goBack() }
-                Spacer()
-                browserButton("chevron.right", enabled: browser.canGoForward) { browser.goForward() }
-                Spacer()
-                Menu {
-                    Button("较小文字") { browser.adjustTextSize(by: -10) }
-                    Button("较大文字") { browser.adjustTextSize(by: 10) }
-                } label: {
-                    Image(systemName: "textformat.size").frame(width: 44, height: 44)
-                }
-                Spacer()
-                browserButton("arrow.clockwise", enabled: true) { browser.reload() }
-                Spacer()
-                Menu {
-                    ShareLink(item: entity.url) { Label("分享词条", systemImage: "square.and.arrow.up") }
-                    Button { UIPasteboard.general.url = entity.url } label: {
-                        Label("复制链接", systemImage: "doc.on.doc")
+                if browser.canGoBack {
+                    Button { browser.goBack() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 46, height: 46)
+                            .background(.regularMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+                    .padding(16)
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel("返回上一个维基百科页面")
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(height: 50)
-            Text(entity.url.host ?? "wikipedia.org")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.bottom, 5)
+            .animation(.easeOut(duration: 0.18), value: browser.canGoBack)
         }
         .background(Color(uiColor: .systemBackground))
-        .interactiveDismissDisabled(browser.isLoading)
-    }
-
-    private func browserButton(_ systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: systemName).frame(width: 44, height: 44) }
-            .disabled(!enabled)
     }
 }
 
@@ -419,9 +387,7 @@ final class WikipediaBrowserModel: ObservableObject {
     @Published var isLoading = true
     @Published var progress = 0.05
     @Published var canGoBack = false
-    @Published var canGoForward = false
     fileprivate weak var webView: WKWebView?
-    private var textSize = 100
 
     func attach(_ webView: WKWebView) {
         self.webView = webView
@@ -432,15 +398,16 @@ final class WikipediaBrowserModel: ObservableObject {
         isLoading = webView.isLoading
         progress = max(webView.estimatedProgress, 0.05)
         canGoBack = webView.canGoBack
-        canGoForward = webView.canGoForward
     }
 
     func goBack() { webView?.goBack() }
-    func goForward() { webView?.goForward() }
-    func reload() { webView?.reload() }
-    func adjustTextSize(by amount: Int) {
-        textSize = min(160, max(70, textSize + amount))
-        webView?.evaluateJavaScript("document.documentElement.style.webkitTextSizeAdjust='\(textSize)%'")
+}
+
+extension View {
+    func wikipediaReaderPresentation() -> some View {
+        presentationDetents([.fraction(0.82), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
     }
 }
 
