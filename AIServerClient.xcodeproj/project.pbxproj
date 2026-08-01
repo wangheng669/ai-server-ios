@@ -8,8 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
-		A10000000000000000000001 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* NotificationService.swift */; };
-		A10000000000000000000002 /* NotificationServiceExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* NotificationServiceExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F23 /* MarketView.swift */; };
 		0BB9A3475C0408092697FA60 /* DeploymentStatusTip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DC0C4FF5F713E3E9A116D6 /* DeploymentStatusTip.swift */; };
 		10D34066B133EC9CD153A5B9 /* RealtimeFeedClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71E3DBE08DFCC43540E027C0 /* RealtimeFeedClient.swift */; };
@@ -19,15 +17,14 @@
 		212E02E9454406B9CEE36D72 /* MarketStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E95DF23DE2CBD0DEEC463B /* MarketStore.swift */; };
 		233ACCCB8DEA01858D633D98 /* CountryGDPDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */; };
 		260E90A29878D779265564DE /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */; };
-		2A3C6E7F8091A2B3C4D5E6F7 /* PersonPushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4D5F60718293A4B5C6D7E8 /* PersonPushNotificationManager.swift */; };
 		26D2AAFFCB9B9B48EE1CD558 /* ServerAddressValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */; };
+		2A3C6E7F8091A2B3C4D5E6F7 /* PersonPushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4D5F60718293A4B5C6D7E8 /* PersonPushNotificationManager.swift */; };
 		30DCD0C5835091D25C86B8A3 /* PeopleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3E8C146E7D023F0970E445 /* PeopleService.swift */; };
 		37F017F6121304BAF106D46C /* LearningModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17DC4FBD3DC2E026FF2278B2 /* LearningModels.swift */; };
 		3AC230E32369C12C743332AD /* InvestmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5FF3634D4DF69CCE8DB1B32 /* InvestmentView.swift */; };
 		46344011320819650C0EEC08 /* PeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1304CD1593E840EFAF32E208 /* PeopleStore.swift */; };
 		4A2C39B8984DD9FAF7E37AC2 /* IndustryPanoramaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75D84CF1869965892028891E /* IndustryPanoramaView.swift */; };
 		5543ADDBFA9B940978410DD8 /* CountryGDPRankingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C6756677ADA82073372908E /* CountryGDPRankingView.swift */; };
-		A11B22C33D44E55F66778890 /* GlobalAssetsRankingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */; };
 		5BD0A8A5E55F738CE9F9EE81 /* LearningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 888F04206EE0876BD874BBAF /* LearningView.swift */; };
 		617480D9D30D6A38B04EA755 /* RetailInvestorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C78B11625D59970AF947C /* RetailInvestorView.swift */; };
 		681EF7E93F4BE35044B2149C /* MarketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0964D64008AE6D9891C78345 /* MarketService.swift */; };
@@ -42,6 +39,9 @@
 		92D94B2A4B1E251539E7F2AD /* FamousHoldingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6017E166E5F6A363E603B660 /* FamousHoldingsModels.swift */; };
 		98C37AD5B7A82018DFF1B291 /* MarketModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF6BC692002C20D456E9D73 /* MarketModels.swift */; };
 		9C0435A43070CEEF7C5977E8 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4451E467F4556EF68A32271 /* PeopleView.swift */; };
+		A10000000000000000000001 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* NotificationService.swift */; };
+		A10000000000000000000002 /* NotificationServiceExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* NotificationServiceExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A11B22C33D44E55F66778890 /* GlobalAssetsRankingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */; };
 		A12DB4EFD18F02485AC3A268 /* PeopleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905EA06C318F52C44CED7F0E /* PeopleModels.swift */; };
 		B55F6FF2942E844AB7A7C342 /* KnowledgeConceptViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5CF07B6B532341EA1E9FFC /* KnowledgeConceptViews.swift */; };
 		BCE08613AAF3FE8AE92F8724 /* WikipediaArticleSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3686E2A6A6443140E186A435 /* WikipediaArticleSupport.swift */; };
@@ -75,15 +75,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		A1000000000000000000000A /* Embed App Extensions */ = {
+		A1000000000000000000000A /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				A10000000000000000000002 /* NotificationServiceExtension.appex in Embed App Extensions */,
+				A10000000000000000000002 /* NotificationServiceExtension.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -99,13 +99,13 @@
 		137FDCB7037445C35ED02C74 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		17DC4FBD3DC2E026FF2278B2 /* LearningModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningModels.swift; sourceTree = "<group>"; };
 		1A3FE9C2FF8A73D898482112 /* Post.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Post.swift; sourceTree = "<group>"; };
-		2E41B4D8C7F35A209B6E1D53 /* IdeologyCampTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdeologyCampTests.swift; sourceTree = "<group>"; };
 		2E3E8C146E7D023F0970E445 /* PeopleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleService.swift; sourceTree = "<group>"; };
-		3B4D5F60718293A4B5C6D7E8 /* PersonPushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPushNotificationManager.swift; sourceTree = "<group>"; };
+		2E41B4D8C7F35A209B6E1D53 /* IdeologyCampTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdeologyCampTests.swift; sourceTree = "<group>"; };
 		33DF2FE619F731E7105C5F23 /* MarketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketView.swift; sourceTree = "<group>"; };
 		3686E2A6A6443140E186A435 /* WikipediaArticleSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikipediaArticleSupport.swift; sourceTree = "<group>"; };
 		3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddressValidatorTests.swift; sourceTree = "<group>"; };
 		3AFA9759085824610FC53E65 /* LearningServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningServiceTests.swift; sourceTree = "<group>"; };
+		3B4D5F60718293A4B5C6D7E8 /* PersonPushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPushNotificationManager.swift; sourceTree = "<group>"; };
 		3D5C78B11625D59970AF947C /* RetailInvestorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetailInvestorView.swift; sourceTree = "<group>"; };
 		40244177985ED17E7717147A /* FamousHoldingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsStore.swift; sourceTree = "<group>"; };
 		47F7ED7E08363D8510FC627D /* PostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDetailView.swift; sourceTree = "<group>"; };
@@ -113,7 +113,6 @@
 		50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDecodingTests.swift; sourceTree = "<group>"; };
 		5C6756677ADA82073372908E /* CountryGDPRankingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryGDPRankingView.swift; sourceTree = "<group>"; };
-		B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalAssetsRankingView.swift; sourceTree = "<group>"; };
 		5D7DCAC8CCF496B338DF783E /* LearningService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningService.swift; sourceTree = "<group>"; };
 		5F0204E08B2D0424F860EFFE /* ServerConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfiguration.swift; sourceTree = "<group>"; };
 		6017E166E5F6A363E603B660 /* FamousHoldingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsModels.swift; sourceTree = "<group>"; };
@@ -121,7 +120,7 @@
 		71E3DBE08DFCC43540E027C0 /* RealtimeFeedClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeFeedClient.swift; sourceTree = "<group>"; };
 		75D84CF1869965892028891E /* IndustryPanoramaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndustryPanoramaView.swift; sourceTree = "<group>"; };
 		7CF6BC692002C20D456E9D73 /* MarketModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketModels.swift; sourceTree = "<group>"; };
-		7EEF5CEFD643AD59FF1351B3 /* AIServerClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AIServerClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7EEF5CEFD643AD59FF1351B3 /* AIServerClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIServerClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		82E95DF23DE2CBD0DEEC463B /* MarketStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketStore.swift; sourceTree = "<group>"; };
 		888F04206EE0876BD874BBAF /* LearningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningView.swift; sourceTree = "<group>"; };
 		8B9ED3C144483DC5D1DFAA3A /* NewsFeedViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedViewModel.swift; sourceTree = "<group>"; };
@@ -129,17 +128,18 @@
 		9A2C22D012A44ABE4FDE5A64 /* PersonDetailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonDetailStore.swift; sourceTree = "<group>"; };
 		9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedAdapterTests.swift; sourceTree = "<group>"; };
 		9F83C9F64DA0CE10A02AD089 /* NewsFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedView.swift; sourceTree = "<group>"; };
+		A10000000000000000000004 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		A10000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000006 /* NotificationServiceExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationServiceExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		AFDC2300DFD6141704CC0B16 /* CountryGDPRankingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryGDPRankingTests.swift; sourceTree = "<group>"; };
+		B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalAssetsRankingView.swift; sourceTree = "<group>"; };
 		BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostComponents.swift; sourceTree = "<group>"; };
-		C41BF51CBE9570E400E536EE /* AIClientTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AIClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C41BF51CBE9570E400E536EE /* AIClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AIClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C5FF3634D4DF69CCE8DB1B32 /* InvestmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentView.swift; sourceTree = "<group>"; };
 		D9D7B5B9A81B19337F41D31D /* FamousHoldingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsTests.swift; sourceTree = "<group>"; };
 		DEBD6D31DCEDA25975180F41 /* FamousHoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsView.swift; sourceTree = "<group>"; };
 		F4451E467F4556EF68A32271 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		FF5CF07B6B532341EA1E9FFC /* KnowledgeConceptViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeConceptViews.swift; sourceTree = "<group>"; };
-		A10000000000000000000004 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
-		A10000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A10000000000000000000006 /* NotificationServiceExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationServiceExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -243,6 +243,15 @@
 			path = People;
 			sourceTree = "<group>";
 		};
+		A10000000000000000000007 /* NotificationServiceExtension */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000004 /* NotificationService.swift */,
+				A10000000000000000000005 /* Info.plist */,
+			);
+			path = NotificationServiceExtension;
+			sourceTree = "<group>";
+		};
 		AB627736F386E322364D4CF2 /* AIClient */ = {
 			isa = PBXGroup;
 			children = (
@@ -303,15 +312,6 @@
 			path = Server;
 			sourceTree = "<group>";
 		};
-		A10000000000000000000007 /* NotificationServiceExtension */ = {
-			isa = PBXGroup;
-			children = (
-				A10000000000000000000004 /* NotificationService.swift */,
-				A10000000000000000000005 /* Info.plist */,
-			);
-			path = NotificationServiceExtension;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -321,7 +321,7 @@
 			buildPhases = (
 				EFC5607213D06CBAA11AED87 /* Sources */,
 				67A79DE6F4E9D3A90F78000E /* Resources */,
-				A1000000000000000000000A /* Embed App Extensions */,
+				A1000000000000000000000A /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -334,23 +334,6 @@
 			productName = AIServerClient;
 			productReference = 7EEF5CEFD643AD59FF1351B3 /* AIServerClient.app */;
 			productType = "com.apple.product-type.application";
-		};
-		A10000000000000000000008 /* NotificationServiceExtension */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = A1000000000000000000000E /* Build configuration list for PBXNativeTarget "NotificationServiceExtension" */;
-			buildPhases = (
-				A10000000000000000000009 /* Sources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = NotificationServiceExtension;
-			packageProductDependencies = (
-			);
-			productName = NotificationServiceExtension;
-			productReference = A10000000000000000000006 /* NotificationServiceExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
 		};
 		9B03021EF69495E5B996EA2D /* AIClientTests */ = {
 			isa = PBXNativeTarget;
@@ -370,6 +353,23 @@
 			productReference = C41BF51CBE9570E400E536EE /* AIClientTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		A10000000000000000000008 /* NotificationServiceExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000E /* Build configuration list for PBXNativeTarget "NotificationServiceExtension" */;
+			buildPhases = (
+				A10000000000000000000009 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = NotificationServiceExtension;
+			packageProductDependencies = (
+			);
+			productName = NotificationServiceExtension;
+			productReference = A10000000000000000000006 /* NotificationServiceExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -377,16 +377,16 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					1BA618CF45A696DF721357E4 = {
 						DevelopmentTeam = 9M7P4VLHY3;
 					};
-					A10000000000000000000008 = {
-						CreatedOnToolsVersion = 15.0;
+					9B03021EF69495E5B996EA2D = {
 						DevelopmentTeam = 9M7P4VLHY3;
 					};
-					9B03021EF69495E5B996EA2D = {
+					A10000000000000000000008 = {
+						CreatedOnToolsVersion = 15.0;
 						DevelopmentTeam = 9M7P4VLHY3;
 					};
 				};
@@ -424,6 +424,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000009 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* NotificationService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D798CA6D0B8B6AB14AE41B44 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -483,14 +491,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A10000000000000000000009 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000000000000000000001 /* NotificationService.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -511,7 +511,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -560,8 +559,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -582,6 +583,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -595,7 +597,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/AIServerClient.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -604,6 +605,48 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient;
 				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		A1000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = NotificationServiceExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.NotificationServiceExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A1000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = NotificationServiceExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.NotificationServiceExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
@@ -643,8 +686,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -658,6 +703,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -671,7 +717,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/AIServerClient.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -688,7 +733,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				DEVELOPMENT_TEAM = 9M7P4VLHY3;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -701,50 +745,6 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AIServerClient.app/AIServerClient";
 			};
 			name = Debug;
-		};
-		A1000000000000000000000C /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = 9M7P4VLHY3;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = NotificationServiceExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.NotificationServiceExtension;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Debug;
-		};
-		A1000000000000000000000D /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = 9M7P4VLHY3;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = NotificationServiceExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.NotificationServiceExtension;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
@@ -767,20 +767,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		FD142F784578ED6CAD9F1979 /* Build configuration list for PBXNativeTarget "AIClientTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				F00683F5CA67D62D5A187FC4 /* Debug */,
-				184AFCBFAB0DD3C35B59C46D /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
 		A1000000000000000000000E /* Build configuration list for PBXNativeTarget "NotificationServiceExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A1000000000000000000000C /* Debug */,
 				A1000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FD142F784578ED6CAD9F1979 /* Build configuration list for PBXNativeTarget "AIClientTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F00683F5CA67D62D5A187FC4 /* Debug */,
+				184AFCBFAB0DD3C35B59C46D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

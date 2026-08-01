@@ -3113,10 +3113,10 @@ private struct PersonDetailPage: View {
                     .padding(.trailing, 38)
             }
 
-            if !person.focusTags.isEmpty {
+            if !person.displayFocusTags.isEmpty {
                 ScrollView(.horizontal) {
                     HStack(spacing: 7) {
-                        ForEach(person.focusTags, id: \.self) { tag in
+                        ForEach(person.displayFocusTags, id: \.self) { tag in
                             Text(tag)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.primary.opacity(0.78))
@@ -3172,7 +3172,7 @@ private struct PersonDetailPage: View {
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
-                    Text("\(person.topic.rawValue) · \(person.focusTags.first ?? "人物")")
+                    Text("\(person.topic.rawValue) · \(person.displayFocusTags.first ?? "人物")")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Color.accentColor)
                     if let account = person.socialAccounts.first {
@@ -3191,7 +3191,7 @@ private struct PersonDetailPage: View {
             }
 
             HStack(spacing: 9) {
-                ForEach(person.focusTags, id: \.self) { tag in
+                ForEach(person.displayFocusTags, id: \.self) { tag in
                     Text(tag)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.primary)
@@ -4794,7 +4794,7 @@ private struct PersonProfileView: View {
 
             profileSection(person.topic == .history ? "历史主题" : "关注领域") {
                 HStack(spacing: 8) {
-                    ForEach(person.focusTags, id: \.self) { tag in
+                    ForEach(person.displayFocusTags, id: \.self) { tag in
                         Text(tag)
                             .font(.system(size: 12, weight: .medium))
                             .padding(.horizontal, 11)

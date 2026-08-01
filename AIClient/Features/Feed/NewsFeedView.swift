@@ -939,19 +939,21 @@ struct NewsFeedView: View {
     }
 
     @ViewBuilder private func feedStatus(for source: FeedSource, topInset: CGFloat = 53) -> some View {
-        VStack {
-            if source == model.source, model.isLoading {
-                ProgressView("正在加载").font(.footnote)
-            } else if source == model.source, let error = model.errorMessage {
-                ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
-                    description: { Text(error) }
-                    actions: { Button("重新加载") { Task { await model.refresh() } } }
-            } else {
-                ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
+        if source == model.source, model.isLoading {
+            FeedTimelineLoadingView(topInset: topInset)
+        } else {
+            VStack {
+                if source == model.source, let error = model.errorMessage {
+                    ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
+                        description: { Text(error) }
+                        actions: { Button("重新加载") { Task { await model.refresh() } } }
+                } else {
+                    ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
+                }
             }
+            .padding(.top, topInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.top, topInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func selectSource(_ source: FeedSource) {
@@ -965,6 +967,47 @@ struct NewsFeedView: View {
         if let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL { openURL(url) }
     }
 
+}
+
+private struct FeedTimelineLoadingView: View {
+    let topInset: CGFloat
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                Color.clear.frame(height: topInset)
+                ForEach(0..<3, id: \.self) { index in
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            Circle().frame(width: 42, height: 42)
+                            VStack(alignment: .leading, spacing: 7) {
+                                RoundedRectangle(cornerRadius: 5).frame(width: 132, height: 14)
+                                RoundedRectangle(cornerRadius: 4).frame(width: 84, height: 11)
+                            }
+                        }
+                        RoundedRectangle(cornerRadius: 5).frame(height: 13)
+                        RoundedRectangle(cornerRadius: 5).frame(width: 245, height: 13)
+                        if index == 0 {
+                            RoundedRectangle(cornerRadius: 14).frame(height: 190)
+                        }
+                        HStack(spacing: 36) {
+                            ForEach(0..<4, id: \.self) { _ in
+                                Circle().frame(width: 17, height: 17)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    Divider().padding(.leading, 68)
+                }
+            }
+        }
+        .scrollDisabled(true)
+        .foregroundStyle(Color.secondary.opacity(0.14))
+        .redacted(reason: .placeholder)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在加载内容")
+    }
 }
 
 @MainActor

@@ -179,6 +179,7 @@ struct LearningView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
         }
+        .sensoryFeedback(.selection, trigger: selectedSection)
     }
 
     private func knowledgeSectionPage(_ section: KnowledgeSection) -> some View {
@@ -199,6 +200,14 @@ struct LearningView: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if section == .ideology {
+                ideologyCampPicker
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(KnowledgePagePalette.canvas)
+            }
+        }
         .safeAreaPadding(.bottom, 90)
         .refreshable {
             switch section {
@@ -255,10 +264,9 @@ struct LearningView: View {
     private var investmentContent: some View {
         if let catalog = store.catalog {
             let topics = stockTopics(in: catalog)
+            videoLessons
             WeeklyStudyCard(studiedDays: progressStore.studyDays())
                 .padding(.horizontal, 20)
-
-            videoLessons
             learningPath(topics)
             savedTopics(in: catalog, excluding: Set(topics.prefix(4).map(\.id)))
         } else if store.isLoading {
@@ -279,32 +287,58 @@ struct LearningView: View {
     @ViewBuilder
     private var videoLessons: some View {
         if let lessons = store.videoLibrary?.lessons, !lessons.isEmpty {
-            HStack(alignment: .firstTextBaseline) {
-                Text("小林说视频课")
-                    .font(.system(size: 24, weight: .bold, design: .serif))
-                Spacer()
-                Text("\(lessons.count) 堂精选")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 26)
-            .padding(.bottom, 13)
-
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 13) {
-                    ForEach(lessons) { lesson in
-                        Button {
-                            path.append(.videoLesson(lesson))
-                        } label: {
-                            LearningVideoLessonCard(lesson: lesson)
-                        }
-                        .buttonStyle(LearningPressStyle())
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("小Lin说")
+                        .font(.system(size: 34, weight: .semibold, design: .serif))
+                    Text("把复杂的投资概念，讲成看得懂、用得上的判断框架。")
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Label("投资视频课", systemImage: "play.circle.fill")
+                        Text("\(lessons.count) 期精选")
                     }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(KnowledgePagePalette.accent)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    LinearGradient(
+                        colors: [KnowledgePagePalette.accent.opacity(0.18), KnowledgePagePalette.surface],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
                 }
                 .padding(.horizontal, 20)
+
+                Text("精选视频")
+                    .font(.system(size: 22, weight: .bold, design: .serif))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 26)
+                    .padding(.bottom, 13)
+
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 13) {
+                        ForEach(lessons) { lesson in
+                            Button {
+                                path.append(.videoLesson(lesson))
+                            } label: {
+                                LearningVideoLessonCard(lesson: lesson)
+                            }
+                            .buttonStyle(LearningPressStyle())
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         } else if store.isVideoLibraryLoading {
             ProgressView()
                 .frame(maxWidth: .infinity)
@@ -541,9 +575,7 @@ struct LearningView: View {
     @ViewBuilder
     private var ideologyContent: some View {
         if peopleStore.isLoading && peopleStore.people.isEmpty {
-            ProgressView("正在载入人物")
-                .frame(maxWidth: .infinity)
-                .padding(.top, 44)
+            IdeologyContentLoadingView()
         } else if let error = peopleStore.errorMessage, peopleStore.people.isEmpty {
             ContentUnavailableView {
                 Label("人物载入失败", systemImage: "wifi.exclamationmark")
@@ -566,8 +598,6 @@ struct LearningView: View {
             .padding(.top, 36)
         } else {
             VStack(alignment: .leading, spacing: 18) {
-                ideologyCampPicker
-
                 ForEach(visibleIdeologyCamps) { camp in
                     ideologyCampSection(
                         title: camp.title,
@@ -590,6 +620,7 @@ struct LearningView: View {
                     .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 20)
+            .padding(.top, 6)
         }
     }
 
@@ -605,7 +636,7 @@ struct LearningView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(ideologyCampFilter == filter ? Color.primary : Color.secondary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
+                        .frame(minHeight: 44)
                         .background {
                             if ideologyCampFilter == filter {
                                 Capsule()
@@ -626,6 +657,7 @@ struct LearningView: View {
             Capsule()
                 .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
         }
+        .sensoryFeedback(.selection, trigger: ideologyCampFilter)
     }
 
     private func ideologyCampSection(
@@ -781,7 +813,12 @@ enum IdeologyCamp: String, CaseIterable, Identifiable {
     case rebel = "反贼"
 
     var id: Self { self }
-    var title: String { rawValue }
+    var title: String {
+        switch self {
+        case .loyalist: "正方"
+        case .rebel: "反方"
+        }
+    }
 
     var color: Color {
         switch self {
@@ -806,7 +843,13 @@ private enum IdeologyCampFilter: String, CaseIterable, Identifiable {
     case rebel = "反贼"
 
     var id: Self { self }
-    var title: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .loyalist: "正方"
+        case .rebel: "反方"
+        }
+    }
 }
 
 private struct LearningMilestone: Identifiable {
@@ -2155,6 +2198,39 @@ private struct InvestmentContentLoadingView: View {
         .padding(.horizontal, 20)
         .foregroundStyle(Color.secondary.opacity(0.16))
         .redacted(reason: .placeholder)
+    }
+}
+
+private struct IdeologyContentLoadingView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(0..<2, id: \.self) { _ in
+                HStack(spacing: 8) {
+                    Circle().frame(width: 8, height: 8)
+                    RoundedRectangle(cornerRadius: 5).frame(width: 58, height: 18)
+                    RoundedRectangle(cornerRadius: 4).frame(width: 18, height: 14)
+                }
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
+                    spacing: 14
+                ) {
+                    ForEach(0..<8, id: \.self) { _ in
+                        VStack(spacing: 7) {
+                            Circle().frame(width: 62, height: 62)
+                            RoundedRectangle(cornerRadius: 4).frame(width: 48, height: 13)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 6)
+        .foregroundStyle(Color.secondary.opacity(0.14))
+        .redacted(reason: .placeholder)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在载入人物")
     }
 }
 
