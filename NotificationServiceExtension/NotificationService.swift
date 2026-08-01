@@ -38,7 +38,8 @@ final class NotificationService: UNNotificationServiceExtension {
                 try data.write(to: fileURL, options: .atomic)
                 let attachment = try UNNotificationAttachment(
                     identifier: "person-avatar",
-                    url: fileURL
+                    url: fileURL,
+                    options: [UNNotificationAttachmentOptionsThumbnailHiddenKey: true]
                 )
                 content.attachments = [attachment]
             } catch {
