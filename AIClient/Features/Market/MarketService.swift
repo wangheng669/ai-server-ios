@@ -110,6 +110,11 @@ struct MarketService {
         return try await request(url, as: MarketAShareTemperatureResponse.self).data
     }
 
+    func koreaLeverage(refresh: Bool = false) async throws -> MarketKoreaLeverage {
+        let url = baseURL.appending(path: "api/v1/market/korea-leverage")
+        return try await request(url, as: MarketKoreaLeverageResponse.self, bypassCache: refresh).data
+    }
+
     func hongKongValuationHistory() async throws -> MarketHKValuationHistory {
         let history = try await valuationHistory(market: "hong-kong")
         return MarketHKValuationHistory(date: history.date, pe: history.pe)

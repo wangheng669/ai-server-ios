@@ -63,6 +63,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.latest.aiServer?.advancerShare?.value, 0.7759)
     }
 
+    func testDecodesKoreaLeverageContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_korea_leverage_v1","asOf":"20260730","generatedAt":"2026-08-01T21:31:00+08:00","fetchedAt":"2026-08-02T06:25:00Z","leverageThermometer":{"value":51.64,"weighted":51.64,"unit":"percent","anchor":"20240102","note":"ratio"},"r2FinancingRatio":{"value":30.72,"percentile10Y":16.4,"unit":"percent","note":"credit / deposits"},"forcedLiquidation":{"unsettledBillionKRW":1.725,"fiveDayAverageBillionKRW":419,"percentile10Y":94},"indices":{"kospi":5593.56,"spx":7437.63},"alert":{"level":"critical","value":51.64,"message":"高位报警","thresholds":{"warning":40,"critical":45}},"freshness":{"staleDays":2,"dailyFullRefreshBeijing":"14:16","recommendedPoll":"after 14:20"},"source":{"name":"KOFIA + KSD","url":"https://kimpremium.com/","docs":"https://kimpremium.com/api"},"disclaimer":"not investment advice"}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketKoreaLeverageResponse.self, from: data)
+
+        XCTAssertEqual(response.data.dataContract, "market_korea_leverage_v1")
+        XCTAssertEqual(response.data.alert.level, "critical")
+        XCTAssertEqual(response.data.leverageThermometer.value, 51.64)
+        XCTAssertEqual(response.data.forcedLiquidation.fiveDayAverageBillionKRW, 419)
+        XCTAssertEqual(response.data.freshness.staleDays, 2)
+    }
+
     func testDecodesInvestorMoodPublicVideoSamples() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","videoUrl":"https://video.example.com/123.mp4","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
         let response = try JSONDecoder().decode(InvestorMoodResponse.self, from: data)

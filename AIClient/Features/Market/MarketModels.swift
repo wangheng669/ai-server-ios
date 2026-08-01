@@ -682,6 +682,76 @@ struct MarketAShareTemperatureResponse: Decodable {
     let data: MarketAShareTemperature
 }
 
+struct MarketKoreaLeverageResponse: Decodable {
+    let success: Bool
+    let data: MarketKoreaLeverage
+}
+
+struct MarketKoreaLeverage: Decodable {
+    let dataContract: String
+    let asOf: String
+    let generatedAt: String
+    let fetchedAt: String
+    let leverageThermometer: MarketKoreaLeverageThermometer
+    let r2FinancingRatio: MarketKoreaFinancingRatio
+    let forcedLiquidation: MarketKoreaForcedLiquidation
+    let indices: MarketKoreaIndices
+    let alert: MarketKoreaLeverageAlert
+    let freshness: MarketKoreaLeverageFreshness
+    let source: MarketKoreaLeverageSource
+    let disclaimer: String
+}
+
+struct MarketKoreaLeverageThermometer: Decodable {
+    let value: Double
+    let weighted: Double
+    let unit: String
+    let anchor: String
+    let note: String
+}
+
+struct MarketKoreaFinancingRatio: Decodable {
+    let value: Double
+    let percentile10Y: Double
+    let unit: String
+    let note: String
+}
+
+struct MarketKoreaForcedLiquidation: Decodable {
+    let unsettledBillionKRW: Double
+    let fiveDayAverageBillionKRW: Double
+    let percentile10Y: Double
+}
+
+struct MarketKoreaIndices: Decodable {
+    let kospi: Double
+    let spx: Double
+}
+
+struct MarketKoreaLeverageAlert: Decodable {
+    let level: String
+    let value: Double
+    let message: String
+    let thresholds: MarketKoreaLeverageThresholds
+}
+
+struct MarketKoreaLeverageThresholds: Decodable {
+    let warning: Double
+    let critical: Double
+}
+
+struct MarketKoreaLeverageFreshness: Decodable {
+    let staleDays: Int
+    let dailyFullRefreshBeijing: String
+    let recommendedPoll: String
+}
+
+struct MarketKoreaLeverageSource: Decodable {
+    let name: String
+    let url: String
+    let docs: String
+}
+
 struct MarketAShareTemperature: Decodable {
     let dataContract: String
     let days: Int
