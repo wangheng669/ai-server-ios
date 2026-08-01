@@ -55,9 +55,10 @@ private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @Binding private var hidesTabBar: Bool
+    @Binding private var notificationPostID: Int?
     @StateObject private var model = NewsFeedViewModel()
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
-    @State private var path: [Post] = []
+    @State private var selectedPost: Post?
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
@@ -81,15 +82,17 @@ struct NewsFeedView: View {
 
     init(
         showsDetail: Binding<Bool> = .constant(false),
-        hidesTabBar: Binding<Bool> = .constant(false)
+        hidesTabBar: Binding<Bool> = .constant(false),
+        notificationPostID: Binding<Int?> = .constant(nil)
     ) {
         _showsDetail = showsDetail
         _hidesTabBar = hidesTabBar
+        _notificationPostID = notificationPostID
         WeiboSessionCookieStore.importFromEnvironmentIfPresent()
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ZStack(alignment: .top) {
                 content
                 feedHeader
@@ -98,18 +101,30 @@ struct NewsFeedView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: Post.self) { post in
+        }
+        .sheet(item: $selectedPost) { post in
+            NavigationStack {
                 if let source = FeedSource(rawValue: post.source ?? ""),
                    source == .weibo || source == .douyin,
                    let link = post.linkURL {
-                    EmbeddedWebPage(url: link, source: source, preparedWebView: preparedWebViews[post.id])
+                    EmbeddedWebPage(
+                        url: link,
+                        source: source,
+                        preparedWebView: preparedWebViews[post.id],
+                        presentedAsSheet: true
+                    )
                 } else {
                     PostDetailView(
                         post: post,
-                        preloadedNewYorkTimesArticle: model.preloadedNewYorkTimesArticle(for: post.id)
+                        preloadedNewYorkTimesArticle: model.preloadedNewYorkTimesArticle(for: post.id),
+                        presentedAsSheet: true
                     )
                 }
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
@@ -128,9 +143,17 @@ struct NewsFeedView: View {
                 model.stopRealtime()
             }
         }
-        .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
-            showsDetail = !isEmpty
-            if isEmpty { preparedWebViews.removeAll() }
+        .onChange(of: selectedPost, initial: true) { _, post in
+            showsDetail = post != nil
+            if post == nil { preparedWebViews.removeAll() }
+        }
+        .task(id: notificationPostID) {
+            guard let postID = notificationPostID else { return }
+            defer { notificationPostID = nil }
+            guard let post = try? await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: postID) else {
+                return
+            }
+            selectedPost = post
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
             guard count > 0, isFeedAtTop else { return }
@@ -157,20 +180,20 @@ struct NewsFeedView: View {
             hasLoadedFeedOnce = true
             #if DEBUG
             if opensZhihuDetailPreview,
-               path.isEmpty,
+               selectedPost == nil,
                let first = model.posts.first(where: { $0.sourceName == "知乎" }) {
-                path = [first]
+                selectedPost = first
             } else if opensYouTubeDetailPreview,
-                      path.isEmpty,
+                      selectedPost == nil,
                       let first = model.posts.first(where: \.isYouTube) {
                 if ProcessInfo.processInfo.arguments.contains("--youtube-prewarm-preview") {
                     try? await Task.sleep(for: .seconds(10))
                 }
-                path = [first]
+                selectedPost = first
             } else if opensBilibiliDetailPreview,
-                      path.isEmpty,
+                      selectedPost == nil,
                       let first = model.posts.first(where: \.isBilibili) {
-                path = [first]
+                selectedPost = first
             }
             #endif
         }
@@ -408,7 +431,7 @@ struct NewsFeedView: View {
                         ForEach(weiboFollowingModel.posts) { post in
                             WeiboFollowingRow(post: post)
                                 .contentShape(Rectangle())
-                                .onTapGesture { path.append(post) }
+                                .onTapGesture { openPost(post) }
                                 .task(id: rootTabIsActive) {
                                     guard rootTabIsActive else { return }
                                     await weiboFollowingModel.loadMoreIfNeeded(current: post)
@@ -654,11 +677,11 @@ struct NewsFeedView: View {
         guard let source = FeedSource(rawValue: post.source ?? ""),
               source == .weibo || source == .douyin,
               let url = post.linkURL else {
-            path.append(post)
+            selectedPost = post
             return
         }
         if preparedWebViews[post.id] != nil {
-            path.append(post)
+            selectedPost = post
             return
         }
         guard openingWebPostID == nil else { return }
@@ -669,7 +692,7 @@ struct NewsFeedView: View {
                 guard !Task.isCancelled else { return }
                 preparedWebViews[post.id] = webView
                 openingWebPostID = nil
-                path.append(post)
+                selectedPost = post
             } catch {
                 guard !Task.isCancelled else { return }
                 openingWebPostID = nil
@@ -928,19 +951,21 @@ struct NewsFeedView: View {
     }
 
     @ViewBuilder private func feedStatus(for source: FeedSource, topInset: CGFloat = 53) -> some View {
-        VStack {
-            if source == model.source, model.isLoading {
-                ProgressView("正在加载").font(.footnote)
-            } else if source == model.source, let error = model.errorMessage {
-                ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
-                    description: { Text(error) }
-                    actions: { Button("重新加载") { Task { await model.refresh() } } }
-            } else {
-                ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
+        if source == model.source, model.isLoading {
+            FeedTimelineLoadingView(topInset: topInset)
+        } else {
+            VStack {
+                if source == model.source, let error = model.errorMessage {
+                    ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
+                        description: { Text(error) }
+                        actions: { Button("重新加载") { Task { await model.refresh() } } }
+                } else {
+                    ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
+                }
             }
+            .padding(.top, topInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.top, topInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func selectSource(_ source: FeedSource) {
@@ -954,6 +979,47 @@ struct NewsFeedView: View {
         if let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL { openURL(url) }
     }
 
+}
+
+private struct FeedTimelineLoadingView: View {
+    let topInset: CGFloat
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                Color.clear.frame(height: topInset)
+                ForEach(0..<3, id: \.self) { index in
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            Circle().frame(width: 42, height: 42)
+                            VStack(alignment: .leading, spacing: 7) {
+                                RoundedRectangle(cornerRadius: 5).frame(width: 132, height: 14)
+                                RoundedRectangle(cornerRadius: 4).frame(width: 84, height: 11)
+                            }
+                        }
+                        RoundedRectangle(cornerRadius: 5).frame(height: 13)
+                        RoundedRectangle(cornerRadius: 5).frame(width: 245, height: 13)
+                        if index == 0 {
+                            RoundedRectangle(cornerRadius: 14).frame(height: 190)
+                        }
+                        HStack(spacing: 36) {
+                            ForEach(0..<4, id: \.self) { _ in
+                                Circle().frame(width: 17, height: 17)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    Divider().padding(.leading, 68)
+                }
+            }
+        }
+        .scrollDisabled(true)
+        .foregroundStyle(Color.secondary.opacity(0.14))
+        .redacted(reason: .placeholder)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在加载内容")
+    }
 }
 
 @MainActor
@@ -1051,8 +1117,10 @@ private struct EmbeddedWebPage: View {
     let url: URL
     let source: FeedSource
     let preparedWebView: WKWebView?
+    let presentedAsSheet: Bool
     @StateObject private var model = EmbeddedWebViewModel()
     @State private var isShowingWeiboAccountMenu = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         EmbeddedWebView(url: url, model: model, preparedWebView: preparedWebView)
@@ -1063,6 +1131,14 @@ private struct EmbeddedWebPage: View {
         .toolbar(.hidden, for: .tabBar)
         .background(InteractivePopGestureEnabler())
         .toolbar {
+            if presentedAsSheet {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("关闭网页详情")
+                }
+            }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
                     Image(source == .weibo ? "WeiboMark" : "TikTokMark")

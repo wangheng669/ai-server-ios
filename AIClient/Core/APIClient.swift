@@ -16,6 +16,20 @@ struct APIClient {
 
     func checkHealth() async throws { let _: HealthResponse = try await get(baseURL.appending(path: "health")) }
 
+    func fetchTodayWorld(limit: Int = 3) async throws -> TodayWorldPayload {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/v1/today-world"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            .init(name: "limit", value: String(min(max(limit, 1), 20)))
+        ]
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: TodayWorldResponse = try await get(url)
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data
+    }
+
     func fetchPosts(
         page: Int,
         limit: Int = 20,
@@ -375,21 +389,39 @@ struct NewYorkTimesArticle: Equatable {
     let blocks: [NewYorkTimesArticleBlock]
 
     static func storedText(_ text: String) -> NewYorkTimesArticle? {
-        let normalized = text.replacingOccurrences(
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let paragraphNormalized = normalized.replacingOccurrences(
+            of: #"\n[ \t]*\n+"#,
+            with: "\u{2029}",
+            options: .regularExpression
+        )
+        let rawParagraphs = paragraphNormalized
+            .components(separatedBy: "\u{2029}")
+            .map(normalizedChineseSpacing)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if rawParagraphs.count > 1 {
+            return NewYorkTimesArticle(blocks: rawParagraphs.map(NewYorkTimesArticleBlock.paragraph))
+        }
+
+        let sentenceNormalized = normalized.replacingOccurrences(
             of: #"(?<=[。！？])\s+"#,
             with: "\n",
             options: .regularExpression
         )
-        let sentences = normalized
+        let sentences = sentenceNormalized
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: "\n")
+            .map(normalizedChineseSpacing)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !sentences.isEmpty else { return nil }
         var paragraphs: [NewYorkTimesArticleBlock] = []
         var current = ""
         for sentence in sentences {
-            current = current.isEmpty ? sentence : current + " " + sentence
+            current = current.isEmpty ? sentence : normalizedChineseSpacing(current + " " + sentence)
             if current.count >= 180 {
                 paragraphs.append(.paragraph(current))
                 current = ""
@@ -397,6 +429,14 @@ struct NewYorkTimesArticle: Equatable {
         }
         if !current.isEmpty { paragraphs.append(.paragraph(current)) }
         return NewYorkTimesArticle(blocks: paragraphs)
+    }
+
+    private static func normalizedChineseSpacing(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: #"([\u3400-\u9FFF，。！？；：、“”‘’（）《》])[ \t\u00A0]+(?=[\u3400-\u9FFF，。！？；：、“”‘’（）《》])"#,
+            with: "$1",
+            options: .regularExpression
+        )
     }
 
     static func isSameImageAsset(_ lhs: URL, _ rhs: URL?) -> Bool {
@@ -534,6 +574,75 @@ struct ArticlePreviewResponse: Decodable {
 }
 
 private struct HealthResponse: Decodable { let status: String }
+
+struct TodayWorldResponse: Decodable {
+    let success: Bool
+    let data: TodayWorldPayload
+}
+
+struct TodayWorldPayload: Decodable, Equatable {
+    let schemaVersion: String
+    let date: String
+    let timezone: String
+    let generatedAt: String
+    let sections: [TodayWorldSection]
+
+    enum CodingKeys: String, CodingKey {
+        case date, timezone, sections
+        case schemaVersion = "schema_version"
+        case generatedAt = "generated_at"
+    }
+}
+
+struct TodayWorldSection: Decodable, Identifiable, Equatable {
+    let id: String
+    let kind: String
+    let title: String
+    let subtitle: String?
+    let layout: String
+    let entity: TodayWorldEntity?
+    let source: TodayWorldSource?
+    let items: [Post]
+    let itemCount: Int
+    let hasMore: Bool
+    let latestAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, subtitle, layout, entity, source, items
+        case itemCount = "item_count"
+        case hasMore = "has_more"
+        case latestAt = "latest_at"
+    }
+}
+
+struct TodayWorldEntity: Decodable, Equatable {
+    let key: String
+    let name: String
+    let type: String
+    let avatarURL: String?
+    let xHandle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case key, name, type
+        case avatarURL = "avatar_url"
+        case xHandle = "x_handle"
+    }
+}
+
+struct TodayWorldSource: Decodable, Equatable {
+    let type: String
+    let platform: String?
+    let account: String?
+    let feedView: String?
+    let homeFeedType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type, platform, account
+        case feedView = "feed_view"
+        case homeFeedType = "home_feed_type"
+    }
+}
+
 private struct XBookmarkRequest: Encodable {
     let articleID: String
     enum CodingKeys: String, CodingKey { case articleID = "article_id" }

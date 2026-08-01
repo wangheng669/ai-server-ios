@@ -102,6 +102,8 @@ struct XTweetDetailItem: Decodable, Equatable {
     let noteText: String?
     let shortText: String?
     let media: [Media]?
+    let createdAt: String?
+    let metrics: PostMetrics?
 
     struct Media: Decodable, Equatable {
         let type: String?
@@ -141,6 +143,26 @@ struct XTweetDetailItem: Decodable, Equatable {
 }
 
 enum XPostTextFormatter {
+    static func commentText(_ text: String, replyingTo screenName: String?) -> String {
+        guard let screenName = screenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+            .nilIfEmpty else { return text }
+        return text.replacingOccurrences(
+            of: "^@\(NSRegularExpression.escapedPattern(for: screenName))\\s*",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+    }
+
+    static func shouldWaitForFullText(_ value: String) -> Bool {
+        isTruncated(detailText(value))
+    }
+
+    static func shouldShowExternalURL(_ url: URL?) -> Bool {
+        guard let host = url?.host()?.lowercased() else { return false }
+        return !["t.co", "x.com", "twitter.com", "www.x.com", "www.twitter.com"].contains(host)
+    }
+
     static func longestText(_ values: String?...) -> String? {
         values
             .compactMap { value in
@@ -217,7 +239,7 @@ struct XComment: Decodable, Identifiable, Equatable {
     }
 
     struct Metrics: Decodable, Equatable {
-        let likes, retweets, replies: Int?
+        let bookmarks, likes, quotes, replies, retweets, views: Int?
     }
 }
 
@@ -333,6 +355,27 @@ struct Post: Decodable, Identifiable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let excerpt = String(normalized.prefix(280))
         return excerpt + (normalized.count > excerpt.count || raw.count > boundedRaw.count ? "…" : "")
+    }
+    var newYorkTimesLead: String? {
+        guard var lead = clean(summary)?
+            .split(separator: "<", maxSplits: 1)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !lead.isEmpty else { return nil }
+        let credits = ([meta?.photoCredit] + (images ?? []).map(\.altText))
+            .compactMap { clean($0) }
+            .sorted { $0.count > $1.count }
+        for credit in credits {
+            if lead.localizedCaseInsensitiveCompare(credit) == .orderedSame { return nil }
+            guard lead.lowercased().hasSuffix(credit.lowercased()) else { continue }
+            lead.removeLast(credit.count)
+            lead = lead.trimmingCharacters(
+                in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "·•|—-"))
+            )
+            break
+        }
+        return lead.isEmpty ? nil : lead
     }
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }

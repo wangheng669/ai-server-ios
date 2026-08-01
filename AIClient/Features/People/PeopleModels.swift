@@ -198,6 +198,15 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         let tags = focusTagsValue?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? []
         return tags.isEmpty ? Array(discussionKeywords.prefix(4)) : Array(tags.prefix(4))
     }
+    var displayFocusTags: [String] {
+        focusTags.map { tag in
+            switch tag {
+            case "忠臣": "正方"
+            case "反贼": "反方"
+            default: tag
+            }
+        }
+    }
     var roles: [PersonRole] {
         if let rolesValue, !rolesValue.isEmpty { return rolesValue }
         return [PersonRole(organization: organizationName ?? topic.rawValue, title: secondaryLabel ?? "人物")]

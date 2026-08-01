@@ -80,7 +80,13 @@ jobs:
           HOME: /Users/wangheng
         run: |
           set -euo pipefail
-          codex_bin="$(find "$HOME/.nvm/versions/node" -path '*/bin/codex' -type f 2>/dev/null | sort -V | tail -1)"
+          codex_bin="$(command -v codex 2>/dev/null || true)"
+          if [[ -z "$codex_bin" && -x /opt/homebrew/bin/codex ]]; then
+            codex_bin=/opt/homebrew/bin/codex
+          fi
+          if [[ -z "$codex_bin" ]]; then
+            codex_bin="$(find "$HOME/.nvm/versions/node" -path '*/bin/codex' -type f 2>/dev/null | sort -V | tail -1)"
+          fi
           if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
             echo "Local Codex CLI is not installed for $USER." >&2
             exit 1

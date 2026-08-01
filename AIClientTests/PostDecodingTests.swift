@@ -413,10 +413,20 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testDecodesLiveXTweetDetailResponse() throws {
-        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段"}}}"#.data(using: .utf8)!
+        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段","createdAt":"Sat Aug 01 08:16:38 +0000 2026","metrics":{"bookmarks":9,"likes":15,"quotes":0,"replies":1,"retweets":2,"views":3740}}}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(XTweetDetailResponse.self, from: data)
 
         XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
+        XCTAssertEqual(response.data.item.metrics?.views, 3740)
+        XCTAssertEqual(response.data.item.metrics?.bookmarks, 9)
+    }
+
+    func testDecodesCompleteXCommentMetrics() throws {
+        let data = #"{"success":true,"data":{"items":[{"id":"456","text":"@author 回复正文","author":{"name":"用户","screenName":"reader","profileImageUrl":null,"verified":true},"metrics":{"bookmarks":3,"likes":4,"quotes":0,"replies":1,"retweets":2,"views":118},"createdAt":"Sat Aug 01 08:56:28 +0000 2026","inReplyToScreenName":"author","lang":"zh"}],"nextCursor":null}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(XCommentsResponse.self, from: data)
+
+        XCTAssertEqual(response.data.items.first?.metrics?.views, 118)
+        XCTAssertEqual(response.data.items.first?.metrics?.bookmarks, 3)
     }
 
     func testDecodesLiveXTweetVideoForDetailFallback() throws {
@@ -470,6 +480,30 @@ final class PostDecodingTests: XCTestCase {
                 "第三段。"
             ]
         )
+    }
+
+    func testXCommentRemovesDuplicatedReplyMention() {
+        XCTAssertEqual(
+            XPostTextFormatter.commentText("@AsiaFinance AI 牛市中场。", replyingTo: "AsiaFinance"),
+            "AI 牛市中场。"
+        )
+        XCTAssertEqual(
+            XPostTextFormatter.commentText("普通评论", replyingTo: nil),
+            "普通评论"
+        )
+    }
+
+    func testXDetailHidesPlatformShortLinksButKeepsRealArticleLinks() {
+        XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://t.co/abc")))
+        XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://x.com/example/status/1")))
+        XCTAssertTrue(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://example.com/story")))
+        XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(nil))
+    }
+
+    func testXDetailWaitsOnlyWhenInitialTextIsTruncated() {
+        XCTAssertTrue(XPostTextFormatter.shouldWaitForFullText("列表摘要…"))
+        XCTAssertTrue(XPostTextFormatter.shouldWaitForFullText("列表摘要..."))
+        XCTAssertFalse(XPostTextFormatter.shouldWaitForFullText("这已经是完整正文。"))
     }
 
     func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
@@ -583,6 +617,17 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(candidates.contains("欧洲"))
         XCTAssertTrue(candidates.contains("英伟达"))
         XCTAssertTrue(candidates.contains("微软"))
+    }
+
+    func testWikipediaCandidateExtractionDoesNotLinkGenericChineseWords() {
+        let candidates = WikipediaEntityCandidateExtractor.candidates(
+            in: ["官员表示相关法律要求企业使用普通工具维护社会稳定。"]
+        )
+
+        XCTAssertFalse(candidates.contains("官员"))
+        XCTAssertFalse(candidates.contains("法律"))
+        XCTAssertFalse(candidates.contains("工具"))
+        XCTAssertFalse(candidates.contains("稳定"))
     }
 
     func testSmallSquareRSSImageIsTreatedAsInlineEmoji() throws {
@@ -884,6 +929,34 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertGreaterThan(article.blocks.count, 1)
         XCTAssertTrue(article.blocks.allSatisfy { if case .paragraph = $0 { return true }; return false })
+    }
+
+    func testNewYorkTimesStoredTextPreservesParagraphsAndRemovesBrokenChineseSpacing() throws {
+        let article = try XCTUnwrap(NewYorkTimesArticle.storedText(
+            "第一段首次 超过 了预期。\n\n第二段正在被 迅速 采用，并通过 复 制 完成。"
+        ))
+
+        XCTAssertEqual(article.blocks, [
+            .paragraph("第一段首次超过了预期。"),
+            .paragraph("第二段正在被迅速采用，并通过复制完成。")
+        ])
+    }
+
+    func testNewYorkTimesLeadRemovesHeroImageCredit() throws {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "post": [
+                "id": 502,
+                "source": "rss:47",
+                "summary": "这是一段文章摘要。 Benny Douet",
+                "images": [[
+                    "url": "https://example.com/hero.png",
+                    "alt_text": "Benny Douet"
+                ]]
+            ]
+        ])
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: payload).post
+
+        XCTAssertEqual(post.newYorkTimesLead, "这是一段文章摘要。")
     }
 
     func testNewYorkTimesFeedExcerptDoesNotExposeTheCompleteArticle() throws {

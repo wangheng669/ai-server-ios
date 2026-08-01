@@ -46,7 +46,7 @@ final class PeopleStore {
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 

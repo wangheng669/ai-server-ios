@@ -142,7 +142,7 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             guard selectedRSSFeedID == feedID else { return }
-            errorMessage = error.localizedDescription
+            errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 
@@ -169,7 +169,7 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             guard selectedRSSFeedID == feedID else { return }
-            errorMessage = error.localizedDescription
+            errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 
@@ -397,7 +397,7 @@ final class NewsFeedViewModel: ObservableObject {
                 isSwitchingSource = false
                 posts = []
             }
-            errorMessage = error.localizedDescription
+            errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 
@@ -426,7 +426,9 @@ final class NewsFeedViewModel: ObservableObject {
             canLoadMore = !result.isEmpty
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
-        } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
+        } catch is CancellationError { } catch {
+            errorMessage = NetworkErrorPresentation.message(for: error)
+        }
     }
 
     private func fetchPage(
@@ -574,7 +576,7 @@ final class WeiboFollowingFeedModel: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 
@@ -593,7 +595,7 @@ final class WeiboFollowingFeedModel: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 }

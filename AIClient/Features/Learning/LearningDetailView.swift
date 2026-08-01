@@ -50,7 +50,7 @@ struct LearningDetailView: View {
     private var detailBar: some View {
         HStack(spacing: 12) {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.primary)
                     .frame(width: 40, height: 40)
@@ -60,7 +60,7 @@ struct LearningDetailView: View {
                     }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回学习路径")
+            .accessibilityLabel("关闭学习详情")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("股票入门路径")
