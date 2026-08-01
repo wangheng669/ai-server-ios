@@ -308,6 +308,17 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(candidates.contains("微软"))
     }
 
+    func testWikipediaCandidateExtractionDoesNotLinkGenericChineseWords() {
+        let candidates = WikipediaEntityCandidateExtractor.candidates(
+            in: ["官员表示相关法律要求企业使用普通工具维护社会稳定。"]
+        )
+
+        XCTAssertFalse(candidates.contains("官员"))
+        XCTAssertFalse(candidates.contains("法律"))
+        XCTAssertFalse(candidates.contains("工具"))
+        XCTAssertFalse(candidates.contains("稳定"))
+    }
+
     func testSmallSquareRSSImageIsTreatedAsInlineEmoji() throws {
         let data = #"{"url":"https://example.com/emoji.png","width":64,"height":64}"#.data(using: .utf8)!
         let image = try JSONDecoder().decode(PostImage.self, from: data)
@@ -581,6 +592,34 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertGreaterThan(article.blocks.count, 1)
         XCTAssertTrue(article.blocks.allSatisfy { if case .paragraph = $0 { return true }; return false })
+    }
+
+    func testNewYorkTimesStoredTextPreservesParagraphsAndRemovesBrokenChineseSpacing() throws {
+        let article = try XCTUnwrap(NewYorkTimesArticle.storedText(
+            "第一段首次 超过 了预期。\n\n第二段正在被 迅速 采用，并通过 复 制 完成。"
+        ))
+
+        XCTAssertEqual(article.blocks, [
+            .paragraph("第一段首次超过了预期。"),
+            .paragraph("第二段正在被迅速采用，并通过复制完成。")
+        ])
+    }
+
+    func testNewYorkTimesLeadRemovesHeroImageCredit() throws {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "post": [
+                "id": 502,
+                "source": "rss:47",
+                "summary": "这是一段文章摘要。 Benny Douet",
+                "images": [[
+                    "url": "https://example.com/hero.png",
+                    "alt_text": "Benny Douet"
+                ]]
+            ]
+        ])
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: payload).post
+
+        XCTAssertEqual(post.newYorkTimesLead, "这是一段文章摘要。")
     }
 
     func testNewYorkTimesFeedExcerptDoesNotExposeTheCompleteArticle() throws {

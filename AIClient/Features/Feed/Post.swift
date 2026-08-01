@@ -224,6 +224,27 @@ struct Post: Decodable, Identifiable, Hashable {
         let excerpt = String(normalized.prefix(280))
         return excerpt + (normalized.count > excerpt.count || raw.count > boundedRaw.count ? "…" : "")
     }
+    var newYorkTimesLead: String? {
+        guard var lead = clean(summary)?
+            .split(separator: "<", maxSplits: 1)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !lead.isEmpty else { return nil }
+        let credits = ([meta?.photoCredit] + (images ?? []).map(\.altText))
+            .compactMap { clean($0) }
+            .sorted { $0.count > $1.count }
+        for credit in credits {
+            if lead.localizedCaseInsensitiveCompare(credit) == .orderedSame { return nil }
+            guard lead.lowercased().hasSuffix(credit.lowercased()) else { continue }
+            lead.removeLast(credit.count)
+            lead = lead.trimmingCharacters(
+                in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "·•|—-"))
+            )
+            break
+        }
+        return lead.isEmpty ? nil : lead
+    }
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }

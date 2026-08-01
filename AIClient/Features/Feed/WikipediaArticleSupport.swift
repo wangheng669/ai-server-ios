@@ -24,11 +24,6 @@ enum WikipediaEntityCandidateExtractor {
     private static let ignoredEnglishTerms: Set<String> = [
         "A", "An", "And", "As", "At", "But", "For", "From", "In", "New", "Of", "On", "Or", "The", "To", "With"
     ]
-    private static let ignoredChineseTerms: Set<String> = [
-        "一个", "一些", "一种", "这个", "这些", "那个", "那些", "其中", "以及", "因为", "所以", "但是", "然而",
-        "如果", "已经", "没有", "可能", "目前", "今天", "表示", "认为", "进行", "成为", "需要", "问题", "时候",
-        "我们", "他们", "她们", "你们", "自己", "记者", "报道", "文章", "内容", "市场", "公司"
-    ]
     private static let commonChineseEntities = [
         "美国", "中国", "英国", "法国", "德国", "日本", "韩国", "印度", "俄罗斯", "加拿大", "澳大利亚",
         "欧洲", "亚洲", "非洲", "欧盟", "联合国", "华尔街", "纽约时报", "微软", "英伟达", "苹果", "谷歌",
@@ -74,31 +69,7 @@ enum WikipediaEntityCandidateExtractor {
             if results.count == limit { break }
         }
 
-        // Name recognition requires optional on-device linguistic assets on some
-        // iOS versions. Word tokenization is available more broadly, so use it as
-        // a conservative fallback and let Wikipedia validate every candidate.
-        if results.count < limit {
-            for paragraph in paragraphs {
-                let tokenizer = NLTokenizer(unit: .word)
-                tokenizer.string = paragraph
-                tokenizer.enumerateTokens(in: paragraph.startIndex..<paragraph.endIndex) { range, _ in
-                    let token = String(paragraph[range])
-                    if isUsefulChineseToken(token) {
-                        append(token, to: &results, seen: &seen, limit: limit)
-                    }
-                    return results.count < limit
-                }
-                if results.count == limit { break }
-            }
-        }
         return results
-    }
-
-    private static func isUsefulChineseToken(_ value: String) -> Bool {
-        guard (2...8).contains(value.count), !ignoredChineseTerms.contains(value) else { return false }
-        return value.unicodeScalars.allSatisfy { scalar in
-            (0x3400...0x4DBF).contains(scalar.value) || (0x4E00...0x9FFF).contains(scalar.value)
-        }
     }
 
     private static func append(_ raw: String, to results: inout [String], seen: inout Set<String>, limit: Int) {

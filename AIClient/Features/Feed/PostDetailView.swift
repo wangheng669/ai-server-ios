@@ -60,8 +60,8 @@ struct PostDetailView: View {
         }
         .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar((["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
-        .navigationBarBackButtonHidden(["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
+        .toolbar((post.isNewYorkTimes || ["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(post.isNewYorkTimes || ["知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
         .toolbar(.hidden, for: .tabBar)
         .fullScreenCover(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
@@ -98,7 +98,7 @@ struct PostDetailView: View {
                         Image(systemName: "ellipsis")
                     }
                 }
-            } else if post.isRSS {
+            } else if post.isRSS && !post.isNewYorkTimes {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isRSSBookmarked.toggle()
@@ -141,102 +141,132 @@ struct PostDetailView: View {
 
     @ViewBuilder
     private var newYorkTimesDetail: some View {
-        if isLoadingNewYorkTimesBody {
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("正在加载完整文章…")
-                    .font(.system(size: 16, design: .serif))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle)
-                    .font(.system(size: 30, weight: .bold, design: .serif))
-                    .lineSpacing(3)
+        VStack(spacing: 0) {
+            newYorkTimesHeader
+            Divider()
 
-                if let lead = newYorkTimesLead, lead != post.displayTitle {
-                    Text(lead)
-                        .font(.system(size: 18, design: .serif))
+            if isLoadingNewYorkTimesBody {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("正在加载完整文章…")
+                        .font(.system(size: 16, design: .serif))
                         .foregroundStyle(.secondary)
-                        .lineSpacing(5)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle)
+                            .font(.system(size: 30, weight: .bold, design: .serif))
+                            .lineSpacing(3)
 
-                HStack(spacing: 5) {
-                    if post.authorName != "RSS" && post.authorName != "纽约时报中文网 国际纵览" {
-                        Text(post.authorName.uppercased())
-                    }
-                    if let time = post.formattedTime { Text("· \(time)") }
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                        if let lead = post.newYorkTimesLead, lead != post.displayTitle {
+                            Text(lead)
+                                .font(.system(size: 18, design: .serif))
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(5)
+                        }
 
-                ForEach(post.imageURLs.prefix(1), id: \.self) {
-                    NewYorkTimesArticleImage(url: $0, height: 245)
-                }
+                        HStack(spacing: 5) {
+                            if post.authorName != "RSS" && post.authorName != "纽约时报中文网 国际纵览" {
+                                Text(post.authorName.uppercased())
+                            }
+                            if let time = post.formattedTime { Text("· \(time)") }
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
 
-                Divider()
+                        ForEach(post.imageURLs.prefix(1), id: \.self) {
+                            NewYorkTimesArticleImage(url: $0, height: 245)
+                        }
 
-                if let article = newYorkTimesArticle {
-                    LazyVStack(alignment: .leading, spacing: 22) {
-                        ForEach(Array(article.blocks.enumerated()), id: \.offset) { index, block in
-                            switch block {
-                            case .paragraph(let text):
-                                VStack(alignment: .leading, spacing: 12) {
-                                    WikipediaLinkedParagraph(
-                                        text: text,
-                                        entities: wikipediaEntitiesByParagraph[index] ?? []
-                                    ) { entity in
-                                        withAnimation(.easeOut(duration: 0.18)) {
-                                            selectedWikipediaEntity = WikipediaSelection(
-                                                paragraphIndex: index,
-                                                entity: entity
+                        Divider()
+
+                        if let article = newYorkTimesArticle {
+                            LazyVStack(alignment: .leading, spacing: 22) {
+                                ForEach(Array(article.blocks.enumerated()), id: \.offset) { index, block in
+                                    switch block {
+                                    case .paragraph(let text):
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            WikipediaLinkedParagraph(
+                                                text: text,
+                                                entities: wikipediaEntitiesByParagraph[index] ?? []
+                                            ) { entity in
+                                                withAnimation(.easeOut(duration: 0.18)) {
+                                                    selectedWikipediaEntity = WikipediaSelection(
+                                                        paragraphIndex: index,
+                                                        entity: entity
+                                                    )
+                                                }
+                                            }
+                                            if let selection = selectedWikipediaEntity,
+                                               selection.paragraphIndex == index {
+                                                WikipediaEntityCard(entity: selection.entity) {
+                                                    presentedWikipediaEntity = selection.entity
+                                                } close: {
+                                                    withAnimation(.easeOut(duration: 0.15)) {
+                                                        selectedWikipediaEntity = nil
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    case .image(let url, let caption, let credit):
+                                        if !NewYorkTimesArticle.isSameImageAsset(url, post.imageURLs.first) {
+                                            NewYorkTimesArticleImage(
+                                                url: url,
+                                                caption: caption,
+                                                credit: credit,
+                                                height: 230
                                             )
                                         }
                                     }
-                                    if let selection = selectedWikipediaEntity,
-                                       selection.paragraphIndex == index {
-                                        WikipediaEntityCard(entity: selection.entity) {
-                                            presentedWikipediaEntity = selection.entity
-                                        } close: {
-                                            withAnimation(.easeOut(duration: 0.15)) {
-                                                selectedWikipediaEntity = nil
-                                            }
-                                        }
-                                    }
-                                }
-                            case .image(let url, let caption, let credit):
-                                if !NewYorkTimesArticle.isSameImageAsset(url, post.imageURLs.first) {
-                                    NewYorkTimesArticleImage(
-                                        url: url,
-                                        caption: caption,
-                                        credit: credit,
-                                        height: 230
-                                    )
                                 }
                             }
+                        } else {
+                            Text("正文暂未收录，请打开原文阅读。")
+                                .font(.system(size: 17, design: .serif))
+                                .foregroundStyle(.secondary)
                         }
-                    }
-                } else {
-                    Text("正文暂未收录，请打开原文阅读。")
-                        .font(.system(size: 17, design: .serif))
-                        .foregroundStyle(.secondary)
-                }
 
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 14)
-            .padding(.bottom, 30)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 14)
+                    .padding(.bottom, 30)
+                }
             }
         }
     }
 
-    private var newYorkTimesLead: String? {
-        guard let raw = post.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
-        let lead = raw.split(separator: "<", maxSplits: 1).first.map(String.init)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return lead?.isEmpty == false ? lead : nil
+    private var newYorkTimesHeader: some View {
+        HStack(spacing: 12) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("返回")
+
+            Spacer(minLength: 0)
+
+            Text("纽约时报")
+                .font(.system(size: 17, weight: .semibold, design: .serif))
+
+            Spacer(minLength: 0)
+
+            Button {
+                isRSSBookmarked.toggle()
+                RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
+            } label: {
+                Image(systemName: isRSSBookmarked ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(isRSSBookmarked ? "取消收藏" : "收藏")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 8)
+        .frame(height: 52)
+        .background(.background)
     }
 
     private var standardDetail: some View {
