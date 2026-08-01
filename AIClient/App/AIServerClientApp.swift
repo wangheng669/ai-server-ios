@@ -171,9 +171,9 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") { return .learning }
-        return .observation
+        return .world
         #else
-        .observation
+        .world
         #endif
     }()
     @State private var marketShowsDetail = false
