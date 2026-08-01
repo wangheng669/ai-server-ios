@@ -111,6 +111,10 @@ struct XTweetDetailItem: Decodable, Equatable {
 }
 
 enum XPostTextFormatter {
+    static func shouldWaitForFullText(_ value: String) -> Bool {
+        isTruncated(detailText(value))
+    }
+
     static func shouldShowExternalURL(_ url: URL?) -> Bool {
         guard let host = url?.host()?.lowercased() else { return false }
         return !["t.co", "x.com", "twitter.com", "www.x.com", "www.twitter.com"].contains(host)

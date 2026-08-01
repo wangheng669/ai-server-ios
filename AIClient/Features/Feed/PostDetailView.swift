@@ -33,6 +33,7 @@ struct PostDetailView: View {
     @State private var loadingXTranslationIDs: Set<String> = []
     @State private var xLiveDetail: XTweetDetailItem?
     @State private var xLiveTranslationText: String?
+    @State private var isLoadingXFullText: Bool
     @State private var weiboImageSelection: ImageGallerySelection?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -51,6 +52,10 @@ struct PostDetailView: View {
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
         _isTruthBookmarked = State(initialValue: TruthBookmarkStore.contains(post.id))
         _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
+        _isLoadingXFullText = State(initialValue:
+            post.sourceName == "X"
+                && XPostTextFormatter.shouldWaitForFullText(post.xStoredOriginalContent)
+        )
     }
 
     private var usesCustomDismissControl: Bool {
@@ -1692,18 +1697,25 @@ struct PostDetailView: View {
                             .padding(.top, 16)
                         }
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                                Text(xStyledParagraph(paragraph))
-                                    .font(.system(size: 17, weight: .regular))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                        Group {
+                            if isLoadingXFullText {
+                                xFullTextLoadingPlaceholder
+                            } else {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                                        Text(xStyledParagraph(paragraph))
+                                            .font(.system(size: 17, weight: .regular))
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                                .textSelection(.enabled)
                             }
                         }
                         .padding(.top, 24)
-                        .textSelection(.enabled)
 
-                        if XPostTextFormatter.isTruncated(xDisplayedDetailText),
+                        if !isLoadingXFullText,
+                           XPostTextFormatter.isTruncated(xDisplayedDetailText),
                            post.linkURL != nil {
                             Button { openOriginal() } label: {
                                 Label("X 源仅返回了摘要，前往 X 查看全文", systemImage: "arrow.up.right.square")
@@ -1813,6 +1825,18 @@ struct PostDetailView: View {
 
     private var xDisplayedDetailParagraphs: [String] {
         XPostTextFormatter.paragraphs(xDisplayedDetailText)
+    }
+
+    private var xFullTextLoadingPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach([1.0, 0.94, 0.98, 0.88, 0.72], id: \.self) { width in
+                Capsule()
+                    .fill(Color.secondary.opacity(0.16))
+                    .frame(width: (UIScreen.main.bounds.width - 16) * width, height: 14)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在加载完整帖子")
     }
 
     private var xAuthorHeader: some View {
@@ -2048,6 +2072,10 @@ struct PostDetailView: View {
             } else {
                 post = detail.replacingTranslation(with: post.displayContent)
             }
+            if post.sourceName == "X",
+               !XPostTextFormatter.shouldWaitForFullText(post.xStoredOriginalContent) {
+                isLoadingXFullText = false
+            }
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
             var translationTweetID = tweetID
@@ -2061,10 +2089,13 @@ struct PostDetailView: View {
                     showsOriginal = true
                 }
             }
+            isLoadingXFullText = false
             if post.meta?.lang?.lowercased().hasPrefix("zh") != true,
                let translation = try? await client.fetchXTranslation(tweetID: translationTweetID) {
                 xLiveTranslationText = translation.text
             }
+        } else if post.sourceName == "X" {
+            isLoadingXFullText = false
         }
         if post.isYouTube || post.isBilibili || post.isWeiboRSS {
             player?.pause()
