@@ -39,6 +39,22 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         Task { await PersonPushNotificationManager.shared.restoreRegistration() }
+        #if DEBUG
+        if let preview = ProcessInfo.processInfo.arguments.first(where: {
+            $0.hasPrefix("--person-push-video-preview=")
+        })?.split(separator: "=", maxSplits: 1).last {
+            let values = preview.split(separator: ":", maxSplits: 1).map(String.init)
+            if values.count == 2 {
+                Task { @MainActor in
+                    PersonPushNavigationStore.shared.handle(userInfo: [
+                        "kind": "video",
+                        "person_id": values[0],
+                        "content_id": values[1]
+                    ])
+                }
+            }
+        }
+        #endif
         return true
     }
 
@@ -162,6 +178,7 @@ private struct EditorialRootView: View {
     @State private var feedHidesTabBar = false
     @State private var notificationPostID: Int?
     @State private var notificationPersonID: String?
+    @State private var notificationVideoID: Int64?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -211,7 +228,8 @@ private struct EditorialRootView: View {
                 PeopleView(
                     store: peopleStore,
                     showsDetail: $peopleShowsDetail,
-                    notificationPersonID: $notificationPersonID
+                    notificationPersonID: $notificationPersonID,
+                    notificationVideoID: $notificationVideoID
                 )
             }
         }
@@ -253,6 +271,7 @@ private struct EditorialRootView: View {
             case "video":
                 selectedTab = .people
                 notificationPersonID = request.personID
+                notificationVideoID = Int64(request.contentID)
             default:
                 selectedTab = .observation
             }

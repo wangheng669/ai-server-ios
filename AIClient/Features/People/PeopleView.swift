@@ -4,6 +4,7 @@ import UIKit
 struct PeopleView: View {
     @Binding private var showsDetail: Bool
     @Binding private var notificationPersonID: String?
+    @Binding private var notificationVideoID: Int64?
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -11,11 +12,13 @@ struct PeopleView: View {
     init(
         store: PeopleStore,
         showsDetail: Binding<Bool> = .constant(false),
-        notificationPersonID: Binding<String?> = .constant(nil)
+        notificationPersonID: Binding<String?> = .constant(nil),
+        notificationVideoID: Binding<Int64?> = .constant(nil)
     ) {
         self.store = store
         _showsDetail = showsDetail
         _notificationPersonID = notificationPersonID
+        _notificationVideoID = notificationVideoID
     }
 
     var body: some View {
@@ -68,6 +71,7 @@ struct PeopleView: View {
             PersonDetailSheet(
                 selectedPerson: $selectedPerson,
                 people: store.people,
+                notificationVideoID: $notificationVideoID,
                 onClose: { selectedPerson = nil }
             )
             .presentationDetents([.large])
@@ -2664,9 +2668,22 @@ private struct PeopleLoadingTimeline: View {
 struct PersonDetailSheet: View {
     @Binding var selectedPerson: SpecialPerson?
     let people: [SpecialPerson]
+    @Binding var notificationVideoID: Int64?
     let onClose: () -> Void
     @GestureState private var isHorizontalDragging = false
     @State private var incomingEdge: Edge = .trailing
+
+    init(
+        selectedPerson: Binding<SpecialPerson?>,
+        people: [SpecialPerson],
+        notificationVideoID: Binding<Int64?> = .constant(nil),
+        onClose: @escaping () -> Void
+    ) {
+        _selectedPerson = selectedPerson
+        self.people = people
+        _notificationVideoID = notificationVideoID
+        self.onClose = onClose
+    }
 
     var body: some View {
         NavigationStack {
@@ -2678,7 +2695,9 @@ struct PersonDetailSheet: View {
                     PersonDetailPage(
                         person: person,
                         showsNavigationChrome: false,
-                        usesSheetLayout: true
+                        usesSheetLayout: true,
+                        notificationVideoID: notificationVideoID,
+                        onNotificationVideoOpened: { notificationVideoID = nil }
                     )
                     .id(person.id)
                     .transition(personTransition)
@@ -2839,6 +2858,8 @@ private struct PersonDetailPage: View {
     let person: SpecialPerson
     let showsNavigationChrome: Bool
     let usesSheetLayout: Bool
+    let notificationVideoID: Int64?
+    let onNotificationVideoOpened: () -> Void
     @ObservedObject private var pushNotifications = PersonPushNotificationManager.shared
     @State private var store = PersonDetailStore()
     @State private var section: PersonDetailSection
@@ -2856,11 +2877,15 @@ private struct PersonDetailPage: View {
     init(
         person: SpecialPerson,
         showsNavigationChrome: Bool = true,
-        usesSheetLayout: Bool = false
+        usesSheetLayout: Bool = false,
+        notificationVideoID: Int64? = nil,
+        onNotificationVideoOpened: @escaping () -> Void = {}
     ) {
         self.person = person
         self.showsNavigationChrome = showsNavigationChrome
         self.usesSheetLayout = usesSheetLayout
+        self.notificationVideoID = notificationVideoID
+        self.onNotificationVideoOpened = onNotificationVideoOpened
         _section = State(initialValue: person.topic == .history ? .profile : .posts)
     }
 
@@ -2976,6 +3001,7 @@ private struct PersonDetailPage: View {
         }
         .task(id: person.id) {
             await store.load(person: person)
+            openNotificationVideoIfNeeded()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--article-detail-preview"),
                let article = store.articles.dropFirst().first ?? store.articles.first {
@@ -2989,6 +3015,9 @@ private struct PersonDetailPage: View {
             }
             #endif
         }
+        .onChange(of: notificationVideoID) { _, _ in
+            openNotificationVideoIfNeeded()
+        }
         .task(id: articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)) {
             let query = articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !query.isEmpty {
@@ -2997,6 +3026,17 @@ private struct PersonDetailPage: View {
             guard !Task.isCancelled else { return }
             await store.searchArticles(personID: person.id, query: query)
         }
+    }
+
+    private func openNotificationVideoIfNeeded() {
+        guard let notificationVideoID,
+              let video = store.relatedVideos.first(where: { $0.id == notificationVideoID }) else {
+            return
+        }
+        section = .discussions
+        relatedSection = .videos
+        selectedVideo = video
+        onNotificationVideoOpened()
     }
 
     @ViewBuilder
