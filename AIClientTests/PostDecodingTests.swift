@@ -461,6 +461,13 @@ final class PostDecodingTests: XCTestCase {
         )
     }
 
+    func testXDetailHidesPlatformShortLinksButKeepsRealArticleLinks() {
+        XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://t.co/abc")))
+        XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://x.com/example/status/1")))
+        XCTAssertTrue(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://example.com/story")))
+        XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(nil))
+    }
+
     func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
         let data = #"{"id":7,"source":"x","content":"列表摘要…","content_zh":"被压平的完整中文正文","post_link":"https://x.com/example/status/123","meta":{"lang":"zh","note_text":"第一段。\n\n第二段。"}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: data)

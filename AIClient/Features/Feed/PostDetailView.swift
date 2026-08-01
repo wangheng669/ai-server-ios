@@ -1714,7 +1714,8 @@ struct PostDetailView: View {
                             .padding(.top, 16)
                         }
 
-                        if let link = post.externalURL {
+                        if let link = post.externalURL,
+                           XPostTextFormatter.shouldShowExternalURL(link) {
                             Button { openURL(link) } label: {
                                 Text("阅读更多：\(link.host() ?? link.absoluteString)")
                                     .font(.system(size: 16, weight: .semibold))
@@ -1735,7 +1736,7 @@ struct PostDetailView: View {
 
                         HStack(spacing: 4) {
                             Text(xTimestamp)
-                            if let views = post.meta?.metrics?.views {
+                            if let views = post.meta?.metrics?.views, views > 0 {
                                 Text("·")
                                 Text("\(compactCount(views)) 次查看").fontWeight(.semibold).foregroundStyle(.primary)
                             }
@@ -1744,8 +1745,8 @@ struct PostDetailView: View {
                         .foregroundStyle(.secondary)
                         .padding(.top, 18)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.top, 18)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 16)
                     .padding(.bottom, 12)
 
                     Divider()
@@ -1754,39 +1755,9 @@ struct PostDetailView: View {
                         .frame(height: 44)
                     Divider()
 
-                    HStack {
-                        Text("相关").font(.subheadline.weight(.semibold))
-                        Image(systemName: "chevron.down").font(.caption2)
-                        Spacer()
-                        Button("查看引用") { openOriginal() }
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 15)
-                    .frame(height: 48)
-                    Divider()
-
                     xCommentsSection
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            Button { openOriginal() } label: {
-                HStack {
-                    Text("发布你的回复")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 18)
-                .frame(height: 42)
-                .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-            }
-            .buttonStyle(.plain)
-            .background(Color(uiColor: .systemBackground))
         }
     }
 
@@ -1959,12 +1930,15 @@ struct PostDetailView: View {
         guard let raw = post.articlePostAt else { return post.formattedTime ?? "" }
         let formatter = ISO8601DateFormatter()
         guard let date = formatter.date(from: raw) else { return post.formattedTime ?? raw }
-        return date.formatted(.dateTime.hour().minute().month().day().year().locale(Locale(identifier: "zh_CN")))
+        let display = DateFormatter()
+        display.locale = Locale(identifier: "zh_CN")
+        display.dateFormat = "ah:mm · M/d/yy"
+        return display.string(from: date)
     }
 
     private var detailImageHeight: CGFloat {
         guard let image = post.images?.first, let width = image.width, let height = image.height, width > 0 else { return 300 }
-        let availableWidth = UIScreen.main.bounds.width - 30
+        let availableWidth = UIScreen.main.bounds.width - 16
         return min(availableWidth * CGFloat(height) / CGFloat(width), 620)
     }
 
@@ -1990,7 +1964,12 @@ struct PostDetailView: View {
             .frame(height: xVideoHeight)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         } else {
-            PostMediaGrid(post: post, singleImageHeight: detailImageHeight)
+            PostMediaGrid(
+                post: post,
+                singleImageHeight: detailImageHeight,
+                availableWidth: UIScreen.main.bounds.width - 16,
+                cornerRadius: 6
+            )
         }
     }
 
