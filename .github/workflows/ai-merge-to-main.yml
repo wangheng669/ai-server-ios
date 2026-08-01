@@ -11,14 +11,18 @@ permissions:
   actions: write
   contents: write
 
+concurrency:
+  group: ai-merge-to-main
+  cancel-in-progress: false
+
 jobs:
   merge:
-    name: Safely integrate on office Mac mini
+    name: Safely integrate on selected central Mac
     runs-on:
       - self-hosted
       - macOS
       - ARM64
-      - office-builder
+      - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
     timeout-minutes: 45
 
     steps:
@@ -76,7 +80,13 @@ jobs:
           HOME: /Users/wangheng
         run: |
           set -euo pipefail
-          codex_bin="$(find "$HOME/.nvm/versions/node" -path '*/bin/codex' -type f 2>/dev/null | sort -V | tail -1)"
+          codex_bin="$(command -v codex 2>/dev/null || true)"
+          if [[ -z "$codex_bin" && -x /opt/homebrew/bin/codex ]]; then
+            codex_bin=/opt/homebrew/bin/codex
+          fi
+          if [[ -z "$codex_bin" ]]; then
+            codex_bin="$(find "$HOME/.nvm/versions/node" -path '*/bin/codex' -type f 2>/dev/null | sort -V | tail -1)"
+          fi
           if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
             echo "Local Codex CLI is not installed for $USER." >&2
             exit 1
@@ -215,7 +225,7 @@ jobs:
           test -d "$app_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
-      - name: Install directly from office Mac mini
+      - name: Install directly from selected central Mac
         id: local_install
         if: steps.merge.outputs.already_merged == 'false'
         continue-on-error: true
@@ -236,8 +246,8 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
-      - name: Schedule a fresh installation retry
-        if: steps.local_install.outcome == 'failure'
+      - name: Schedule a fresh installation retry on office Mac mini
+        if: steps.local_install.outcome == 'failure' && (vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder') == 'office-builder'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

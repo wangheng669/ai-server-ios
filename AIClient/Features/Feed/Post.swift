@@ -101,14 +101,44 @@ struct XTweetDetailItem: Decodable, Equatable {
     let text: String
     let noteText: String?
     let shortText: String?
+    let media: [Media]?
     let createdAt: String?
     let metrics: PostMetrics?
+
+    struct Media: Decodable, Equatable {
+        let type: String?
+        let url: String?
+        let thumbnailURL: String?
+        let width: Int?
+        let height: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case type, url, width, height
+            case thumbnailURL = "thumbnail_url"
+        }
+
+        var isVideo: Bool {
+            ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
+        }
+    }
 
     var fullText: String {
         [noteText, text, shortText]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .max(by: { $0.count < $1.count }) ?? text
+    }
+
+    var videoMedia: Media? {
+        media?.first(where: \.isVideo)
+    }
+
+    var videoURL: URL? {
+        videoMedia?.url.flatMap(MediaURL.video)
+    }
+
+    var videoPreviewURL: URL? {
+        videoMedia?.thumbnailURL.flatMap(MediaURL.image)
     }
 }
 
