@@ -1700,7 +1700,7 @@ struct PostDetailView: View {
                         }
 
                         xMedia
-                            .padding(.top, post.images?.isEmpty == false || !post.videoURLs.isEmpty ? 16 : 0)
+                            .padding(.top, xDetailHasMedia ? 16 : 0)
 
                         HStack(spacing: 4) {
                             Text(xTimestamp)
@@ -1938,8 +1938,12 @@ struct PostDetailView: View {
     }
 
     @ViewBuilder private var xMedia: some View {
-        if post.sourceName == "X", let videoURL = post.videoURLs.first {
-            XVideoPlayerView(url: videoURL, thumbnailURL: post.previewURL)
+        if post.sourceName == "X", let videoURL = xDetailVideoURL {
+            XVideoPlayerView(
+                url: videoURL,
+                thumbnailURL: xDetailVideoPreviewURL,
+                onAspectRatioResolved: { detectedVideoAspectRatio = $0 }
+            )
                 .id(videoURL)
                 .frame(height: xVideoHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1963,11 +1967,25 @@ struct PostDetailView: View {
         }
     }
 
+    private var xDetailVideoURL: URL? {
+        post.videoURLs.first ?? xLiveDetail?.videoURL
+    }
+
+    private var xDetailVideoPreviewURL: URL? {
+        post.previewURL ?? xLiveDetail?.videoPreviewURL
+    }
+
+    private var xDetailHasMedia: Bool {
+        xDetailVideoURL != nil || !post.imageURLs.isEmpty
+    }
+
     private var xVideoHeight: CGFloat {
         let availableWidth = UIScreen.main.bounds.width - 30
-        let metadataAspectRatio: CGFloat? = post.videos?.first.flatMap { video in
-            guard let width = video.width,
-                  let height = video.height,
+        let dimensions = post.videos?.first.map { ($0.width, $0.height) }
+            ?? xLiveDetail?.videoMedia.map { ($0.width, $0.height) }
+        let metadataAspectRatio: CGFloat? = dimensions.flatMap { dimensions in
+            guard let width = dimensions.0,
+                  let height = dimensions.1,
                   width > 0,
                   height > 0 else { return nil }
             return CGFloat(width) / CGFloat(height)
@@ -2044,6 +2062,11 @@ struct PostDetailView: View {
             if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 xLiveDetail = liveDetail
                 translationTweetID = liveDetail.id
+                if post.videoURLs.isEmpty,
+                   let videoURL = liveDetail.videoURL,
+                   detectedVideoAspectRatio == nil {
+                    await detectVideoAspectRatio(url: videoURL)
+                }
                 if XPostTextFormatter.shouldPreferFullOriginal(
                     displayed: xDisplayedDetailText,
                     fullOriginal: liveDetail.fullText

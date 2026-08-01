@@ -419,6 +419,17 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
     }
 
+    func testDecodesLiveXTweetVideoForDetailFallback() throws {
+        let data = #"{"success":true,"data":{"item":{"id":"2083612366155984927","text":"这是哪个国家？","media":[{"type":"video","url":"https://video.twimg.com/amplify_video/demo.mp4","thumbnail_url":"https://pbs.twimg.com/amplify_video_thumb/demo.jpg","width":720,"height":1280}]}}}"#.data(using: .utf8)!
+        let item = try JSONDecoder().decode(XTweetDetailResponse.self, from: data).data.item
+
+        XCTAssertTrue(item.videoMedia?.isVideo == true)
+        XCTAssertEqual(item.videoMedia?.width, 720)
+        XCTAssertEqual(item.videoMedia?.height, 1280)
+        XCTAssertEqual(item.videoURL?.path, "/api/v1/media-proxy")
+        XCTAssertEqual(item.videoPreviewURL?.path, "/api/v1/image-proxy")
+    }
+
     func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
         let storedBody = "这是已经存储的完整中文正文，包含第一段和第二段。"
         let liveSummary = "中文摘要…"
