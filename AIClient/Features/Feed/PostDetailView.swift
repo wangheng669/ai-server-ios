@@ -2101,7 +2101,8 @@ struct PostDetailView: View {
                    detectedVideoAspectRatio == nil {
                     await detectVideoAspectRatio(url: videoURL)
                 }
-                if XPostTextFormatter.shouldPreferFullOriginal(
+                if !presentedAsSheet,
+                   XPostTextFormatter.shouldPreferFullOriginal(
                     displayed: xDisplayedDetailText,
                     fullOriginal: liveDetail.fullText
                 ) {
