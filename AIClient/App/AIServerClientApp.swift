@@ -307,36 +307,44 @@ private struct RootNavigationBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            item(.world, title: "今日世界", icon: "globe.asia.australia")
             item(.observation, title: "观点", icon: "list.bullet.rectangle")
             item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
+            item(.world, title: "今日世界", icon: "globe")
             item(.learning, title: "知识", icon: "books.vertical")
             item(.people, title: "人物", icon: "person")
         }
-        .frame(height: 56)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(InvestmentDesign.divider)
-                .frame(height: 0.5)
+        .frame(maxWidth: 292)
+        .frame(height: 46)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
         }
+        .shadow(color: Color.black.opacity(0.08), radius: 12, y: 4)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 44)
+        .padding(.bottom, 10)
     }
 
     private func item(_ tab: EditorialTab, title: String, icon: String) -> some View {
         Button {
             withAnimation(.easeOut(duration: 0.16)) { selection = tab }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 Image(systemName: icon)
                     .font(.system(size: 19, weight: selection == tab ? .semibold : .regular))
-                Text(title)
-                    .font(.system(size: 10.5, weight: selection == tab ? .semibold : .regular))
+                    .symbolRenderingMode(.monochrome)
+
+                Circle()
+                    .fill(selection == tab ? InvestmentDesign.accent : Color.clear)
+                    .frame(width: 4, height: 4)
             }
             .foregroundStyle(selection == tab ? InvestmentDesign.accent : Color.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
         .accessibilityAddTraits(selection == tab ? .isSelected : [])
     }
 }
