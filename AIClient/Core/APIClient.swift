@@ -375,21 +375,39 @@ struct NewYorkTimesArticle: Equatable {
     let blocks: [NewYorkTimesArticleBlock]
 
     static func storedText(_ text: String) -> NewYorkTimesArticle? {
-        let normalized = text.replacingOccurrences(
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let paragraphNormalized = normalized.replacingOccurrences(
+            of: #"\n[ \t]*\n+"#,
+            with: "\u{2029}",
+            options: .regularExpression
+        )
+        let rawParagraphs = paragraphNormalized
+            .components(separatedBy: "\u{2029}")
+            .map(normalizedChineseSpacing)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if rawParagraphs.count > 1 {
+            return NewYorkTimesArticle(blocks: rawParagraphs.map(NewYorkTimesArticleBlock.paragraph))
+        }
+
+        let sentenceNormalized = normalized.replacingOccurrences(
             of: #"(?<=[。！？])\s+"#,
             with: "\n",
             options: .regularExpression
         )
-        let sentences = normalized
+        let sentences = sentenceNormalized
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: "\n")
+            .map(normalizedChineseSpacing)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !sentences.isEmpty else { return nil }
         var paragraphs: [NewYorkTimesArticleBlock] = []
         var current = ""
         for sentence in sentences {
-            current = current.isEmpty ? sentence : current + " " + sentence
+            current = current.isEmpty ? sentence : normalizedChineseSpacing(current + " " + sentence)
             if current.count >= 180 {
                 paragraphs.append(.paragraph(current))
                 current = ""
@@ -397,6 +415,14 @@ struct NewYorkTimesArticle: Equatable {
         }
         if !current.isEmpty { paragraphs.append(.paragraph(current)) }
         return NewYorkTimesArticle(blocks: paragraphs)
+    }
+
+    private static func normalizedChineseSpacing(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: #"([\u3400-\u9FFF，。！？；：、“”‘’（）《》])[ \t\u00A0]+(?=[\u3400-\u9FFF，。！？；：、“”‘’（）《》])"#,
+            with: "$1",
+            options: .regularExpression
+        )
     }
 
     static func isSameImageAsset(_ lhs: URL, _ rhs: URL?) -> Bool {
