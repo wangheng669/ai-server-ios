@@ -3,13 +3,19 @@ import UIKit
 
 struct PeopleView: View {
     @Binding private var showsDetail: Bool
+    @Binding private var notificationPersonID: String?
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
-    init(store: PeopleStore, showsDetail: Binding<Bool> = .constant(false)) {
+    init(
+        store: PeopleStore,
+        showsDetail: Binding<Bool> = .constant(false),
+        notificationPersonID: Binding<String?> = .constant(nil)
+    ) {
         self.store = store
         _showsDetail = showsDetail
+        _notificationPersonID = notificationPersonID
     }
 
     var body: some View {
@@ -72,6 +78,7 @@ struct PeopleView: View {
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await store.load()
+            openNotificationPersonIfNeeded()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
@@ -84,7 +91,17 @@ struct PeopleView: View {
         .onChange(of: selectedPerson) { _, person in
             showsDetail = person != nil
         }
+        .onChange(of: notificationPersonID) { _, _ in
+            openNotificationPersonIfNeeded()
+        }
         .onDisappear { showsDetail = false }
+    }
+
+    private func openNotificationPersonIfNeeded() {
+        guard let personID = notificationPersonID, !personID.isEmpty,
+              let person = store.people.first(where: { $0.id == personID }) else { return }
+        selectedPerson = person
+        notificationPersonID = nil
     }
 
     private var detailIsPresented: Binding<Bool> {

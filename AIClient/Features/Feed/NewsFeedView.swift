@@ -55,6 +55,7 @@ private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
 struct NewsFeedView: View {
     @Binding private var showsDetail: Bool
     @Binding private var hidesTabBar: Bool
+    @Binding private var notificationPostID: Int?
     @StateObject private var model = NewsFeedViewModel()
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
     @State private var path: [Post] = []
@@ -81,10 +82,12 @@ struct NewsFeedView: View {
 
     init(
         showsDetail: Binding<Bool> = .constant(false),
-        hidesTabBar: Binding<Bool> = .constant(false)
+        hidesTabBar: Binding<Bool> = .constant(false),
+        notificationPostID: Binding<Int?> = .constant(nil)
     ) {
         _showsDetail = showsDetail
         _hidesTabBar = hidesTabBar
+        _notificationPostID = notificationPostID
         WeiboSessionCookieStore.importFromEnvironmentIfPresent()
     }
 
@@ -131,6 +134,14 @@ struct NewsFeedView: View {
         .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
             showsDetail = !isEmpty
             if isEmpty { preparedWebViews.removeAll() }
+        }
+        .task(id: notificationPostID) {
+            guard let postID = notificationPostID else { return }
+            defer { notificationPostID = nil }
+            guard let post = try? await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: postID) else {
+                return
+            }
+            path = [post]
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
             guard count > 0, isFeedAtTop else { return }
