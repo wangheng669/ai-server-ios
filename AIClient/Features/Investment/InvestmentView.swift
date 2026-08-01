@@ -20,7 +20,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case sentiment = "情绪"
     case holdings = "知名投资人"
     case industries = "产业全景"
-    case gdp = "GDP排行"
+    case gdp = "全球排行"
 
     var id: Self { self }
 }
@@ -55,48 +55,32 @@ struct InvestmentView: View {
     }
 
     var body: some View {
-        Group {
-            switch section {
-            case .market:
-                VStack(spacing: 0) {
-                    if !marketShowsDetail {
-                        InvestmentHeader(selection: $section)
-                    }
-                    MarketView(store: marketStore, showsDetail: $marketShowsDetail)
-                }
-            case .sentiment:
-                VStack(spacing: 0) {
-                    if !showsDetail {
-                        InvestmentHeader(selection: $section)
-                    }
-                    RetailInvestorView(
-                        store: sentimentStore,
-                        marketStore: marketStore,
-                        showsDetail: $showsDetail
-                    )
-                }
-            case .holdings:
-                VStack(spacing: 0) {
-                    if !holdingsShowsDetail {
-                        InvestmentHeader(selection: $section)
-                    }
-                    FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
-                }
-            case .industries:
-                VStack(spacing: 0) {
-                    if !showsDetail {
-                        InvestmentHeader(selection: $section)
-                    }
-                    IndustryPanoramaView()
-                }
-            case .gdp:
-                VStack(spacing: 0) {
-                    if !showsDetail {
-                        InvestmentHeader(selection: $section)
-                    }
-                    CountryGDPRankingView(showsDetail: $showsDetail)
-                }
+        VStack(spacing: 0) {
+            if !showsDetail {
+                InvestmentHeader(selection: $section)
             }
+
+            TabView(selection: $section) {
+                MarketView(store: marketStore, showsDetail: $marketShowsDetail)
+                    .tag(InvestmentSection.market)
+
+                RetailInvestorView(
+                    store: sentimentStore,
+                    marketStore: marketStore,
+                    showsDetail: $showsDetail
+                )
+                .tag(InvestmentSection.sentiment)
+
+                FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
+                    .tag(InvestmentSection.holdings)
+
+                IndustryPanoramaView()
+                    .tag(InvestmentSection.industries)
+
+                CountryGDPRankingView(showsDetail: $showsDetail)
+                    .tag(InvestmentSection.gdp)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(InvestmentDesign.canvas)
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }

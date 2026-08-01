@@ -1,9 +1,111 @@
 import Foundation
 
+struct KnownAccountIdentity: Hashable {
+    let canonicalName: String
+    let platform: String
+    let accountName: String
+    let aliases: [String]
+
+    var accountLabel: String { "\(platform) · \(accountName)" }
+}
+
+enum AccountIdentityResolver {
+    // Curated identities are keyed only by stable server/platform IDs. Never infer a
+    // real person from a mutable nickname, because unrelated accounts may share it.
+    private static let identitiesByUserID: [String: KnownAccountIdentity] = [
+        "rss:14": KnownAccountIdentity(
+            canonicalName: "段永平",
+            platform: "雪球",
+            accountName: "大道无形我有型",
+            aliases: ["段永平", "大道无形我有型"]
+        )
+    ]
+
+    static func knownIdentity(userID: String?) -> KnownAccountIdentity? {
+        guard let userID = nonempty(userID) else { return nil }
+        return identitiesByUserID[userID.lowercased()]
+    }
+}
+
 struct SpecialPeopleResponse: Decodable {
     let success: Bool
     let categories: [PeopleCategory]?
     let users: [SpecialPerson]
+}
+
+struct XPeopleSearchResponse: Decodable {
+    let success: Bool
+    let results: [XPersonSearchResult]
+}
+
+struct XPersonImportResponse: Decodable {
+    let success: Bool
+    let added: Bool
+    let person: SpecialPerson
+}
+
+struct WikipediaPeopleSearchResponse: Decodable {
+    let success: Bool
+    let results: [WikipediaPersonSearchResult]
+}
+
+struct WikipediaPersonImportResponse: Decodable {
+    let success: Bool
+    let added: Bool
+    let person: SpecialPerson
+}
+
+struct WikipediaPersonSearchResult: Decodable, Identifiable, Hashable {
+    let id: String
+    let pageID: Int64
+    let language: String
+    let title: String
+    let description: String?
+    let extract: String?
+    let avatarURLValue: String?
+    let articleURLValue: String
+    let alreadyInDirectory: Bool
+    let personID: String?
+
+    var name: String { title }
+    var avatarURL: URL? { avatarURLValue.flatMap(MediaURL.image) }
+    var articleURL: URL? { URL(string: articleURLValue) }
+    var sourceLabel: String { language == "en" ? "英文维基百科" : "中文维基百科" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, language, title, description, extract
+        case pageID = "page_id"
+        case avatarURLValue = "avatar_url"
+        case articleURLValue = "article_url"
+        case alreadyInDirectory = "already_in_directory"
+        case personID = "person_id"
+    }
+}
+
+struct XPersonSearchResult: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let screenName: String
+    let description: String?
+    let avatarURLValue: String?
+    let verified: Bool
+    let followersCount: Int64
+    let followingCount: Int64
+    let alreadyInDirectory: Bool
+    let personID: String?
+
+    var handle: String { screenName.hasPrefix("@") ? screenName : "@\(screenName)" }
+    var avatarURL: URL? { avatarURLValue.flatMap(MediaURL.image) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, verified
+        case screenName = "screen_name"
+        case avatarURLValue = "avatar_url"
+        case followersCount = "followers_count"
+        case followingCount = "following_count"
+        case alreadyInDirectory = "already_in_directory"
+        case personID = "person_id"
+    }
 }
 
 struct PeopleCategory: Decodable, Identifiable {
@@ -40,6 +142,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     private let milestonesValue: [PersonMilestone]?
     private let relatedPeopleValue: [RelatedPerson]?
     private let photosValue: [PersonPhoto]?
+    private let socialAccountsValue: [PersonSocialAccount]?
     private let profileUpdatedAtValue: String?
     private let lifeYearsValue: String?
 
@@ -49,7 +152,12 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var hasOwnPostSource: Bool { hasOwnPostSourceValue ?? !isCurated }
     var hasXSource: Bool { nonempty(xScreenName) != nil }
     var isOrganizationAccount: Bool { false }
-    var name: String { nonempty(userName) ?? nonempty(userScreenName) ?? "未知用户" }
+    private var knownIdentity: KnownAccountIdentity? {
+        AccountIdentityResolver.knownIdentity(userID: userID)
+    }
+    var name: String {
+        knownIdentity?.canonicalName ?? nonempty(userName) ?? nonempty(userScreenName) ?? "未知用户"
+    }
     var xHandle: String? {
         nonempty(xScreenName).map { $0.hasPrefix("@") ? $0 : "@\($0)" }
     }
@@ -62,18 +170,29 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         }
         return URL(string: "https://x.com")?.appending(path: screenName)
     }
-    var secondaryLabel: String? { isCurated ? nonempty(userScreenName) : handle }
+    var secondaryLabel: String? {
+        knownIdentity?.accountLabel ?? (isCurated ? nonempty(userScreenName) : handle)
+    }
     var organizationName: String? {
         nonempty(organizationNameValue) ?? (isCurated ? nonempty(userScreenName) : nil)
     }
-    var avatarAssetName: String? { nonempty(avatarAssetNameValue) }
-    var discussionKeywords: [String] {
-        guard let keywords = discussionKeywordsValue?.filter({
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }), !keywords.isEmpty else {
-            return [name]
+    var avatarAssetName: String? {
+        if userID.localizedCaseInsensitiveContains("elon-musk") ||
+            name.localizedCaseInsensitiveContains("Elon Musk") {
+            return "ElonMuskAvatar"
         }
-        return keywords
+        return nonempty(avatarAssetNameValue)
+    }
+    var discussionKeywords: [String] {
+        let serverKeywords = discussionKeywordsValue?.filter({
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) ?? []
+        let identityKeywords = knownIdentity?.aliases ?? []
+        let keywords = (serverKeywords + identityKeywords).reduce(into: [String]()) { result, keyword in
+            guard !result.contains(keyword) else { return }
+            result.append(keyword)
+        }
+        return keywords.isEmpty ? [name] : keywords
     }
     var focusTags: [String] {
         let tags = focusTagsValue?.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? []
@@ -86,6 +205,20 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var milestones: [PersonMilestone] { milestonesValue ?? [] }
     var relatedPeople: [RelatedPerson] { relatedPeopleValue ?? [] }
     var photos: [PersonPhoto] { photosValue ?? [] }
+    var socialAccounts: [PersonSocialAccount] {
+        var accounts = socialAccountsValue?.filter { $0.profileURL != nil } ?? []
+        if let xProfileURL,
+           !accounts.contains(where: { $0.profileURL == xProfileURL }) {
+            accounts.append(
+                PersonSocialAccount(
+                    platform: "X",
+                    handle: xHandle ?? "X",
+                    profileURLValue: xProfileURL.absoluteString
+                )
+            )
+        }
+        return accounts
+    }
     var profileUpdatedAt: String? { nonempty(profileUpdatedAtValue) }
     var lifeYears: String? { nonempty(lifeYearsValue) }
     var summary: String {
@@ -120,6 +253,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         case milestonesValue = "milestones"
         case relatedPeopleValue = "related_people"
         case photosValue = "photos"
+        case socialAccountsValue = "social_accounts"
         case profileUpdatedAtValue = "profile_updated_at"
         case lifeYearsValue = "life_years"
     }
@@ -153,6 +287,7 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
         milestonesValue = nil
         relatedPeopleValue = nil
         photosValue = nil
+        socialAccountsValue = nil
         profileUpdatedAtValue = nil
         lifeYearsValue = nil
     }
@@ -197,14 +332,33 @@ struct PersonMilestone: Decodable, Hashable {
     let title: String
 }
 
+struct PersonSocialAccount: Decodable, Hashable, Identifiable {
+    let platform: String
+    let handle: String
+    let profileURLValue: String
+
+    var id: String { "\(platform)|\(profileURLValue)" }
+    var profileURL: URL? { URL(string: profileURLValue) }
+    var displayHandle: String {
+        handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? platform : handle
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case platform, handle
+        case profileURLValue = "profile_url"
+    }
+}
+
 struct PeopleArticlesResponse: Decodable {
     let success: Bool
     let personID: String
     let articles: [PersonArticle]
+    let queryApplied: Bool?
 
     enum CodingKeys: String, CodingKey {
         case success, articles
         case personID = "person_id"
+        case queryApplied = "query_applied"
     }
 }
 
@@ -452,12 +606,6 @@ enum PeopleRelationshipPlanner {
             for person in allPeople where person.relatedPeople.contains(where: { $0.id == focused.id }) {
                 append(person)
             }
-            for person in topicPeople where primaryOrganization(for: person) == primaryOrganization(for: focused) {
-                append(person)
-            }
-            for person in ranked(topicPeople) {
-                append(person)
-            }
             return Array(result.prefix(limit))
         }
 
@@ -479,11 +627,7 @@ enum PeopleRelationshipPlanner {
         if let relation = other.relatedPeople.first(where: { $0.id == center.id })?.relationship {
             return relation
         }
-        let organization = primaryOrganization(for: center)
-        if organization == primaryOrganization(for: other) {
-            return "同属\(organization)"
-        }
-        return "同属\(center.topic.rawValue)领域"
+        return "暂无已核实关系"
     }
 
     static func clusters(
@@ -516,22 +660,6 @@ enum PeopleRelationshipPlanner {
                     id: person.id,
                     name: person.name,
                     relationship: inbound.relationship,
-                    person: person,
-                    avatarURLValue: person.avatarPath,
-                    avatarAssetName: person.avatarAssetName
-                )
-            }
-        }
-
-        if membersByID.isEmpty {
-            let fallbackPeople = ranked(
-                allPeople.filter { $0.id != center.id && $0.topic == center.topic }
-            )
-            for person in fallbackPeople {
-                membersByID[person.id] = PeopleRelationshipMember(
-                    id: person.id,
-                    name: person.name,
-                    relationship: "同属\(center.topic.rawValue)领域",
                     person: person,
                     avatarURLValue: person.avatarPath,
                     avatarAssetName: person.avatarAssetName
@@ -593,11 +721,14 @@ enum PeopleRelationshipPlanner {
     ) -> String {
         let value = relationship.trimmingCharacters(in: .whitespacesAndNewlines)
         let mappings: [(title: String, keywords: [String])] = [
-            ("同事", ["同事", "团队", "任职", "高管", "下属", "创始"]),
-            ("行业同行", ["同行", "同业"]),
-            ("合作", ["合作", "伙伴", "客户", "供应", "生态", "联盟"]),
-            ("投资", ["投资", "股东", "资本", "基金", "出资"]),
             ("竞争", ["竞争", "对手", "竞品"]),
+            ("访谈", ["访谈", "播客", "受访"]),
+            ("投资", ["投资", "股东", "资本", "基金", "出资"]),
+            ("合作", ["合作", "伙伴", "客户", "供应", "生态", "联盟"]),
+            ("同事", ["同事", "团队", "任职", "高管", "下属", "创始"]),
+            ("学术", ["学术", "教授", "研究"]),
+            ("历史关联", ["历史", "国共", "革命", "改革开放", "国家建设"]),
+            ("行业同行", ["同行", "同业"]),
             ("师友", ["导师", "学生", "师生", "前辈", "好友", "朋友"]),
             ("家庭", ["家人", "家庭", "夫妻", "父亲", "母亲", "兄弟", "姐妹", "亲属"])
         ]
@@ -689,6 +820,7 @@ enum PeopleTopic: String, CaseIterable, Identifiable {
     case business = "商业"
     case investment = "投资"
     case politics = "政治"
+    case ideology = "意识形态"
     case history = "历史"
 
     var id: Self { self }
@@ -699,6 +831,7 @@ enum PeopleTopic: String, CaseIterable, Identifiable {
         case "business": self = .business
         case "investment": self = .investment
         case "politics": self = .politics
+        case "ideology": self = .ideology
         case "history": self = .history
         default: return nil
         }

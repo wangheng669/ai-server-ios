@@ -18,6 +18,9 @@ final class PersonDetailStore {
     private(set) var discussionsError: String?
     private(set) var relatedVideosError: String?
     private(set) var articlesError: String?
+    private(set) var articleSearchResults: [PersonArticle]?
+    private(set) var isSearchingArticles = false
+    private(set) var articleSearchError: String?
     private(set) var canLoadMoreOwnPosts = true
     private(set) var xTranslations: [Int: String] = [:]
     private var loadingXTranslationIDs: Set<Int> = []
@@ -42,6 +45,8 @@ final class PersonDetailStore {
     private func loadArticles(for person: SpecialPerson) async {
         isLoadingArticles = true
         articlesError = nil
+        articleSearchResults = nil
+        articleSearchError = nil
         defer { isLoadingArticles = false }
         do {
             articles = try await service.articles(personID: person.id)
@@ -50,6 +55,31 @@ final class PersonDetailStore {
         } catch {
             articles = []
             articlesError = error.localizedDescription
+        }
+    }
+
+    func searchArticles(personID: String, query: String) async {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            articleSearchResults = nil
+            articleSearchError = nil
+            isSearchingArticles = false
+            return
+        }
+
+        isSearchingArticles = true
+        articleSearchError = nil
+        defer { isSearchingArticles = false }
+        do {
+            let results = try await service.articles(personID: personID, query: normalized)
+            guard !Task.isCancelled else { return }
+            articleSearchResults = results
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            articleSearchResults = []
+            articleSearchError = error.localizedDescription
         }
     }
 

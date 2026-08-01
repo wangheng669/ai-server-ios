@@ -302,23 +302,29 @@ struct WikipediaReaderView: View {
     let entity: WikipediaEntity
     @Environment(\.dismiss) private var dismiss
     @StateObject private var browser = WikipediaBrowserModel()
+    @State private var presentedLink: WikipediaEntity?
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                }
-                Spacer()
-                Text("维基百科").font(.headline)
-                Spacer()
-                ShareLink(item: entity.url) {
-                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+            ZStack {
+                Text(entity.url.isWikipediaURL ? "维基百科" : (entity.url.host ?? "网页"))
+                    .font(.headline)
+                    .lineLimit(1)
+
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 40, height: 40)
+                            .background(Color.secondary.opacity(0.1), in: Circle())
+                    }
+                    .accessibilityLabel(entity.url.isWikipediaURL ? "关闭维基百科" : "关闭网页")
                 }
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 16)
+            .frame(height: 58)
 
             if browser.isLoading {
                 ProgressView(value: browser.progress).progressViewStyle(.linear)
@@ -326,61 +332,34 @@ struct WikipediaReaderView: View {
                 Divider()
             }
 
-            Button { dismiss() } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "doc.text")
-                    Text("返回纽约时报文章")
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption.bold())
+            ZStack(alignment: .bottomLeading) {
+                WikipediaWebView(url: entity.url, model: browser) {
+                    presentedLink = $0
                 }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .frame(height: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            Divider()
 
-            WikipediaWebView(url: entity.url, model: browser)
-
-            Divider()
-            HStack {
-                browserButton("chevron.left", enabled: browser.canGoBack) { browser.goBack() }
-                Spacer()
-                browserButton("chevron.right", enabled: browser.canGoForward) { browser.goForward() }
-                Spacer()
-                Menu {
-                    Button("较小文字") { browser.adjustTextSize(by: -10) }
-                    Button("较大文字") { browser.adjustTextSize(by: 10) }
-                } label: {
-                    Image(systemName: "textformat.size").frame(width: 44, height: 44)
-                }
-                Spacer()
-                browserButton("arrow.clockwise", enabled: true) { browser.reload() }
-                Spacer()
-                Menu {
-                    ShareLink(item: entity.url) { Label("分享词条", systemImage: "square.and.arrow.up") }
-                    Button { UIPasteboard.general.url = entity.url } label: {
-                        Label("复制链接", systemImage: "doc.on.doc")
+                if browser.canGoBack {
+                    Button { browser.goBack() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 46, height: 46)
+                            .background(.regularMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+                    .padding(16)
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel("返回上一个维基百科页面")
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(height: 50)
-            Text(entity.url.host ?? "wikipedia.org")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.bottom, 5)
+            .animation(.easeOut(duration: 0.18), value: browser.canGoBack)
         }
         .background(Color(uiColor: .systemBackground))
-        .interactiveDismissDisabled(browser.isLoading)
-    }
-
-    private func browserButton(_ systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: systemName).frame(width: 44, height: 44) }
-            .disabled(!enabled)
+        .sheet(item: $presentedLink) { linkedEntity in
+            AnyView(
+                WikipediaReaderView(entity: linkedEntity)
+                    .wikipediaReaderPresentation()
+            )
+        }
     }
 }
 
@@ -389,9 +368,7 @@ final class WikipediaBrowserModel: ObservableObject {
     @Published var isLoading = true
     @Published var progress = 0.05
     @Published var canGoBack = false
-    @Published var canGoForward = false
     fileprivate weak var webView: WKWebView?
-    private var textSize = 100
 
     func attach(_ webView: WKWebView) {
         self.webView = webView
@@ -402,27 +379,286 @@ final class WikipediaBrowserModel: ObservableObject {
         isLoading = webView.isLoading
         progress = max(webView.estimatedProgress, 0.05)
         canGoBack = webView.canGoBack
-        canGoForward = webView.canGoForward
     }
 
     func goBack() { webView?.goBack() }
-    func goForward() { webView?.goForward() }
-    func reload() { webView?.reload() }
-    func adjustTextSize(by amount: Int) {
-        textSize = min(160, max(70, textSize + amount))
-        webView?.evaluateJavaScript("document.documentElement.style.webkitTextSizeAdjust='\(textSize)%'")
+}
+
+extension View {
+    func wikipediaReaderPresentation() -> some View {
+        presentationDetents([.fraction(0.82), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+    }
+}
+
+enum WikipediaReaderStyle {
+    static let script = #"""
+    (() => {
+      if (!/(^|\.)wikipedia\.org$/i.test(window.location.hostname)) return;
+
+      const styleID = "aiserver-wikipedia-reader-style";
+
+      const installReaderStyle = () => {
+        if (!document.documentElement || document.getElementById(styleID)) {
+          if (!document.documentElement) requestAnimationFrame(installReaderStyle);
+          return;
+        }
+
+        const style = document.createElement("style");
+        style.id = styleID;
+        style.textContent = `
+          :root {
+            color-scheme: light !important;
+            --aiserver-link: #3366cc;
+            --aiserver-rule: rgba(60, 60, 67, 0.18);
+          }
+
+          html, body {
+            background: #fff !important;
+            color: #1c1c1e !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+              "PingFang SC", "Helvetica Neue", sans-serif !important;
+            font-size: 18px !important;
+            line-height: 1.65 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow-x: hidden !important;
+          }
+
+          header, footer,
+          .mw-header, .minerva-header, .vector-header-container,
+          .vector-page-toolbar, .page-actions-menu, .page-actions-menu__list,
+          .mw-footer-container, .minerva-footer, #footer,
+          #p-lang-btn, #p-lang, .mw-portlet-lang, .uls-language-list,
+          .mw-indicators, .mw-editsection, .mw-jump-link,
+          .vector-toc, .sidebar-toc, .toc, #toc,
+          .shortdescription, .noprint, .nomobile,
+          .banner-container, .centralNotice, #siteNotice,
+          .post-content, .printfooter, .catlinks,
+          #mw-mf-page-center__mask, #mw-mf-page-left,
+          .vector-sticky-header, .vector-column-start,
+          .vector-column-end, .vector-page-tools {
+            display: none !important;
+          }
+
+          .mw-page-container,
+          .mw-page-container-inner,
+          .mw-content-container,
+          .mw-body,
+          .mw-body-content,
+          main,
+          #content {
+            background: #fff !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            display: block !important;
+            float: none !important;
+            grid-area: auto !important;
+            margin: 0 !important;
+            max-width: none !important;
+            min-width: 0 !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            width: auto !important;
+          }
+
+          #content, .mw-body {
+            padding: 18px 20px 48px !important;
+          }
+
+          #firstHeading {
+            border-bottom: 1px solid var(--aiserver-rule) !important;
+            color: #111 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+              "PingFang SC", sans-serif !important;
+            font-size: 2rem !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.025em !important;
+            line-height: 1.2 !important;
+            margin: 0 0 20px !important;
+            padding: 0 0 16px !important;
+          }
+
+          #firstHeading::before {
+            color: #8e8e93;
+            content: "来自维基百科，自由的百科全书";
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 400;
+            letter-spacing: 0;
+            line-height: 1.4;
+            margin-bottom: 12px;
+          }
+
+          .mw-parser-output {
+            color: #1c1c1e !important;
+            font-size: 1rem !important;
+            line-height: 1.65 !important;
+          }
+
+          .mw-parser-output p {
+            margin: 0 0 1.15em !important;
+          }
+
+          .mw-parser-output h2 {
+            border-bottom: 1px solid var(--aiserver-rule) !important;
+            color: #111 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+              "PingFang SC", sans-serif !important;
+            font-size: 1.55rem !important;
+            font-weight: 700 !important;
+            line-height: 1.3 !important;
+            margin: 1.65em 0 0.8em !important;
+            padding-bottom: 0.35em !important;
+          }
+
+          .mw-parser-output h3,
+          .mw-parser-output h4 {
+            color: #111 !important;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+              "PingFang SC", sans-serif !important;
+            font-weight: 650 !important;
+            line-height: 1.35 !important;
+            margin: 1.45em 0 0.65em !important;
+          }
+
+          a, a:visited {
+            color: var(--aiserver-link) !important;
+            text-decoration: none !important;
+          }
+
+          figure, .thumb, .thumbinner, .mw-halign-right, .mw-halign-left {
+            background: transparent !important;
+            border: 0 !important;
+            box-sizing: border-box !important;
+            float: none !important;
+            margin: 1.2em 0 !important;
+            max-width: 100% !important;
+            padding: 0 !important;
+            width: 100% !important;
+          }
+
+          figure img, .thumb img, img.mw-file-element {
+            border: 0 !important;
+            border-radius: 12px !important;
+            box-sizing: border-box !important;
+            height: auto !important;
+            max-width: 100% !important;
+          }
+
+          figcaption, .thumbcaption {
+            color: #8e8e93 !important;
+            font-size: 0.78rem !important;
+            line-height: 1.45 !important;
+            padding: 8px 2px 0 !important;
+          }
+
+          table {
+            border-collapse: collapse !important;
+            display: block !important;
+            font-size: 0.88rem !important;
+            max-width: 100% !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .infobox {
+            background: #f7f7f8 !important;
+            border: 0 !important;
+            border-radius: 14px !important;
+            box-sizing: border-box !important;
+            float: none !important;
+            margin: 1.25em 0 !important;
+            padding: 12px !important;
+            width: 100% !important;
+          }
+
+          blockquote {
+            border-left: 3px solid var(--aiserver-link) !important;
+            color: #48484a !important;
+            margin: 1.2em 0 !important;
+            padding: 0.1em 0 0.1em 1em !important;
+          }
+
+          sup.reference {
+            font-size: 0.7em !important;
+            line-height: 0 !important;
+          }
+        `;
+
+        document.documentElement.appendChild(style);
+      };
+
+      installReaderStyle();
+    })();
+    """#
+}
+
+extension URL {
+    var isWikipediaURL: Bool {
+        guard let host = host?.lowercased() else { return false }
+        return host == "wikipedia.org" || host.hasSuffix(".wikipedia.org")
+    }
+}
+
+enum WikipediaLinkPresentation {
+    static func entity(for destinationURL: URL, currentURL: URL?) -> WikipediaEntity? {
+        guard ["http", "https"].contains(destinationURL.scheme?.lowercased() ?? "") else {
+            return nil
+        }
+        guard !isSameDocument(destinationURL, currentURL) else { return nil }
+
+        let encodedPathTitle = destinationURL.path
+            .split(separator: "/")
+            .last
+            .map(String.init)
+        let decodedPathTitle = encodedPathTitle?.removingPercentEncoding ?? encodedPathTitle ?? ""
+        let pathTitle = decodedPathTitle
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = (pathTitle.isEmpty ? nil : pathTitle)
+            ?? destinationURL.host
+            ?? "链接"
+
+        return WikipediaEntity(
+            id: destinationURL.absoluteString,
+            term: title,
+            title: title,
+            summary: "",
+            url: destinationURL
+        )
+    }
+
+    private static func isSameDocument(_ destinationURL: URL, _ currentURL: URL?) -> Bool {
+        guard let currentURL else { return false }
+        var destination = URLComponents(url: destinationURL, resolvingAgainstBaseURL: false)
+        var current = URLComponents(url: currentURL, resolvingAgainstBaseURL: false)
+        destination?.fragment = nil
+        current?.fragment = nil
+        return destination?.url == current?.url
     }
 }
 
 private struct WikipediaWebView: UIViewRepresentable {
     let url: URL
     @ObservedObject var model: WikipediaBrowserModel
+    let openLink: (WikipediaEntity) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(model: model, openLink: openLink)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: WikipediaReaderStyle.script,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
@@ -446,9 +682,13 @@ private struct WikipediaWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         private let model: WikipediaBrowserModel
+        private let openLink: (WikipediaEntity) -> Void
         private var progressObservation: NSKeyValueObservation?
 
-        init(model: WikipediaBrowserModel) { self.model = model }
+        init(model: WikipediaBrowserModel, openLink: @escaping (WikipediaEntity) -> Void) {
+            self.model = model
+            self.openLink = openLink
+        }
 
         func observe(_ webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self, weak webView] _, _ in
@@ -458,6 +698,24 @@ private struct WikipediaWebView: UIViewRepresentable {
         }
 
         func stopObserving() { progressObservation?.invalidate() }
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard navigationAction.navigationType == .linkActivated,
+                  let destinationURL = navigationAction.request.url,
+                  let entity = WikipediaLinkPresentation.entity(
+                    for: destinationURL,
+                    currentURL: webView.url
+                  ) else {
+                decisionHandler(.allow)
+                return
+            }
+
+            openLink(entity)
+            decisionHandler(.cancel)
+        }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { model.update(from: webView) }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { model.update(from: webView) }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { model.update(from: webView) }

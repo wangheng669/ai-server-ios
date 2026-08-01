@@ -93,6 +93,16 @@ struct MarketService {
         return try await request(url, as: InvestorMoodResponse.self).data
     }
 
+    func prewarmInvestorMoodVideos(_ items: [InvestorMoodItem]) async {
+        for item in items.prefix(6) {
+            guard let url = item.prewarmURL else { continue }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 4
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            _ = try? await session.data(for: request)
+        }
+    }
+
     func aShareTemperature(days: Int = 90) async throws -> MarketAShareTemperature {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/ashare-temperature"), resolvingAgainstBaseURL: false)
         components?.queryItems = [.init(name: "days", value: String(days))]

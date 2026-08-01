@@ -138,7 +138,9 @@ jobs:
         run: |
           ./ci/report-ios-deployment.sh running 0.04 merge-testing || true
           set -o pipefail
-          xcodebuild test \
+          ./ci/with-ios-simulator-lock.sh \
+            --label "central merge tests $GITHUB_RUN_ID" \
+            -- xcodebuild test \
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \
             -destination 'platform=iOS Simulator,name=iPhone 16e' \
@@ -234,7 +236,7 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
-      - name: Fall back to remote installation workflow
+      - name: Schedule a fresh installation retry
         if: steps.local_install.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}

@@ -64,13 +64,17 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDecodesInvestorMoodPublicVideoSamples() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","videoUrl":"https://video.example.com/123.mp4","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
         let response = try JSONDecoder().decode(InvestorMoodResponse.self, from: data)
         XCTAssertEqual(response.data.dataContract, "market_investor_mood_v1")
         XCTAssertEqual(response.data.methodology, "public-video-sample")
         XCTAssertEqual(response.data.items.first?.nickname, "王小雨")
         XCTAssertEqual(response.data.items.first?.label, "观望")
         XCTAssertEqual(response.data.items.first?.analysis, "情绪保持中性。")
+        XCTAssertEqual(response.data.items.first?.videoUrl, "https://video.example.com/123.mp4")
+        XCTAssertEqual(response.data.items.first?.directPlaybackURL?.absoluteString, "https://video.example.com/123.mp4")
+        XCTAssertTrue(response.data.items.first?.playbackURL?.absoluteString.contains("/api/v1/media-proxy?") == true)
+        XCTAssertTrue(response.data.items.first?.coverPlaybackURL?.absoluteString.contains("/api/v1/media-proxy?") == true)
         XCTAssertEqual(response.data.items.first?.stale, false)
     }
 
@@ -126,6 +130,23 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.crypto.map(\.symbol), ["BINANCE:BTCUSDT"])
         XCTAssertEqual(response.data.quote(symbol: "BINANCE:BTCUSDT")?.name, "比特币")
         XCTAssertEqual(response.data.crypto.first?.freshnessLabel, "24小时交易")
+    }
+
+    func testDashboardDecodesV3RealtimeProxyContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","definitionVersion":"2026-07-29.2","generatedAt":"2026-07-30T07:26:57Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理（SPY）","displayName":"标普500实时代理（SPY）","instrumentType":"realtime-proxy-etf","proxyFor":"^GSPC","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","price":729.46}],"referenceIndices":[{"symbol":"^GSPC","name":"标普500","instrumentType":"reference-index","displayMode":"historical-reference","price":7316.15}],"realtimeProxies":[{"symbol":"SPY","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","displayName":"标普500实时代理（SPY）"}],"metrics":[],"components":[],"crypto":[],"indexSessions":{},"missingSymbols":[],"expectedSymbols":["SPY","^GSPC"],"symbolHealth":[],"regions":[]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+        let proxy = try XCTUnwrap(response.data.coreIndices.first)
+
+        XCTAssertEqual(response.data.dataContract, "market_dashboard_v3")
+        XCTAssertEqual(proxy.symbol, "SPY")
+        XCTAssertEqual(proxy.presentationName, "标普500实时代理（SPY）")
+        XCTAssertEqual(proxy.instrumentType, "realtime-proxy-etf")
+        XCTAssertEqual(proxy.proxyFor, "^GSPC")
+        XCTAssertEqual(proxy.historicalSymbol, "^GSPC")
+        XCTAssertEqual(response.data.referenceIndices.first?.symbol, "^GSPC")
+        XCTAssertEqual(response.data.realtimeProxies.first?.symbol, "SPY")
+        XCTAssertEqual(response.data.quote(symbol: "^GSPC")?.displayMode, "historical-reference")
     }
 
     func testDashboardDecodesPerSymbolHealthAndRegions() throws {

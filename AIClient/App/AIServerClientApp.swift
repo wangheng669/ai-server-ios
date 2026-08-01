@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 
 private struct RootTabIsActiveKey: EnvironmentKey {
     static let defaultValue = true
@@ -31,7 +32,50 @@ final class AppOrientationController {
     }
 }
 
-final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate {
+final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        Task { await PersonPushNotificationManager.shared.restoreRegistration() }
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Task { await PersonPushNotificationManager.shared.didRegister(deviceToken: deviceToken) }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        Task { @MainActor in
+            PersonPushNotificationManager.shared.didFailToRegister()
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        await MainActor.run {
+            PersonPushNavigationStore.shared.handle(
+                userInfo: response.notification.request.content.userInfo
+            )
+        }
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
@@ -39,6 +83,31 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate {
         MainActor.assumeIsolated {
             AppOrientationController.shared.supportedOrientations
         }
+    }
+}
+
+struct PersonPushNavigationRequest: Equatable {
+    let kind: String
+    let contentID: String
+    let personID: String
+}
+
+@MainActor
+final class PersonPushNavigationStore: ObservableObject {
+    static let shared = PersonPushNavigationStore()
+
+    @Published private(set) var request: PersonPushNavigationRequest?
+
+    func handle(userInfo: [AnyHashable: Any]) {
+        request = PersonPushNavigationRequest(
+            kind: (userInfo["kind"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            contentID: (userInfo["content_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            personID: (userInfo["person_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        )
+    }
+
+    func clear() {
+        request = nil
     }
 }
 
@@ -56,6 +125,7 @@ struct AIServerClientApp: App {
 private struct EditorialRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var deploymentStore = DeploymentStatusStore()
+    @StateObject private var personPushNavigation = PersonPushNavigationStore.shared
     @State private var peopleStore = PeopleStore()
     @State private var selectedTab: RootTab = {
         #if DEBUG
@@ -76,7 +146,10 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-video-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-book-preview") { return .learning }
+            ProcessInfo.processInfo.arguments.contains("--learning-book-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") { return .learning }
         return .observation
         #else
         .observation
@@ -87,6 +160,8 @@ private struct EditorialRootView: View {
     @State private var peopleShowsDetail = false
     @State private var learningShowsDetail = false
     @State private var feedHidesTabBar = false
+    @State private var notificationPostID: Int?
+    @State private var notificationPersonID: String?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -120,7 +195,11 @@ private struct EditorialRootView: View {
     var body: some View {
         ZStack {
             tabContent(.observation) {
-                NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
+                NewsFeedView(
+                    showsDetail: $feedShowsDetail,
+                    hidesTabBar: $feedHidesTabBar,
+                    notificationPostID: $notificationPostID
+                )
             }
             tabContent(.investment) {
                 InvestmentView(showsDetail: $marketShowsDetail)
@@ -129,7 +208,11 @@ private struct EditorialRootView: View {
                 LearningView(showsDetail: $learningShowsDetail)
             }
             tabContent(.people) {
-                PeopleView(store: peopleStore, showsDetail: $peopleShowsDetail)
+                PeopleView(
+                    store: peopleStore,
+                    showsDetail: $peopleShowsDetail,
+                    notificationPersonID: $notificationPersonID
+                )
             }
         }
         .background(Color.white.ignoresSafeArea())
@@ -160,6 +243,20 @@ private struct EditorialRootView: View {
             } else {
                 deploymentStore.stop()
             }
+        }
+        .onChange(of: personPushNavigation.request, initial: true) { _, request in
+            guard let request else { return }
+            switch request.kind {
+            case "post":
+                selectedTab = .observation
+                notificationPostID = Int(request.contentID)
+            case "video":
+                selectedTab = .people
+                notificationPersonID = request.personID
+            default:
+                selectedTab = .observation
+            }
+            personPushNavigation.clear()
         }
     }
 

@@ -87,6 +87,86 @@ struct XCommentsResponse: Decodable {
     }
 }
 
+struct XTweetDetailResponse: Decodable {
+    let success: Bool
+    let data: Payload
+
+    struct Payload: Decodable {
+        let item: XTweetDetailItem
+    }
+}
+
+struct XTweetDetailItem: Decodable, Equatable {
+    let id: String
+    let text: String
+    let noteText: String?
+    let shortText: String?
+
+    var fullText: String {
+        [noteText, text, shortText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .max(by: { $0.count < $1.count }) ?? text
+    }
+}
+
+enum XPostTextFormatter {
+    static func longestText(_ values: String?...) -> String? {
+        values
+            .compactMap { value in
+                value?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .nilIfEmpty
+            }
+            .max(by: { $0.count < $1.count })
+    }
+
+    static func detailText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(
+                of: #"[ \t]+\*(?=\S)"#,
+                with: "\n• ",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"(^|\n)[ \t]*\*(?=\S)"#,
+                with: "$1• ",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: #"\n[ \t]+"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func paragraphs(_ value: String) -> [String] {
+        detailText(value)
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    static func isTruncated(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
+    }
+
+    static func shouldPreferFullOriginal(displayed: String, fullOriginal: String) -> Bool {
+        let displayed = detailText(displayed)
+        let fullOriginal = detailText(fullOriginal)
+        return isTruncated(displayed)
+            && !isTruncated(fullOriginal)
+            && fullOriginal.count > displayed.count
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
 struct XComment: Decodable, Identifiable, Equatable {
     let id: String
     let text: String
@@ -247,6 +327,14 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
+    var xStoredOriginalContent: String {
+        [meta?.noteText, meta?.rawText, originalDisplayContent]
+            .compactMap(clean)
+            .max(by: { $0.count < $1.count }) ?? originalDisplayContent
+    }
+    var isChineseXSource: Bool {
+        sourceName == "X" && meta?.lang?.lowercased().hasPrefix("zh") == true
+    }
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
     var needsXTranslation: Bool {
         guard sourceName == "X", !hasTranslation, xTweetID != nil else { return false }
@@ -293,8 +381,13 @@ struct Post: Decodable, Identifiable, Hashable {
         let firstSentence = impact.split(whereSeparator: { "。！？\n".contains($0) }).first.map(String.init) ?? impact
         return firstSentence.count > 66 ? String(firstSentence.prefix(66)) + "…" : firstSentence
     }
-    var authorName: String { clean(user?.userName) ?? clean(user?.userScreenName) ?? sourceName }
+    var authorName: String {
+        user?.resolvedCanonicalName ?? clean(user?.userName) ?? clean(user?.userScreenName) ?? sourceName
+    }
     var authorHandle: String? {
+        if let accountLabel = user?.resolvedAccountLabel {
+            return accountLabel
+        }
         guard let handle = clean(user?.userScreenName), handle != authorName else { return nil }
         return handle.hasPrefix("@") ? handle : "@\(handle)"
     }
@@ -856,6 +949,8 @@ struct PostMeta: Decodable, Hashable {
     let metrics: PostMetrics?
     let lang: String?
     let urls: [String]?
+    let rawText: String?
+    let noteText: String?
     let quotedTweet: XQuotedPost?
     let photoCredit: String?
     let zhihuRank: Int?
@@ -879,6 +974,8 @@ struct PostMeta: Decodable, Hashable {
     let flashPlatforms: [String]?
     enum CodingKeys: String, CodingKey {
         case metrics, lang, urls
+        case rawText = "raw_text"
+        case noteText = "note_text"
         case quotedTweet = "quoted_tweet"
         case photoCredit = "photo_credit"
         case zhihuRank = "zhihu_rank"
@@ -906,7 +1003,8 @@ struct PostMeta: Decodable, Hashable {
         platforms: [String]?
     ) -> PostMeta {
         PostMeta(
-            metrics: nil, lang: nil, urls: nil, quotedTweet: nil, photoCredit: nil,
+            metrics: nil, lang: nil, urls: nil, rawText: nil, noteText: nil,
+            quotedTweet: nil, photoCredit: nil,
             zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
             zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
             zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
@@ -989,31 +1087,51 @@ struct PostMetrics: Decodable, Hashable {
 }
 
 struct PostUser: Decodable, Hashable {
+    let userID, personID: String?
     let userName, userScreenName, avatarURL, userDesc: String?
+    let canonicalName, platformDisplayName, identityStatus, platform: String?
     let verified: Bool?
     let verifiedType: String?
 
     init(
+        userID: String? = nil,
+        personID: String? = nil,
         userName: String?,
         userScreenName: String?,
         avatarURL: String?,
         userDesc: String?,
+        canonicalName: String? = nil,
+        platformDisplayName: String? = nil,
+        identityStatus: String? = nil,
+        platform: String? = nil,
         verified: Bool? = nil,
         verifiedType: String? = nil
     ) {
+        self.userID = userID
+        self.personID = personID
         self.userName = userName
         self.userScreenName = userScreenName
         self.avatarURL = avatarURL
         self.userDesc = userDesc
+        self.canonicalName = canonicalName
+        self.platformDisplayName = platformDisplayName
+        self.identityStatus = identityStatus
+        self.platform = platform
         self.verified = verified
         self.verifiedType = verifiedType
     }
 
     enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case personID = "person_id"
         case userName = "user_name"
         case userScreenName = "user_screen_name"
         case avatarURL = "avatar_url"
         case userDesc = "user_desc"
+        case canonicalName = "canonical_name"
+        case platformDisplayName = "platform_display_name"
+        case identityStatus = "identity_status"
+        case platform
         case verified
         case isVerified = "is_verified"
         case verifiedType = "verified_type"
@@ -1021,13 +1139,53 @@ struct PostUser: Decodable, Hashable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        userID = try container.decodeIfPresent(String.self, forKey: .userID)
+        personID = try container.decodeIfPresent(String.self, forKey: .personID)
         userName = try container.decodeIfPresent(String.self, forKey: .userName)
         userScreenName = try container.decodeIfPresent(String.self, forKey: .userScreenName)
         avatarURL = try container.decodeIfPresent(String.self, forKey: .avatarURL)
         userDesc = try container.decodeIfPresent(String.self, forKey: .userDesc)
+        canonicalName = try container.decodeIfPresent(String.self, forKey: .canonicalName)
+        platformDisplayName = try container.decodeIfPresent(String.self, forKey: .platformDisplayName)
+        identityStatus = try container.decodeIfPresent(String.self, forKey: .identityStatus)
+        platform = try container.decodeIfPresent(String.self, forKey: .platform)
         verified = try container.decodeIfPresent(Bool.self, forKey: .verified)
             ?? container.decodeIfPresent(Bool.self, forKey: .isVerified)
         verifiedType = try container.decodeIfPresent(String.self, forKey: .verifiedType)
+    }
+
+    var resolvedCanonicalName: String? {
+        if let identity = AccountIdentityResolver.knownIdentity(userID: personID ?? userID) {
+            return identity.canonicalName
+        }
+        let confirmedStatuses = ["confirmed", "manual", "official", "verified"]
+        guard let status = identityStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              confirmedStatuses.contains(status) else {
+            return nil
+        }
+        return normalizedIdentityText(canonicalName)
+    }
+
+    var resolvedAccountLabel: String? {
+        if let identity = AccountIdentityResolver.knownIdentity(userID: personID ?? userID) {
+            return identity.accountLabel
+        }
+        guard resolvedCanonicalName != nil else { return nil }
+        let accountName = normalizedIdentityText(platformDisplayName)
+            ?? normalizedIdentityText(userName)
+            ?? normalizedIdentityText(userScreenName)
+        guard let accountName, accountName != resolvedCanonicalName else { return nil }
+        guard let platform = normalizedIdentityText(platform) else {
+            return accountName
+        }
+        return "\(platform) · \(accountName)"
+    }
+
+    private func normalizedIdentityText(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 }
 
@@ -1050,7 +1208,18 @@ struct PostImage: Decodable, Hashable {
             || value.contains("/images/emoji/")
             || value.contains("/face/emoji_")
             || value.contains("/emoji/")
+            || isSinaTimelinePlaceholder
             || isLikelyInlineEmoji
+    }
+
+    private var isSinaTimelinePlaceholder: Bool {
+        guard let sourceURL = URL(string: url),
+              let host = sourceURL.host()?.lowercased(),
+              host == "sinaimg.cn" || host.hasSuffix(".sinaimg.cn") else {
+            return false
+        }
+        let filename = sourceURL.lastPathComponent.lowercased()
+        return filename.hasPrefix("timeline_card_small_") && filename.contains("_default.")
     }
 
     enum CodingKeys: String, CodingKey {

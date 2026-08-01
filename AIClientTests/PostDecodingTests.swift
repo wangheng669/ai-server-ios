@@ -2,6 +2,90 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testPeopleSearchRequestRetriggersAndRoutesSourcesReliably() {
+        let hidden = PeopleSearchRequest(
+            isPresented: false,
+            source: .all,
+            query: " 爱因斯坦 "
+        )
+        XCTAssertEqual(hidden.query, "爱因斯坦")
+        XCTAssertFalse(hidden.searchesX)
+        XCTAssertFalse(hidden.searchesWikipedia)
+
+        let allSources = PeopleSearchRequest(
+            isPresented: true,
+            source: .all,
+            query: "爱因斯坦"
+        )
+        XCTAssertTrue(allSources.searchesX)
+        XCTAssertTrue(allSources.searchesWikipedia)
+
+        let wikipediaOnly = PeopleSearchRequest(
+            isPresented: true,
+            source: .wikipedia,
+            query: "爱因斯坦"
+        )
+        XCTAssertFalse(wikipediaOnly.searchesX)
+        XCTAssertTrue(wikipediaOnly.searchesWikipedia)
+
+        let submittedAgain = PeopleSearchRequest(
+            isPresented: true,
+            source: .wikipedia,
+            query: "爱因斯坦",
+            revision: 1
+        )
+        XCTAssertNotEqual(wikipediaOnly, submittedAgain)
+    }
+
+    func testWikipediaReaderStyleHidesChromeAndKeepsArticleContentStyled() {
+        let script = WikipediaReaderStyle.script
+
+        XCTAssertTrue(script.contains("wikipedia\\.org"))
+        XCTAssertTrue(script.contains(".mw-header"))
+        XCTAssertTrue(script.contains(".vector-page-toolbar"))
+        XCTAssertTrue(script.contains("#p-lang-btn"))
+        XCTAssertTrue(script.contains(".mw-editsection"))
+        XCTAssertTrue(script.contains(".vector-toc"))
+        XCTAssertTrue(script.contains(".mw-footer-container"))
+        XCTAssertTrue(script.contains("#firstHeading"))
+        XCTAssertTrue(script.contains(".mw-parser-output"))
+        XCTAssertTrue(script.contains("来自维基百科，自由的百科全书"))
+        XCTAssertTrue(script.contains("font-size: 18px"))
+    }
+
+    func testWikipediaLinkOpensInNestedPresentationWithoutReplacingCurrentPage() throws {
+        let currentURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能"))
+        let destinationURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/机器学习"))
+
+        let entity = try XCTUnwrap(
+            WikipediaLinkPresentation.entity(for: destinationURL, currentURL: currentURL)
+        )
+
+        XCTAssertEqual(entity.title, "机器学习")
+        XCTAssertEqual(entity.url, destinationURL)
+    }
+
+    func testWikipediaSamePageAnchorRemainsInsideCurrentPresentation() throws {
+        let currentURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能"))
+        let anchorURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能#历史"))
+
+        XCTAssertNil(
+            WikipediaLinkPresentation.entity(for: anchorURL, currentURL: currentURL)
+        )
+    }
+
+    func testExternalWikipediaReferenceAlsoOpensWithoutReplacingCurrentPage() throws {
+        let currentURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能"))
+        let referenceURL = try XCTUnwrap(URL(string: "https://example.com/research/paper"))
+
+        let entity = try XCTUnwrap(
+            WikipediaLinkPresentation.entity(for: referenceURL, currentURL: currentURL)
+        )
+
+        XCTAssertEqual(entity.title, "paper")
+        XCTAssertFalse(entity.url.isWikipediaURL)
+    }
+
     func testPersonArticleDecoding() throws {
         let data = Data(
             """
@@ -26,6 +110,23 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(article.displayTitle, "Reflections")
         XCTAssertEqual(article.readingMinutes, 8)
         XCTAssertEqual(article.canonicalURL?.host, "blog.samaltman.com")
+    }
+
+    func testPersonArticleSearchResponseConfirmsQueryWasApplied() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "person_id": "1605",
+              "query_applied": true,
+              "articles": []
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(PeopleArticlesResponse.self, from: data)
+        XCTAssertTrue(response.queryApplied == true)
+        XCTAssertTrue(response.articles.isEmpty)
     }
 
     func testPersonArticleTranslationPreservesProductNames() {
@@ -132,6 +233,11 @@ final class PostDecodingTests: XCTestCase {
                   "relationship": "合作伙伴",
                   "avatar_url": "https://example.com/elon.jpg"
                 }],
+                "social_accounts": [{
+                  "platform": "微博",
+                  "handle": "@peterthiel",
+                  "profile_url": "https://weibo.com/peterthiel"
+                }],
                 "profile_updated_at": "2026年7月",
                 "has_own_post_source": false,
                 "today_count": 0,
@@ -153,10 +259,44 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(payload.users.first?.roles.first?.organization, "Founders Fund")
         XCTAssertEqual(payload.users.first?.milestones.first?.year, "2005")
         XCTAssertEqual(payload.users.first?.relatedPeople.first?.name, "Elon Musk")
+        XCTAssertEqual(payload.users.first?.socialAccounts.first?.platform, "微博")
+        XCTAssertEqual(payload.users.first?.socialAccounts.first?.displayHandle, "@peterthiel")
+        XCTAssertEqual(payload.users.first?.socialAccounts.count, 2)
         XCTAssertEqual(payload.users.first?.profileUpdatedAt, "2026年7月")
         XCTAssertEqual(payload.users.first?.hasOwnPostSource, false)
         XCTAssertEqual(payload.users.first?.xHandle, "@peterthiel")
         XCTAssertEqual(payload.users.first?.xProfileURL?.absoluteString, "https://x.com/peterthiel")
+    }
+
+    func testDecodesServerManagedIdeologyTopic() throws {
+        let data = Data(
+            """
+            {
+              "success": true,
+              "categories": [
+                {"id": "ideology", "title": "意识形态", "sort_order": 40}
+              ],
+              "users": [{
+                "user_id": "curated:zhang-weiwei",
+                "user_name": "张维为",
+                "user_desc": "关注中国道路、中国模式与国际秩序。",
+                "organization_name": "复旦大学中国研究院院长",
+                "topic": "ideology",
+                "discussion_keywords": ["张维为", "这就是中国"],
+                "has_own_post_source": false,
+                "today_count": 0,
+                "total_count": 0,
+                "last_post_time": null
+              }]
+            }
+            """.utf8
+        )
+
+        let payload = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data)
+
+        XCTAssertEqual(payload.categories?.compactMap(\.topic), [.ideology])
+        XCTAssertEqual(payload.users.first?.topic, .ideology)
+        XCTAssertEqual(payload.users.first?.name, "张维为")
     }
 
     func testRelationshipPlannerBuildsServerDrivenLocalGraph() throws {
@@ -221,8 +361,7 @@ final class PostDecodingTests: XCTestCase {
         )
 
         XCTAssertEqual(lenses.first, PeopleRelationshipLens(title: "OpenAI", memberCount: 2))
-        XCTAssertEqual(focused.first?.id, "satya")
-        XCTAssertTrue(focused.contains { $0.id == "greg" })
+        XCTAssertEqual(focused.map(\.id), ["satya"])
         XCTAssertEqual(Set(openAI.map(\.id)), Set(["sam", "greg"]))
         XCTAssertEqual(clusters.first?.title, "合作")
         XCTAssertEqual(clusters.first?.members.map(\.id), ["satya"])
@@ -230,6 +369,25 @@ final class PostDecodingTests: XCTestCase {
             PeopleRelationshipPlanner.relationshipLabel(from: people[0], to: people[2]),
             "战略合作伙伴"
         )
+        XCTAssertEqual(
+            PeopleRelationshipPlanner.relationshipLabel(from: people[0], to: people[1]),
+            "暂无已核实关系"
+        )
+        XCTAssertTrue(
+            PeopleRelationshipPlanner.clusters(around: people[1], allPeople: people).isEmpty
+        )
+    }
+
+    func testElonMuskUsesBundledPortraitInsteadOfServerAvatar() {
+        let person = SpecialPerson(
+            id: "elon-musk",
+            name: "Elon Musk",
+            organization: "xAI",
+            summary: "xAI 创始人",
+            avatarURL: "https://example.com/wrong-image.jpg"
+        )
+
+        XCTAssertEqual(person.avatarAssetName, "ElonMuskAvatar")
     }
 
     func testDecodesXQuotedTweetForPersonPostCard() throws {
@@ -239,6 +397,77 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.meta?.quotedTweet?.author?.handle, "@example")
         XCTAssertEqual(post.meta?.quotedTweet?.displayText, "双子座是谁？")
         XCTAssertEqual(post.meta?.quotedTweet?.media?.first?.displayURL?.absoluteString, "https://example.com/t.jpg")
+    }
+
+    func testXDetailUsesStoredLongTextAndFormatsBullets() throws {
+        let data = #"{"id":7,"source":"x","content":"short…","post_link":"https://x.com/example/status/123","meta":{"raw_text":"价格调整： *第一项 *第二项","note_text":"第一段\n\n价格调整： *第一项 *第二项"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertEqual(post.xStoredOriginalContent, "第一段\n\n价格调整： *第一项 *第二项")
+        XCTAssertEqual(
+            XPostTextFormatter.detailText(post.xStoredOriginalContent),
+            "第一段\n\n价格调整：\n• 第一项\n• 第二项"
+        )
+        XCTAssertFalse(XPostTextFormatter.isTruncated(post.xStoredOriginalContent))
+        XCTAssertTrue(XPostTextFormatter.isTruncated("上游摘要…"))
+    }
+
+    func testDecodesLiveXTweetDetailResponse() throws {
+        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段"}}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(XTweetDetailResponse.self, from: data)
+
+        XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
+    }
+
+    func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
+        let storedBody = "这是已经存储的完整中文正文，包含第一段和第二段。"
+        let liveSummary = "中文摘要…"
+
+        XCTAssertEqual(
+            XPostTextFormatter.longestText(liveSummary, storedBody),
+            storedBody
+        )
+        XCTAssertEqual(
+            XPostTextFormatter.longestText("  \(storedBody)  ", nil),
+            storedBody
+        )
+    }
+
+    func testXDetailSwitchesFromTruncatedSummaryToLiveFullOriginal() {
+        XCTAssertTrue(
+            XPostTextFormatter.shouldPreferFullOriginal(
+                displayed: "这是列表接口返回的摘要…",
+                fullOriginal: "这是 X 详情接口返回的完整正文，包含摘要中缺少的后续内容。"
+            )
+        )
+        XCTAssertFalse(
+            XPostTextFormatter.shouldPreferFullOriginal(
+                displayed: "这已经是完整正文。",
+                fullOriginal: "这是另一份完整正文。"
+            )
+        )
+    }
+
+    func testXDetailKeepsParagraphsSeparateAndSingleLineBreaksInsideParagraphs() {
+        XCTAssertEqual(
+            XPostTextFormatter.paragraphs(
+                "第一段。\n\n第二段第一行。\n第二段第二行。\n\n\n第三段。"
+            ),
+            [
+                "第一段。",
+                "第二段第一行。\n第二段第二行。",
+                "第三段。"
+            ]
+        )
+    }
+
+    func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
+        let data = #"{"id":7,"source":"x","content":"列表摘要…","content_zh":"被压平的完整中文正文","post_link":"https://x.com/example/status/123","meta":{"lang":"zh","note_text":"第一段。\n\n第二段。"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertTrue(post.isChineseXSource)
+        XCTAssertEqual(post.xStoredOriginalContent, "第一段。\n\n第二段。")
+        XCTAssertEqual(XPostTextFormatter.paragraphs(post.xStoredOriginalContent), ["第一段。", "第二段。"])
     }
 
     func testProtectsModelNamesInXTranslation() {
@@ -255,6 +484,43 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertFalse(person.isCurated)
         XCTAssertFalse(person.hasXSource)
         XCTAssertTrue(person.hasOwnPostSource)
+    }
+
+    func testKnownAccountIdentityUsesCanonicalPersonNameAndKeepsPlatformAlias() throws {
+        let data = #"{"success":true,"users":[{"user_id":"rss:14","user_name":"大道无形我有型","user_screen_name":"雪球-大道无形我有型","today_count":1,"total_count":20,"discussion_keywords":["大道无形我有型"]}]}"#.data(using: .utf8)!
+        let person = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data).users[0]
+
+        XCTAssertEqual(person.name, "段永平")
+        XCTAssertEqual(person.secondaryLabel, "雪球 · 大道无形我有型")
+        XCTAssertEqual(person.discussionKeywords, ["大道无形我有型", "段永平"])
+    }
+
+    func testDecodesXPeopleSearchAndImportResponses() throws {
+        let searchData = #"{"success":true,"results":[{"id":"1605","name":"Sam Altman","screen_name":"sama","description":"OpenAI","avatar_url":"https://example.com/avatar.jpg","verified":true,"followers_count":100,"following_count":10,"already_in_directory":false}]}"#.data(using: .utf8)!
+        let importData = #"{"success":true,"added":true,"person":{"user_id":"1605","user_name":"Sam Altman","user_screen_name":"sama","x_user_id":"1605","x_screen_name":"sama","today_count":0,"total_count":0}}"#.data(using: .utf8)!
+        let search = try JSONDecoder().decode(XPeopleSearchResponse.self, from: searchData)
+        let imported = try JSONDecoder().decode(XPersonImportResponse.self, from: importData)
+
+        XCTAssertEqual(search.results.first?.handle, "@sama")
+        XCTAssertEqual(search.results.first?.avatarURL?.absoluteString, "https://example.com/avatar.jpg")
+        XCTAssertTrue(search.results.first?.verified == true)
+        XCTAssertEqual(imported.person.id, "1605")
+        XCTAssertTrue(imported.added)
+    }
+
+    func testDecodesWikipediaPeopleSearchAndImportResponses() throws {
+        let searchData = #"{"success":true,"results":[{"id":"Q1137062","page_id":123,"language":"zh","title":"马云","description":"中国企业家","extract":"阿里巴巴集团主要创始人。","avatar_url":"https://example.com/jack-ma.jpg","article_url":"https://zh.wikipedia.org/wiki/%E9%A9%AC%E4%BA%91","already_in_directory":false}]}"#.data(using: .utf8)!
+        let importData = #"{"success":true,"added":true,"person":{"user_id":"curated:wikidata:q1137062","user_name":"马云","user_screen_name":"维基百科","user_description":"阿里巴巴集团主要创始人。","avatar_url":"https://example.com/jack-ma.jpg","organization_name":"中国企业家","today_count":0,"total_count":0,"has_own_post_source":false}}"#.data(using: .utf8)!
+        let search = try JSONDecoder().decode(WikipediaPeopleSearchResponse.self, from: searchData)
+        let imported = try JSONDecoder().decode(WikipediaPersonImportResponse.self, from: importData)
+
+        XCTAssertEqual(search.results.first?.name, "马云")
+        XCTAssertEqual(search.results.first?.sourceLabel, "中文维基百科")
+        XCTAssertEqual(search.results.first?.avatarURL?.absoluteString, "https://example.com/jack-ma.jpg")
+        XCTAssertEqual(search.results.first?.articleURL?.host, "zh.wikipedia.org")
+        XCTAssertEqual(imported.person.id, "curated:wikidata:q1137062")
+        XCTAssertFalse(imported.person.hasOwnPostSource)
+        XCTAssertTrue(imported.added)
     }
 
     func testCuratedPersonWithoutAccountDoesNotRequestOwnPostFeed() {
@@ -333,6 +599,13 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertFalse(image.isLikelyInlineEmoji)
     }
 
+    func testWeiboVideoPlaceholderIsTreatedAsKnownInlineAssetWithoutDimensions() throws {
+        let data = #"{"url":"https://h5.sinaimg.cn/upload/timeline_card_small_video_default.png"}"#.data(using: .utf8)!
+        let image = try JSONDecoder().decode(PostImage.self, from: data)
+
+        XCTAssertTrue(image.isKnownInlineAsset)
+    }
+
     func testDecodesPostListResponse() throws {
         let json = #"""
         {
@@ -364,6 +637,25 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.first?.authorName, "示例来源")
         XCTAssertEqual(response.data.first?.photoCredit, "VCG/Getty Images")
         XCTAssertEqual(response.data.first?.externalURL?.absoluteString, "https://example.com/story")
+    }
+
+    func testKnownPostAccountUsesCanonicalNameWithoutLosingOriginalAccount() throws {
+        let json = #"{"data":[{"id":14,"source":"rss:14","user":{"user_id":"rss:14","user_name":"大道无形我有型","user_screen_name":"大道无形我有型"}}]}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostListResponse.self, from: json).data[0]
+
+        XCTAssertEqual(post.authorName, "段永平")
+        XCTAssertEqual(post.authorHandle, "雪球 · 大道无形我有型")
+    }
+
+    func testConfirmedServerIdentityIsShownButUnconfirmedClaimIsIgnored() throws {
+        let confirmedJSON = #"{"data":[{"id":15,"source":"weibo","user":{"user_id":"weibo:123","user_name":"平台昵称","canonical_name":"真实人物","platform_display_name":"平台昵称","platform":"微博","identity_status":"verified"}}]}"#.data(using: .utf8)!
+        let unconfirmedJSON = #"{"data":[{"id":16,"source":"weibo","user":{"user_id":"weibo:456","user_name":"另一个昵称","canonical_name":"不应展示的人物","identity_status":"unconfirmed"}}]}"#.data(using: .utf8)!
+        let confirmed = try JSONDecoder().decode(PostListResponse.self, from: confirmedJSON).data[0]
+        let unconfirmed = try JSONDecoder().decode(PostListResponse.self, from: unconfirmedJSON).data[0]
+
+        XCTAssertEqual(confirmed.authorName, "真实人物")
+        XCTAssertEqual(confirmed.authorHandle, "微博 · 平台昵称")
+        XCTAssertEqual(unconfirmed.authorName, "另一个昵称")
     }
 
     func testYouTubePostBuildsCoverFromVideoLink() throws {

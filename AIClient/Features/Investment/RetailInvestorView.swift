@@ -1,14 +1,12 @@
 import Observation
 import SwiftUI
-import WebKit
 
 struct RetailInvestorView: View {
     @Binding private var showsDetail: Bool
     private let store: RetailSentimentStore
     private let marketStore: MarketStore
-    @State private var path: [InvestorMoodRoute] = []
     @State private var selectedMarket: SentimentMarket = .china
-    @State private var showsAllInvestorMood = false
+    @State private var selectedInvestorMoodID: InvestorMoodItem.ID?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     @MainActor
@@ -32,7 +30,7 @@ struct RetailInvestorView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     marketPicker
@@ -69,11 +67,8 @@ struct RetailInvestorView: View {
                 await store.loadDetails(for: selectedMarket)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: InvestorMoodRoute.self) { route in
-                InvestorMoodWebView(route: route)
-            }
         }
-        .onChange(of: path) { _, path in showsDetail = !path.isEmpty }
+        .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
     }
 
@@ -518,36 +513,10 @@ struct RetailInvestorView: View {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
                 investorMoodSummary(items)
-
-                let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(3))
-                ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
-                    investorRow(item)
-                    if index < visibleItems.count - 1 {
-                        Divider().overlay(InvestmentDesign.divider).padding(.leading, 47)
-                    }
-                }
-
-                if items.count > 3 {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showsAllInvestorMood.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(showsAllInvestorMood ? "收起" : "查看全部 \(items.count) 条")
-                            Image(systemName: showsAllInvestorMood ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 9, weight: .bold))
-                        }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(HoldingsPalette.purple)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                    }
-                    .buttonStyle(.plain)
-                }
+                investorMoodCarousel(items)
             }
         }
-        .padding(16)
+        .padding(.vertical, 16)
         .background(InvestmentDesign.surface)
     }
 
@@ -577,51 +546,54 @@ struct RetailInvestorView: View {
         .font(.system(size: 10.5, weight: .medium))
         .foregroundStyle(.secondary)
         .padding(.vertical, 2)
+        .padding(.horizontal, 16)
     }
 
-    private func investorRow(_ item: InvestorMoodItem) -> some View {
-        NavigationLink(value: InvestorMoodRoute(item: item)) {
-            HStack(spacing: 9) {
-                AsyncImage(url: URL(string: item.coverUrl)) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Image(systemName: "person.crop.circle.fill")
-                            .resizable().scaledToFit().padding(8)
-                            .foregroundStyle(HoldingsPalette.purple.opacity(0.65))
+    private func investorMoodCarousel(_ items: [InvestorMoodItem]) -> some View {
+        GeometryReader { proxy in
+            let cardWidth = min(max(proxy.size.width - 52, 270), 320)
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(items) { item in
+                        InvestorMoodVideoCard(
+                            item: item,
+                            isPlaybackActive: rootTabIsActive && selectedInvestorMoodID == item.id
+                        )
+                            .frame(width: cardWidth)
+                            .id(item.id)
+                            .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                                content
+                                    .scaleEffect(phase.isIdentity ? 1 : 0.96)
+                                    .opacity(phase.isIdentity ? 1 : 0.82)
+                            }
                     }
                 }
-                .frame(width: 38, height: 38)
-                .background(HoldingsPalette.purple.opacity(0.08))
-                .clipShape(Circle())
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(item.nickname)
-                            .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text(item.stale ? "\(item.label) · 旧样本" : item.label)
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(RetailSentimentFormat.moodColor(item.label))
-                        Spacer(minLength: 2)
-                        Text(RetailSentimentFormat.relativeTime(item.createdAt))
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(item.analysis.isEmpty ? (item.reasons.first ?? item.description) : item.analysis)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 3)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                .scrollTargetLayout()
+                .padding(.horizontal, 16)
             }
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+            .scrollPosition(id: $selectedInvestorMoodID)
+            .onAppear {
+                selectFirstInvestorMoodItemIfNeeded(items)
+            }
+            .onChange(of: items.map(\.id)) { _, _ in
+                selectFirstInvestorMoodItemIfNeeded(items)
+            }
         }
-        .buttonStyle(.plain)
+        .frame(height: 530)
+    }
+
+    private func selectFirstInvestorMoodItemIfNeeded(_ items: [InvestorMoodItem]) {
+        guard !items.isEmpty else {
+            selectedInvestorMoodID = nil
+            return
+        }
+        if let selectedInvestorMoodID,
+           items.contains(where: { $0.id == selectedInvestorMoodID }) {
+            return
+        }
+        selectedInvestorMoodID = items.first?.id
     }
 
     private var methodologyNote: some View {
@@ -858,193 +830,99 @@ private struct InvestorMoodCount: Identifiable {
     let count: Int
 }
 
-private struct InvestorMoodRoute: Hashable {
-    let title: String
-    let url: URL
-
-    init(item: InvestorMoodItem) {
-        title = item.nickname
-        url = URL(string: item.url) ?? ServerConfiguration.currentURL
-    }
-}
-
-private struct InvestorMoodWebView: View {
-    let route: InvestorMoodRoute
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var browser = InvestorMoodBrowserModel()
+private struct InvestorMoodVideoCard: View {
+    let item: InvestorMoodItem
+    let isPlaybackActive: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 44, height: 44)
+        VStack(alignment: .leading, spacing: 0) {
+            media
+                .frame(height: 410)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 14,
+                        topTrailingRadius: 14
+                    )
+                )
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    Text(item.nickname)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(1)
+                    moodBadge
+                    Spacer(minLength: 4)
+                    Text(RetailSentimentFormat.relativeTime(item.createdAt))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer()
-                Text(route.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                ShareLink(item: route.url) {
-                    Image(systemName: "square.and.arrow.up")
-                        .frame(width: 44, height: 44)
+                Text(summary)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(13)
+        }
+        .background(
+            InvestmentDesign.secondarySurface,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var media: some View {
+        if let playbackURL = item.directPlaybackURL ?? item.playbackURL {
+            XVideoPlayerView(
+                url: playbackURL,
+                fallbackURL: item.directPlaybackURL == nil ? nil : item.playbackURL,
+                thumbnailURL: item.coverPlaybackURL,
+                contentMode: .fill,
+                chromeStyle: .minimal,
+                isPlaybackActive: isPlaybackActive
+            )
+        } else {
+            ZStack {
+                Color.black
+                AsyncImage(url: URL(string: item.coverUrl)) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Image(systemName: "video.slash.fill")
+                            .font(.system(size: 34, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
                 }
+                Label("视频暂不可播放", systemImage: "clock")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.62), in: Capsule())
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 14)
             }
-            .padding(.horizontal, 6)
-
-            if browser.isLoading {
-                ProgressView(value: browser.progress)
-                    .progressViewStyle(.linear)
-            } else {
-                Divider()
-            }
-
-            InvestorMoodWebPage(url: route.url, browser: browser)
-
-            Divider()
-            HStack {
-                browserButton("chevron.left", enabled: browser.canGoBack) { browser.goBack() }
-                Spacer()
-                browserButton("chevron.right", enabled: browser.canGoForward) { browser.goForward() }
-                Spacer()
-                browserButton("arrow.clockwise", enabled: true) { browser.reload() }
-                Spacer()
-                ShareLink(item: browser.currentURL ?? route.url) {
-                    Image(systemName: "square.and.arrow.up")
-                        .frame(width: 44, height: 44)
-                }
-            }
-            .padding(.horizontal, 24)
-            .frame(height: 50)
+            .clipped()
         }
-        .background(Color(uiColor: .systemBackground))
-        .toolbar(.hidden, for: .navigationBar)
     }
 
-    private func browserButton(_ systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .frame(width: 44, height: 44)
-        }
-        .disabled(!enabled)
-    }
-}
-
-@MainActor
-private final class InvestorMoodBrowserModel: ObservableObject {
-    @Published var isLoading = true
-    @Published var progress = 0.05
-    @Published var canGoBack = false
-    @Published var canGoForward = false
-    @Published var currentURL: URL?
-    fileprivate weak var webView: WKWebView?
-
-    func attach(_ webView: WKWebView) {
-        self.webView = webView
-        update(from: webView)
+    private var summary: String {
+        item.analysis.nonEmpty ?? item.reasons.first?.nonEmpty ?? item.description.nonEmpty ?? "暂无观点摘要"
     }
 
-    func update(from webView: WKWebView) {
-        isLoading = webView.isLoading
-        progress = max(webView.estimatedProgress, 0.05)
-        canGoBack = webView.canGoBack
-        canGoForward = webView.canGoForward
-        currentURL = webView.url
-    }
-
-    func goBack() { webView?.goBack() }
-    func goForward() { webView?.goForward() }
-    func reload() { webView?.reload() }
-}
-
-private struct InvestorMoodWebPage: UIViewRepresentable {
-    let url: URL
-    @ObservedObject var browser: InvestorMoodBrowserModel
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(browser: browser)
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        context.coordinator.observe(webView)
-        browser.attach(webView)
-        webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20))
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        guard webView.url == nil else { return }
-        webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20))
-    }
-
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
-        coordinator.stopObserving()
-        webView.stopLoading()
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        private let browser: InvestorMoodBrowserModel
-        private var progressObservation: NSKeyValueObservation?
-
-        init(browser: InvestorMoodBrowserModel) {
-            self.browser = browser
-        }
-
-        func observe(_ webView: WKWebView) {
-            progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self, weak webView] _, _ in
-                guard let self, let webView else { return }
-                Task { @MainActor in self.browser.update(from: webView) }
-            }
-        }
-
-        func stopObserving() {
-            progressObservation?.invalidate()
-        }
-
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            browser.update(from: webView)
-        }
-
-        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-            browser.update(from: webView)
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            browser.update(from: webView)
-        }
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            browser.update(from: webView)
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            didFailProvisionalNavigation navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            browser.update(from: webView)
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            createWebViewWith configuration: WKWebViewConfiguration,
-            for navigationAction: WKNavigationAction,
-            windowFeatures: WKWindowFeatures
-        ) -> WKWebView? {
-            if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
-                webView.load(URLRequest(url: url))
-            }
-            return nil
-        }
+    private var moodBadge: some View {
+        let color = RetailSentimentFormat.moodColor(item.label)
+        return Text(item.stale ? "\(item.label) · 旧样本" : item.label)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.11), in: Capsule())
     }
 }
 
@@ -1219,7 +1097,9 @@ final class RetailSentimentStore {
         dashboard = marketStore.dashboard
         if dashboard != nil { errorMessage = nil }
         do {
-            investorMood = try await moodRequest
+            let mood = try await moodRequest
+            investorMood = mood
+            await service.prewarmInvestorMoodVideos(mood.items)
         } catch is CancellationError {
             return
         } catch {

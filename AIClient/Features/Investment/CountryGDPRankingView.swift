@@ -113,13 +113,94 @@ struct CountryGDPService {
     }
 }
 
+struct GlobalAssetsRankingResponse: Decodable {
+    let success: Bool
+    let data: GlobalAssetsRanking
+}
+
+struct GlobalAssetsRanking: Decodable {
+    let sourceName: String
+    let sourceURL: URL
+    let unit: String
+    let fetchedAt: String
+    let assets: [GlobalAsset]
+
+    enum CodingKeys: String, CodingKey {
+        case unit, assets
+        case sourceName = "source_name"
+        case sourceURL = "source_url"
+        case fetchedAt = "fetched_at"
+    }
+}
+
+struct GlobalAsset: Decodable, Identifiable {
+    let rank: Int
+    let symbol: String
+    let name: String
+    let marketCapUSD: Double
+    let priceUSD: Double
+    let change24HPercent: Double
+    let change7DPercent: Double
+    let iconURL: URL?
+
+    var id: String { symbol }
+
+    enum CodingKeys: String, CodingKey {
+        case rank, symbol, name
+        case marketCapUSD = "market_cap_usd"
+        case priceUSD = "price_usd"
+        case change24HPercent = "change_24h_percent"
+        case change7DPercent = "change_7d_percent"
+        case iconURL = "icon_url"
+    }
+}
+
+struct GlobalAssetsService {
+    let baseURL: URL
+    let session: URLSession
+
+    init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession = .shared) {
+        self.baseURL = baseURL
+        self.session = session
+    }
+
+    func ranking() async throws -> GlobalAssetsRanking {
+        let url = baseURL.appending(path: "api/v1/economy/global-assets")
+        var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: data)
+        guard payload.success, !payload.data.assets.isEmpty else {
+            throw URLError(.cannotParseResponse)
+        }
+        return payload.data
+    }
+}
+
 struct CountryGDPRankingView: View {
     @Binding var showsDetail: Bool
+    @State private var category: GlobalRankingCategory
     @State private var ranking: CountryGDPRanking?
     @State private var isLoading = true
     @State private var loadFailed = false
     @State private var searchText = ""
     @State private var selectedCountry: CountryGDPRoute?
+
+    init(showsDetail: Binding<Bool>) {
+        _showsDetail = showsDetail
+        #if DEBUG
+        _category = State(
+            initialValue: ProcessInfo.processInfo.arguments.contains("--global-assets-preview")
+                ? .globalAssets
+                : .countryGDP
+        )
+        #else
+        _category = State(initialValue: .countryGDP)
+        #endif
+    }
 
     private var visibleCountries: [CountryGDP] {
         guard let countries = ranking?.countries else { return [] }
@@ -133,40 +214,50 @@ struct CountryGDPRankingView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let ranking {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            overview(ranking)
+        VStack(spacing: 0) {
+            categoryPicker
 
-                            rankingHeader(ranking)
-                                .padding(.top, 18)
+            switch category {
+            case .countryGDP:
+                NavigationStack {
+                    Group {
+                        if let ranking {
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    overview(ranking)
 
-                            searchField
-                                .padding(.horizontal, InvestmentDesign.pageInset)
-                                .padding(.bottom, 10)
+                                    rankingHeader(ranking)
+                                        .padding(.top, 18)
 
-                            countries(ranking)
+                                    searchField
+                                        .padding(.horizontal, InvestmentDesign.pageInset)
+                                        .padding(.bottom, 10)
 
-                            sourceFooter(ranking)
-                                .padding(.horizontal, InvestmentDesign.pageInset)
-                                .padding(.vertical, 22)
+                                    countries(ranking)
+
+                                    sourceFooter(ranking)
+                                        .padding(.horizontal, InvestmentDesign.pageInset)
+                                        .padding(.vertical, 22)
+                                }
+                            }
+                            .background(GDPDesign.porcelain)
+                            .scrollIndicators(.hidden)
+                            .scrollDismissesKeyboard(.interactively)
+                            .refreshable { await load() }
+                        } else if isLoading {
+                            loadingState
+                        } else {
+                            errorState
                         }
                     }
                     .background(GDPDesign.porcelain)
-                    .scrollIndicators(.hidden)
-                    .scrollDismissesKeyboard(.interactively)
-                    .refreshable { await load() }
-                } else if isLoading {
-                    loadingState
-                } else {
-                    errorState
+                    .toolbar(.hidden, for: .navigationBar)
                 }
+            case .globalAssets:
+                GlobalAssetsRankingView()
             }
-            .background(GDPDesign.porcelain)
-            .toolbar(.hidden, for: .navigationBar)
         }
+        .background(GDPDesign.porcelain)
         .sheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
                 .presentationDetents([.fraction(0.72), .large])
@@ -174,9 +265,27 @@ struct CountryGDPRankingView: View {
                 .presentationCornerRadius(28)
                 .presentationBackground(GDPDesign.porcelain)
         }
-        .task { await load() }
+        .task(id: category) {
+            if category == .countryGDP, ranking == nil {
+                await load()
+            }
+        }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
+    }
+
+    private var categoryPicker: some View {
+        Picker("排行类型", selection: $category) {
+            ForEach(GlobalRankingCategory.allCases) { category in
+                Text(category.rawValue).tag(category)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, InvestmentDesign.pageInset)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .background(GDPDesign.midnight)
+        .accessibilityIdentifier("global-ranking-category-picker")
     }
 
     @ViewBuilder
@@ -423,6 +532,13 @@ struct CountryGDPRankingView: View {
             if ranking == nil { loadFailed = true }
         }
     }
+}
+
+enum GlobalRankingCategory: String, CaseIterable, Identifiable {
+    case countryGDP = "国家 GDP"
+    case globalAssets = "全球资产"
+
+    var id: Self { self }
 }
 
 enum CountryGDPFormat {

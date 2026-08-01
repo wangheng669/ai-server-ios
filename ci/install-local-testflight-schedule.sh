@@ -7,11 +7,14 @@ label="com.wangheng.ai-server-ios.testflight-upload"
 launch_agents_dir="$HOME/Library/LaunchAgents"
 plist_path="$launch_agents_dir/$label.plist"
 log_dir="$HOME/Library/Logs/ai-server-ios"
+support_dir="$HOME/Library/Application Support/ai-server-ios"
+installed_script="$support_dir/trigger-local-testflight.sh"
 
-mkdir -p "$launch_agents_dir" "$log_dir"
+mkdir -p "$launch_agents_dir" "$log_dir" "$support_dir"
+install -m 755 "$repo_dir/ci/trigger-local-testflight.sh" "$installed_script"
 
-escaped_repo_dir="$(printf '%s' "$repo_dir" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')"
 escaped_home_dir="$(printf '%s' "$HOME" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')"
+escaped_installed_script="$(printf '%s' "$installed_script" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')"
 
 cat > "$plist_path" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -23,8 +26,7 @@ cat > "$plist_path" <<EOF
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>$escaped_repo_dir/ci/trigger-local-testflight.sh</string>
-    <string>$escaped_repo_dir</string>
+    <string>$escaped_installed_script</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -54,4 +56,4 @@ plutil -lint "$plist_path"
 launchctl bootout "gui/$(id -u)" "$plist_path" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$plist_path"
 
-echo "Installed $label. It will trigger TestFlight every day at 04:30 local time."
+echo "Installed $label. It will publish to TestFlight locally every day at 04:30."
