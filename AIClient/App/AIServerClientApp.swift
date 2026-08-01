@@ -396,9 +396,15 @@ private struct TodayWorldView: View {
             }
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(item: $selectedPost) { post in
-                PostDetailView(post: post)
+        }
+        .sheet(item: $selectedPost) { post in
+            NavigationStack {
+                PostDetailView(post: post, presentedAsSheet: true)
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
