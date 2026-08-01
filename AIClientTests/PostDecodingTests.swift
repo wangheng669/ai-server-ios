@@ -413,10 +413,20 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testDecodesLiveXTweetDetailResponse() throws {
-        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段"}}}"#.data(using: .utf8)!
+        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段","createdAt":"Sat Aug 01 08:16:38 +0000 2026","metrics":{"bookmarks":9,"likes":15,"quotes":0,"replies":1,"retweets":2,"views":3740}}}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(XTweetDetailResponse.self, from: data)
 
         XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
+        XCTAssertEqual(response.data.item.metrics?.views, 3740)
+        XCTAssertEqual(response.data.item.metrics?.bookmarks, 9)
+    }
+
+    func testDecodesCompleteXCommentMetrics() throws {
+        let data = #"{"success":true,"data":{"items":[{"id":"456","text":"@author 回复正文","author":{"name":"用户","screenName":"reader","profileImageUrl":null,"verified":true},"metrics":{"bookmarks":3,"likes":4,"quotes":0,"replies":1,"retweets":2,"views":118},"createdAt":"Sat Aug 01 08:56:28 +0000 2026","inReplyToScreenName":"author","lang":"zh"}],"nextCursor":null}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(XCommentsResponse.self, from: data)
+
+        XCTAssertEqual(response.data.items.first?.metrics?.views, 118)
+        XCTAssertEqual(response.data.items.first?.metrics?.bookmarks, 3)
     }
 
     func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
@@ -458,6 +468,17 @@ final class PostDecodingTests: XCTestCase {
                 "第二段第一行。\n第二段第二行。",
                 "第三段。"
             ]
+        )
+    }
+
+    func testXCommentRemovesDuplicatedReplyMention() {
+        XCTAssertEqual(
+            XPostTextFormatter.commentText("@AsiaFinance AI 牛市中场。", replyingTo: "AsiaFinance"),
+            "AI 牛市中场。"
+        )
+        XCTAssertEqual(
+            XPostTextFormatter.commentText("普通评论", replyingTo: nil),
+            "普通评论"
         )
     }
 

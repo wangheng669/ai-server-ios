@@ -101,6 +101,8 @@ struct XTweetDetailItem: Decodable, Equatable {
     let text: String
     let noteText: String?
     let shortText: String?
+    let createdAt: String?
+    let metrics: PostMetrics?
 
     var fullText: String {
         [noteText, text, shortText]
@@ -111,6 +113,17 @@ struct XTweetDetailItem: Decodable, Equatable {
 }
 
 enum XPostTextFormatter {
+    static func commentText(_ text: String, replyingTo screenName: String?) -> String {
+        guard let screenName = screenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+            .nilIfEmpty else { return text }
+        return text.replacingOccurrences(
+            of: "^@\(NSRegularExpression.escapedPattern(for: screenName))\\s*",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+    }
+
     static func shouldWaitForFullText(_ value: String) -> Bool {
         isTruncated(detailText(value))
     }
@@ -196,7 +209,7 @@ struct XComment: Decodable, Identifiable, Equatable {
     }
 
     struct Metrics: Decodable, Equatable {
-        let likes, retweets, replies: Int?
+        let bookmarks, likes, quotes, replies, retweets, views: Int?
     }
 }
 
