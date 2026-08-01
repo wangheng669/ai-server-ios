@@ -4034,17 +4034,16 @@ private struct PersonVideoDetailView: View {
     @State private var subtitleError: String?
     @State private var currentMS: Int64 = 0
     @State private var isFullscreen = false
+    @State private var isPlaying = false
+    @State private var playbackFailed = false
 
     var body: some View {
         VStack(spacing: 0) {
             player(instanceID: "detail-inline")
                 .aspectRatio(16 / 9, contentMode: .fit)
-                .frame(maxWidth: 320)
+                .frame(maxWidth: .infinity)
                 .background(Color.black)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
+                .clipped()
             .background(Color(uiColor: .systemBackground))
 
             Divider()
@@ -4075,8 +4074,8 @@ private struct PersonVideoDetailView: View {
                         .font(.system(size: 20, weight: .bold))
                         .padding(.horizontal, 18)
 
-                    if subtitleStatus == "loading" {
-                        ProgressView("首次打开正在提取字幕…")
+                    if isSubtitlePending {
+                        ProgressView(subtitleStatus == "loading" ? "正在载入字幕…" : "首次提取约需 10 秒…")
                             .padding(.horizontal, 18)
                     } else if let subtitleError {
                         ContentUnavailableView(
@@ -4155,14 +4154,20 @@ private struct PersonVideoDetailView: View {
                 videoID: video.platformVideoID,
                 instanceID: instanceID,
                 options: .customSubtitles,
-                onPlaying: {},
-                onFailed: {},
+                onPlaying: {
+                    isPlaying = true
+                    playbackFailed = false
+                },
+                onFailed: { playbackFailed = true },
                 onTime: { seconds in
                     let isFullPlayer = instanceID == "detail-full"
                     guard isFullPlayer == isFullscreen else { return }
                     updatePlaybackTime(seconds)
                 }
             )
+            if !isPlaying {
+                videoPoster(instanceID: instanceID)
+            }
             if showsFullscreenButton {
                 Button {
                     YouTubeWarmPlayerPool.shared.pause(
@@ -4187,6 +4192,42 @@ private struct PersonVideoDetailView: View {
                 .padding(10)
             }
         }
+    }
+
+    private func videoPoster(instanceID: String) -> some View {
+        ZStack {
+            AsyncImage(url: video.coverURL) { phase in
+                if let image = phase.image {
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Color.black
+                }
+            }
+            LinearGradient(
+                colors: [.black.opacity(0.08), .black.opacity(0.42)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            Button {
+                playbackFailed = false
+                YouTubeWarmPlayerPool.shared.startPlayback(
+                    videoID: video.platformVideoID,
+                    instanceID: instanceID,
+                    options: .customSubtitles
+                )
+            } label: {
+                Image(systemName: playbackFailed ? "arrow.clockwise" : "play.fill")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 62, height: 62)
+                    .background(.black.opacity(0.68), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(playbackFailed ? "重新加载视频" : "播放视频")
+        }
+        .clipped()
     }
 
     @ViewBuilder
@@ -4248,6 +4289,10 @@ private struct PersonVideoDetailView: View {
         cue(at: currentMS)
     }
 
+    private var isSubtitlePending: Bool {
+        ["loading", "pending", "processing", "extracting", "queued"].contains(subtitleStatus)
+    }
+
     private func cue(at timestamp: Int64) -> PersonVideoSubtitleCue? {
         guard !cues.isEmpty else { return nil }
         var lower = 0
@@ -4294,13 +4339,24 @@ private struct PersonVideoDetailView: View {
     private func loadSubtitles() async {
         subtitleStatus = "loading"
         subtitleError = nil
-        do {
-            let payload = try await PeopleService().subtitles(videoID: video.id)
-            cues = payload.cues
-            subtitleStatus = payload.status
-        } catch {
-            subtitleStatus = "failed"
-            subtitleError = error.localizedDescription
+        for attempt in 0..<5 {
+            do {
+                let payload = try await PeopleService().subtitles(videoID: video.id)
+                guard !Task.isCancelled else { return }
+                cues = payload.cues
+                subtitleStatus = payload.status
+                if !payload.cues.isEmpty || payload.status == "ready" {
+                    return
+                }
+                guard attempt < 4 else { return }
+                try await Task.sleep(for: .seconds(2))
+            } catch is CancellationError {
+                return
+            } catch {
+                subtitleStatus = "failed"
+                subtitleError = error.localizedDescription
+                return
+            }
         }
     }
 }
