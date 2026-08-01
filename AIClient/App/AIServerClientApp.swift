@@ -69,13 +69,10 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        guard let value = response.notification.request.content.userInfo["url"] as? String,
-              let url = URL(string: value),
-              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
-            return
-        }
         await MainActor.run {
-            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            PersonPushNavigationStore.shared.handle(
+                userInfo: response.notification.request.content.userInfo
+            )
         }
     }
 
@@ -86,6 +83,31 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         MainActor.assumeIsolated {
             AppOrientationController.shared.supportedOrientations
         }
+    }
+}
+
+struct PersonPushNavigationRequest: Equatable {
+    let kind: String
+    let contentID: String
+    let personID: String
+}
+
+@MainActor
+final class PersonPushNavigationStore: ObservableObject {
+    static let shared = PersonPushNavigationStore()
+
+    @Published private(set) var request: PersonPushNavigationRequest?
+
+    func handle(userInfo: [AnyHashable: Any]) {
+        request = PersonPushNavigationRequest(
+            kind: (userInfo["kind"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            contentID: (userInfo["content_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            personID: (userInfo["person_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        )
+    }
+
+    func clear() {
+        request = nil
     }
 }
 
@@ -103,6 +125,7 @@ struct AIServerClientApp: App {
 private struct EditorialRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var deploymentStore = DeploymentStatusStore()
+    @StateObject private var personPushNavigation = PersonPushNavigationStore.shared
     @State private var peopleStore = PeopleStore()
     @State private var selectedTab: RootTab = {
         #if DEBUG
@@ -137,6 +160,8 @@ private struct EditorialRootView: View {
     @State private var peopleShowsDetail = false
     @State private var learningShowsDetail = false
     @State private var feedHidesTabBar = false
+    @State private var notificationPostID: Int?
+    @State private var notificationPersonID: String?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -170,7 +195,11 @@ private struct EditorialRootView: View {
     var body: some View {
         ZStack {
             tabContent(.observation) {
-                NewsFeedView(showsDetail: $feedShowsDetail, hidesTabBar: $feedHidesTabBar)
+                NewsFeedView(
+                    showsDetail: $feedShowsDetail,
+                    hidesTabBar: $feedHidesTabBar,
+                    notificationPostID: $notificationPostID
+                )
             }
             tabContent(.investment) {
                 InvestmentView(showsDetail: $marketShowsDetail)
@@ -179,7 +208,11 @@ private struct EditorialRootView: View {
                 LearningView(showsDetail: $learningShowsDetail)
             }
             tabContent(.people) {
-                PeopleView(store: peopleStore, showsDetail: $peopleShowsDetail)
+                PeopleView(
+                    store: peopleStore,
+                    showsDetail: $peopleShowsDetail,
+                    notificationPersonID: $notificationPersonID
+                )
             }
         }
         .background(Color.white.ignoresSafeArea())
@@ -210,6 +243,20 @@ private struct EditorialRootView: View {
             } else {
                 deploymentStore.stop()
             }
+        }
+        .onChange(of: personPushNavigation.request, initial: true) { _, request in
+            guard let request else { return }
+            switch request.kind {
+            case "post":
+                selectedTab = .observation
+                notificationPostID = Int(request.contentID)
+            case "video":
+                selectedTab = .people
+                notificationPersonID = request.personID
+            default:
+                selectedTab = .observation
+            }
+            personPushNavigation.clear()
         }
     }
 
