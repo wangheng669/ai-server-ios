@@ -41,7 +41,8 @@ struct InvestmentView: View {
             _section = State(initialValue: .holdings)
         } else if ProcessInfo.processInfo.arguments.contains("--industries-preview") {
             _section = State(initialValue: .industries)
-        } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") {
+        } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
+                    ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
             _section = State(initialValue: .sentiment)
         } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
                     ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) {
