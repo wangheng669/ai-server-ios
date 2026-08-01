@@ -2963,8 +2963,14 @@ private struct PersonDetailPage: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
-        .navigationDestination(item: $selectedVideo) { video in
-            PersonVideoDetailView(video: video)
+        .sheet(item: $selectedVideo) { video in
+            NavigationStack {
+                PersonVideoDetailView(video: video)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .sheet(item: $selectedArticle) { article in
             NavigationStack {
@@ -4036,6 +4042,7 @@ private struct PersonVideoDetailView: View {
     @State private var isFullscreen = false
     @State private var isPlaying = false
     @State private var playbackFailed = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
@@ -4107,6 +4114,14 @@ private struct PersonVideoDetailView: View {
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("关闭视频详情")
+            }
+        }
         .task(id: video.id) { await loadSubtitles() }
         .fullScreenCover(isPresented: $isFullscreen) {
             ZStack {

@@ -23,18 +23,23 @@ private struct HoldingSector: Identifiable {
     var id: String { name }
 }
 
+private struct HoldingDetailRoute: Identifiable, Equatable {
+    let managerKey: String
+    var id: String { managerKey }
+}
+
 struct FamousHoldingsView: View {
     let store: FamousHoldingsStore
     @Binding var showsDetail: Bool
     @State private var selectedIndex = 0
-    @State private var path: [String] = []
+    @State private var selectedDetail: HoldingDetailRoute?
 
     private var managers: [FamousHoldingsManager] {
         (store.holdings?.managers ?? []).sorted { managerPriority($0.key) < managerPriority($1.key) }
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             GeometryReader { _ in
                 Group {
                     if managers.indices.contains(selectedIndex) {
@@ -52,21 +57,29 @@ struct FamousHoldingsView: View {
             .task {
                 await store.load()
                 #if DEBUG
-                if path.isEmpty,
+                if selectedDetail == nil,
                    let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--holdings-detail-preview=") }) {
-                    path.append(String(argument.dropFirst("--holdings-detail-preview=".count)))
+                    selectedDetail = HoldingDetailRoute(
+                        managerKey: String(argument.dropFirst("--holdings-detail-preview=".count))
+                    )
                 }
                 #endif
             }
-            .navigationDestination(for: String.self) { key in
-                if let manager = managers.first(where: { $0.key == key }) {
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(item: $selectedDetail) { route in
+            NavigationStack {
+                if let manager = managers.first(where: { $0.key == route.managerKey }) {
                     FamousHoldingDetailView(manager: manager, store: store)
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
-        .onChange(of: path) { _, value in showsDetail = !value.isEmpty }
-        .onAppear { showsDetail = !path.isEmpty }
+        .onChange(of: selectedDetail) { _, value in showsDetail = value != nil }
+        .onAppear { showsDetail = selectedDetail != nil }
         .onDisappear { showsDetail = false }
     }
 
@@ -220,7 +233,7 @@ struct FamousHoldingsView: View {
                     Text("变化最大").font(.system(size: 16, weight: .bold))
                     Image(systemName: "info.circle").font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer()
-                    Button { path.append(manager.key) } label: {
+                    Button { selectedDetail = HoldingDetailRoute(managerKey: manager.key) } label: {
                         HStack(spacing: 3) { Text("查看更多"); Image(systemName: "chevron.right") }
                     }
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(HoldingsPalette.purple)
@@ -502,7 +515,7 @@ struct FamousHoldingsView: View {
                 .padding(.leading, 12)
                 .overlay(alignment: .bottom) { Divider().overlay(HoldingsPalette.divider).padding(.leading, 12) }
             }
-            Button { path.append(manager.key) } label: {
+            Button { selectedDetail = HoldingDetailRoute(managerKey: manager.key) } label: {
                 HStack {
                     Text("查看全部持仓")
                     Spacer()

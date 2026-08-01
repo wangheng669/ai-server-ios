@@ -16,7 +16,7 @@ struct LearningView: View {
     @State private var repository = LearningContentRepository()
     @State private var progressStore = LearningProgressStore()
     @State private var peopleStore = PeopleStore()
-    @State private var path: [LearningRoute] = []
+    @State private var selectedRoute: LearningRoute?
     @State private var selectedIdeologyPerson: SpecialPerson?
     @State private var ideologyCampFilter: IdeologyCampFilter = .all
     @State private var selectedConcept: KnowledgeConceptCard?
@@ -46,11 +46,13 @@ struct LearningView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             knowledgeHome
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: LearningRoute.self) { route in
+        }
+        .sheet(item: $selectedRoute) { route in
+            NavigationStack {
                 switch route {
                 case let .topic(topic, lessonTitle, lessonNumber, lessonCount):
                     LearningDetailView(
@@ -65,6 +67,10 @@ struct LearningView: View {
                     LearningVideoLessonDetailView(seed: lesson)
                 }
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .sheet(isPresented: ideologyPersonIsPresented) {
             PersonDetailSheet(
@@ -96,16 +102,16 @@ struct LearningView: View {
             }
             if (ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-video-preview")),
-               path.isEmpty,
+               selectedRoute == nil,
                let topic = store.catalog?.sections
                 .flatMap(\.topics)
                 .first(where: { $0.title.contains("市盈率") }) {
                 let topics = store.catalog.map { stockTopics(in: $0) } ?? []
                 let milestones = learningMilestones(from: topics)
                 if let index = milestones.firstIndex(where: { $0.topic.id == topic.id }) {
-                    path = [route(for: milestones[index], at: index, total: milestones.count)]
+                    selectedRoute = route(for: milestones[index], at: index, total: milestones.count)
                 } else {
-                    path = [.topic(topic, nil, nil, nil)]
+                    selectedRoute = .topic(topic, nil, nil, nil)
                 }
             }
             #endif
@@ -118,11 +124,11 @@ struct LearningView: View {
                 initialID: concept.id
             )
         }
-        .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
-            showsDetail = !isEmpty || selectedIdeologyPerson != nil
+        .onChange(of: selectedRoute, initial: true) { _, route in
+            showsDetail = route != nil || selectedIdeologyPerson != nil
         }
         .onChange(of: selectedIdeologyPerson) { _, person in
-            showsDetail = !path.isEmpty || person != nil
+            showsDetail = selectedRoute != nil || person != nil
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
@@ -328,7 +334,7 @@ struct LearningView: View {
                     LazyHStack(spacing: 13) {
                         ForEach(lessons) { lesson in
                             Button {
-                                path.append(.videoLesson(lesson))
+                                selectedRoute = .videoLesson(lesson)
                             } label: {
                                 LearningVideoLessonCard(lesson: lesson)
                             }
@@ -371,7 +377,7 @@ struct LearningView: View {
             VStack(spacing: 0) {
                 ForEach(Array(milestones.enumerated()), id: \.element.id) { index, milestone in
                     Button {
-                        path.append(route(for: milestone, at: index, total: milestones.count))
+                        selectedRoute = route(for: milestone, at: index, total: milestones.count)
                     } label: {
                         LearningMilestoneRow(
                             number: index + 1,
@@ -415,7 +421,7 @@ struct LearningView: View {
             VStack(spacing: 0) {
                 ForEach(topics) { topic in
                     Button {
-                        path.append(.topic(topic, nil, nil, nil))
+                        selectedRoute = .topic(topic, nil, nil, nil)
                     } label: {
                         LearningTopicRow(topic: topic)
                     }
@@ -783,9 +789,16 @@ private enum KnowledgeSection: String {
     }
 }
 
-private enum LearningRoute: Hashable {
+private enum LearningRoute: Hashable, Identifiable {
     case topic(LearningTopic, String?, Int?, Int?)
     case videoLesson(LearningVideoLesson)
+
+    var id: String {
+        switch self {
+        case let .topic(topic, _, _, _): "topic-\(topic.id)"
+        case let .videoLesson(lesson): "video-\(lesson.id)"
+        }
+    }
 }
 
 private enum KnowledgePagePalette {
@@ -1051,7 +1064,7 @@ private struct LearningVideoLessonDetailView: View {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
@@ -1063,7 +1076,7 @@ private struct LearningVideoLessonDetailView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回知识")
+            .accessibilityLabel("关闭视频详情")
             .padding(.leading, 14)
             .padding(.top, 6)
         }
