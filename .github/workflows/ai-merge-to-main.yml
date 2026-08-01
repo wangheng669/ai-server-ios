@@ -11,14 +11,18 @@ permissions:
   actions: write
   contents: write
 
+concurrency:
+  group: ai-merge-to-main
+  cancel-in-progress: false
+
 jobs:
   merge:
-    name: Safely integrate on office Mac mini
+    name: Safely integrate on selected central Mac
     runs-on:
       - self-hosted
       - macOS
       - ARM64
-      - office-builder
+      - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
     timeout-minutes: 45
 
     steps:
@@ -215,7 +219,7 @@ jobs:
           test -d "$app_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
-      - name: Install directly from office Mac mini
+      - name: Install directly from selected central Mac
         id: local_install
         if: steps.merge.outputs.already_merged == 'false'
         continue-on-error: true
@@ -236,8 +240,8 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
-      - name: Schedule a fresh installation retry
-        if: steps.local_install.outcome == 'failure'
+      - name: Schedule a fresh installation retry on office Mac mini
+        if: steps.local_install.outcome == 'failure' && (vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder') == 'office-builder'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
