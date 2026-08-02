@@ -774,31 +774,46 @@ private struct TodayWorldGroupedPostRow: View {
 
     @ViewBuilder
     private var contextLine: some View {
-        HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 8) {
             if let replyHandle {
-                Image(systemName: "arrowshape.turn.up.left")
-                Text("回复 \(replyHandle)")
+                Label("回复 \(replyHandle)", systemImage: "arrowshape.turn.up.left")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
             if let quote = post.meta?.quotedTweet {
-                Image(systemName: "quote.bubble")
-                Text(quoteSummary(quote))
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "quote.bubble")
+                        Text(quote.author?.name ?? "引用动态")
+                            .fontWeight(.semibold)
+                        if let handle = quote.author?.handle {
+                            Text(handle)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.system(size: 12.5))
                     .lineLimit(1)
-            }
 
-            Spacer(minLength: 2)
+                    if let text = quote.displayText {
+                        Text(text.replacingOccurrences(of: "\n", with: " "))
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
 
-            if let quote = post.meta?.quotedTweet {
-                mediaBadges(quote.media ?? [])
+                    TodayWorldMediaGrid(items: quoteMediaItems(quote))
+                }
+                .padding(9)
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
+                }
             } else {
-                mediaBadge(symbol: "photo", count: ownImageCount, label: "张图片")
-                mediaBadge(symbol: "play.rectangle", count: ownVideoCount, label: "个视频")
+                TodayWorldMediaGrid(items: ownMediaItems)
             }
         }
-        .font(.system(size: 12.5, weight: .medium))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.065), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func quoteSummary(_ quote: XQuotedPost) -> String {
@@ -807,21 +822,24 @@ private struct TodayWorldGroupedPostRow: View {
         return "\(author)：\(text.replacingOccurrences(of: "\n", with: " "))"
     }
 
-    @ViewBuilder
-    private func mediaBadges(_ media: [XQuotedMedia]) -> some View {
-        let imageCount = media.filter { !$0.isVideo }.count
-        let videoCount = media.filter(\.isVideo).count
-        mediaBadge(symbol: "photo", count: imageCount, label: "张图片")
-        mediaBadge(symbol: "play.rectangle", count: videoCount, label: "个视频")
+    private func quoteMediaItems(_ quote: XQuotedPost) -> [TodayWorldMediaItem] {
+        (quote.media ?? []).compactMap { media in
+            if media.isVideo, let preview = media.previewURL {
+                return TodayWorldMediaItem(url: preview, isVideo: true)
+            }
+            guard let url = media.displayURL else { return nil }
+            return TodayWorldMediaItem(url: url, isVideo: media.isVideo)
+        }
     }
 
-    @ViewBuilder
-    private func mediaBadge(symbol: String, count: Int, label: String) -> some View {
-        if count > 0 {
-            Label("\(count)\(label)", systemImage: symbol)
-                .labelStyle(.titleAndIcon)
-                .fixedSize()
+    private var ownMediaItems: [TodayWorldMediaItem] {
+        let images = post.imageURLs.map { TodayWorldMediaItem(url: $0, isVideo: false) }
+        let videoPreviews = (post.videos ?? []).compactMap { video -> TodayWorldMediaItem? in
+            guard let raw = video.coverURL ?? video.previewImageURL ?? video.preview,
+                  let url = MediaURL.image(raw) else { return nil }
+            return TodayWorldMediaItem(url: url, isVideo: true)
         }
+        return images + videoPreviews
     }
 
     private var contextAccessibilityText: String {
@@ -832,4 +850,52 @@ private struct TodayWorldGroupedPostRow: View {
         if ownVideoCount > 0 { parts.append("包含 \(ownVideoCount) 个视频") }
         return parts.isEmpty ? "" : "，" + parts.joined(separator: "，")
     }
+}
+
+private struct TodayWorldMediaItem: Identifiable {
+    let url: URL
+    let isVideo: Bool
+    var id: URL { url }
+}
+
+private struct TodayWorldMediaGrid: View {
+    let items: [TodayWorldMediaItem]
+
+    var body: some View {
+        if !items.isEmpty {
+            GeometryReader { proxy in
+                let visibleItems = Array(items.prefix(4))
+                let columns = visibleItems.count == 1 ? 1 : 2
+                let spacing: CGFloat = 3
+                let width = max(0, (proxy.size.width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.fixed(width), spacing: spacing), count: columns),
+                    spacing: spacing
+                ) {
+                    ForEach(visibleItems) { item in
+                        ZStack {
+                            RemoteImage(url: item.url, height: itemHeight, cornerRadius: 0, contentMode: .fill)
+                                .frame(width: width, height: itemHeight)
+                                .clipped()
+
+                            if item.isVideo {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 17, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 36, height: 36)
+                                    .background(.black.opacity(0.58), in: Circle())
+                            }
+                        }
+                    }
+                }
+                .frame(width: proxy.size.width, alignment: .leading)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .frame(height: gridHeight)
+        }
+    }
+
+    private var itemHeight: CGFloat { items.count == 1 ? 150 : 112 }
+    private var gridHeight: CGFloat { min(items.count, 4) > 2 ? itemHeight * 2 + 3 : itemHeight }
 }
