@@ -393,6 +393,11 @@ struct Post: Decodable, Identifiable, Hashable {
         guard let language = meta?.lang?.lowercased() else { return false }
         return !language.hasPrefix("zh")
     }
+    var needsXLiveDetail: Bool {
+        sourceName == "X"
+            && xTweetID != nil
+            && XPostTextFormatter.shouldWaitForFullText(xStoredOriginalContent)
+    }
 
     func replacingTranslation(with translation: String) -> Post {
         Post(
