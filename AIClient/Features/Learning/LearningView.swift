@@ -438,7 +438,7 @@ struct LearningView: View {
     @ViewBuilder
     private var booksContent: some View {
         let books = store.bookshelf?.books ?? []
-        Text("正在读")
+        Text("最近阅读")
             .font(.system(size: 24, weight: .bold, design: .serif))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
@@ -482,6 +482,33 @@ struct LearningView: View {
                 .buttonStyle(LearningPressStyle())
                 .padding(.horizontal, 20)
 
+                if books.count > 1 {
+                    Text("近期书目")
+                        .font(.system(size: 18, weight: .bold, design: .serif))
+                        .padding(.horizontal, 20)
+                        .padding(.top, 28)
+                        .padding(.bottom, 12)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 16) {
+                            ForEach(Array(books.dropFirst().enumerated()), id: \.element.id) { index, recentBook in
+                                Button {
+                                    if let url = recentBook.openURL {
+                                        openURL(url)
+                                    }
+                                } label: {
+                                    RecentKnowledgeBookCard(
+                                        book: recentBook,
+                                        paletteIndex: index + 1
+                                    )
+                                }
+                                .buttonStyle(LearningPressStyle())
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .contentMargins(.bottom, 8, for: .scrollContent)
+                }
             }
         }
     }
@@ -2083,6 +2110,41 @@ private struct KnowledgeBookCover: View {
         default:
             [Color(red: 0.42, green: 0.29, blue: 0.10), Color(red: 0.73, green: 0.53, blue: 0.20)]
         }
+    }
+}
+
+private struct RecentKnowledgeBookCard: View {
+    let book: KnowledgeBook
+    let paletteIndex: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            KnowledgeBookCover(book: book, paletteIndex: paletteIndex, compact: true)
+                .frame(width: 104, height: 146)
+                .shadow(color: .black.opacity(0.14), radius: 7, x: 0, y: 5)
+
+            Text(book.title)
+                .font(.system(size: 14, weight: .semibold, design: .serif))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .frame(height: 38, alignment: .top)
+                .padding(.top, 10)
+
+            Text(book.author)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.top, 4)
+
+            Text(book.isFinished ? "已读完" : "阅读中")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(book.isFinished ? Color.secondary : KnowledgePagePalette.accent)
+                .padding(.top, 7)
+        }
+        .frame(width: 104, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.isFinished ? "已读完" : "阅读中")")
+        .accessibilityHint("在微信读书打开")
     }
 }
 
