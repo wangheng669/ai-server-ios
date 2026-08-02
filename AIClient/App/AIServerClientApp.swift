@@ -743,6 +743,10 @@ private struct TodayWorldGroupedPostRow: View {
                         .multilineTextAlignment(.leading)
                         .lineLimit(4)
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if hasContext {
+                        contextLine
+                    }
                 }
             }
             .padding(.top, 8)
@@ -750,7 +754,82 @@ private struct TodayWorldGroupedPostRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(post.formattedTime ?? "")：\(post.displayContent)")
+        .accessibilityLabel("\(post.formattedTime ?? "")：\(post.displayContent)\(contextAccessibilityText)")
         .accessibilityHint("打开动态详情")
+    }
+
+    private var hasContext: Bool {
+        replyHandle != nil || post.meta?.quotedTweet != nil || ownImageCount > 0 || ownVideoCount > 0
+    }
+
+    private var replyHandle: String? {
+        guard let value = post.meta?.inReplyToScreenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@")),
+              !value.isEmpty else { return nil }
+        return "@\(value)"
+    }
+
+    private var ownImageCount: Int { post.images?.count ?? 0 }
+    private var ownVideoCount: Int { post.videos?.count ?? 0 }
+
+    @ViewBuilder
+    private var contextLine: some View {
+        HStack(spacing: 5) {
+            if let replyHandle {
+                Image(systemName: "arrowshape.turn.up.left")
+                Text("回复 \(replyHandle)")
+            }
+            if let quote = post.meta?.quotedTweet {
+                Image(systemName: "quote.bubble")
+                Text(quoteSummary(quote))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 2)
+
+            if let quote = post.meta?.quotedTweet {
+                mediaBadges(quote.media ?? [])
+            } else {
+                mediaBadge(symbol: "photo", count: ownImageCount, label: "张图片")
+                mediaBadge(symbol: "play.rectangle", count: ownVideoCount, label: "个视频")
+            }
+        }
+        .font(.system(size: 12.5, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.065), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func quoteSummary(_ quote: XQuotedPost) -> String {
+        let author = quote.author?.handle ?? quote.author?.name ?? "引用动态"
+        guard let text = quote.displayText else { return "引用 \(author)" }
+        return "\(author)：\(text.replacingOccurrences(of: "\n", with: " "))"
+    }
+
+    @ViewBuilder
+    private func mediaBadges(_ media: [XQuotedMedia]) -> some View {
+        let imageCount = media.filter { !$0.isVideo }.count
+        let videoCount = media.filter(\.isVideo).count
+        mediaBadge(symbol: "photo", count: imageCount, label: "张图片")
+        mediaBadge(symbol: "play.rectangle", count: videoCount, label: "个视频")
+    }
+
+    @ViewBuilder
+    private func mediaBadge(symbol: String, count: Int, label: String) -> some View {
+        if count > 0 {
+            Label("\(count)\(label)", systemImage: symbol)
+                .labelStyle(.titleAndIcon)
+                .fixedSize()
+        }
+    }
+
+    private var contextAccessibilityText: String {
+        var parts: [String] = []
+        if let replyHandle { parts.append("回复 \(replyHandle)") }
+        if let quote = post.meta?.quotedTweet { parts.append(quoteSummary(quote)) }
+        if ownImageCount > 0 { parts.append("包含 \(ownImageCount) 张图片") }
+        if ownVideoCount > 0 { parts.append("包含 \(ownVideoCount) 个视频") }
+        return parts.isEmpty ? "" : "，" + parts.joined(separator: "，")
     }
 }
