@@ -149,7 +149,6 @@ private struct MarketHomeView: View {
             }
             .background(MarketTerminalPalette.header.ignoresSafeArea())
             .scrollIndicators(.hidden)
-            .safeAreaPadding(.bottom, 112)
             .refreshable { await store.refresh() }
             .onChange(of: selectedMarket) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
