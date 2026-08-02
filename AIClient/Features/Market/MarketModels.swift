@@ -45,13 +45,13 @@ struct MarketDashboard: Codable {
         definitionVersion = try values.decodeIfPresent(String.self, forKey: .definitionVersion)
         generatedAt = try values.decode(String.self, forKey: .generatedAt)
         refreshIntervalMs = try values.decode(Int.self, forKey: .refreshIntervalMs)
-        coreIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .coreIndices) ?? []
-        referenceIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .referenceIndices) ?? []
+        coreIndices = try values.decodeLossyQuotes(forKey: .coreIndices)
+        referenceIndices = try values.decodeLossyQuotes(forKey: .referenceIndices)
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
-        metrics = try values.decodeIfPresent([MarketQuote].self, forKey: .metrics) ?? []
-        components = try values.decodeIfPresent([MarketQuote].self, forKey: .components) ?? []
-        crypto = try values.decodeIfPresent([MarketQuote].self, forKey: .crypto) ?? []
-        indexSessions = try values.decodeIfPresent([String: MarketQuote].self, forKey: .indexSessions)
+        metrics = try values.decodeLossyQuotes(forKey: .metrics)
+        components = try values.decodeLossyQuotes(forKey: .components)
+        crypto = try values.decodeLossyQuotes(forKey: .crypto)
+        indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
         freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
         missingSymbols = try values.decodeIfPresent([String].self, forKey: .missingSymbols) ?? []
@@ -94,6 +94,25 @@ struct MarketDashboard: Codable {
             next.nightTrend = marketAppendingLiveValue(next.sessionPrice ?? next.price, to: quotes[index].nightTrend)
         }
         quotes[index] = next
+    }
+}
+
+private struct LossyMarketQuote: Decodable {
+    let value: MarketQuote?
+
+    init(from decoder: Decoder) throws {
+        value = try? MarketQuote(from: decoder)
+    }
+}
+
+private extension KeyedDecodingContainer where Key == MarketDashboard.CodingKeys {
+    func decodeLossyQuotes(forKey key: Key) throws -> [MarketQuote] {
+        try decodeIfPresent([LossyMarketQuote].self, forKey: key)?.compactMap(\.value) ?? []
+    }
+
+    func decodeLossyQuoteDictionary(forKey key: Key) throws -> [String: MarketQuote]? {
+        try decodeIfPresent([String: LossyMarketQuote].self, forKey: key)?
+            .compactMapValues(\.value)
     }
 }
 

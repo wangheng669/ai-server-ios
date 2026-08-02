@@ -161,6 +161,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.quote(symbol: "^GSPC")?.displayMode, "historical-reference")
     }
 
+    func testDashboardSkipsQuotesWithNullPriceWithoutDroppingValidData() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","generatedAt":"2026-08-02T08:09:10Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理","price":632.08}],"referenceIndices":[],"metrics":[{"symbol":"USDJPY","name":"美元兑日元","price":null,"lastKnownPrice":157.4,"stale":true},{"symbol":"^VIX","name":"波动率指数","price":16.72}],"components":[],"crypto":[],"indexSessions":{"SPY":{"symbol":"SPY","name":"标普500盘后","price":null,"stale":true}},"missingSymbols":[],"expectedSymbols":["SPY","USDJPY","^VIX"],"symbolHealth":[{"symbol":"USDJPY","status":"stale","reason":"quote_stale"}],"regions":[]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+
+        XCTAssertEqual(response.data.coreIndices.map(\.symbol), ["SPY"])
+        XCTAssertEqual(response.data.metrics.map(\.symbol), ["^VIX"])
+        XCTAssertEqual(response.data.indexSessions, [:])
+        XCTAssertEqual(response.data.symbolHealth.first?.symbol, "USDJPY")
+        XCTAssertEqual(response.data.symbolHealth.first?.status, .stale)
+    }
+
     func testDashboardDecodesPerSymbolHealthAndRegions() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","definitionVersion":"2026-07-21.1","generatedAt":"2026-07-21T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":["JP10Y"],"expectedSymbols":["JP10Y","KR10Y"],"symbolHealth":[{"symbol":"JP10Y","status":"missing","reason":"quote_unavailable"},{"symbol":"KR10Y","status":"delayed","delaySeconds":15}],"regions":[{"id":"jp","metricSymbols":["USDJPY","JP10Y","^TOPX"]}]}}"#.utf8)
 
