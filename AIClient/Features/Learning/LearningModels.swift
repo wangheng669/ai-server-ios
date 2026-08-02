@@ -317,12 +317,14 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
     let category: String?
     let openURLValue: String
     let isFinished: Bool
+    let readUpdateTime: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id, title, author, category
         case coverURLValue = "cover_url"
         case openURLValue = "open_url"
         case isFinished = "is_finished"
+        case readUpdateTime = "read_update_time"
     }
 
     var coverURL: URL? {
