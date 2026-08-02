@@ -1,6 +1,6 @@
 # 两台 Mac 的 Codex 协作规则
 
-GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停留在 `main`；开发使用 `~/.codex/worktrees` 下的独立 worktree 和唯一的 `codex/<任务名>` 分支。中央 AI 流程串行合并、测试，并由仓库变量 `IOS_CENTRAL_RUNNER_LABEL` 选择当前中央机器：MacBook Air 使用 `home-installer`，Mac mini 使用 `office-builder`。真机安装优先使用用户当前所在且已连接目标 iPhone 的 Mac。
+GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停留在 `main`；开发使用 `~/.codex/worktrees` 下的独立 worktree 和唯一的 `codex/<任务名>` 分支。中央 AI 流程串行合并、测试，并由仓库变量 `IOS_CENTRAL_RUNNER_LABEL` 选择当前中央机器：MacBook Air 使用 `home-installer`，Mac mini 使用 `office-builder`。当前会话运行在 MacBook Air，且用户明确说明目标 iPhone 就在身边、该设备能被当前电脑识别时，MacBook Air 即为本任务的中央 Mac，优先级高于此前配置的 Mac mini。真机安装使用同一台中央 Mac。
 
 ## AI Server 后端
 
@@ -16,7 +16,7 @@ GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停�
 4. 任何相关工作区有改动都视为未完成任务：不得自动拉取、切换、重置、清理或覆盖。
 5. 修改共享页面前运行 `./ci/check-worktree-overlap.sh <文件或目录>`；检测到其他活跃任务修改同一文件时，必须协调顺序或等待合并后再继续。
 6. 两台 Mac 尽量修改不同模块，不共用任务分支；必要时在分支名加入机器名。
-7. 用户当前在 MacBook Air 时，将 `IOS_CENTRAL_RUNNER_LABEL` 设为 `home-installer`，中央合并、测试和本地安装都留在 MacBook Air；用户当前在 Mac mini 时再设为 `office-builder`。除非用户明确要求回退，不要跨机器等待或安装。
+7. 开始前确认当前电脑名称，并用 `devicectl` 确认目标真机状态。会话运行在 MacBook Air、用户明确说明目标 iPhone 就在身边，且真机显示为 `available (paired)` 或 `connected` 时，必须把当前 MacBook Air 视为中央 Mac：在推送任务分支前将 `IOS_CENTRAL_RUNNER_LABEL` 设为 `home-installer`，确认该 Runner 在线，并把中央合并、完整测试和真机安装都留在当前电脑。用户当前在 Mac mini 时再设为 `office-builder`。只有当前电脑无法识别目标 iPhone，或用户明确要求回退时，才能跨机器等待、合并或安装。
 
 ## 完成、同步与清理
 
