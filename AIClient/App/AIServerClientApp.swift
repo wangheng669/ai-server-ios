@@ -363,7 +363,7 @@ private final class TodayWorldStore: ObservableObject {
 
         do {
             payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchTodayWorld(limit: 3)
+                .fetchTodayWorld(limit: 8)
             errorMessage = nil
         } catch is CancellationError {
             return
@@ -416,15 +416,36 @@ private struct TodayWorldView: View {
     }
 
     private func timeline(_ payload: TodayWorldPayload) -> some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
+        let groups = TodayWorldAuthorGroup.make(from: payload)
+
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 pageHeader(payload)
 
-                ForEach(payload.sections) { section in
-                    TodayWorldSectionView(section: section) { post in
-                        selectedPost = post
+                TodayWorldBriefingView(payload: payload, groups: groups)
+
+                Text("成员动态")
+                    .font(.system(size: 20, weight: .bold))
+                    .padding(.horizontal, 18)
+                    .padding(.top, 22)
+                    .padding(.bottom, 8)
+
+                if groups.isEmpty {
+                    Text("今天还没有新的动态")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 24)
+                } else {
+                    ForEach(groups) { group in
+                        TodayWorldAuthorGroupView(group: group) { post in
+                            selectedPost = post
+                        }
                     }
                 }
+
+                Color.clear.frame(height: 104)
             }
         }
         .scrollIndicators(.hidden)
@@ -504,139 +525,232 @@ private struct TodayWorldView: View {
     }
 }
 
-private struct TodayWorldSectionView: View {
-    let section: TodayWorldSection
-    let onOpenPost: (Post) -> Void
+private struct TodayWorldBriefingView: View {
+    let payload: TodayWorldPayload
+    let groups: [TodayWorldAuthorGroup]
 
-    var body: some View {
-        VStack(spacing: 0) {
-            sectionHeader
-
-            if section.items.isEmpty {
-                Text("今天还没有新的动态")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 28)
-            } else {
-                ForEach(section.items) { post in
-                    TodayWorldPostRow(
-                        post: post,
-                        fallbackHandle: section.entity?.xHandle
-                    ) {
-                        onOpenPost(post)
-                    }
-
-                    if post.id != section.items.last?.id {
-                        Divider().padding(.leading, 71)
-                    }
-                }
-            }
-        }
-        .overlay(alignment: .top) { Divider() }
+    private var totalCount: Int {
+        groups.reduce(0) { $0 + $1.posts.count }
     }
 
-    private var sectionHeader: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(section.title)
-                    .font(.system(size: 19, weight: .bold))
+    private var activeAuthorCount: Int { Set(groups.map(\.authorKey)).count }
 
-                if let subtitle = section.subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
+    private var leadingGroup: TodayWorldAuthorGroup? {
+        groups.max { $0.posts.count < $1.posts.count }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("OpenAI · 今日 \(totalCount) 条动态 · \(activeAuthorCount) 位成员更新")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 24, height: 24)
+                    .background(Color.blue.opacity(0.1), in: Circle())
+
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("今日焦点")
+                            .font(.system(size: 16, weight: .bold))
+                        Spacer()
+                        if totalCount > 0 {
+                            Text("\(totalCount) 条更新")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.blue)
+                        }
+                    }
+
+                    Text(briefingText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.primary)
+                        .lineSpacing(3)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-
-            Spacer()
-
-            Text("X")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.primary)
-                .frame(width: 28, height: 28)
-                .background(Color.primary.opacity(0.06), in: Circle())
-                .accessibilityLabel("来源 X")
+        }
+        .padding(14)
+        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.bottom, 2)
+    }
+
+    private var briefingText: String {
+        guard let leadingGroup, let latestPost = leadingGroup.posts.first else {
+            return "OpenAI 及已关注成员今天暂未发布新动态。"
+        }
+        let authorSummary = activeAuthorCount == 1
+            ? "\(leadingGroup.authorName) 今日更新 \(leadingGroup.posts.count) 条"
+            : "\(leadingGroup.authorName) 等 \(activeAuthorCount) 位成员今日共更新 \(totalCount) 条"
+        return "\(authorSummary)。最新：\(latestPost.displayContent)"
     }
 }
 
-private struct TodayWorldPostRow: View {
+private struct TodayWorldAuthorGroup: Identifiable {
+    let id: String
+    let authorKey: String
+    let authorName: String
+    let handle: String?
+    let avatarURL: URL?
+    let roleLabel: String
+    var posts: [Post]
+
+    static func make(from payload: TodayWorldPayload) -> [TodayWorldAuthorGroup] {
+        let entries = payload.sections.flatMap { section in
+            section.items.map { post in
+                TodayWorldPostEntry(post: post, section: section)
+            }
+        }
+        .sorted { lhs, rhs in
+            postDate(lhs.post) > postDate(rhs.post)
+        }
+
+        var groups: [TodayWorldAuthorGroup] = []
+        for entry in entries {
+            let handle = entry.post.authorHandle ?? normalizedHandle(entry.section.entity?.xHandle)
+            let authorName = entry.post.authorName.isEmpty
+                ? (entry.section.entity?.name ?? "OpenAI")
+                : entry.post.authorName
+            let authorKey = handle?.lowercased() ?? authorName.lowercased()
+
+            if groups.last?.authorKey == authorKey {
+                groups[groups.count - 1].posts.append(entry.post)
+                continue
+            }
+
+            let avatarURL = entry.post.avatarURL
+                ?? entry.section.entity?.avatarURL.flatMap(URL.init(string:))
+            groups.append(TodayWorldAuthorGroup(
+                id: "\(authorKey)-\(entry.post.id)",
+                authorKey: authorKey,
+                authorName: authorName,
+                handle: handle,
+                avatarURL: avatarURL,
+                roleLabel: entry.section.entity?.type == "company" ? "OpenAI 官方" : "OpenAI 成员",
+                posts: [entry.post]
+            ))
+        }
+        return groups
+    }
+
+    private static func normalizedHandle(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value.hasPrefix("@") ? value : "@\(value)"
+    }
+
+    private static func postDate(_ post: Post) -> Date {
+        guard let value = post.articlePostAt else { return .distantPast }
+        return ISO8601DateFormatter().date(from: value) ?? .distantPast
+    }
+}
+
+private struct TodayWorldPostEntry {
     let post: Post
-    let fallbackHandle: String?
+    let section: TodayWorldSection
+}
+
+private struct TodayWorldAuthorGroupView: View {
+    let group: TodayWorldAuthorGroup
+    let onOpenPost: (Post) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AvatarView(url: group.avatarURL, name: group.authorName, size: 42)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 5) {
+                    Text(group.authorName)
+                        .font(.system(size: 16, weight: .bold))
+                        .lineLimit(1)
+
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.blue)
+
+                    if let handle = group.handle {
+                        Text(handle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Text(group.roleLabel)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+                    .padding(.bottom, 4)
+
+                ForEach(Array(group.posts.enumerated()), id: \.element.id) { index, post in
+                    TodayWorldGroupedPostRow(
+                        post: post,
+                        isLast: index == group.posts.indices.last
+                    ) {
+                        onOpenPost(post)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .overlay(alignment: .bottom) { Divider().padding(.leading, 72) }
+    }
+}
+
+private struct TodayWorldGroupedPostRow: View {
+    let post: Post
+    let isLast: Bool
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 11) {
-                AvatarView(url: post.avatarURL, name: post.authorName, size: 42)
+            HStack(alignment: .top, spacing: 10) {
+                VStack(spacing: 0) {
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 7)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    authorLine
-
-                    Text(post.displayContent)
-                        .font(.system(size: 16))
-                        .foregroundStyle(.primary)
-                        .lineSpacing(3)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(7)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if let imageURL = post.imageURLs.first {
-                        RemoteImage(
-                            url: imageURL,
-                            height: 188,
-                            cornerRadius: 13,
-                            contentMode: .fit
-                        )
-                        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13))
+                    if !isLast {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.18))
+                            .frame(width: 1)
                     }
                 }
+                .frame(width: 8)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    if let time = post.formattedTime {
+                        Text(time)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Text(post.displayContent)
+                        .font(.system(size: 15))
+                        .foregroundStyle(.primary)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .padding(.top, 8)
+            .padding(.bottom, isLast ? 4 : 9)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(post.authorName)：\(post.displayContent)")
+        .accessibilityLabel("\(post.formattedTime ?? "")：\(post.displayContent)")
         .accessibilityHint("打开动态详情")
-    }
-
-    private var authorLine: some View {
-        HStack(spacing: 5) {
-            Text(post.authorName)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.blue)
-
-            if let handle = displayHandle {
-                Text(handle)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 4)
-
-            if let time = post.formattedTime {
-                Text(time)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    private var displayHandle: String? {
-        if let handle = post.authorHandle { return handle }
-        guard let fallbackHandle, !fallbackHandle.isEmpty else { return nil }
-        return fallbackHandle.hasPrefix("@") ? fallbackHandle : "@\(fallbackHandle)"
     }
 }
