@@ -518,6 +518,22 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertFalse(XPostTextFormatter.shouldWaitForFullText("这已经是完整正文。"))
     }
 
+    func testXDetailReusesCompleteStoredTextAndTranslation() throws {
+        let data = #"{"id":7,"source":"x","content":"Complete stored original.","content_zh":"已经存储的完整中文翻译。","post_link":"https://x.com/example/status/123","meta":{"lang":"en","raw_text":"Complete stored original."}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertFalse(post.needsXLiveDetail)
+        XCTAssertFalse(post.needsXTranslation)
+    }
+
+    func testXDetailFetchesOnlyMissingStoredData() throws {
+        let data = #"{"id":7,"source":"x","content":"Truncated original…","post_link":"https://x.com/example/status/123","meta":{"lang":"en"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertTrue(post.needsXLiveDetail)
+        XCTAssertTrue(post.needsXTranslation)
+    }
+
     func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
         let data = #"{"id":7,"source":"x","content":"列表摘要…","content_zh":"被压平的完整中文正文","post_link":"https://x.com/example/status/123","meta":{"lang":"zh","note_text":"第一段。\n\n第二段。"}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: data)

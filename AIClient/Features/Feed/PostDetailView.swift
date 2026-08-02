@@ -2182,7 +2182,8 @@ struct PostDetailView: View {
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
             var translationTweetID = tweetID
-            if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
+            if post.needsXLiveDetail,
+               let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 xLiveDetail = liveDetail
                 translationTweetID = liveDetail.id
                 if post.videoURLs.isEmpty,
@@ -2199,7 +2200,7 @@ struct PostDetailView: View {
                 }
             }
             isLoadingXFullText = false
-            if post.meta?.lang?.lowercased().hasPrefix("zh") != true,
+            if post.needsXTranslation,
                let translation = try? await client.fetchXTranslation(tweetID: translationTweetID) {
                 xLiveTranslationText = translation.text
             }
