@@ -5031,6 +5031,8 @@ private struct PersonProfileView: View {
 
 private struct XQuotedPostCard: View {
     let quote: XQuotedPost
+    @State private var liveTranslation: String?
+    @State private var showsOriginal = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -5044,8 +5046,16 @@ private struct XQuotedPostCard: View {
                     Text(handle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            if let text = quote.displayText {
+            if let text = displayedText {
                 Text(text).font(.subheadline).lineSpacing(2).foregroundStyle(.primary)
+            }
+            if hasTranslation, quote.originalText != nil {
+                Button(showsOriginal ? "显示翻译" : "显示原文") {
+                    showsOriginal.toggle()
+                }
+                .font(.caption.weight(.medium))
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
             }
             let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
             if !media.isEmpty {
@@ -5056,6 +5066,54 @@ private struct XQuotedPostCard: View {
         .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.18)))
+        .task(id: quote.id) {
+            await loadTranslationIfNeeded()
+        }
+    }
+
+    private var displayedText: String? {
+        if showsOriginal {
+            return quote.originalText ?? quote.displayText
+        }
+        return nonempty(quote.textZH)
+            ?? liveTranslation
+            ?? quote.originalText
+    }
+
+    private var hasTranslation: Bool {
+        nonempty(quote.textZH) != nil
+            || liveTranslation != nil
+    }
+
+    private func loadTranslationIfNeeded() async {
+        guard nonempty(quote.textZH) == nil,
+              liveTranslation == nil,
+              let tweetID = nonempty(quote.id),
+              let original = quote.originalText else { return }
+        if let cached = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
+            liveTranslation = cached
+            return
+        }
+        do {
+            let result = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchXTranslation(tweetID: tweetID)
+            guard !Task.isCancelled else { return }
+            let value = PersonDetailStore.presentedTranslation(
+                result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                original: original
+            )
+            guard !value.isEmpty, value != original else { return }
+            PersonDetailStore.cacheXTranslation(value, tweetID: tweetID)
+            liveTranslation = value
+        } catch {
+            return
+        }
+    }
+
+    private func nonempty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
     }
 }
 
