@@ -127,6 +127,34 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.displayCode, "BTC/USDT")
     }
 
+    func testDashboardQuoteDecodesTradingDateQuality() throws {
+        let data = Data(#"{"symbol":"SPY","name":"标普500","price":747.03,"timestamp":1785661401902,"quality":{"status":"delayed","reason":"official_close","tradingDate":"2026-07-31","fallbackUsed":false}}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.quality?.tradingDate, "2026-07-31")
+    }
+
+    func testClosedIndexFutureDoesNotReplaceCashProxy() throws {
+        let data = Data(#"{"symbol":"ES1!","name":"标普500 E-mini期货","price":7519.25,"marketSession":"closed"}"#.utf8)
+        let future = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertNil(marketActiveIndexSession(future))
+    }
+
+    func testActiveIndexFutureCanReplaceCashProxy() throws {
+        let data = Data(#"{"symbol":"ES1!","name":"标普500 E-mini期货","price":7519.25,"marketSession":"regular"}"#.utf8)
+        let future = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(marketActiveIndexSession(future)?.symbol, "ES1!")
+    }
+
+    func testSuspiciousMajorIndexMoveIsFlaggedForReview() throws {
+        let data = Data(#"{"symbol":"^KS11","name":"韩国KOSPI","price":6595.45,"previousClose":5593.56,"changePercent":"17.91%"}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertTrue(quote.hasSuspiciousIndexMove)
+    }
+
     func testShanghaiDisplayCodeUsesConsistentExchangeSuffix() throws {
         let data = Data(#"{"symbol":"000905.SS","name":"中证500","price":7000}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
