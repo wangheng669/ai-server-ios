@@ -399,6 +399,18 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.meta?.quotedTweet?.media?.first?.displayURL?.absoluteString, "https://example.com/t.jpg")
     }
 
+    func testDecodesXReplyAndQuotedVideoContext() throws {
+        let data = #"{"post":{"id":1,"source":"x","meta":{"in_reply_to_screen_name":"openai","in_reply_to_status_id":"42","quoted_tweet":{"id":"99","text":"Demo","author":{"name":"Example","screenName":"example"},"media":[{"type":"video","url":"https://example.com/demo.mp4","thumbnail_url":"https://example.com/demo.jpg","width":1920,"height":1080}]}}}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
+
+        XCTAssertEqual(post.meta?.inReplyToScreenName, "openai")
+        XCTAssertEqual(post.meta?.inReplyToStatusID, "42")
+        let media = try XCTUnwrap(post.meta?.quotedTweet?.media?.first)
+        XCTAssertTrue(media.isVideo)
+        XCTAssertEqual(media.playbackURL?.absoluteString, "https://example.com/demo.mp4")
+        XCTAssertEqual(media.previewURL?.absoluteString, "https://example.com/demo.jpg")
+    }
+
     func testXDetailUsesStoredLongTextAndFormatsBullets() throws {
         let data = #"{"id":7,"source":"x","content":"short…","post_link":"https://x.com/example/status/123","meta":{"raw_text":"价格调整： *第一项 *第二项","note_text":"第一段\n\n价格调整： *第一项 *第二项"}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: data)
@@ -413,10 +425,31 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testDecodesLiveXTweetDetailResponse() throws {
-        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段"}}}"#.data(using: .utf8)!
+        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段","createdAt":"Sat Aug 01 08:16:38 +0000 2026","metrics":{"bookmarks":9,"likes":15,"quotes":0,"replies":1,"retweets":2,"views":3740}}}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(XTweetDetailResponse.self, from: data)
 
         XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
+        XCTAssertEqual(response.data.item.metrics?.views, 3740)
+        XCTAssertEqual(response.data.item.metrics?.bookmarks, 9)
+    }
+
+    func testDecodesCompleteXCommentMetrics() throws {
+        let data = #"{"success":true,"data":{"items":[{"id":"456","text":"@author 回复正文","author":{"name":"用户","screenName":"reader","profileImageUrl":null,"verified":true},"metrics":{"bookmarks":3,"likes":4,"quotes":0,"replies":1,"retweets":2,"views":118},"createdAt":"Sat Aug 01 08:56:28 +0000 2026","inReplyToScreenName":"author","lang":"zh"}],"nextCursor":null}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(XCommentsResponse.self, from: data)
+
+        XCTAssertEqual(response.data.items.first?.metrics?.views, 118)
+        XCTAssertEqual(response.data.items.first?.metrics?.bookmarks, 3)
+    }
+
+    func testDecodesLiveXTweetVideoForDetailFallback() throws {
+        let data = #"{"success":true,"data":{"item":{"id":"2083612366155984927","text":"这是哪个国家？","media":[{"type":"video","url":"https://video.twimg.com/amplify_video/demo.mp4","thumbnail_url":"https://pbs.twimg.com/amplify_video_thumb/demo.jpg","width":720,"height":1280}]}}}"#.data(using: .utf8)!
+        let item = try JSONDecoder().decode(XTweetDetailResponse.self, from: data).data.item
+
+        XCTAssertTrue(item.videoMedia?.isVideo == true)
+        XCTAssertEqual(item.videoMedia?.width, 720)
+        XCTAssertEqual(item.videoMedia?.height, 1280)
+        XCTAssertEqual(item.videoURL?.path, "/api/v1/media-proxy")
+        XCTAssertEqual(item.videoPreviewURL?.path, "/api/v1/image-proxy")
     }
 
     func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
@@ -461,11 +494,44 @@ final class PostDecodingTests: XCTestCase {
         )
     }
 
+    func testXCommentRemovesDuplicatedReplyMention() {
+        XCTAssertEqual(
+            XPostTextFormatter.commentText("@AsiaFinance AI 牛市中场。", replyingTo: "AsiaFinance"),
+            "AI 牛市中场。"
+        )
+        XCTAssertEqual(
+            XPostTextFormatter.commentText("普通评论", replyingTo: nil),
+            "普通评论"
+        )
+    }
+
     func testXDetailHidesPlatformShortLinksButKeepsRealArticleLinks() {
         XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://t.co/abc")))
         XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://x.com/example/status/1")))
         XCTAssertTrue(XPostTextFormatter.shouldShowExternalURL(URL(string: "https://example.com/story")))
         XCTAssertFalse(XPostTextFormatter.shouldShowExternalURL(nil))
+    }
+
+    func testXDetailWaitsOnlyWhenInitialTextIsTruncated() {
+        XCTAssertTrue(XPostTextFormatter.shouldWaitForFullText("列表摘要…"))
+        XCTAssertTrue(XPostTextFormatter.shouldWaitForFullText("列表摘要..."))
+        XCTAssertFalse(XPostTextFormatter.shouldWaitForFullText("这已经是完整正文。"))
+    }
+
+    func testXDetailReusesCompleteStoredTextAndTranslation() throws {
+        let data = #"{"id":7,"source":"x","content":"Complete stored original.","content_zh":"已经存储的完整中文翻译。","post_link":"https://x.com/example/status/123","meta":{"lang":"en","raw_text":"Complete stored original."}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertFalse(post.needsXLiveDetail)
+        XCTAssertFalse(post.needsXTranslation)
+    }
+
+    func testXDetailFetchesOnlyMissingStoredData() throws {
+        let data = #"{"id":7,"source":"x","content":"Truncated original…","post_link":"https://x.com/example/status/123","meta":{"lang":"en"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertTrue(post.needsXLiveDetail)
+        XCTAssertTrue(post.needsXTranslation)
     }
 
     func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {

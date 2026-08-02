@@ -45,13 +45,13 @@ struct MarketDashboard: Codable {
         definitionVersion = try values.decodeIfPresent(String.self, forKey: .definitionVersion)
         generatedAt = try values.decode(String.self, forKey: .generatedAt)
         refreshIntervalMs = try values.decode(Int.self, forKey: .refreshIntervalMs)
-        coreIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .coreIndices) ?? []
-        referenceIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .referenceIndices) ?? []
+        coreIndices = try values.decodeLossyQuotes(forKey: .coreIndices)
+        referenceIndices = try values.decodeLossyQuotes(forKey: .referenceIndices)
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
-        metrics = try values.decodeIfPresent([MarketQuote].self, forKey: .metrics) ?? []
-        components = try values.decodeIfPresent([MarketQuote].self, forKey: .components) ?? []
-        crypto = try values.decodeIfPresent([MarketQuote].self, forKey: .crypto) ?? []
-        indexSessions = try values.decodeIfPresent([String: MarketQuote].self, forKey: .indexSessions)
+        metrics = try values.decodeLossyQuotes(forKey: .metrics)
+        components = try values.decodeLossyQuotes(forKey: .components)
+        crypto = try values.decodeLossyQuotes(forKey: .crypto)
+        indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
         freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
         missingSymbols = try values.decodeIfPresent([String].self, forKey: .missingSymbols) ?? []
@@ -94,6 +94,25 @@ struct MarketDashboard: Codable {
             next.nightTrend = marketAppendingLiveValue(next.sessionPrice ?? next.price, to: quotes[index].nightTrend)
         }
         quotes[index] = next
+    }
+}
+
+private struct LossyMarketQuote: Decodable {
+    let value: MarketQuote?
+
+    init(from decoder: Decoder) throws {
+        value = try? MarketQuote(from: decoder)
+    }
+}
+
+private extension KeyedDecodingContainer where Key == MarketDashboard.CodingKeys {
+    func decodeLossyQuotes(forKey key: Key) throws -> [MarketQuote] {
+        try decodeIfPresent([LossyMarketQuote].self, forKey: key)?.compactMap(\.value) ?? []
+    }
+
+    func decodeLossyQuoteDictionary(forKey key: Key) throws -> [String: MarketQuote]? {
+        try decodeIfPresent([String: LossyMarketQuote].self, forKey: key)?
+            .compactMapValues(\.value)
     }
 }
 
@@ -191,6 +210,13 @@ struct MarketDashboardFreshness: Codable {
     let sessions: [String]
 }
 
+struct MarketQuoteQuality: Codable, Hashable {
+    let status: String?
+    let reason: String?
+    let tradingDate: String?
+    let fallbackUsed: Bool?
+}
+
 struct MarketQuote: Codable, Identifiable, Hashable {
     var id: String { symbol }
     let symbol: String
@@ -219,6 +245,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let sessionDataSource: String?
     let changePercent: String?
     let timestamp: Int64?
+    let quality: MarketQuoteQuality?
     var trend: [Double]
     var nightTrend: [Double]
     let stale: Bool?
@@ -231,7 +258,8 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     }
 
     var formattedPercent: String {
-        String(format: "%@%.2f%%", percentValue >= 0 ? "+" : "−", abs(percentValue))
+        if hasSuspiciousIndexMove { return "待核验" }
+        return String(format: "%@%.2f%%", percentValue >= 0 ? "+" : "−", abs(percentValue))
     }
 
     var changeValue: Double {
@@ -260,7 +288,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode
         case price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
         case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
-        case changePercent, timestamp, trend, nightTrend, stale
+        case changePercent, timestamp, quality, trend, nightTrend, stale
     }
 
     init(
@@ -292,7 +320,8 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         timestamp: Int64?,
         trend: [Double],
         nightTrend: [Double],
-        stale: Bool?
+        stale: Bool?,
+        quality: MarketQuoteQuality? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -320,6 +349,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.sessionDataSource = sessionDataSource
         self.changePercent = changePercent
         self.timestamp = timestamp
+        self.quality = quality
         self.trend = trend
         self.nightTrend = nightTrend
         self.stale = stale
@@ -353,6 +383,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         sessionDataSource = try values.decodeIfPresent(String.self, forKey: .sessionDataSource)
         changePercent = try values.decodeIfPresent(String.self, forKey: .changePercent)
         timestamp = try values.decodeIfPresent(Int64.self, forKey: .timestamp)
+        quality = try values.decodeIfPresent(MarketQuoteQuality.self, forKey: .quality)
         trend = try values.decodeIfPresent([Double].self, forKey: .trend) ?? []
         nightTrend = try values.decodeIfPresent([Double].self, forKey: .nightTrend) ?? []
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale)
@@ -682,6 +713,76 @@ struct MarketAShareTemperatureResponse: Decodable {
     let data: MarketAShareTemperature
 }
 
+struct MarketKoreaLeverageResponse: Decodable {
+    let success: Bool
+    let data: MarketKoreaLeverage
+}
+
+struct MarketKoreaLeverage: Decodable {
+    let dataContract: String
+    let asOf: String
+    let generatedAt: String
+    let fetchedAt: String
+    let leverageThermometer: MarketKoreaLeverageThermometer
+    let r2FinancingRatio: MarketKoreaFinancingRatio
+    let forcedLiquidation: MarketKoreaForcedLiquidation
+    let indices: MarketKoreaIndices
+    let alert: MarketKoreaLeverageAlert
+    let freshness: MarketKoreaLeverageFreshness
+    let source: MarketKoreaLeverageSource
+    let disclaimer: String
+}
+
+struct MarketKoreaLeverageThermometer: Decodable {
+    let value: Double
+    let weighted: Double
+    let unit: String
+    let anchor: String
+    let note: String
+}
+
+struct MarketKoreaFinancingRatio: Decodable {
+    let value: Double
+    let percentile10Y: Double
+    let unit: String
+    let note: String
+}
+
+struct MarketKoreaForcedLiquidation: Decodable {
+    let unsettledBillionKRW: Double
+    let fiveDayAverageBillionKRW: Double
+    let percentile10Y: Double
+}
+
+struct MarketKoreaIndices: Decodable {
+    let kospi: Double
+    let spx: Double
+}
+
+struct MarketKoreaLeverageAlert: Decodable {
+    let level: String
+    let value: Double
+    let message: String
+    let thresholds: MarketKoreaLeverageThresholds
+}
+
+struct MarketKoreaLeverageThresholds: Decodable {
+    let warning: Double
+    let critical: Double
+}
+
+struct MarketKoreaLeverageFreshness: Decodable {
+    let staleDays: Int
+    let dailyFullRefreshBeijing: String
+    let recommendedPoll: String
+}
+
+struct MarketKoreaLeverageSource: Decodable {
+    let name: String
+    let url: String
+    let docs: String
+}
+
 struct MarketAShareTemperature: Decodable {
     let dataContract: String
     let days: Int
@@ -960,6 +1061,11 @@ func marketAppendingLiveValue(_ value: Double, to values: [Double], limit: Int =
 }
 
 extension MarketQuote {
+    var hasSuspiciousIndexMove: Bool {
+        let guardedSymbols: Set<String> = ["^GSPC", "^NDX", "^DJI", "^N225", "^KS11", "^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]
+        return guardedSymbols.contains(symbol.uppercased()) && abs(percentValue) >= 15
+    }
+
     var presentationName: String {
         displayName ?? name
     }
@@ -998,6 +1104,16 @@ extension MarketQuote {
         case "^TNX": "US10Y"
         default: symbol
         }
+    }
+}
+
+func marketActiveIndexSession(_ quote: MarketQuote?) -> MarketQuote? {
+    guard let quote else { return nil }
+    switch quote.marketSession?.lowercased() {
+    case "regular", "pre", "premarket", "post", "after", "overnight":
+        return quote
+    default:
+        return nil
     }
 }
 

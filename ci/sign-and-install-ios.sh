@@ -116,6 +116,17 @@ refresh_signing_with_xcode() {
   return 1
 }
 
+if find "$APP_PATH" -type d -name '*.appex' -print -quit | grep -q .; then
+  echo "App extensions detected; using Xcode automatic signing for the app and every extension."
+  refresh_signing_with_xcode
+  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+    ./ci/report-ios-deployment.sh running 0.92 installing || true
+  fi
+  install_app_with_connectivity_retry "$xcode_refreshed_app"
+  echo "Installed $BUNDLE_ID on $DEVICE_UDID using Xcode automatic signing for embedded extensions."
+  exit 0
+fi
+
 expected_application_id="$TEAM_ID.$BUNDLE_ID"
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 selected_profile=""
@@ -190,11 +201,6 @@ if [[ -z "$signing_identity" ]] || ! grep -Fq "$signing_identity" <<< "$valid_id
 fi
 
 echo "Using valid signing identity $signing_identity with profile valid until $selected_expiration."
-
-if find "$APP_PATH" -type d -name '*.appex' -print -quit | grep -q .; then
-  echo "App extensions require their own provisioning profiles and are not supported by this installer yet." >&2
-  exit 1
-fi
 
 while IFS= read -r -d '' nested_code; do
   codesign \

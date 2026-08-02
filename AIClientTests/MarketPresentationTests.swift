@@ -63,6 +63,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.latest.aiServer?.advancerShare?.value, 0.7759)
     }
 
+    func testDecodesKoreaLeverageContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_korea_leverage_v1","asOf":"20260730","generatedAt":"2026-08-01T21:31:00+08:00","fetchedAt":"2026-08-02T06:25:00Z","leverageThermometer":{"value":51.64,"weighted":51.64,"unit":"percent","anchor":"20240102","note":"ratio"},"r2FinancingRatio":{"value":30.72,"percentile10Y":16.4,"unit":"percent","note":"credit / deposits"},"forcedLiquidation":{"unsettledBillionKRW":1.725,"fiveDayAverageBillionKRW":419,"percentile10Y":94},"indices":{"kospi":5593.56,"spx":7437.63},"alert":{"level":"critical","value":51.64,"message":"高位报警","thresholds":{"warning":40,"critical":45}},"freshness":{"staleDays":2,"dailyFullRefreshBeijing":"14:16","recommendedPoll":"after 14:20"},"source":{"name":"KOFIA + KSD","url":"https://kimpremium.com/","docs":"https://kimpremium.com/api"},"disclaimer":"not investment advice"}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketKoreaLeverageResponse.self, from: data)
+
+        XCTAssertEqual(response.data.dataContract, "market_korea_leverage_v1")
+        XCTAssertEqual(response.data.alert.level, "critical")
+        XCTAssertEqual(response.data.leverageThermometer.value, 51.64)
+        XCTAssertEqual(response.data.forcedLiquidation.fiveDayAverageBillionKRW, 419)
+        XCTAssertEqual(response.data.freshness.staleDays, 2)
+    }
+
     func testDecodesInvestorMoodPublicVideoSamples() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","videoUrl":"https://video.example.com/123.mp4","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
         let response = try JSONDecoder().decode(InvestorMoodResponse.self, from: data)
@@ -115,6 +127,34 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.displayCode, "BTC/USDT")
     }
 
+    func testDashboardQuoteDecodesTradingDateQuality() throws {
+        let data = Data(#"{"symbol":"SPY","name":"标普500","price":747.03,"timestamp":1785661401902,"quality":{"status":"delayed","reason":"official_close","tradingDate":"2026-07-31","fallbackUsed":false}}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.quality?.tradingDate, "2026-07-31")
+    }
+
+    func testClosedIndexFutureDoesNotReplaceCashProxy() throws {
+        let data = Data(#"{"symbol":"ES1!","name":"标普500 E-mini期货","price":7519.25,"marketSession":"closed"}"#.utf8)
+        let future = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertNil(marketActiveIndexSession(future))
+    }
+
+    func testActiveIndexFutureCanReplaceCashProxy() throws {
+        let data = Data(#"{"symbol":"ES1!","name":"标普500 E-mini期货","price":7519.25,"marketSession":"regular"}"#.utf8)
+        let future = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(marketActiveIndexSession(future)?.symbol, "ES1!")
+    }
+
+    func testSuspiciousMajorIndexMoveIsFlaggedForReview() throws {
+        let data = Data(#"{"symbol":"^KS11","name":"韩国KOSPI","price":6595.45,"previousClose":5593.56,"changePercent":"17.91%"}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertTrue(quote.hasSuspiciousIndexMove)
+    }
+
     func testShanghaiDisplayCodeUsesConsistentExchangeSuffix() throws {
         let data = Data(#"{"symbol":"000905.SS","name":"中证500","price":7000}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
@@ -147,6 +187,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.referenceIndices.first?.symbol, "^GSPC")
         XCTAssertEqual(response.data.realtimeProxies.first?.symbol, "SPY")
         XCTAssertEqual(response.data.quote(symbol: "^GSPC")?.displayMode, "historical-reference")
+    }
+
+    func testDashboardSkipsQuotesWithNullPriceWithoutDroppingValidData() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","generatedAt":"2026-08-02T08:09:10Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理","price":632.08}],"referenceIndices":[],"metrics":[{"symbol":"USDJPY","name":"美元兑日元","price":null,"lastKnownPrice":157.4,"stale":true},{"symbol":"^VIX","name":"波动率指数","price":16.72}],"components":[],"crypto":[],"indexSessions":{"SPY":{"symbol":"SPY","name":"标普500盘后","price":null,"stale":true}},"missingSymbols":[],"expectedSymbols":["SPY","USDJPY","^VIX"],"symbolHealth":[{"symbol":"USDJPY","status":"stale","reason":"quote_stale"}],"regions":[]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+
+        XCTAssertEqual(response.data.coreIndices.map(\.symbol), ["SPY"])
+        XCTAssertEqual(response.data.metrics.map(\.symbol), ["^VIX"])
+        XCTAssertEqual(response.data.indexSessions, [:])
+        XCTAssertEqual(response.data.symbolHealth.first?.symbol, "USDJPY")
+        XCTAssertEqual(response.data.symbolHealth.first?.status, .stale)
     }
 
     func testDashboardDecodesPerSymbolHealthAndRegions() throws {

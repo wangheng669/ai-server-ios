@@ -101,6 +101,26 @@ struct XTweetDetailItem: Decodable, Equatable {
     let text: String
     let noteText: String?
     let shortText: String?
+    let media: [Media]?
+    let createdAt: String?
+    let metrics: PostMetrics?
+
+    struct Media: Decodable, Equatable {
+        let type: String?
+        let url: String?
+        let thumbnailURL: String?
+        let width: Int?
+        let height: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case type, url, width, height
+            case thumbnailURL = "thumbnail_url"
+        }
+
+        var isVideo: Bool {
+            ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
+        }
+    }
 
     var fullText: String {
         [noteText, text, shortText]
@@ -108,9 +128,36 @@ struct XTweetDetailItem: Decodable, Equatable {
             .filter { !$0.isEmpty }
             .max(by: { $0.count < $1.count }) ?? text
     }
+
+    var videoMedia: Media? {
+        media?.first(where: \.isVideo)
+    }
+
+    var videoURL: URL? {
+        videoMedia?.url.flatMap(MediaURL.video)
+    }
+
+    var videoPreviewURL: URL? {
+        videoMedia?.thumbnailURL.flatMap(MediaURL.image)
+    }
 }
 
 enum XPostTextFormatter {
+    static func commentText(_ text: String, replyingTo screenName: String?) -> String {
+        guard let screenName = screenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+            .nilIfEmpty else { return text }
+        return text.replacingOccurrences(
+            of: "^@\(NSRegularExpression.escapedPattern(for: screenName))\\s*",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+    }
+
+    static func shouldWaitForFullText(_ value: String) -> Bool {
+        isTruncated(detailText(value))
+    }
+
     static func shouldShowExternalURL(_ url: URL?) -> Bool {
         guard let host = url?.host()?.lowercased() else { return false }
         return !["t.co", "x.com", "twitter.com", "www.x.com", "www.twitter.com"].contains(host)
@@ -192,7 +239,7 @@ struct XComment: Decodable, Identifiable, Equatable {
     }
 
     struct Metrics: Decodable, Equatable {
-        let likes, retweets, replies: Int?
+        let bookmarks, likes, quotes, replies, retweets, views: Int?
     }
 }
 
@@ -345,6 +392,11 @@ struct Post: Decodable, Identifiable, Hashable {
         guard sourceName == "X", !hasTranslation, xTweetID != nil else { return false }
         guard let language = meta?.lang?.lowercased() else { return false }
         return !language.hasPrefix("zh")
+    }
+    var needsXLiveDetail: Bool {
+        sourceName == "X"
+            && xTweetID != nil
+            && XPostTextFormatter.shouldWaitForFullText(xStoredOriginalContent)
     }
 
     func replacingTranslation(with translation: String) -> Post {
@@ -956,6 +1008,8 @@ struct PostMeta: Decodable, Hashable {
     let urls: [String]?
     let rawText: String?
     let noteText: String?
+    let inReplyToScreenName: String?
+    let inReplyToStatusID: String?
     let quotedTweet: XQuotedPost?
     let photoCredit: String?
     let zhihuRank: Int?
@@ -981,6 +1035,8 @@ struct PostMeta: Decodable, Hashable {
         case metrics, lang, urls
         case rawText = "raw_text"
         case noteText = "note_text"
+        case inReplyToScreenName = "in_reply_to_screen_name"
+        case inReplyToStatusID = "in_reply_to_status_id"
         case quotedTweet = "quoted_tweet"
         case photoCredit = "photo_credit"
         case zhihuRank = "zhihu_rank"
@@ -1009,6 +1065,7 @@ struct PostMeta: Decodable, Hashable {
     ) -> PostMeta {
         PostMeta(
             metrics: nil, lang: nil, urls: nil, rawText: nil, noteText: nil,
+            inReplyToScreenName: nil, inReplyToStatusID: nil,
             quotedTweet: nil, photoCredit: nil,
             zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
             zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
@@ -1072,6 +1129,11 @@ struct XQuotedMedia: Decodable, Hashable {
     }
 
     var displayURL: URL? { (thumbnailURL ?? url).flatMap(MediaURL.image) }
+    var isVideo: Bool {
+        ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
+    }
+    var playbackURL: URL? { isVideo ? url.flatMap(MediaURL.video) : nil }
+    var previewURL: URL? { thumbnailURL.flatMap(MediaURL.image) }
 }
 
 private func xNonempty(_ value: String?) -> String? {

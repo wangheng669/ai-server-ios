@@ -70,11 +70,12 @@ struct FamousHoldingDetailView: View {
     private var navigationHeader: some View {
         HStack {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: "xmark")
                     .font(.system(size: 17, weight: .semibold))
                     .frame(width: 40, height: 40)
                     .background(Color.secondary.opacity(0.10), in: Circle())
             }
+            .accessibilityLabel("关闭持仓详情")
             Spacer()
             Text("持仓详情")
                 .font(.system(size: 19, weight: .semibold))

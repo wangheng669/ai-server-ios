@@ -33,6 +33,7 @@ struct PostDetailView: View {
     @State private var loadingXTranslationIDs: Set<String> = []
     @State private var xLiveDetail: XTweetDetailItem?
     @State private var xLiveTranslationText: String?
+    @State private var isLoadingXFullText: Bool
     @State private var weiboImageSelection: ImageGallerySelection?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -51,6 +52,10 @@ struct PostDetailView: View {
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
         _isTruthBookmarked = State(initialValue: TruthBookmarkStore.contains(post.id))
         _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
+        _isLoadingXFullText = State(initialValue:
+            post.sourceName == "X"
+                && XPostTextFormatter.shouldWaitForFullText(post.xStoredOriginalContent)
+        )
     }
 
     private var usesCustomDismissControl: Bool {
@@ -111,15 +116,7 @@ struct PostDetailView: View {
                     .accessibilityLabel("关闭动态详情")
                 }
             }
-            if post.sourceName == "X" {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { openOriginal() } label: { Image(systemName: "bell.slash") }
-                    Menu {
-                        if let link = post.linkURL { ShareLink(item: link) { Label("分享帖子", systemImage: "square.and.arrow.up") } }
-                        Button("在 X 中打开") { openOriginal() }
-                    } label: { Image(systemName: "ellipsis") }
-                }
-            } else if post.isBilibili {
+            if post.isBilibili {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if let link = post.linkURL {
                         ShareLink(item: link) { Image(systemName: "square.and.arrow.up") }
@@ -1692,18 +1689,38 @@ struct PostDetailView: View {
                             .padding(.top, 16)
                         }
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                                Text(xStyledParagraph(paragraph))
-                                    .font(.system(size: 17, weight: .regular))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                        Group {
+                            if isLoadingXFullText {
+                                xFullTextLoadingPlaceholder
+                            } else {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                                        Text(xStyledParagraph(paragraph))
+                                            .font(.system(size: 17, weight: .regular))
+                                            .lineSpacing(3)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                                .textSelection(.enabled)
                             }
                         }
                         .padding(.top, 24)
-                        .textSelection(.enabled)
 
-                        if XPostTextFormatter.isTruncated(xDisplayedDetailText),
+                        if let replyHandle = xReplyHandle {
+                            Label("回复 \(replyHandle)", systemImage: "arrowshape.turn.up.left")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 14)
+                        }
+
+                        if let quote = post.meta?.quotedTweet {
+                            xQuotedPostCard(quote)
+                                .padding(.top, 16)
+                        }
+
+                        if !isLoadingXFullText,
+                           XPostTextFormatter.isTruncated(xDisplayedDetailText),
                            post.linkURL != nil {
                             Button { openOriginal() } label: {
                                 Label("X 源仅返回了摘要，前往 X 查看全文", systemImage: "arrow.up.right.square")
@@ -1732,11 +1749,11 @@ struct PostDetailView: View {
                         }
 
                         xMedia
-                            .padding(.top, post.images?.isEmpty == false || !post.videoURLs.isEmpty ? 16 : 0)
+                            .padding(.top, xDetailHasMedia ? 16 : 0)
 
                         HStack(spacing: 4) {
                             Text(xTimestamp)
-                            if let views = post.meta?.metrics?.views, views > 0 {
+                            if let views = xMetrics?.views, views > 0 {
                                 Text("·")
                                 Text("\(compactCount(views)) 次查看").fontWeight(.semibold).foregroundStyle(.primary)
                             }
@@ -1746,7 +1763,7 @@ struct PostDetailView: View {
                         .padding(.top, 18)
                     }
                     .padding(.horizontal, 8)
-                    .padding(.top, 16)
+                    .padding(.top, 14)
                     .padding(.bottom, 12)
 
                     Divider()
@@ -1764,15 +1781,15 @@ struct PostDetailView: View {
     private var xNavigationBar: some View {
         HStack {
             Button { dismiss() } label: {
-                Image(systemName: dismissIconName)
-                    .font(.system(size: 22, weight: .semibold))
-                    .frame(width: 36, height: 44)
+                Image(systemName: presentedAsSheet ? "xmark" : "arrow.left")
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 40, height: 48)
             }
             .accessibilityLabel(dismissAccessibilityLabel)
 
             Spacer()
             Text("帖子")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 17, weight: .bold))
             Spacer()
 
             Menu {
@@ -1784,13 +1801,13 @@ struct PostDetailView: View {
                 Button("在 X 中打开") { openOriginal() }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 21, weight: .bold))
-                    .frame(width: 36, height: 44)
+                    .font(.system(size: 18, weight: .bold))
+                    .frame(width: 40, height: 48)
             }
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
-        .frame(height: 54)
+        .padding(.horizontal, 8)
+        .frame(height: 50)
         .background(Color(uiColor: .systemBackground))
     }
 
@@ -1815,22 +1832,34 @@ struct PostDetailView: View {
         XPostTextFormatter.paragraphs(xDisplayedDetailText)
     }
 
+    private var xFullTextLoadingPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach([1.0, 0.94, 0.98, 0.88, 0.72], id: \.self) { width in
+                Capsule()
+                    .fill(Color.secondary.opacity(0.16))
+                    .frame(width: (UIScreen.main.bounds.width - 16) * width, height: 14)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在加载完整帖子")
+    }
+
     private var xAuthorHeader: some View {
-        HStack(spacing: 10) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 38)
+        HStack(spacing: 9) {
+            AvatarView(url: post.avatarURL, name: post.authorName, size: 40)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(post.authorName).font(.system(size: 16, weight: .bold)).lineLimit(1)
+                    Text(post.authorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
                     Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
                 }
                 if let handle = post.authorHandle {
-                    Text(handle).font(.system(size: 15)).foregroundStyle(.secondary)
+                    Text(handle).font(.system(size: 14)).foregroundStyle(.secondary)
                 }
             }
             Spacer()
             Button { openOriginal() } label: {
                 Text("X.com")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
@@ -1895,18 +1924,17 @@ struct PostDetailView: View {
                 ) {
                     await loadXTranslation(for: comment)
                 }
-                Divider().padding(.leading, 62)
+                Divider().padding(.leading, 58)
             }
         }
     }
 
     private var xEngagementRow: some View {
-        let metrics = post.meta?.metrics
+        let metrics = xMetrics
         return HStack {
             xMetric("bubble.left", metrics?.replies)
             Spacer(); xMetric("arrow.2.squarepath", metrics?.retweets)
             Spacer(); xMetric("heart", metrics?.likes)
-            Spacer(); xMetric("chart.bar", metrics?.views)
             Spacer(); xMetric("bookmark", metrics?.bookmarks)
             Spacer()
             if let link = post.linkURL {
@@ -1915,8 +1943,8 @@ struct PostDetailView: View {
                 Image(systemName: "square.and.arrow.up")
             }
         }
-        .font(.system(size: 15))
-        .foregroundStyle(.secondary)
+        .font(.system(size: 16, weight: .regular))
+        .foregroundStyle(Color(uiColor: .label).opacity(0.72))
     }
 
     private func xMetric(_ symbol: String, _ value: Int?) -> some View {
@@ -1924,6 +1952,10 @@ struct PostDetailView: View {
             Image(systemName: symbol)
             if let value, value > 0 { Text(compactCount(value)).font(.caption) }
         }
+    }
+
+    private var xMetrics: PostMetrics? {
+        xLiveDetail?.metrics ?? post.meta?.metrics
     }
 
     private var xTimestamp: String {
@@ -1936,6 +1968,83 @@ struct PostDetailView: View {
         return display.string(from: date)
     }
 
+    private var xReplyHandle: String? {
+        guard let value = post.meta?.inReplyToScreenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@")),
+              !value.isEmpty else { return nil }
+        return "@\(value)"
+    }
+
+    private func xQuotedPostCard(_ quote: XQuotedPost) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                if let avatar = quote.author?.profileImageURL.flatMap(MediaURL.image) {
+                    RemoteImage(url: avatar, height: 28, cornerRadius: 14)
+                        .frame(width: 28, height: 28)
+                        .clipped()
+                }
+
+                Text(quote.author?.name ?? "引用动态")
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+
+                if let handle = quote.author?.handle {
+                    Text(handle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if let text = quote.displayText {
+                Text(text)
+                    .font(.system(size: 15))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
+            ForEach(Array((quote.media ?? []).enumerated()), id: \.offset) { _, media in
+                xQuotedMedia(media)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
+        }
+    }
+
+    @ViewBuilder
+    private func xQuotedMedia(_ media: XQuotedMedia) -> some View {
+        if let videoURL = media.playbackURL {
+            XVideoPlayerView(url: videoURL, thumbnailURL: media.previewURL)
+                .frame(height: xQuotedMediaHeight(media))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else if let imageURL = media.displayURL {
+            RemoteImage(
+                url: imageURL,
+                height: xQuotedMediaHeight(media),
+                cornerRadius: 8,
+                contentMode: .fit
+            )
+            .frame(maxWidth: .infinity)
+            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .clipped()
+        }
+    }
+
+    private func xQuotedMediaHeight(_ media: XQuotedMedia) -> CGFloat {
+        let width = UIScreen.main.bounds.width - 42
+        guard let mediaWidth = media.width,
+              let mediaHeight = media.height,
+              mediaWidth > 0,
+              mediaHeight > 0 else { return 190 }
+        return min(width * CGFloat(mediaHeight) / CGFloat(mediaWidth), 460)
+    }
+
     private var detailImageHeight: CGFloat {
         guard let image = post.images?.first, let width = image.width, let height = image.height, width > 0 else { return 300 }
         let availableWidth = UIScreen.main.bounds.width - 16
@@ -1943,8 +2052,12 @@ struct PostDetailView: View {
     }
 
     @ViewBuilder private var xMedia: some View {
-        if post.sourceName == "X", let videoURL = post.videoURLs.first {
-            XVideoPlayerView(url: videoURL, thumbnailURL: post.previewURL)
+        if post.sourceName == "X", let videoURL = xDetailVideoURL {
+            XVideoPlayerView(
+                url: videoURL,
+                thumbnailURL: xDetailVideoPreviewURL,
+                onAspectRatioResolved: { detectedVideoAspectRatio = $0 }
+            )
                 .id(videoURL)
                 .frame(height: xVideoHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1973,11 +2086,25 @@ struct PostDetailView: View {
         }
     }
 
+    private var xDetailVideoURL: URL? {
+        post.videoURLs.first ?? xLiveDetail?.videoURL
+    }
+
+    private var xDetailVideoPreviewURL: URL? {
+        post.previewURL ?? xLiveDetail?.videoPreviewURL
+    }
+
+    private var xDetailHasMedia: Bool {
+        xDetailVideoURL != nil || !post.imageURLs.isEmpty
+    }
+
     private var xVideoHeight: CGFloat {
         let availableWidth = UIScreen.main.bounds.width - 30
-        let metadataAspectRatio: CGFloat? = post.videos?.first.flatMap { video in
-            guard let width = video.width,
-                  let height = video.height,
+        let dimensions = post.videos?.first.map { ($0.width, $0.height) }
+            ?? xLiveDetail?.videoMedia.map { ($0.width, $0.height) }
+        let metadataAspectRatio: CGFloat? = dimensions.flatMap { dimensions in
+            guard let width = dimensions.0,
+                  let height = dimensions.1,
                   width > 0,
                   height > 0 else { return nil }
             return CGFloat(width) / CGFloat(height)
@@ -2048,23 +2175,37 @@ struct PostDetailView: View {
             } else {
                 post = detail.replacingTranslation(with: post.displayContent)
             }
+            if post.sourceName == "X",
+               !XPostTextFormatter.shouldWaitForFullText(post.xStoredOriginalContent) {
+                isLoadingXFullText = false
+            }
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
             var translationTweetID = tweetID
-            if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
+            if post.needsXLiveDetail,
+               let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 xLiveDetail = liveDetail
                 translationTweetID = liveDetail.id
-                if XPostTextFormatter.shouldPreferFullOriginal(
+                if post.videoURLs.isEmpty,
+                   let videoURL = liveDetail.videoURL,
+                   detectedVideoAspectRatio == nil {
+                    await detectVideoAspectRatio(url: videoURL)
+                }
+                if !presentedAsSheet,
+                   XPostTextFormatter.shouldPreferFullOriginal(
                     displayed: xDisplayedDetailText,
                     fullOriginal: liveDetail.fullText
                 ) {
                     showsOriginal = true
                 }
             }
-            if post.meta?.lang?.lowercased().hasPrefix("zh") != true,
+            isLoadingXFullText = false
+            if post.needsXTranslation,
                let translation = try? await client.fetchXTranslation(tweetID: translationTweetID) {
                 xLiveTranslationText = translation.text
             }
+        } else if post.sourceName == "X" {
+            isLoadingXFullText = false
         }
         if post.isYouTube || post.isBilibili || post.isWeiboRSS {
             player?.pause()
@@ -2311,12 +2452,12 @@ private struct XCommentRow: View {
     @State private var showsOriginal = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            AvatarView(url: comment.author.avatarURL, name: comment.author.name, size: 38)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 4) {
+        HStack(alignment: .top, spacing: 9) {
+            AvatarView(url: comment.author.avatarURL, name: comment.author.name, size: 40)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 3) {
                     Text(comment.author.name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 15, weight: .bold))
                         .lineLimit(1)
                     if comment.author.verified == true {
                         Image(systemName: "checkmark.seal.fill")
@@ -2327,10 +2468,15 @@ private struct XCommentRow: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                }
-                if let replyTo = comment.inReplyToScreenName, !replyTo.isEmpty {
-                    Text("回复 @\(replyTo.trimmingCharacters(in: CharacterSet(charactersIn: "@")))")
-                        .font(.system(size: 13))
+                    if let relativeTime {
+                        Text("· \(relativeTime)")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
                 if translation != nil {
@@ -2352,23 +2498,33 @@ private struct XCommentRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 }
-                Text(showsOriginal || translation == nil ? comment.text : translation ?? comment.text)
+                Text(showsOriginal || translation == nil ? displayedCommentText : translation ?? displayedCommentText)
                     .font(.system(size: 16))
-                    .lineSpacing(2)
+                    .lineSpacing(3)
                     .textSelection(.enabled)
-                HStack(spacing: 28) {
+                HStack {
                     metric("bubble.left", comment.metrics?.replies)
+                    Spacer()
                     metric("arrow.2.squarepath", comment.metrics?.retweets)
+                    Spacer()
                     metric("heart", comment.metrics?.likes)
+                    Spacer()
+                    metric("chart.bar.xaxis", comment.metrics?.views)
+                    Spacer()
+                    metric("bookmark", comment.metrics?.bookmarks)
+                    Spacer()
+                    ShareLink(item: commentURL) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
                 }
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .padding(.top, 3)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(uiColor: .label).opacity(0.66))
+                .padding(.top, 5)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 11)
         .task(id: comment.id) {
             await translate()
         }
@@ -2379,6 +2535,34 @@ private struct XCommentRow: View {
             Image(systemName: symbol)
             if let value, value > 0 { Text(value.formatted()) }
         }
+    }
+
+    private var displayedCommentText: String {
+        XPostTextFormatter.commentText(comment.text, replyingTo: comment.inReplyToScreenName)
+    }
+
+    private var commentURL: URL {
+        URL(string: "https://x.com/\(comment.author.screenName)/status/\(comment.id)")!
+    }
+
+    private var relativeTime: String? {
+        guard let raw = comment.createdAt else { return nil }
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "EEE MMM dd HH:mm:ss Z yyyy"
+        guard let date = parser.date(from: raw) else { return nil }
+        let seconds = max(0, Date().timeIntervalSince(date))
+        if seconds < 60 { return "刚刚" }
+        if seconds < 3_600 { return "\(Int(seconds / 60))分钟" }
+        if seconds < 86_400 { return "\(Int(seconds / 3_600))小时" }
+        if seconds < 604_800 { return "\(Int(seconds / 86_400))天" }
+
+        let display = DateFormatter()
+        display.locale = Locale(identifier: "zh_CN")
+        display.dateFormat = Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: Date())
+            ? "M月d日"
+            : "yyyy年M月d日"
+        return display.string(from: date)
     }
 }
 

@@ -16,7 +16,7 @@ struct LearningView: View {
     @State private var repository = LearningContentRepository()
     @State private var progressStore = LearningProgressStore()
     @State private var peopleStore = PeopleStore()
-    @State private var path: [LearningRoute] = []
+    @State private var selectedRoute: LearningRoute?
     @State private var selectedIdeologyPerson: SpecialPerson?
     @State private var ideologyCampFilter: IdeologyCampFilter = .all
     @State private var selectedConcept: KnowledgeConceptCard?
@@ -46,11 +46,13 @@ struct LearningView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             knowledgeHome
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: LearningRoute.self) { route in
+        }
+        .sheet(item: $selectedRoute) { route in
+            NavigationStack {
                 switch route {
                 case let .topic(topic, lessonTitle, lessonNumber, lessonCount):
                     LearningDetailView(
@@ -65,6 +67,10 @@ struct LearningView: View {
                     LearningVideoLessonDetailView(seed: lesson)
                 }
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .sheet(isPresented: ideologyPersonIsPresented) {
             PersonDetailSheet(
@@ -96,16 +102,16 @@ struct LearningView: View {
             }
             if (ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-video-preview")),
-               path.isEmpty,
+               selectedRoute == nil,
                let topic = store.catalog?.sections
                 .flatMap(\.topics)
                 .first(where: { $0.title.contains("市盈率") }) {
                 let topics = store.catalog.map { stockTopics(in: $0) } ?? []
                 let milestones = learningMilestones(from: topics)
                 if let index = milestones.firstIndex(where: { $0.topic.id == topic.id }) {
-                    path = [route(for: milestones[index], at: index, total: milestones.count)]
+                    selectedRoute = route(for: milestones[index], at: index, total: milestones.count)
                 } else {
-                    path = [.topic(topic, nil, nil, nil)]
+                    selectedRoute = .topic(topic, nil, nil, nil)
                 }
             }
             #endif
@@ -118,11 +124,11 @@ struct LearningView: View {
                 initialID: concept.id
             )
         }
-        .onChange(of: path.isEmpty, initial: true) { _, isEmpty in
-            showsDetail = !isEmpty || selectedIdeologyPerson != nil
+        .onChange(of: selectedRoute, initial: true) { _, route in
+            showsDetail = route != nil || selectedIdeologyPerson != nil
         }
         .onChange(of: selectedIdeologyPerson) { _, person in
-            showsDetail = !path.isEmpty || person != nil
+            showsDetail = selectedRoute != nil || person != nil
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
@@ -179,6 +185,7 @@ struct LearningView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
         }
+        .sensoryFeedback(.selection, trigger: selectedSection)
     }
 
     private func knowledgeSectionPage(_ section: KnowledgeSection) -> some View {
@@ -199,6 +206,14 @@ struct LearningView: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if section == .ideology {
+                ideologyCampPicker
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(KnowledgePagePalette.canvas)
+            }
+        }
         .safeAreaPadding(.bottom, 90)
         .refreshable {
             switch section {
@@ -255,10 +270,9 @@ struct LearningView: View {
     private var investmentContent: some View {
         if let catalog = store.catalog {
             let topics = stockTopics(in: catalog)
+            videoLessons
             WeeklyStudyCard(studiedDays: progressStore.studyDays())
                 .padding(.horizontal, 20)
-
-            videoLessons
             learningPath(topics)
             savedTopics(in: catalog, excluding: Set(topics.prefix(4).map(\.id)))
         } else if store.isLoading {
@@ -279,32 +293,58 @@ struct LearningView: View {
     @ViewBuilder
     private var videoLessons: some View {
         if let lessons = store.videoLibrary?.lessons, !lessons.isEmpty {
-            HStack(alignment: .firstTextBaseline) {
-                Text("小林说视频课")
-                    .font(.system(size: 24, weight: .bold, design: .serif))
-                Spacer()
-                Text("\(lessons.count) 堂精选")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 26)
-            .padding(.bottom, 13)
-
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 13) {
-                    ForEach(lessons) { lesson in
-                        Button {
-                            path.append(.videoLesson(lesson))
-                        } label: {
-                            LearningVideoLessonCard(lesson: lesson)
-                        }
-                        .buttonStyle(LearningPressStyle())
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("小Lin说")
+                        .font(.system(size: 34, weight: .semibold, design: .serif))
+                    Text("把复杂的投资概念，讲成看得懂、用得上的判断框架。")
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Label("投资视频课", systemImage: "play.circle.fill")
+                        Text("\(lessons.count) 期精选")
                     }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(KnowledgePagePalette.accent)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    LinearGradient(
+                        colors: [KnowledgePagePalette.accent.opacity(0.18), KnowledgePagePalette.surface],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
                 }
                 .padding(.horizontal, 20)
+
+                Text("精选视频")
+                    .font(.system(size: 22, weight: .bold, design: .serif))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 26)
+                    .padding(.bottom, 13)
+
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 13) {
+                        ForEach(lessons) { lesson in
+                            Button {
+                                selectedRoute = .videoLesson(lesson)
+                            } label: {
+                                LearningVideoLessonCard(lesson: lesson)
+                            }
+                            .buttonStyle(LearningPressStyle())
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         } else if store.isVideoLibraryLoading {
             ProgressView()
                 .frame(maxWidth: .infinity)
@@ -337,7 +377,7 @@ struct LearningView: View {
             VStack(spacing: 0) {
                 ForEach(Array(milestones.enumerated()), id: \.element.id) { index, milestone in
                     Button {
-                        path.append(route(for: milestone, at: index, total: milestones.count))
+                        selectedRoute = route(for: milestone, at: index, total: milestones.count)
                     } label: {
                         LearningMilestoneRow(
                             number: index + 1,
@@ -381,7 +421,7 @@ struct LearningView: View {
             VStack(spacing: 0) {
                 ForEach(topics) { topic in
                     Button {
-                        path.append(.topic(topic, nil, nil, nil))
+                        selectedRoute = .topic(topic, nil, nil, nil)
                     } label: {
                         LearningTopicRow(topic: topic)
                     }
@@ -398,7 +438,7 @@ struct LearningView: View {
     @ViewBuilder
     private var booksContent: some View {
         let books = store.bookshelf?.books ?? []
-        Text("正在读")
+        Text("最近阅读")
             .font(.system(size: 24, weight: .bold, design: .serif))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
@@ -442,6 +482,33 @@ struct LearningView: View {
                 .buttonStyle(LearningPressStyle())
                 .padding(.horizontal, 20)
 
+                if books.count > 1 {
+                    Text("近期书目")
+                        .font(.system(size: 18, weight: .bold, design: .serif))
+                        .padding(.horizontal, 20)
+                        .padding(.top, 28)
+                        .padding(.bottom, 12)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 16) {
+                            ForEach(Array(books.dropFirst().enumerated()), id: \.element.id) { index, recentBook in
+                                Button {
+                                    if let url = recentBook.openURL {
+                                        openURL(url)
+                                    }
+                                } label: {
+                                    RecentKnowledgeBookCard(
+                                        book: recentBook,
+                                        paletteIndex: index + 1
+                                    )
+                                }
+                                .buttonStyle(LearningPressStyle())
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    .contentMargins(.bottom, 8, for: .scrollContent)
+                }
             }
         }
     }
@@ -541,9 +608,7 @@ struct LearningView: View {
     @ViewBuilder
     private var ideologyContent: some View {
         if peopleStore.isLoading && peopleStore.people.isEmpty {
-            ProgressView("正在载入人物")
-                .frame(maxWidth: .infinity)
-                .padding(.top, 44)
+            IdeologyContentLoadingView()
         } else if let error = peopleStore.errorMessage, peopleStore.people.isEmpty {
             ContentUnavailableView {
                 Label("人物载入失败", systemImage: "wifi.exclamationmark")
@@ -566,8 +631,6 @@ struct LearningView: View {
             .padding(.top, 36)
         } else {
             VStack(alignment: .leading, spacing: 18) {
-                ideologyCampPicker
-
                 ForEach(visibleIdeologyCamps) { camp in
                     ideologyCampSection(
                         title: camp.title,
@@ -590,6 +653,7 @@ struct LearningView: View {
                     .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 20)
+            .padding(.top, 6)
         }
     }
 
@@ -605,7 +669,7 @@ struct LearningView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(ideologyCampFilter == filter ? Color.primary : Color.secondary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
+                        .frame(minHeight: 44)
                         .background {
                             if ideologyCampFilter == filter {
                                 Capsule()
@@ -626,6 +690,7 @@ struct LearningView: View {
             Capsule()
                 .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
         }
+        .sensoryFeedback(.selection, trigger: ideologyCampFilter)
     }
 
     private func ideologyCampSection(
@@ -751,9 +816,16 @@ private enum KnowledgeSection: String {
     }
 }
 
-private enum LearningRoute: Hashable {
+private enum LearningRoute: Hashable, Identifiable {
     case topic(LearningTopic, String?, Int?, Int?)
     case videoLesson(LearningVideoLesson)
+
+    var id: String {
+        switch self {
+        case let .topic(topic, _, _, _): "topic-\(topic.id)"
+        case let .videoLesson(lesson): "video-\(lesson.id)"
+        }
+    }
 }
 
 private enum KnowledgePagePalette {
@@ -781,7 +853,12 @@ enum IdeologyCamp: String, CaseIterable, Identifiable {
     case rebel = "反贼"
 
     var id: Self { self }
-    var title: String { rawValue }
+    var title: String {
+        switch self {
+        case .loyalist: "正方"
+        case .rebel: "反方"
+        }
+    }
 
     var color: Color {
         switch self {
@@ -806,7 +883,13 @@ private enum IdeologyCampFilter: String, CaseIterable, Identifiable {
     case rebel = "反贼"
 
     var id: Self { self }
-    var title: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .loyalist: "正方"
+        case .rebel: "反方"
+        }
+    }
 }
 
 private struct LearningMilestone: Identifiable {
@@ -1008,7 +1091,7 @@ private struct LearningVideoLessonDetailView: View {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
@@ -1020,7 +1103,7 @@ private struct LearningVideoLessonDetailView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回知识")
+            .accessibilityLabel("关闭视频详情")
             .padding(.leading, 14)
             .padding(.top, 6)
         }
@@ -2030,6 +2113,41 @@ private struct KnowledgeBookCover: View {
     }
 }
 
+private struct RecentKnowledgeBookCard: View {
+    let book: KnowledgeBook
+    let paletteIndex: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            KnowledgeBookCover(book: book, paletteIndex: paletteIndex, compact: true)
+                .frame(width: 104, height: 146)
+                .shadow(color: .black.opacity(0.14), radius: 7, x: 0, y: 5)
+
+            Text(book.title)
+                .font(.system(size: 14, weight: .semibold, design: .serif))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .frame(height: 38, alignment: .top)
+                .padding(.top, 10)
+
+            Text(book.author)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.top, 4)
+
+            Text(book.isFinished ? "已读完" : "阅读中")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(book.isFinished ? Color.secondary : KnowledgePagePalette.accent)
+                .padding(.top, 7)
+        }
+        .frame(width: 104, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.isFinished ? "已读完" : "阅读中")")
+        .accessibilityHint("在微信读书打开")
+    }
+}
+
 private struct LearningTopicRow: View {
     let topic: LearningTopic
 
@@ -2155,6 +2273,39 @@ private struct InvestmentContentLoadingView: View {
         .padding(.horizontal, 20)
         .foregroundStyle(Color.secondary.opacity(0.16))
         .redacted(reason: .placeholder)
+    }
+}
+
+private struct IdeologyContentLoadingView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(0..<2, id: \.self) { _ in
+                HStack(spacing: 8) {
+                    Circle().frame(width: 8, height: 8)
+                    RoundedRectangle(cornerRadius: 5).frame(width: 58, height: 18)
+                    RoundedRectangle(cornerRadius: 4).frame(width: 18, height: 14)
+                }
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
+                    spacing: 14
+                ) {
+                    ForEach(0..<8, id: \.self) { _ in
+                        VStack(spacing: 7) {
+                            Circle().frame(width: 62, height: 62)
+                            RoundedRectangle(cornerRadius: 4).frame(width: 48, height: 13)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 6)
+        .foregroundStyle(Color.secondary.opacity(0.14))
+        .redacted(reason: .placeholder)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在载入人物")
     }
 }
 

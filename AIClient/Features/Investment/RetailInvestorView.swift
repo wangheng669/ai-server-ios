@@ -18,6 +18,11 @@ struct RetailInvestorView: View {
         self.store = store
         self.marketStore = marketStore
         _showsDetail = showsDetail
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
+            _selectedMarket = State(initialValue: .korea)
+        }
+        #endif
     }
 
     @MainActor
@@ -34,21 +39,25 @@ struct RetailInvestorView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     marketPicker
-                    if let message = store.errorMessage {
+                    if let message = selectedMarket == .korea ? store.koreaLeverageErrorMessage : store.errorMessage {
                         errorBanner(message)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                     }
-                    marketSignalStrip
-                    sectionGap
-                    marketTemperatureCard
-                    if selectedMarket == .china {
+                    if selectedMarket == .korea {
+                        koreaLeverageContent
+                    } else {
+                        marketSignalStrip
                         sectionGap
-                        sectorHighlights
+                        marketTemperatureCard
+                        if selectedMarket == .china {
+                            sectionGap
+                            sectorHighlights
+                        }
+                        sectionGap
+                        investorMoodCard
+                        methodologyNote
                     }
-                    sectionGap
-                    investorMoodCard
-                    methodologyNote
                 }
                 .padding(.bottom, 36)
             }
@@ -70,6 +79,29 @@ struct RetailInvestorView: View {
         }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
+    }
+
+    @ViewBuilder
+    private var koreaLeverageContent: some View {
+        if let snapshot = store.koreaLeverage {
+            KoreaLeverageOverview(snapshot: snapshot)
+        } else if store.isLoadingKoreaLeverage {
+            VStack(spacing: 12) {
+                ProgressView()
+                Text("正在读取韩国散户杠杆数据")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 80)
+        } else {
+            ContentUnavailableView(
+                "暂无韩国杠杆数据",
+                systemImage: "chart.line.downtrend.xyaxis",
+                description: Text("服务器完成首次同步后会自动显示")
+            )
+            .padding(.vertical, 46)
+        }
     }
 
     private var marketTemperatureCard: some View {
@@ -938,6 +970,9 @@ final class RetailSentimentStore {
     private(set) var hongKongCharts: [MarketChart] = []
     private(set) var unitedStatesValuationHistory: MarketUSValuationHistory?
     private(set) var unitedStatesCharts: [MarketChart] = []
+    private(set) var koreaLeverage: MarketKoreaLeverage?
+    private(set) var isLoadingKoreaLeverage = false
+    private(set) var koreaLeverageErrorMessage: String?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private let service: MarketService
@@ -1011,6 +1046,8 @@ final class RetailSentimentStore {
                 fetchedAt: dashboard?.generatedAt,
                 detail: "与 A 股采用相同公式：标普 500 当前市盈率的历史百分位，与核心成分上涨家数占比的近一年历史百分位等权合成。"
             )
+        case .korea:
+            return nil
         }
     }
 
@@ -1020,6 +1057,7 @@ final class RetailSentimentStore {
         case .hongKong: items = hongKongConstituents?.items ?? []
         case .unitedStates: items = unitedStatesConstituents?.items ?? []
         case .china: items = []
+        case .korea: items = []
         }
         var up = 0, down = 0, flat = 0
         for item in items {
@@ -1128,9 +1166,24 @@ final class RetailSentimentStore {
             await loadHongKongDetails()
         case .unitedStates:
             await loadUnitedStatesDetails()
+        case .korea:
+            await loadKoreaLeverage(force: force)
         }
         guard !Task.isCancelled else { return }
         loadedMarkets.insert(market)
+    }
+
+    private func loadKoreaLeverage(force: Bool) async {
+        isLoadingKoreaLeverage = true
+        defer { isLoadingKoreaLeverage = false }
+        do {
+            koreaLeverage = try await service.koreaLeverage(refresh: force)
+            koreaLeverageErrorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            koreaLeverageErrorMessage = error.localizedDescription
+        }
     }
 
     private func loadHongKongDetails() async {
@@ -1211,6 +1264,7 @@ enum SentimentMarket: String, CaseIterable, Identifiable {
     case china
     case hongKong
     case unitedStates
+    case korea
 
     var id: Self { self }
     var title: String {
@@ -1218,6 +1272,7 @@ enum SentimentMarket: String, CaseIterable, Identifiable {
         case .china: "A 股"
         case .hongKong: "港股"
         case .unitedStates: "美股"
+        case .korea: "韩股"
         }
     }
     var methodology: String {
@@ -1225,6 +1280,7 @@ enum SentimentMarket: String, CaseIterable, Identifiable {
         case .china: "估值与情绪各占 50%"
         case .hongKong: "估值与情绪各占 50%"
         case .unitedStates: "估值与情绪各占 50%"
+        case .korea: "散户杠杆风险"
         }
     }
     var detail: String {
@@ -1232,7 +1288,176 @@ enum SentimentMarket: String, CaseIterable, Identifiable {
         case .china: "结合估值与市场广度的历史百分位。"
         case .hongKong: "恒指估值与核心成分情绪各占 50%。"
         case .unitedStates: "标普估值与核心成分情绪各占 50%。"
+        case .korea: "融资、杠杆 ETF 与投资者存管金共同衡量散户杠杆压力。"
         }
+    }
+}
+
+private struct KoreaLeverageOverview: View {
+    let snapshot: MarketKoreaLeverage
+
+    private var alertColor: Color {
+        switch snapshot.alert.level {
+        case "critical": InvestmentDesign.gain
+        case "warning": InvestmentDesign.warning
+        default: InvestmentDesign.loss
+        }
+    }
+
+    private var alertTitle: String {
+        switch snapshot.alert.level {
+        case "critical": "杠杆高危"
+        case "warning": "杠杆偏高"
+        default: "杠杆正常"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("韩国散户杠杆")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("数据截至 \(formattedAsOf)")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(alertTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(alertColor)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(alertColor.opacity(0.1), in: Capsule())
+                }
+
+                HStack(alignment: .lastTextBaseline, spacing: 5) {
+                    Text(snapshot.leverageThermometer.value, format: .number.precision(.fractionLength(1)))
+                        .font(.system(size: 42, weight: .semibold, design: .rounded))
+                        .foregroundStyle(alertColor)
+                        .tracking(-1.2)
+                    Text("%")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(alertColor)
+                    Spacer()
+                    Text("预警 > \(snapshot.alert.thresholds.warning, format: .number.precision(.fractionLength(0)))%\n高危 > \(snapshot.alert.thresholds.critical, format: .number.precision(.fractionLength(0)))%")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                KoreaLeverageScale(
+                    value: snapshot.leverageThermometer.value,
+                    warning: snapshot.alert.thresholds.warning,
+                    critical: snapshot.alert.thresholds.critical,
+                    tint: alertColor
+                )
+
+                Text(snapshot.alert.message)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            .background(InvestmentDesign.surface)
+
+            InvestmentDesign.canvas.frame(height: InvestmentDesign.sectionSpacing)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("杠杆压力")
+                    .font(.system(size: 16, weight: .semibold))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
+                HStack(spacing: 0) {
+                    metric(
+                        "强平金额 5日均",
+                        value: "\(String(format: "%.0f", snapshot.forcedLiquidation.fiveDayAverageBillionKRW)) 亿韩元",
+                        detail: "10年 \(String(format: "%.0f", snapshot.forcedLiquidation.percentile10Y))% 分位"
+                    )
+                    divider
+                    metric(
+                        "R2 融资/存管金",
+                        value: "\(String(format: "%.2f", snapshot.r2FinancingRatio.value))%",
+                        detail: "10年 \(String(format: "%.1f", snapshot.r2FinancingRatio.percentile10Y))% 分位"
+                    )
+                }
+                .padding(.bottom, 16)
+                Divider().overlay(InvestmentDesign.divider)
+                HStack(spacing: 0) {
+                    metric("KOSPI", value: snapshot.indices.kospi.formatted(.number.precision(.fractionLength(0...2))), detail: "韩国综合指数")
+                    divider
+                    metric("数据新鲜度", value: snapshot.freshness.staleDays == 0 ? "当日" : "\(snapshot.freshness.staleDays) 天前", detail: "每日 14:25 同步")
+                }
+                .padding(.vertical, 16)
+            }
+            .background(InvestmentDesign.surface)
+
+            InvestmentDesign.canvas.frame(height: InvestmentDesign.sectionSpacing)
+
+            VStack(alignment: .leading, spacing: 9) {
+                Label("数据口径", systemImage: "checkmark.shield.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("杠杆温度计 =（融资余额 + 杠杆 ETF 累计净申赎）/ 投资者存管金。数据由服务器保存，客户端不直接请求第三方。")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(snapshot.source.name)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .background(InvestmentDesign.surface)
+        }
+    }
+
+    private var divider: some View {
+        Rectangle().fill(InvestmentDesign.divider).frame(width: 0.5, height: 52)
+    }
+
+    private func metric(_ title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit()
+            Text(detail).font(.system(size: 10.5)).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+    }
+
+    private var formattedAsOf: String {
+        guard snapshot.asOf.count == 8 else { return snapshot.asOf }
+        return "\(snapshot.asOf.prefix(4))-\(snapshot.asOf.dropFirst(4).prefix(2))-\(snapshot.asOf.suffix(2))"
+    }
+}
+
+private struct KoreaLeverageScale: View {
+    let value: Double
+    let warning: Double
+    let critical: Double
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.13))
+                Capsule()
+                    .fill(tint.opacity(0.86))
+                    .frame(width: proxy.size.width * min(max(value / 60, 0), 1))
+                marker(at: warning, width: proxy.size.width)
+                marker(at: critical, width: proxy.size.width)
+            }
+        }
+        .frame(height: 8)
+        .accessibilityLabel("杠杆温度计 \(value, format: .number.precision(.fractionLength(1)))%")
+    }
+
+    private func marker(at value: Double, width: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.36))
+            .frame(width: 1, height: 12)
+            .offset(x: width * min(max(value / 60, 0), 1))
     }
 }
 

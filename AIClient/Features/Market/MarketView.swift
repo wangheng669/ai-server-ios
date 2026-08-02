@@ -149,7 +149,6 @@ private struct MarketHomeView: View {
             }
             .background(MarketTerminalPalette.header.ignoresSafeArea())
             .scrollIndicators(.hidden)
-            .safeAreaPadding(.bottom, 112)
             .refreshable { await store.refresh() }
             .onChange(of: selectedMarket) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -282,8 +281,7 @@ private struct MarketTerminalHero: View {
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
     private var overnightQuote: MarketQuote? {
         guard region == .unitedStates, quote?.marketSession != "regular",
-              let session = store.dashboard?.indexSessions?[region.primarySymbol],
-              session.marketSession == "regular" else { return nil }
+              let session = marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol]) else { return nil }
         return session
     }
     private var displayedQuote: MarketQuote? { overnightQuote ?? quote }
@@ -330,14 +328,15 @@ private struct MarketTerminalHero: View {
                                 .tracking(-0.8)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.78)
-                            Text(displayedQuote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情")
-                                .font(.system(size: 16, weight: .semibold))
+                            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
+                                .font(.system(size: 15, weight: .semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(quoteTint(displayedQuote))
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.68)
+                                .minimumScaleFactor(0.6)
+                                .allowsTightening(true)
                         }
-                        .frame(width: 142, alignment: .leading)
+                        .frame(width: 154, alignment: .leading)
 
                         TerminalLeadChart(
                             quote: displayedQuote,
@@ -448,6 +447,10 @@ private struct MarketTerminalHero: View {
     }
 
     private var heroDate: String {
+        if let tradingDate = quote?.quality?.tradingDate,
+           let date = DateFormatter.marketTradingDate.date(from: tradingDate) {
+            return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
+        }
         let date = quote?.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
         return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
     }
@@ -793,11 +796,11 @@ private struct MarketIndexTable: View {
                     Button { onSelectIndex(quote.symbol) } label: {
                          MarketIndexTableRow(
                              quote: quote,
-                             overnightQuote: region == .unitedStates && quote.marketSession != "regular"
-                                 ? store.dashboard?.indexSessions?[quote.symbol]
+                            overnightQuote: region == .unitedStates && quote.marketSession != "regular"
+                                 ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol])
                                  : nil,
-                             trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
-                                 ? store.dashboard?.indexSessions?[quote.symbol] ?? quote
+                            trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
+                                 ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
                                  : quote)
                          )
                     }
@@ -1268,7 +1271,7 @@ private struct MarketIndexTableRow: View {
                 Text(displayedPercent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
-                Text(signed(displayedChange, digits: cryptoChangeDigits(overnightQuote ?? quote)))
+                Text(displayedChangeText)
                     .font(.caption2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -1313,7 +1316,13 @@ private struct MarketIndexTableRow: View {
     }
 
     private var displayedPercent: String {
-        String(format: "%@%.2f%%", displayedPercentValue >= 0 ? "+" : "−", abs(displayedPercentValue))
+        if (overnightQuote ?? quote).hasSuspiciousIndexMove { return "待核验" }
+        return String(format: "%@%.2f%%", displayedPercentValue >= 0 ? "+" : "−", abs(displayedPercentValue))
+    }
+
+    private var displayedChangeText: String {
+        guard !(overnightQuote ?? quote).hasSuspiciousIndexMove else { return "—" }
+        return signed(displayedChange, digits: cryptoChangeDigits(overnightQuote ?? quote))
     }
 
     private var displayedChange: Double {
@@ -3238,6 +3247,21 @@ private func companyMarketLabel(_ symbol: String) -> String {
 }
 private func number(_ value: Double, digits: Int) -> String { value.formatted(.number.grouping(.automatic).precision(.fractionLength(digits))) }
 private func signed(_ value: Double, digits: Int) -> String { (value >= 0 ? "+" : "−") + number(abs(value), digits: digits) }
+private func marketHeroChangeText(_ quote: MarketQuote) -> String {
+    guard !quote.hasSuspiciousIndexMove else { return "异常波动待核验" }
+    return "\(signed(quote.changeValue, digits: cryptoChangeDigits(quote)))  \(quote.formattedPercent)"
+}
+
+private extension DateFormatter {
+    static let marketTradingDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+}
 private func compactNumber(_ value: Double) -> String { value.formatted(.number.notation(.compactName).precision(.fractionLength(1))) }
 
 func marketFinancialAmount(_ value: Double, currency: String) -> String {
