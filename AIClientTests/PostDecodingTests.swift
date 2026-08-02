@@ -399,6 +399,18 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.meta?.quotedTweet?.media?.first?.displayURL?.absoluteString, "https://example.com/t.jpg")
     }
 
+    func testDecodesXReplyAndQuotedVideoContext() throws {
+        let data = #"{"post":{"id":1,"source":"x","meta":{"in_reply_to_screen_name":"openai","in_reply_to_status_id":"42","quoted_tweet":{"id":"99","text":"Demo","author":{"name":"Example","screenName":"example"},"media":[{"type":"video","url":"https://example.com/demo.mp4","thumbnail_url":"https://example.com/demo.jpg","width":1920,"height":1080}]}}}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
+
+        XCTAssertEqual(post.meta?.inReplyToScreenName, "openai")
+        XCTAssertEqual(post.meta?.inReplyToStatusID, "42")
+        let media = try XCTUnwrap(post.meta?.quotedTweet?.media?.first)
+        XCTAssertTrue(media.isVideo)
+        XCTAssertEqual(media.playbackURL?.absoluteString, "https://example.com/demo.mp4")
+        XCTAssertEqual(media.previewURL?.absoluteString, "https://example.com/demo.jpg")
+    }
+
     func testXDetailUsesStoredLongTextAndFormatsBullets() throws {
         let data = #"{"id":7,"source":"x","content":"short…","post_link":"https://x.com/example/status/123","meta":{"raw_text":"价格调整： *第一项 *第二项","note_text":"第一段\n\n价格调整： *第一项 *第二项"}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: data)

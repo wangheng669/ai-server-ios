@@ -1003,6 +1003,8 @@ struct PostMeta: Decodable, Hashable {
     let urls: [String]?
     let rawText: String?
     let noteText: String?
+    let inReplyToScreenName: String?
+    let inReplyToStatusID: String?
     let quotedTweet: XQuotedPost?
     let photoCredit: String?
     let zhihuRank: Int?
@@ -1028,6 +1030,8 @@ struct PostMeta: Decodable, Hashable {
         case metrics, lang, urls
         case rawText = "raw_text"
         case noteText = "note_text"
+        case inReplyToScreenName = "in_reply_to_screen_name"
+        case inReplyToStatusID = "in_reply_to_status_id"
         case quotedTweet = "quoted_tweet"
         case photoCredit = "photo_credit"
         case zhihuRank = "zhihu_rank"
@@ -1056,6 +1060,7 @@ struct PostMeta: Decodable, Hashable {
     ) -> PostMeta {
         PostMeta(
             metrics: nil, lang: nil, urls: nil, rawText: nil, noteText: nil,
+            inReplyToScreenName: nil, inReplyToStatusID: nil,
             quotedTweet: nil, photoCredit: nil,
             zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
             zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
@@ -1119,6 +1124,11 @@ struct XQuotedMedia: Decodable, Hashable {
     }
 
     var displayURL: URL? { (thumbnailURL ?? url).flatMap(MediaURL.image) }
+    var isVideo: Bool {
+        ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
+    }
+    var playbackURL: URL? { isVideo ? url.flatMap(MediaURL.video) : nil }
+    var previewURL: URL? { thumbnailURL.flatMap(MediaURL.image) }
 }
 
 private func xNonempty(_ value: String?) -> String? {
