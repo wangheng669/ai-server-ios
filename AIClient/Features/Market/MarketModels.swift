@@ -45,13 +45,13 @@ struct MarketDashboard: Codable {
         definitionVersion = try values.decodeIfPresent(String.self, forKey: .definitionVersion)
         generatedAt = try values.decode(String.self, forKey: .generatedAt)
         refreshIntervalMs = try values.decode(Int.self, forKey: .refreshIntervalMs)
-        coreIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .coreIndices) ?? []
-        referenceIndices = try values.decodeIfPresent([MarketQuote].self, forKey: .referenceIndices) ?? []
+        coreIndices = try values.decodeLossyQuotes(forKey: .coreIndices)
+        referenceIndices = try values.decodeLossyQuotes(forKey: .referenceIndices)
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
-        metrics = try values.decodeIfPresent([MarketQuote].self, forKey: .metrics) ?? []
-        components = try values.decodeIfPresent([MarketQuote].self, forKey: .components) ?? []
-        crypto = try values.decodeIfPresent([MarketQuote].self, forKey: .crypto) ?? []
-        indexSessions = try values.decodeIfPresent([String: MarketQuote].self, forKey: .indexSessions)
+        metrics = try values.decodeLossyQuotes(forKey: .metrics)
+        components = try values.decodeLossyQuotes(forKey: .components)
+        crypto = try values.decodeLossyQuotes(forKey: .crypto)
+        indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
         freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
         missingSymbols = try values.decodeIfPresent([String].self, forKey: .missingSymbols) ?? []
@@ -94,6 +94,25 @@ struct MarketDashboard: Codable {
             next.nightTrend = marketAppendingLiveValue(next.sessionPrice ?? next.price, to: quotes[index].nightTrend)
         }
         quotes[index] = next
+    }
+}
+
+private struct LossyMarketQuote: Decodable {
+    let value: MarketQuote?
+
+    init(from decoder: Decoder) throws {
+        value = try? MarketQuote(from: decoder)
+    }
+}
+
+private extension KeyedDecodingContainer where Key == MarketDashboard.CodingKeys {
+    func decodeLossyQuotes(forKey key: Key) throws -> [MarketQuote] {
+        try decodeIfPresent([LossyMarketQuote].self, forKey: key)?.compactMap(\.value) ?? []
+    }
+
+    func decodeLossyQuoteDictionary(forKey key: Key) throws -> [String: MarketQuote]? {
+        try decodeIfPresent([String: LossyMarketQuote].self, forKey: key)?
+            .compactMapValues(\.value)
     }
 }
 
@@ -680,6 +699,76 @@ struct MarketSentiment: Codable {
 struct MarketAShareTemperatureResponse: Decodable {
     let success: Bool
     let data: MarketAShareTemperature
+}
+
+struct MarketKoreaLeverageResponse: Decodable {
+    let success: Bool
+    let data: MarketKoreaLeverage
+}
+
+struct MarketKoreaLeverage: Decodable {
+    let dataContract: String
+    let asOf: String
+    let generatedAt: String
+    let fetchedAt: String
+    let leverageThermometer: MarketKoreaLeverageThermometer
+    let r2FinancingRatio: MarketKoreaFinancingRatio
+    let forcedLiquidation: MarketKoreaForcedLiquidation
+    let indices: MarketKoreaIndices
+    let alert: MarketKoreaLeverageAlert
+    let freshness: MarketKoreaLeverageFreshness
+    let source: MarketKoreaLeverageSource
+    let disclaimer: String
+}
+
+struct MarketKoreaLeverageThermometer: Decodable {
+    let value: Double
+    let weighted: Double
+    let unit: String
+    let anchor: String
+    let note: String
+}
+
+struct MarketKoreaFinancingRatio: Decodable {
+    let value: Double
+    let percentile10Y: Double
+    let unit: String
+    let note: String
+}
+
+struct MarketKoreaForcedLiquidation: Decodable {
+    let unsettledBillionKRW: Double
+    let fiveDayAverageBillionKRW: Double
+    let percentile10Y: Double
+}
+
+struct MarketKoreaIndices: Decodable {
+    let kospi: Double
+    let spx: Double
+}
+
+struct MarketKoreaLeverageAlert: Decodable {
+    let level: String
+    let value: Double
+    let message: String
+    let thresholds: MarketKoreaLeverageThresholds
+}
+
+struct MarketKoreaLeverageThresholds: Decodable {
+    let warning: Double
+    let critical: Double
+}
+
+struct MarketKoreaLeverageFreshness: Decodable {
+    let staleDays: Int
+    let dailyFullRefreshBeijing: String
+    let recommendedPoll: String
+}
+
+struct MarketKoreaLeverageSource: Decodable {
+    let name: String
+    let url: String
+    let docs: String
 }
 
 struct MarketAShareTemperature: Decodable {
