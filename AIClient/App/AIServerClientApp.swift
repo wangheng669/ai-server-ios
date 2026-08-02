@@ -783,13 +783,20 @@ private struct TodayWorldGroupedPostRow: View {
             if let quote = post.meta?.quotedTweet {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 5) {
-                        Image(systemName: "quote.bubble")
+                        AvatarView(
+                            url: quote.author?.profileImageURL.flatMap(MediaURL.image),
+                            name: quote.author?.name ?? "引用",
+                            size: 22
+                        )
                         Text(quote.author?.name ?? "引用动态")
                             .fontWeight(.semibold)
                         if let handle = quote.author?.handle {
                             Text(handle)
                                 .foregroundStyle(.secondary)
                         }
+                        Spacer(minLength: 0)
+                        Image(systemName: "quote.bubble")
+                            .foregroundStyle(.secondary)
                     }
                     .font(.system(size: 12.5))
                     .lineLimit(1)
