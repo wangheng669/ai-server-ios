@@ -210,6 +210,13 @@ struct MarketDashboardFreshness: Codable {
     let sessions: [String]
 }
 
+struct MarketQuoteQuality: Codable, Hashable {
+    let status: String?
+    let reason: String?
+    let tradingDate: String?
+    let fallbackUsed: Bool?
+}
+
 struct MarketQuote: Codable, Identifiable, Hashable {
     var id: String { symbol }
     let symbol: String
@@ -238,6 +245,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let sessionDataSource: String?
     let changePercent: String?
     let timestamp: Int64?
+    let quality: MarketQuoteQuality?
     var trend: [Double]
     var nightTrend: [Double]
     let stale: Bool?
@@ -250,7 +258,8 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     }
 
     var formattedPercent: String {
-        String(format: "%@%.2f%%", percentValue >= 0 ? "+" : "−", abs(percentValue))
+        if hasSuspiciousIndexMove { return "待核验" }
+        return String(format: "%@%.2f%%", percentValue >= 0 ? "+" : "−", abs(percentValue))
     }
 
     var changeValue: Double {
@@ -279,7 +288,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode
         case price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
         case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
-        case changePercent, timestamp, trend, nightTrend, stale
+        case changePercent, timestamp, quality, trend, nightTrend, stale
     }
 
     init(
@@ -311,7 +320,8 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         timestamp: Int64?,
         trend: [Double],
         nightTrend: [Double],
-        stale: Bool?
+        stale: Bool?,
+        quality: MarketQuoteQuality? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -339,6 +349,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.sessionDataSource = sessionDataSource
         self.changePercent = changePercent
         self.timestamp = timestamp
+        self.quality = quality
         self.trend = trend
         self.nightTrend = nightTrend
         self.stale = stale
@@ -372,6 +383,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         sessionDataSource = try values.decodeIfPresent(String.self, forKey: .sessionDataSource)
         changePercent = try values.decodeIfPresent(String.self, forKey: .changePercent)
         timestamp = try values.decodeIfPresent(Int64.self, forKey: .timestamp)
+        quality = try values.decodeIfPresent(MarketQuoteQuality.self, forKey: .quality)
         trend = try values.decodeIfPresent([Double].self, forKey: .trend) ?? []
         nightTrend = try values.decodeIfPresent([Double].self, forKey: .nightTrend) ?? []
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale)
@@ -1049,6 +1061,11 @@ func marketAppendingLiveValue(_ value: Double, to values: [Double], limit: Int =
 }
 
 extension MarketQuote {
+    var hasSuspiciousIndexMove: Bool {
+        let guardedSymbols: Set<String> = ["^GSPC", "^NDX", "^DJI", "^N225", "^KS11", "^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]
+        return guardedSymbols.contains(symbol.uppercased()) && abs(percentValue) >= 15
+    }
+
     var presentationName: String {
         displayName ?? name
     }
@@ -1087,6 +1104,16 @@ extension MarketQuote {
         case "^TNX": "US10Y"
         default: symbol
         }
+    }
+}
+
+func marketActiveIndexSession(_ quote: MarketQuote?) -> MarketQuote? {
+    guard let quote else { return nil }
+    switch quote.marketSession?.lowercased() {
+    case "regular", "pre", "premarket", "post", "after", "overnight":
+        return quote
+    default:
+        return nil
     }
 }
 
