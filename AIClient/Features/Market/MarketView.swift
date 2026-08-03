@@ -2210,12 +2210,6 @@ private struct MarketIndexDetailView: View {
                 _ = await (logo, companyFinancials)
             }
         }
-        .refreshable {
-            await store.refresh(force: false)
-            if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol, force: true) }
-            if showsCompanyProfile { await store.loadCompanyFinancials(symbol: symbol, force: true) }
-            await store.loadChart(symbol: historicalSymbol, range: selectedRange, force: true)
-        }
     }
 
     private var oneHandDismissGesture: some Gesture {
