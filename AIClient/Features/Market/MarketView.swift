@@ -841,7 +841,9 @@ private struct MarketIndexTable: View {
                                  : nil,
                             trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
                                  ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
-                                 : quote)
+                                 : quote),
+                            companyLogoPath: store.companyLogoPaths[quote.symbol],
+                            showsCompanyLogo: true
                          )
                     }
                     .buttonStyle(MarketPressStyle())
@@ -881,7 +883,7 @@ private struct MarketIndexTable: View {
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             await withTaskGroup(of: Void.self) { group in
-                for quote in coreStocks {
+                for quote in quotes + coreStocks {
                     group.addTask {
                         await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
                     }
@@ -891,7 +893,7 @@ private struct MarketIndexTable: View {
     }
 
     private var componentLogoRequestID: String {
-        "\(region.dashboardID):\(coreStocks.map(\.symbol).joined(separator: ","))"
+        "\(region.dashboardID):\((quotes + coreStocks).map(\.symbol).joined(separator: ","))"
     }
 }
 
@@ -2295,10 +2297,11 @@ private struct MarketIndexDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .task(id: historicalSymbol) {
             if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol) }
-            if showsCompanyProfile, let quote {
-                async let logo: Void = store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
-                async let companyFinancials: Void = store.loadCompanyFinancials(symbol: quote.symbol)
-                _ = await (logo, companyFinancials)
+            if let quote {
+                await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                if showsCompanyProfile {
+                    await store.loadCompanyFinancials(symbol: quote.symbol)
+                }
             }
         }
     }
@@ -2350,7 +2353,7 @@ private struct MarketIndexDetailView: View {
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                if let quote, showsCompanyProfile {
+                if let quote {
                     CompanyLogo(quote: quote, path: companyLogoPath)
                 } else {
                     Image(systemName: CoreDescriptor(symbol: symbol).icon)
