@@ -345,6 +345,12 @@ struct WikipediaReaderView: View {
                         .tracking(0.8)
                         .foregroundStyle(.primary.opacity(0.72))
                     Spacer()
+                    if !browser.isOriginalMode, browser.pageCount > 1 {
+                        Text(String(format: "%02d / %02d", browser.pageIndex + 1, browser.pageCount))
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.trailing, 8)
+                    }
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 16, weight: .medium))
@@ -373,10 +379,10 @@ struct WikipediaReaderView: View {
 
     private var readerToolbar: some View {
         HStack(spacing: 0) {
-            readerToolbarButton("返回", systemImage: "chevron.left") {
-                browser.goBack()
+            readerToolbarButton("上一页", systemImage: "chevron.left") {
+                browser.goToPreviousPage()
             }
-            .disabled(!browser.canGoBack)
+            .disabled(!browser.canGoToPreviousPage)
 
             Divider().frame(height: 24)
 
@@ -387,7 +393,16 @@ struct WikipediaReaderView: View {
 
             Divider().frame(height: 24)
 
-            readerToolbarButton("原站打开", systemImage: "arrow.up.right.square") {
+            readerToolbarButton(
+                browser.isOriginalMode ? "幻灯片" : "原文",
+                systemImage: browser.isOriginalMode ? "rectangle.on.rectangle" : "doc.text"
+            ) {
+                browser.toggleOriginalMode()
+            }
+
+            Divider().frame(height: 24)
+
+            readerToolbarButton("原站", systemImage: "arrow.up.right.square") {
                 openURL(browser.currentURL ?? entity.url)
             }
         }
@@ -413,7 +428,9 @@ struct WikipediaReaderView: View {
     }
 
     private var displayedProgress: Double {
-        browser.isLoading ? browser.progress : max(0.02, browser.scrollProgress)
+        if browser.isLoading { return browser.progress }
+        if browser.isOriginalMode { return max(0.02, browser.scrollProgress) }
+        return min(1, max(0.02, Double(browser.pageIndex + 1) / Double(max(1, browser.pageCount))))
     }
 
     private var archivePaper: Color {
@@ -435,6 +452,9 @@ final class WikipediaBrowserModel: ObservableObject {
     @Published var canGoBack = false
     @Published var currentTitle: String?
     @Published var currentURL: URL?
+    @Published var pageIndex = 0
+    @Published var pageCount = 1
+    @Published var isOriginalMode = false
     fileprivate weak var webView: WKWebView?
 
     func attach(_ webView: WKWebView) {
@@ -452,8 +472,30 @@ final class WikipediaBrowserModel: ObservableObject {
 
     func goBack() { webView?.goBack() }
 
+    var canGoToPreviousPage: Bool {
+        isOriginalMode ? canGoBack : (pageIndex > 0 || canGoBack)
+    }
+
+    func goToPreviousPage() {
+        if pageIndex > 0 && !isOriginalMode {
+            webView?.evaluateJavaScript("window.__aiserverDeckPrevious?.()")
+        } else if canGoBack {
+            webView?.goBack()
+        }
+    }
+
     func toggleTableOfContents() {
         webView?.evaluateJavaScript("window.__aiserverToggleTOC?.()")
+    }
+
+    func toggleOriginalMode() {
+        webView?.evaluateJavaScript("window.__aiserverToggleOriginal?.()")
+    }
+
+    func updateDeckState(pageIndex: Int, pageCount: Int, isOriginalMode: Bool) {
+        self.pageIndex = min(max(0, pageIndex), max(0, pageCount - 1))
+        self.pageCount = max(1, pageCount)
+        self.isOriginalMode = isOriginalMode
     }
 
     func updateScrollProgress(from scrollView: UIScrollView) {
@@ -791,6 +833,292 @@ enum WikipediaReaderStyle {
             font-size: 0.88rem;
             padding-left: 16px;
           }
+
+          body.aiserver-deck-mode {
+            height: 100vh !important;
+            overflow: hidden !important;
+          }
+
+          body.aiserver-deck-mode > :not(#aiserver-deck-root):not(#aiserver-deck-toc) {
+            display: none !important;
+          }
+
+          #aiserver-deck-root {
+            background: var(--aiserver-paper);
+            display: flex;
+            height: 100vh;
+            inset: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            position: fixed;
+            scroll-behavior: smooth;
+            scroll-snap-type: x mandatory;
+            scrollbar-width: none;
+            width: 100vw;
+            z-index: 2147483000;
+          }
+
+          #aiserver-deck-root::-webkit-scrollbar { display: none; }
+
+          #aiserver-deck-root.aiserver-hidden { display: none; }
+
+          .aiserver-deck-slide {
+            background: var(--aiserver-paper);
+            box-sizing: border-box;
+            flex: 0 0 100vw;
+            height: 100vh;
+            overflow: hidden;
+            padding: 25px 22px 112px;
+            position: relative;
+            scroll-snap-align: start;
+            scroll-snap-stop: always;
+            width: 100vw;
+          }
+
+          .aiserver-deck-slide::after {
+            bottom: 86px;
+            color: var(--aiserver-muted);
+            content: attr(data-page-label);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Mono", monospace;
+            font-size: 0.62rem;
+            letter-spacing: 0.08em;
+            position: absolute;
+            right: 22px;
+          }
+
+          .aiserver-deck-cover {
+            align-items: flex-end;
+            background: #181512;
+            color: #fff;
+            display: flex;
+            padding: 0 0 112px;
+          }
+
+          .aiserver-deck-cover-image {
+            height: 100%;
+            inset: 0;
+            object-fit: cover;
+            object-position: center top;
+            opacity: 0.72;
+            position: absolute;
+            width: 100%;
+          }
+
+          .aiserver-deck-cover-shade {
+            background: linear-gradient(180deg, rgba(10, 8, 6, 0.05) 22%, rgba(10, 8, 6, 0.94) 100%);
+            inset: 0;
+            position: absolute;
+          }
+
+          .aiserver-deck-cover-copy {
+            padding: 26px 24px;
+            position: relative;
+            width: 100%;
+            z-index: 1;
+          }
+
+          .aiserver-deck-kicker {
+            color: var(--aiserver-accent);
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            margin-bottom: 13px;
+            text-transform: uppercase;
+          }
+
+          .aiserver-deck-cover .aiserver-deck-kicker { color: #e3c1ad; }
+
+          .aiserver-deck-cover-title {
+            color: inherit;
+            font-family: "Songti SC", Georgia, serif;
+            font-size: clamp(2.65rem, 12vw, 4.4rem);
+            font-weight: 700;
+            letter-spacing: -0.035em;
+            line-height: 1.02;
+            margin: 0;
+          }
+
+          .aiserver-deck-cover-description {
+            color: rgba(255, 255, 255, 0.74);
+            font-size: 0.82rem;
+            line-height: 1.55;
+            margin: 16px 0 0;
+            max-width: 92%;
+          }
+
+          .aiserver-deck-section {
+            align-items: flex-end;
+            background: var(--aiserver-accent);
+            color: #fff8ed;
+            display: flex;
+            padding-bottom: 134px;
+          }
+
+          .aiserver-deck-section-number {
+            color: rgba(255, 248, 237, 0.62);
+            font-family: Georgia, serif;
+            font-size: 1rem;
+            left: 24px;
+            position: absolute;
+            top: 26px;
+          }
+
+          .aiserver-deck-section-title {
+            color: inherit;
+            font-family: "Songti SC", Georgia, serif;
+            font-size: clamp(3rem, 14vw, 5.1rem);
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            line-height: 1.05;
+            margin: 0;
+          }
+
+          .aiserver-deck-section-rule {
+            background: currentColor;
+            height: 2px;
+            margin: 20px 0 0;
+            opacity: 0.7;
+            width: 52px;
+          }
+
+          .aiserver-deck-content {
+            display: flex;
+            flex-direction: column;
+          }
+
+          .aiserver-deck-slide-title {
+            border-bottom: 1px solid var(--aiserver-rule);
+            color: var(--aiserver-accent);
+            font-family: "Songti SC", Georgia, serif;
+            font-size: 1.75rem;
+            font-weight: 700;
+            line-height: 1.2;
+            margin: 0 0 18px;
+            padding: 0 0 14px;
+          }
+
+          .aiserver-deck-body {
+            color: var(--aiserver-ink);
+            font-family: "Songti SC", Georgia, serif;
+            font-size: clamp(1rem, 4.5vw, 1.2rem);
+            line-height: 1.78;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding-right: 3px;
+          }
+
+          .aiserver-deck-body p { margin: 0 0 1em !important; }
+          .aiserver-deck-body p:last-child { margin-bottom: 0 !important; }
+          .aiserver-deck-body a { color: var(--aiserver-link) !important; }
+
+          .aiserver-deck-media {
+            display: flex;
+            flex-direction: column;
+          }
+
+          .aiserver-deck-media-frame {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            position: relative;
+          }
+
+          .aiserver-deck-media-frame img {
+            border-radius: 0 !important;
+            height: 100% !important;
+            object-fit: contain !important;
+            object-position: center top !important;
+            width: 100% !important;
+          }
+
+          .aiserver-deck-caption {
+            color: var(--aiserver-muted);
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+            font-size: 0.72rem;
+            line-height: 1.5;
+            padding: 10px 2px 0;
+          }
+
+          .aiserver-deck-data .aiserver-deck-body {
+            background: var(--aiserver-card);
+            border: 1px solid var(--aiserver-rule);
+            border-radius: 14px;
+            padding: 12px;
+          }
+
+          .aiserver-deck-data table,
+          .aiserver-deck-data .infobox {
+            background: transparent !important;
+            border: 0 !important;
+            display: table !important;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+          }
+
+          .aiserver-deck-data th,
+          .aiserver-deck-data td {
+            border-bottom: 1px solid var(--aiserver-rule) !important;
+            padding: 9px 7px !important;
+          }
+
+          #aiserver-deck-toc {
+            background: rgba(251, 247, 237, 0.98);
+            inset: 0;
+            overflow-y: auto;
+            padding: 26px 22px 110px;
+            position: fixed;
+            transform: translateY(0);
+            transition: opacity 180ms ease, transform 180ms ease, visibility 180ms;
+            z-index: 2147483647;
+          }
+
+          #aiserver-deck-toc.aiserver-hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(14px);
+            visibility: hidden;
+          }
+
+          .aiserver-deck-toc-top {
+            align-items: center;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+          }
+
+          .aiserver-deck-toc-heading {
+            color: var(--aiserver-accent);
+            font-family: "Songti SC", Georgia, serif;
+            font-size: 2rem;
+            font-weight: 700;
+          }
+
+          .aiserver-deck-toc-list button {
+            align-items: center;
+            appearance: none;
+            background: transparent;
+            border: 0;
+            border-bottom: 1px solid var(--aiserver-rule);
+            color: var(--aiserver-ink);
+            display: flex;
+            font-family: "Songti SC", Georgia, serif;
+            font-size: 1.05rem;
+            gap: 16px;
+            padding: 15px 0;
+            text-align: left;
+            width: 100%;
+          }
+
+          .aiserver-deck-toc-index {
+            color: var(--aiserver-accent);
+            font-family: Georgia, serif;
+            font-size: 0.82rem;
+            min-width: 30px;
+          }
         `;
 
         document.documentElement.appendChild(style);
@@ -840,11 +1168,298 @@ enum WikipediaReaderStyle {
         window.__aiserverToggleTOC = () => panel.classList.toggle("aiserver-hidden");
       };
 
+      const installDeck = () => {
+        if (!document.body || document.getElementById("aiserver-deck-root")) return;
+        const article = document.querySelector(".mw-parser-output");
+        const heading = document.getElementById("firstHeading");
+        if (!article || !heading) return;
+
+        const titleText = heading.textContent.trim();
+        const description = document.querySelector("meta[name='description']")?.content?.trim() || "";
+        const slides = [];
+        const sectionEntries = [];
+        let currentSection = "导言";
+        let currentSubsection = "";
+        let sectionNumber = 0;
+        let paragraphBuffer = [];
+        let paragraphLength = 0;
+
+        const textOf = (node) => (node?.textContent || "").replace(/\s+/g, " ").trim();
+        const cloneClean = (node) => {
+          const clone = node.cloneNode(true);
+          clone.querySelectorAll(".mw-editsection, style, script, .noprint, .navbox, .navbar, .metadata").forEach((item) => item.remove());
+          clone.querySelectorAll("[id]").forEach((item) => item.removeAttribute("id"));
+          return clone;
+        };
+        const makeSlide = (type, slideTitle) => {
+          const slide = document.createElement("section");
+          slide.className = `aiserver-deck-slide ${type}`;
+          if (slideTitle) slide.dataset.title = slideTitle;
+          slides.push(slide);
+          return slide;
+        };
+        const appendHeader = (slide, kicker, slideTitle) => {
+          const kickerNode = document.createElement("div");
+          kickerNode.className = "aiserver-deck-kicker";
+          kickerNode.textContent = kicker;
+          const titleNode = document.createElement("h2");
+          titleNode.className = "aiserver-deck-slide-title";
+          titleNode.textContent = slideTitle;
+          slide.append(kickerNode, titleNode);
+        };
+        const flushParagraphs = () => {
+          if (!paragraphBuffer.length) return;
+          const slide = makeSlide("aiserver-deck-content", currentSection);
+          appendHeader(slide, currentSubsection ? currentSection : "WIKIPEDIA · 中文", currentSubsection || currentSection);
+          const body = document.createElement("div");
+          body.className = "aiserver-deck-body";
+          paragraphBuffer.forEach((paragraph) => body.appendChild(cloneClean(paragraph)));
+          slide.appendChild(body);
+          paragraphBuffer = [];
+          paragraphLength = 0;
+        };
+        const addParagraph = (paragraph) => {
+          const length = textOf(paragraph).length;
+          if (!length) return;
+          if (paragraphBuffer.length && paragraphLength + length > 560) flushParagraphs();
+          paragraphBuffer.push(paragraph);
+          paragraphLength += length;
+          if (paragraphLength >= 560) flushParagraphs();
+        };
+        const firstUsefulImage = () => {
+          const candidates = Array.from(article.querySelectorAll(".infobox img, figure img, .thumb img, img.mw-file-element"));
+          return candidates.find((image) => {
+            const width = Number(image.getAttribute("width") || image.naturalWidth || 0);
+            const height = Number(image.getAttribute("height") || image.naturalHeight || 0);
+            return width >= 180 && height >= 160 && !/icon|logo|symbol|question_book/i.test(image.src);
+          }) || candidates[0];
+        };
+
+        const cover = makeSlide("aiserver-deck-cover", titleText);
+        const coverImage = firstUsefulImage();
+        if (coverImage) {
+          const image = coverImage.cloneNode(true);
+          image.className = "aiserver-deck-cover-image";
+          const largestSource = (coverImage.getAttribute("srcset") || "")
+            .split(",")
+            .map((candidate) => candidate.trim().split(/\s+/)[0])
+            .filter(Boolean)
+            .pop();
+          image.src = largestSource || coverImage.currentSrc || coverImage.src;
+          image.removeAttribute("srcset");
+          image.removeAttribute("width");
+          image.removeAttribute("height");
+          cover.appendChild(image);
+        }
+        const coverShade = document.createElement("div");
+        coverShade.className = "aiserver-deck-cover-shade";
+        const coverCopy = document.createElement("div");
+        coverCopy.className = "aiserver-deck-cover-copy";
+        const coverKicker = document.createElement("div");
+        coverKicker.className = "aiserver-deck-kicker";
+        coverKicker.textContent = "WIKIPEDIA · 中文";
+        const coverTitle = document.createElement("h1");
+        coverTitle.className = "aiserver-deck-cover-title";
+        coverTitle.textContent = titleText;
+        coverCopy.append(coverKicker, coverTitle);
+        if (description) {
+          const coverDescription = document.createElement("p");
+          coverDescription.className = "aiserver-deck-cover-description";
+          coverDescription.textContent = description;
+          coverCopy.appendChild(coverDescription);
+        }
+        cover.append(coverShade, coverCopy);
+        sectionEntries.push({ title: "封面", slideIndex: 0 });
+
+        const infobox = article.querySelector(":scope > .infobox, :scope > table.infobox");
+        if (infobox) {
+          const dataSlide = makeSlide("aiserver-deck-content aiserver-deck-data", "关键资料");
+          appendHeader(dataSlide, titleText, "关键资料");
+          const body = document.createElement("div");
+          body.className = "aiserver-deck-body";
+          body.appendChild(cloneClean(infobox));
+          dataSlide.appendChild(body);
+          sectionEntries.push({ title: "关键资料", slideIndex: slides.length - 1 });
+        }
+
+        const skipNode = (node) => {
+          if (!(node instanceof HTMLElement)) return true;
+          if (node === infobox || infobox?.contains(node)) return true;
+          return node.matches("style, script, .mw-empty-elt, .hatnote, .dablink, .shortdescription, .navbox, .vertical-navbox, .sistersitebox, .metadata, .noprint");
+        };
+        const addMediaSlide = (node) => {
+          const image = node.matches("img") ? node : node.querySelector("img");
+          if (!image || !image.src) return false;
+          const width = Number(image.getAttribute("width") || image.naturalWidth || 0);
+          const height = Number(image.getAttribute("height") || image.naturalHeight || 0);
+          if (width && height && width < 140 && height < 140) return false;
+          flushParagraphs();
+          const slide = makeSlide("aiserver-deck-media", currentSection);
+          appendHeader(slide, currentSection, currentSubsection || "图像资料");
+          const frame = document.createElement("div");
+          frame.className = "aiserver-deck-media-frame";
+          const clonedImage = image.cloneNode(true);
+          clonedImage.removeAttribute("width");
+          clonedImage.removeAttribute("height");
+          frame.appendChild(clonedImage);
+          const captionText = textOf(node.querySelector("figcaption, .thumbcaption"));
+          slide.appendChild(frame);
+          if (captionText) {
+            const caption = document.createElement("div");
+            caption.className = "aiserver-deck-caption";
+            caption.textContent = captionText;
+            slide.appendChild(caption);
+          }
+          return true;
+        };
+        const addStructuredSlide = (node, label) => {
+          flushParagraphs();
+          const slide = makeSlide("aiserver-deck-content aiserver-deck-data", currentSection);
+          appendHeader(slide, currentSection, currentSubsection || label);
+          const body = document.createElement("div");
+          body.className = "aiserver-deck-body";
+          body.appendChild(cloneClean(node));
+          slide.appendChild(body);
+        };
+
+        Array.from(article.children).forEach((node) => {
+          if (skipNode(node)) return;
+          const tagName = node.tagName;
+          const wrappedHeading = node.matches(".mw-heading2, .mw-heading3, .mw-heading4")
+            ? node.querySelector("h2, h3, h4")
+            : null;
+          const effectiveHeading = wrappedHeading || node;
+          const effectiveTagName = effectiveHeading.tagName;
+          if (effectiveTagName === "H2") {
+            flushParagraphs();
+            currentSection = textOf(effectiveHeading.querySelector(".mw-headline")) || textOf(effectiveHeading);
+            currentSubsection = "";
+            if (!currentSection || /^(参见|参考资料|参考文献|外部链接|注释|脚注)$/i.test(currentSection)) return;
+            sectionNumber += 1;
+            const divider = makeSlide("aiserver-deck-section", currentSection);
+            const number = document.createElement("div");
+            number.className = "aiserver-deck-section-number";
+            number.textContent = String(sectionNumber).padStart(2, "0");
+            const copy = document.createElement("div");
+            const sectionTitle = document.createElement("h2");
+            sectionTitle.className = "aiserver-deck-section-title";
+            sectionTitle.textContent = currentSection;
+            const rule = document.createElement("div");
+            rule.className = "aiserver-deck-section-rule";
+            copy.append(sectionTitle, rule);
+            divider.append(number, copy);
+            sectionEntries.push({ title: currentSection, slideIndex: slides.length - 1 });
+            return;
+          }
+          if (effectiveTagName === "H3" || effectiveTagName === "H4") {
+            flushParagraphs();
+            currentSubsection = textOf(effectiveHeading.querySelector(".mw-headline")) || textOf(effectiveHeading);
+            return;
+          }
+          if (tagName === "P") {
+            addParagraph(node);
+            return;
+          }
+          if (node.matches("figure, .thumb") && addMediaSlide(node)) return;
+          if (tagName === "UL" || tagName === "OL") {
+            addStructuredSlide(node, "条目资料");
+            return;
+          }
+          if (tagName === "TABLE") {
+            addStructuredSlide(node, "资料表");
+            return;
+          }
+          if (tagName === "BLOCKQUOTE" || tagName === "PRE" || node.matches(".poem, .quotebox")) {
+            addStructuredSlide(node, "引用资料");
+            return;
+          }
+          const directImages = node.querySelectorAll(":scope > img");
+          if (directImages.length && addMediaSlide(node)) return;
+          if (textOf(node).length > 20) addStructuredSlide(node, "补充资料");
+        });
+        flushParagraphs();
+
+        const root = document.createElement("main");
+        root.id = "aiserver-deck-root";
+        slides.forEach((slide, index) => {
+          slide.dataset.pageIndex = String(index);
+          slide.dataset.pageLabel = `${String(index + 1).padStart(2, "0")} / ${String(slides.length).padStart(2, "0")}`;
+          root.appendChild(slide);
+        });
+
+        const toc = document.createElement("aside");
+        toc.id = "aiserver-deck-toc";
+        toc.className = "aiserver-hidden";
+        const tocTop = document.createElement("div");
+        tocTop.className = "aiserver-deck-toc-top";
+        const tocHeading = document.createElement("div");
+        tocHeading.className = "aiserver-deck-toc-heading";
+        tocHeading.textContent = "目录";
+        const tocClose = document.createElement("button");
+        tocClose.className = "aiserver-toc-close";
+        tocClose.type = "button";
+        tocClose.textContent = "×";
+        tocClose.setAttribute("aria-label", "关闭目录");
+        tocTop.append(tocHeading, tocClose);
+        const tocList = document.createElement("div");
+        tocList.className = "aiserver-deck-toc-list";
+        sectionEntries.forEach((entry, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          const number = document.createElement("span");
+          number.className = "aiserver-deck-toc-index";
+          number.textContent = String(index + 1).padStart(2, "0");
+          const title = document.createElement("span");
+          title.textContent = entry.title;
+          button.append(number, title);
+          button.addEventListener("click", () => {
+            currentIndex = entry.slideIndex;
+            root.children[entry.slideIndex]?.scrollIntoView({ behavior: "smooth", inline: "start" });
+            toc.classList.add("aiserver-hidden");
+            postState();
+          });
+          tocList.appendChild(button);
+        });
+        toc.append(tocTop, tocList);
+        document.body.append(root, toc);
+        document.body.classList.add("aiserver-deck-mode");
+
+        let currentIndex = 0;
+        let scrollTimer;
+        const postState = () => {
+          window.webkit?.messageHandlers?.wikipediaDeck?.postMessage({
+            pageIndex: currentIndex,
+            pageCount: slides.length,
+            isOriginalMode: !document.body.classList.contains("aiserver-deck-mode")
+          });
+        };
+        root.addEventListener("scroll", () => {
+          clearTimeout(scrollTimer);
+          scrollTimer = setTimeout(() => {
+            currentIndex = Math.min(slides.length - 1, Math.max(0, Math.round(root.scrollLeft / root.clientWidth)));
+            postState();
+          }, 90);
+        }, { passive: true });
+        tocClose.addEventListener("click", () => toc.classList.add("aiserver-hidden"));
+        window.__aiserverDeckPrevious = () => {
+          if (currentIndex <= 0) return;
+          root.children[currentIndex - 1]?.scrollIntoView({ behavior: "smooth", inline: "start" });
+        };
+        window.__aiserverToggleTOC = () => toc.classList.toggle("aiserver-hidden");
+        window.__aiserverToggleOriginal = () => {
+          const deckMode = document.body.classList.toggle("aiserver-deck-mode");
+          root.classList.toggle("aiserver-hidden", !deckMode);
+          toc.classList.add("aiserver-hidden");
+          postState();
+        };
+        postState();
+      };
+
       installReaderStyle();
       if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", () => setTimeout(installTableOfContents, 120));
+        document.addEventListener("DOMContentLoaded", () => setTimeout(installDeck, 180));
       } else {
-        setTimeout(installTableOfContents, 120);
+        setTimeout(installDeck, 180);
       }
     })();
     """#
@@ -907,6 +1522,7 @@ private struct WikipediaWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.userContentController.add(context.coordinator, name: "wikipediaDeck")
         configuration.userContentController.addUserScript(
             WKUserScript(
                 source: WikipediaReaderStyle.script,
@@ -931,11 +1547,12 @@ private struct WikipediaWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.stopObserving()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "wikipediaDeck")
         webView.stopLoading()
         webView.navigationDelegate = nil
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private let model: WikipediaBrowserModel
         private let openLink: (WikipediaEntity) -> Void
         private var progressObservation: NSKeyValueObservation?
@@ -960,6 +1577,21 @@ private struct WikipediaWebView: UIViewRepresentable {
         func stopObserving() {
             progressObservation?.invalidate()
             contentOffsetObservation?.invalidate()
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "wikipediaDeck",
+                  let state = message.body as? [String: Any] else { return }
+            let pageIndex = state["pageIndex"] as? Int ?? 0
+            let pageCount = state["pageCount"] as? Int ?? 1
+            let isOriginalMode = state["isOriginalMode"] as? Bool ?? false
+            Task { @MainActor in
+                self.model.updateDeckState(
+                    pageIndex: pageIndex,
+                    pageCount: pageCount,
+                    isOriginalMode: isOriginalMode
+                )
+            }
         }
         func webView(
             _ webView: WKWebView,
