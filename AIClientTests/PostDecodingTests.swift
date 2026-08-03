@@ -798,6 +798,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(payload.cached)
     }
 
+    func testDecodesBilibiliVideoInterpretation() throws {
+        let json = #"{"success":true,"bvid":"BV1Pxgy68Ek9","status":"ready","interpretation":{"overview":"画面通过收益曲线展示不同策略。","visual_findings":["曲线在中段出现明显分化"],"timeline":[{"time":"01:20","title":"结果公布","detail":"表格展示最终排名"}],"creator_notes":["数据图承担主要证据作用"]},"provider":"bigmodel","model":"glm-4.6v","cached":false,"estimated_cost_cny":0.18,"pricing_note":"按标准价估算"}"#.data(using: .utf8)!
+        let payload = try JSONDecoder().decode(BilibiliInterpretationResponse.self, from: json)
+
+        XCTAssertEqual(payload.interpretation.timeline.first?.time, "01:20")
+        XCTAssertEqual(payload.estimatedCostCNY, 0.18)
+        XCTAssertEqual(payload.model, "glm-4.6v")
+    }
+
     func testTruthFeedUsesOnlyTranslatedContentAndRelevance() throws {
         let json = #"{"post":{"id":9,"content":"English original","content_zh":"中文翻译","source":"truth","final_score":8.2}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
