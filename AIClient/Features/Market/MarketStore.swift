@@ -91,7 +91,7 @@ final class MarketStore {
             cacheSavedAt = nil
             errorMessage = marketHealthMessage(for: value)
             MarketSnapshotCache.save(value, at: Date())
-            scheduleClosedTrendBackfill()
+            scheduleMissingTrendBackfill()
         } catch is CancellationError {
             return
         } catch {
@@ -207,7 +207,7 @@ final class MarketStore {
         return trendFallbacks[quote.symbol] ?? []
     }
 
-    private func backfillClosedTrends() async {
+    private func backfillMissingTrends() async {
         guard let dashboard else { return }
         var seen: Set<String> = []
         var symbols: [String] = []
@@ -219,7 +219,7 @@ final class MarketStore {
             + dashboard.referenceIndices
             + dashboard.metrics
         for quote in quotes
-        where marketQuoteNeedsTrendFallback(quote) && seen.insert(quote.symbol).inserted {
+        where marketQuoteNeedsTrendBackfill(quote) && seen.insert(quote.symbol).inserted {
             symbols.append(quote.symbol)
             if symbols.count >= 24 { break }
         }
@@ -229,10 +229,10 @@ final class MarketStore {
         }
     }
 
-    private func scheduleClosedTrendBackfill() {
+    private func scheduleMissingTrendBackfill() {
         guard trendBackfillTask == nil else { return }
         trendBackfillTask = Task { [weak self] in
-            await self?.backfillClosedTrends()
+            await self?.backfillMissingTrends()
             self?.trendBackfillTask = nil
         }
     }
@@ -376,8 +376,8 @@ final class MarketStore {
 
 }
 
-func marketQuoteNeedsTrendFallback(_ quote: MarketQuote) -> Bool {
-    quote.trend.count <= 1 && quote.marketSession != "regular" && quote.marketSession != "always-open"
+func marketQuoteNeedsTrendBackfill(_ quote: MarketQuote) -> Bool {
+    quote.trend.count <= 1 && quote.tradingSession != .regular && quote.tradingSession != .alwaysOpen
 }
 
 func marketChartNeedsRetry(_ chart: MarketChart) -> Bool {

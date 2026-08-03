@@ -145,8 +145,31 @@ final class MarketPresentationTests: XCTestCase {
             from: Data(#"{"symbol":"NVDA","name":"英伟达","price":180,"marketSession":"regular","trend":[]}"#.utf8)
         )
 
-        XCTAssertTrue(marketQuoteNeedsTrendFallback(preMarket))
-        XCTAssertFalse(marketQuoteNeedsTrendFallback(regular))
+        XCTAssertTrue(marketQuoteNeedsTrendBackfill(preMarket))
+        XCTAssertFalse(marketQuoteNeedsTrendBackfill(regular))
+    }
+
+    func testTradingSessionUsesExplicitSessionBeforeLegacyNightFlag() {
+        XCTAssertEqual(MarketTradingSession(rawValue: "pre", legacyIsNightSession: true), .premarket)
+        XCTAssertEqual(MarketTradingSession(rawValue: "after"), .postmarket)
+        XCTAssertEqual(MarketTradingSession(rawValue: nil, legacyIsNightSession: true), .overnight)
+        XCTAssertEqual(MarketTradingSession(rawValue: "closed"), .closed)
+        XCTAssertEqual(MarketTradingSession(rawValue: "pre").displayLabel, "盘前")
+    }
+
+    func testDashboardReplacementDoesNotFabricateSingleNightTrendPoint() throws {
+        var dashboard = try JSONDecoder().decode(
+            MarketDashboardResponse.self,
+            from: Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","generatedAt":"2026-08-03T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"components":[{"symbol":"NVDA","name":"英伟达","price":200,"marketSession":"pre","sessionPrice":201,"trend":[198,200],"nightTrend":[]}],"componentsByRegion":{"us":[{"symbol":"NVDA","name":"英伟达","price":200,"marketSession":"pre","sessionPrice":201,"trend":[198,200],"nightTrend":[]}]},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
+        ).data
+        let replacement = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.5,"marketSession":"pre","sessionPrice":201.5,"trend":[198,200.5],"nightTrend":[]}"#.utf8)
+        )
+
+        dashboard.replace(replacement)
+
+        XCTAssertEqual(dashboard.componentsByRegion["us"]?.first?.nightTrend, [])
     }
 
     func testSinglePremarketPointDoesNotHideCompleteSparkline() throws {

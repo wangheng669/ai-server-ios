@@ -432,12 +432,7 @@ private struct MarketTerminalHero: View {
     private var sessionLabel: String {
         if region == .crypto { return "24H 交易中" }
         if overnightQuote != nil { return "夜盘" }
-        return switch quote?.marketSession {
-        case "regular": "交易中"
-        case "pre": "盘前"
-        case "post", "after": "盘后"
-        default: "已收盘"
-        }
+        return quote?.tradingSession.displayLabel ?? "行情更新"
     }
 
     private var sessionTint: Color {
@@ -1378,14 +1373,9 @@ private struct MarketIndexTableRow: View {
     }
 
     private var sessionLabel: String {
-        switch quote.marketSession?.lowercased() {
-        case "pre", "premarket": return "盘前"
-        case "post", "after": return "盘后"
-        default: break
-        }
-        if overnightQuote != nil || quote.isNightSession == true || usesEmbeddedExtendedSession { return "夜盘" }
-        if quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") { return "24H" }
-        return quote.marketSession == "regular" ? "交易中" : "已收盘"
+        if overnightQuote != nil { return "夜盘" }
+        if quote.tradingSession == .alwaysOpen || quote.symbol.hasPrefix("BINANCE:") { return "24H" }
+        return quote.tradingSession.displayLabel
     }
 
     private var statusLabel: String {
@@ -1745,12 +1735,7 @@ private struct MarketSessionColumn: View {
     }
 
     private var sessionLabel: String {
-        switch quote?.marketSession {
-        case "regular": "交易中"
-        case "pre": "盘前"
-        case "post", "after": "盘后"
-        default: "已收盘"
-        }
+        quote?.tradingSession.displayLabel ?? "行情更新"
     }
 
     private var sessionTint: Color { quote?.marketSession == "regular" ? MarketStyle.loss : .secondary }
@@ -2067,13 +2052,7 @@ private struct MarketCountryCard: View {
     }
 
     private var sessionLabel: String {
-        switch quote?.marketSession {
-        case "regular": "交易中"
-        case "pre": "盘前"
-        case "post", "after": "盘后"
-        case "always-open": "全天"
-        default: "已收盘"
-        }
+        quote?.tradingSession == .alwaysOpen ? "全天" : quote?.tradingSession.displayLabel ?? "行情更新"
     }
 
     private var sessionTint: Color { quote?.marketSession == "regular" ? MarketStyle.loss : .secondary }
@@ -2524,7 +2503,7 @@ private struct MarketIndexDetailView: View {
     }
 
     private var sessionText: String {
-        switch quote?.marketSession { case "regular": "交易中"; case "always-open": "24小时交易"; case "pre": "盘前"; case "post", "after": "盘后"; case "overnight": "夜盘"; default: "已收盘" }
+        quote?.tradingSession.displayLabel ?? "行情更新"
     }
     private var isCrypto: Bool { symbol.hasPrefix("BINANCE:") }
     private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
