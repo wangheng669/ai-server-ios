@@ -128,10 +128,11 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDashboardQuoteDecodesTradingDateQuality() throws {
-        let data = Data(#"{"symbol":"SPY","name":"标普500","price":747.03,"timestamp":1785661401902,"quality":{"status":"delayed","reason":"official_close","tradingDate":"2026-07-31","fallbackUsed":false}}"#.utf8)
+        let data = Data(#"{"symbol":"SPY","name":"标普500","price":747.03,"timestamp":1785661401902,"quality":{"status":"delayed","reason":"official_close","asOfTimestamp":1785660501902,"tradingDate":"2026-07-31","fallbackUsed":false}}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
         XCTAssertEqual(quote.quality?.tradingDate, "2026-07-31")
+        XCTAssertEqual(quote.marketAsOfTimestamp, 1785660501902)
     }
 
     func testClosedIndexFutureDoesNotReplaceCashProxy() throws {

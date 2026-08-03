@@ -226,6 +226,7 @@ struct MarketDashboardFreshness: Codable {
 struct MarketQuoteQuality: Codable, Hashable {
     let status: String?
     let reason: String?
+    let asOfTimestamp: Int64?
     let tradingDate: String?
     let fallbackUsed: Bool?
 }
@@ -1119,12 +1120,16 @@ extension MarketQuote {
 
     var freshnessLabel: String {
         if marketSession == "always-open" { return "24小时交易" }
-        if marketSession == "closed" {
-            return timestamp.map { "截至 \(marketShortTimestamp($0))" } ?? "已收盘"
-        }
         if let delaySeconds, delaySeconds > 0 { return "延迟\(max(1, delaySeconds / 60))分钟" }
+        if marketSession == "closed" {
+            return marketAsOfTimestamp.map { "截至 \(marketShortTimestamp($0))" } ?? "已收盘"
+        }
         if stale == true { return "数据延迟" }
         return marketSession == "regular" ? "交易中" : "行情更新"
+    }
+
+    var marketAsOfTimestamp: Int64? {
+        quality?.asOfTimestamp ?? timestamp
     }
 
     var displayCode: String {

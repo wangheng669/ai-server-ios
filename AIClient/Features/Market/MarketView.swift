@@ -462,7 +462,7 @@ private struct MarketTerminalHero: View {
            let date = DateFormatter.marketTradingDate.date(from: tradingDate) {
             return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
         }
-        let date = quote?.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
+        let date = quote?.marketAsOfTimestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
         return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
     }
 
@@ -1291,7 +1291,7 @@ private struct MarketIndexTableRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Circle().fill(sessionTint).frame(width: 5, height: 5)
-                        Text(sessionLabel).font(.caption2).foregroundStyle(.secondary)
+                        Text(statusLabel).font(.caption2).foregroundStyle(.secondary)
                     }
                     Text(quote.presentationName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
                     Text(quote.displayCode).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -1389,6 +1389,11 @@ private struct MarketIndexTableRow: View {
         }
         if quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") { return "24H" }
         return quote.marketSession == "regular" ? "交易中" : "已收盘"
+    }
+
+    private var statusLabel: String {
+        guard let delaySeconds = quote.delaySeconds, delaySeconds > 0 else { return sessionLabel }
+        return "\(sessionLabel) · 延迟\(max(1, delaySeconds / 60))分钟"
     }
 
     private var sessionTint: Color {
@@ -2338,7 +2343,7 @@ private struct MarketIndexDetailView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(quoteTint(quote))
-                Text(quote?.timestamp.map { "\(marketTimestamp($0)) 更新" } ?? "行情更新中")
+                Text(quote?.marketAsOfTimestamp.map { "\(marketTimestamp($0)) 行情" } ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if showsIndexSession, let session = indexSessionQuote {
@@ -2517,7 +2522,7 @@ private struct MarketIndexDetailView: View {
 
     private var shareText: String {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
-        let timestamp = quote.timestamp.map(marketTimestamp) ?? "时间未知"
+        let timestamp = quote.marketAsOfTimestamp.map(marketTimestamp) ?? "时间未知"
         return "\(quote.presentationName)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(timestamp)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
     }
 }
