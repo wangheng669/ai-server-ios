@@ -177,7 +177,7 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
 private struct ChinaMacroAPIEnvelope: Decodable { let data: ChinaMacroAPISnapshot }
 private struct ChinaMacroAPISnapshot: Decodable {
     let observations: [ChinaMacroAPIObservation]
-    let generatedAt: Date
+    let generatedAt: String
 
     enum CodingKeys: String, CodingKey {
         case observations
@@ -212,12 +212,18 @@ struct ChinaMacroService {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let snapshot = try decoder.decode(ChinaMacroAPIEnvelope.self, from: data).data
+        let snapshot = try JSONDecoder().decode(ChinaMacroAPIEnvelope.self, from: data).data
         let years = Self.merge(snapshot.observations)
-        guard !years.isEmpty else { throw URLError(.cannotParseResponse) }
-        return (years, snapshot.generatedAt)
+        guard !years.isEmpty, let generatedAt = Self.parseServerTimestamp(snapshot.generatedAt) else {
+            throw URLError(.cannotParseResponse)
+        }
+        return (years, generatedAt)
+    }
+
+    static func parseServerTimestamp(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
     }
 
     static func merge(_ observations: [ChinaMacroAPIObservation]) -> [ChinaMacroYear] {

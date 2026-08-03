@@ -151,4 +151,9 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertNil(merged[0].privateCredit)
         XCTAssertEqual(merged[1].privateCredit, 194.2)
     }
+
+    func testParsesNanosecondServerTimestamp() throws {
+        let date = try XCTUnwrap(ChinaMacroService.parseServerTimestamp("2026-08-03T09:19:44.326408874Z"))
+        XCTAssertEqual(date.timeIntervalSince1970, 1_785_748_784.3264089, accuracy: 0.001)
+    }
 }
