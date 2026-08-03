@@ -132,6 +132,26 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
+    func testWeChatAggregatesMaobidaoAndXiaohuAI() {
+        XCTAssertEqual(APIClient.weChatFeedIDs, [57, 2373])
+    }
+
+    func testWeChatMergedPostsAreNewestFirstAndDeduplicated() throws {
+        let decoder = JSONDecoder()
+        let older = try decoder.decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:57","article_post_at":"2026-08-01T10:00:00Z"}"#.utf8)
+        )
+        let newer = try decoder.decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss:2373","article_post_at":"2026-08-03T14:08:00Z"}"#.utf8)
+        )
+
+        let result = APIClient.mergeWeChatPosts([older, newer, older])
+
+        XCTAssertEqual(result.map(\.id), [2, 1])
+    }
+
     func testMaobidaoIsExcludedFromGenericRSSBecauseItHasDedicatedWeChatTab() throws {
         let post = try JSONDecoder().decode(
             Post.self,
@@ -576,6 +596,46 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.feedRank, 2)
         XCTAssertEqual(post.formattedTime, "第 2 名 · 热度 9988")
         XCTAssertTrue(post.isSynthetic)
+    }
+
+    func testHotTopicDisplayRepairsDuplicateRanksAndTieOrdering() throws {
+        let json = #"{"success":true,"data":{"topics":[{"id":1,"keyword":"低热度插入项","latest_rank":6,"meta":{"last_payload":{"heat":"543815"}}},{"id":2,"keyword":"高热度正常项","latest_rank":6,"meta":{"last_payload":{"heat":"545903"}}},{"id":3,"keyword":"下一项","latest_rank":7,"meta":{"last_payload":{"heat":"540000"}}}]}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
+
+        let posts = APIClient.hotTopicPostsForDisplay(
+            response.data.topics,
+            page: 1,
+            limit: 20,
+            source: .weibo
+        )
+
+        XCTAssertEqual(posts.map(\.displayTitle), ["高热度正常项", "低热度插入项", "下一项"])
+        XCTAssertEqual(posts.map(\.feedRank), [1, 2, 3])
+        XCTAssertEqual(posts.map(\.formattedTime), [
+            "第 1 名 · 热度 545903",
+            "第 2 名 · 热度 543815",
+            "第 3 名 · 热度 540000"
+        ])
+    }
+
+    func testHotTopicDisplayContinuesRankAcrossPages() throws {
+        let json = #"{"success":true,"data":{"topics":[{"id":21,"keyword":"第二页第一项","latest_rank":20,"latest_heat":12345}]}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
+
+        let posts = APIClient.hotTopicPostsForDisplay(
+            response.data.topics,
+            page: 2,
+            limit: 20,
+            source: .weibo
+        )
+
+        XCTAssertEqual(posts.first?.feedRank, 21)
+        XCTAssertEqual(posts.first?.formattedTime, "第 21 名 · 热度 12345")
+    }
+
+    func testHiddenFeedChromeRemovesWeiboHeaderReservation() {
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: false), 53)
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 0)
     }
 
     func testDecodesAndMapsFlashItem() throws {

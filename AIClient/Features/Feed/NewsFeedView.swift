@@ -42,6 +42,19 @@ private enum WeiboSection: String, CaseIterable, Identifiable {
     var title: String { self == .hot ? "热搜" : "关注" }
 }
 
+enum FeedChromeLayout {
+    static let headerHeight: CGFloat = 53
+
+    static func headerReservationHeight(isHidden: Bool) -> CGFloat {
+        isHidden ? 0 : headerHeight
+    }
+}
+
+private struct WeChatAccount: Identifiable {
+    let id: Int
+    let name: String
+}
+
 private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
     let videoID: String
 
@@ -72,6 +85,7 @@ struct NewsFeedView: View {
     @State private var preparedWebViews: [Int: WKWebView] = [:]
     @State private var showsAllRSSSources = false
     @State private var rssSourceSearch = ""
+    @State private var selectedWeChatFeedID: Int?
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -208,7 +222,7 @@ struct NewsFeedView: View {
             sourceBar
             Divider().opacity(0.55)
         }
-        .frame(height: 53)
+        .frame(height: FeedChromeLayout.headerHeight)
         .background(Color(uiColor: .systemBackground))
         .overlay(alignment: .bottom) {
             if model.isSwitchingSource {
@@ -217,7 +231,7 @@ struct NewsFeedView: View {
                     .tint(.blue)
             }
         }
-        .offset(y: isFeedChromeHidden ? -53 : 0)
+        .offset(y: isFeedChromeHidden ? -FeedChromeLayout.headerHeight : 0)
         .opacity(isFeedChromeHidden ? 0 : 1)
         .allowsHitTesting(!isFeedChromeHidden)
         .accessibilityHidden(isFeedChromeHidden)
@@ -366,14 +380,18 @@ struct NewsFeedView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: "\(rootTabIsActive)-\(source.rawValue)") {
-                if rootTabIsActive, source == .rss { await model.loadRSSFeedsIfNeeded() }
+                if rootTabIsActive, source == .rss || source == .wechat {
+                    await model.loadRSSFeedsIfNeeded()
+                }
             }
         }
     }
 
     private var weiboPage: some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: 53)
+            Color.clear.frame(
+                height: FeedChromeLayout.headerReservationHeight(isHidden: isFeedChromeHidden)
+            )
             weiboSectionSelector
             Divider().opacity(0.5)
             if weiboSection == .hot {
@@ -478,10 +496,16 @@ struct NewsFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func feedList(for source: FeedSource, posts: [Post], topInset: CGFloat = 53) -> some View {
+    private func feedList(
+        for source: FeedSource,
+        posts: [Post],
+        topInset: CGFloat = FeedChromeLayout.headerHeight
+    ) -> some View {
         let visiblePosts = visiblePosts(for: source, posts: posts)
         let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
-        let usesFilteredPagination = source == .flash || (source == .rss && !isSelectedRSSPage)
+        let usesFilteredPagination = source == .flash
+            || source == .wechat
+            || (source == .rss && !isSelectedRSSPage)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -499,6 +523,10 @@ struct NewsFeedView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 22)
                         }
+                    }
+                    if source == .wechat {
+                        weChatAccountBar
+                        Divider().opacity(0.55)
                     }
                     if source == .flash {
                         flashFeedHeader
@@ -639,7 +667,7 @@ struct NewsFeedView: View {
                             proxy.scrollTo("feed-top", anchor: .top)
                         }
                     }
-                    .padding(.top, isFeedChromeHidden ? 12 : 61)
+                    .padding(.top, isFeedChromeHidden ? 12 : FeedChromeLayout.headerHeight + 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
@@ -709,6 +737,9 @@ struct NewsFeedView: View {
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
+        if source == .wechat, let selectedWeChatFeedID {
+            return posts.filter { $0.source == "rss:\(selectedWeChatFeedID)" }
+        }
         if source == .rss {
             let rssPosts: [Post]
             if model.selectedRSSFeedID != nil {
@@ -723,6 +754,46 @@ struct NewsFeedView: View {
     }
 
     private var rssQualityThreshold: Double { 6.0 }
+
+    private var weChatAccounts: [WeChatAccount] {
+        [
+            .init(id: 57, name: "猫笔刀"),
+            .init(id: 2373, name: "小互 AI")
+        ]
+    }
+
+    private var weChatAccountBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                sourceAvatarButton(
+                    id: nil,
+                    name: "全部",
+                    avatarURL: nil,
+                    isSelected: selectedWeChatFeedID == nil
+                ) {
+                    selectedWeChatFeedID = nil
+                }
+
+                ForEach(weChatAccounts) { account in
+                    let feed = model.rssFeeds.first { $0.id == account.id }
+                    sourceAvatarButton(
+                        id: account.id,
+                        name: account.name,
+                        avatarURL: feed?.preferredAvatarURL,
+                        isSelected: selectedWeChatFeedID == account.id,
+                        rejectsUpscaledImages: true
+                    ) {
+                        selectedWeChatFeedID = account.id
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .sensoryFeedback(.selection, trigger: selectedWeChatFeedID)
+        .accessibilityLabel("微信公众号")
+    }
 
     private var rssSourceFilterBar: some View {
         rssSourcePickerTrigger
@@ -859,16 +930,15 @@ struct NewsFeedView: View {
         }
     }
 
-    private func rssSourceButton(
+    private func sourceAvatarButton(
         id: Int?,
         name: String,
         avatarURL: URL?,
-        rejectsUpscaledImages: Bool = false
+        isSelected: Bool,
+        rejectsUpscaledImages: Bool = false,
+        action: @escaping () -> Void
     ) -> some View {
-        let isSelected = model.selectedRSSFeedID == id
-        return Button {
-            Task { await model.selectRSSFeed(id) }
-        } label: {
+        Button(action: action) {
             VStack(spacing: 5) {
                 ZStack {
                     if let id {
@@ -956,7 +1026,10 @@ struct NewsFeedView: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private func feedStatus(for source: FeedSource, topInset: CGFloat = 53) -> some View {
+    @ViewBuilder private func feedStatus(
+        for source: FeedSource,
+        topInset: CGFloat = FeedChromeLayout.headerHeight
+    ) -> some View {
         if source == model.source, model.isLoading {
             FeedTimelineLoadingView(topInset: topInset)
         } else {
