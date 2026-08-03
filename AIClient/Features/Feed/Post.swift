@@ -458,10 +458,10 @@ struct Post: Decodable, Identifiable, Hashable {
     var sourceName: String {
         let value = (source ?? "").lowercased()
         if isXueqiu { return "雪球" }
+        if isBilibili { return "B站" }
         if value.hasPrefix("rss:") { return "RSS" }
         if value.contains("weibo") { return "微博" }
         if value.contains("douyin") { return "抖音" }
-        if value.contains("bilibili") { return "B站" }
         if value.contains("zhihu") { return "知乎" }
         if value.contains("truth") { return "Truth" }
         if value == "flash" { return "快讯" }
@@ -781,7 +781,19 @@ struct Post: Decodable, Identifiable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return first.count > 72 ? String(first.prefix(72)) + "…" : first
     }
-    var isBilibili: Bool { sourceName == "B站" }
+    var isBilibili: Bool {
+        let sourceValue = (source ?? "").lowercased()
+        if sourceValue.contains("bilibili") { return true }
+        if meta?.rssFeedName?.localizedCaseInsensitiveContains("哔哩哔哩") == true ||
+            meta?.rssFeedName?.localizedCaseInsensitiveContains("bilibili") == true {
+            return true
+        }
+
+        return [postLink, meta?.rssArticleLink].compactMap { $0 }.contains { value in
+            guard let host = URL(string: value)?.host()?.lowercased() else { return false }
+            return host == "bilibili.com" || host.hasSuffix(".bilibili.com") || host == "b23.tv"
+        }
+    }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
     var hasDedicatedFeedTab: Bool {
         source == FeedSource.newYorkTimes.rawValue || source == "rss:79"
