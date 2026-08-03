@@ -261,6 +261,17 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
 
     var primarySymbol: String { symbols[0] }
 
+    var dashboardID: String {
+        switch self {
+        case .unitedStates: "us"
+        case .china: "cn"
+        case .japan: "jp"
+        case .korea: "kr"
+        case .europe: "eu"
+        case .crypto: "crypto"
+        }
+    }
+
     var relevantHealthSymbols: Set<String> {
         switch self {
         case .unitedStates: Set(symbols + ["^TNX"])
@@ -765,6 +776,10 @@ private struct MarketIndexTable: View {
 
     private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
     private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
+    private var coreStocks: [MarketQuote] {
+        if let regional = store.dashboard?.componentsByRegion[region.dashboardID] { return regional }
+        return region == .unitedStates ? store.dashboard?.components ?? [] : []
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -809,9 +824,9 @@ private struct MarketIndexTable: View {
                 }
             }
 
-            if region == .unitedStates, let components = store.dashboard?.components, !components.isEmpty {
+            if !coreStocks.isEmpty {
                 HStack {
-                    Text(store.dashboard?.componentsMeta?.label ?? "主要成分股")
+                    Text(store.dashboard?.componentsMeta?.label ?? "核心股票")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -821,7 +836,7 @@ private struct MarketIndexTable: View {
                 .padding(.bottom, 6)
 
                 Divider().opacity(0.45)
-                ForEach(Array(components.enumerated()), id: \.element.symbol) { index, quote in
+                ForEach(Array(coreStocks.enumerated()), id: \.element.symbol) { index, quote in
                     Button { onSelectIndex(quote.symbol) } label: {
                         MarketIndexTableRow(
                             quote: quote,
@@ -832,7 +847,7 @@ private struct MarketIndexTable: View {
                         )
                     }
                     .buttonStyle(MarketPressStyle())
-                    if index < components.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
+                    if index < coreStocks.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
                 }
             }
 
@@ -840,9 +855,8 @@ private struct MarketIndexTable: View {
         .padding(.horizontal, 18)
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
-            guard region == .unitedStates else { return }
             await withTaskGroup(of: Void.self) { group in
-                for quote in store.dashboard?.components ?? [] {
+                for quote in coreStocks {
                     group.addTask {
                         await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
                     }
@@ -852,8 +866,7 @@ private struct MarketIndexTable: View {
     }
 
     private var componentLogoRequestID: String {
-        guard region == .unitedStates else { return region.rawValue }
-        return (store.dashboard?.components ?? []).map(\.symbol).joined(separator: ",")
+        "\(region.dashboardID):\(coreStocks.map(\.symbol).joined(separator: ","))"
     }
 }
 

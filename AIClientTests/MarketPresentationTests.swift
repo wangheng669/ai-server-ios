@@ -189,6 +189,16 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.quote(symbol: "^GSPC")?.displayMode, "historical-reference")
     }
 
+    func testDashboardDecodesRegionalCoreStocksIncludingGoogle() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","definitionVersion":"2026-08-03.1","generatedAt":"2026-08-03T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"components":[{"symbol":"GOOGL","name":"谷歌","price":201}],"componentsByRegion":{"us":[{"symbol":"NVDA","name":"英伟达","price":180},{"symbol":"GOOGL","name":"谷歌","price":201}],"jp":[{"symbol":"7203.T","name":"丰田汽车","price":3200}]},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
+
+        let dashboard = try JSONDecoder().decode(MarketDashboardResponse.self, from: data).data
+
+        XCTAssertEqual(dashboard.componentsByRegion["us"]?.map(\.symbol), ["NVDA", "GOOGL"])
+        XCTAssertEqual(dashboard.componentsByRegion["jp"]?.map(\.symbol), ["7203.T"])
+        XCTAssertEqual(dashboard.quote(symbol: "GOOGL")?.presentationName, "谷歌")
+    }
+
     func testDashboardSkipsQuotesWithNullPriceWithoutDroppingValidData() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","generatedAt":"2026-08-02T08:09:10Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理","price":632.08}],"referenceIndices":[],"metrics":[{"symbol":"USDJPY","name":"美元兑日元","price":null,"lastKnownPrice":157.4,"stale":true},{"symbol":"^VIX","name":"波动率指数","price":16.72}],"components":[],"crypto":[],"indexSessions":{"SPY":{"symbol":"SPY","name":"标普500盘后","price":null,"stale":true}},"missingSymbols":[],"expectedSymbols":["SPY","USDJPY","^VIX"],"symbolHealth":[{"symbol":"USDJPY","status":"stale","reason":"quote_stale"}],"regions":[]}}"#.utf8)
 

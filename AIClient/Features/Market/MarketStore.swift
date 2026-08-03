@@ -185,13 +185,13 @@ final class MarketStore {
             return Date(timeIntervalSince1970: Double(timestamp) / 1000)
         }
         let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.referenceIndices ?? []) + (dashboard?.metrics ?? [])
-            + (dashboard?.components ?? []) + (dashboard?.crypto ?? [])
+            + (dashboard?.allRegionalComponents ?? dashboard?.components ?? []) + (dashboard?.crypto ?? [])
         guard let timestamp = quotes.compactMap(\.timestamp).max() else { return nil }
         return Date(timeIntervalSince1970: Double(timestamp) / 1000)
     }
 
     var componentsLatestQuoteDate: Date? {
-        guard let timestamp = dashboard?.components.compactMap(\.timestamp).max() else { return nil }
+        guard let timestamp = (dashboard?.allRegionalComponents ?? dashboard?.components ?? []).compactMap(\.timestamp).max() else { return nil }
         return Date(timeIntervalSince1970: Double(timestamp) / 1000)
     }
 
@@ -211,7 +211,7 @@ final class MarketStore {
         guard let dashboard else { return }
         var seen: Set<String> = []
         var symbols: [String] = []
-        for quote in dashboard.coreIndices + dashboard.referenceIndices + dashboard.metrics + dashboard.components
+        for quote in dashboard.coreIndices + dashboard.referenceIndices + dashboard.metrics + dashboard.allRegionalComponents
         where quote.trend.count <= 1 && quote.marketSession == "closed" && seen.insert(quote.symbol).inserted {
             symbols.append(quote.symbol)
             if symbols.count >= 12 { break }
@@ -256,7 +256,7 @@ final class MarketStore {
 
     var maximumOpenMarketDelayMinutes: Int? {
         let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.referenceIndices ?? [])
-            + (dashboard?.metrics ?? []) + (dashboard?.components ?? [])
+            + (dashboard?.metrics ?? []) + (dashboard?.allRegionalComponents ?? dashboard?.components ?? [])
         let seconds = quotes
             .filter { $0.marketSession == "regular" }
             .compactMap(\.delaySeconds)
@@ -279,7 +279,7 @@ final class MarketStore {
         if let quote = dashboard?.coreIndices.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.referenceIndices.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.metrics.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = dashboard?.components.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.allRegionalComponents.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.crypto.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.indexSessions?.values.first(where: { $0.symbol == symbol }) { return quote }
         return indexConstituents.values.lazy

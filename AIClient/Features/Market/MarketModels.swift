@@ -15,6 +15,7 @@ struct MarketDashboard: Codable {
     let realtimeProxies: [MarketRealtimeProxyDefinition]
     var metrics: [MarketQuote]
     var components: [MarketQuote]
+    var componentsByRegion: [String: [MarketQuote]]
     var crypto: [MarketQuote]
     var indexSessions: [String: MarketQuote]?
     let componentsMeta: MarketComponentsMeta?
@@ -34,7 +35,7 @@ struct MarketDashboard: Codable {
 
     enum CodingKeys: String, CodingKey {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, referenceIndices, realtimeProxies
-        case metrics, components, crypto
+        case metrics, components, componentsByRegion, crypto
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
         case ashareOverview, marketStructure, sentiment
     }
@@ -50,6 +51,7 @@ struct MarketDashboard: Codable {
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
         metrics = try values.decodeLossyQuotes(forKey: .metrics)
         components = try values.decodeLossyQuotes(forKey: .components)
+        componentsByRegion = try values.decodeIfPresent([String: [MarketQuote]].self, forKey: .componentsByRegion) ?? [:]
         crypto = try values.decodeLossyQuotes(forKey: .crypto)
         indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
@@ -68,6 +70,9 @@ struct MarketDashboard: Codable {
         replace(quote, in: &referenceIndices)
         replace(quote, in: &metrics)
         replace(quote, in: &components)
+        for region in Array(componentsByRegion.keys) {
+            replace(quote, in: &componentsByRegion[region, default: []])
+        }
         replace(quote, in: &crypto)
         for key in indexSessions.map({ Array($0.keys) }) ?? [] where indexSessions?[key]?.symbol == quote.symbol {
             var quotes = [indexSessions?[key]].compactMap { $0 }
@@ -81,7 +86,15 @@ struct MarketDashboard: Codable {
             ?? referenceIndices.first(where: { $0.symbol == symbol })
             ?? metrics.first(where: { $0.symbol == symbol })
             ?? components.first(where: { $0.symbol == symbol })
+            ?? componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol })
             ?? crypto.first(where: { $0.symbol == symbol })
+    }
+
+    var allRegionalComponents: [MarketQuote] {
+        var seen: Set<String> = []
+        return componentsByRegion.values
+            .flatMap { $0 }
+            .filter { seen.insert($0.symbol).inserted }
     }
 
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {
