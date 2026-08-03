@@ -626,11 +626,15 @@ struct TodayWorldEntity: Decodable, Equatable {
     let type: String
     let avatarURL: String?
     let xHandle: String?
+    let companyKey: String?
+    let companyName: String?
 
     enum CodingKeys: String, CodingKey {
         case key, name, type
         case avatarURL = "avatar_url"
         case xHandle = "x_handle"
+        case companyKey = "company_key"
+        case companyName = "company_name"
     }
 }
 
