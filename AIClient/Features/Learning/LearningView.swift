@@ -202,8 +202,8 @@ struct LearningView: View {
                     ideologyContent
                 }
             }
-            .padding(.top, 12)
-            .padding(.bottom, 32)
+            .padding(.top, section == .concepts ? 0 : 12)
+            .padding(.bottom, section == .concepts ? 0 : 32)
         }
         .scrollIndicators(.hidden)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -214,7 +214,7 @@ struct LearningView: View {
                     .background(KnowledgePagePalette.canvas)
             }
         }
-        .safeAreaPadding(.bottom, 90)
+        .safeAreaPadding(.bottom, section == .concepts ? 0 : 90)
         .refreshable {
             switch section {
             case .investment:
@@ -535,7 +535,7 @@ struct LearningView: View {
                                         concept: concept,
                                         index: index,
                                         count: concepts.count,
-                                        width: max(300, proxy.size.width - 24),
+                                        width: proxy.size.width,
                                         height: proxy.size.height
                                     )
                                     .frame(width: proxy.size.width)
@@ -552,7 +552,7 @@ struct LearningView: View {
                         .scrollPosition(id: $selectedConceptID)
                     }
                     .containerRelativeFrame(.vertical) { availableHeight, _ in
-                        max(520, availableHeight - 44)
+                        max(520, availableHeight)
                     }
                 }
             }

@@ -151,17 +151,12 @@ struct KnowledgeConceptCarouselCard: View {
                 .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(.secondary)
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.top, 22)
+            .padding(.bottom, 108)
         }
         .frame(width: width, height: height, alignment: .top)
-        .background(KnowledgeConceptPalette.paper)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(KnowledgeConceptPalette.line, lineWidth: 0.7)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 20, y: 10)
-        .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(concept.title)，\(concept.summary)")
         .accessibilityHint("打开详细内容")
