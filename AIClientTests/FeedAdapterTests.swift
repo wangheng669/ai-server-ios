@@ -306,6 +306,15 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(thumbnail.host, baseURL.host)
     }
 
+    func testVideoThumbnailSupportsSeekPosition() throws {
+        let original = try XCTUnwrap(URL(string: "https://video.twimg.com/amplify_video/example.mp4?tag=29"))
+        let thumbnail = try XCTUnwrap(MediaURL.videoThumbnail(for: original, at: 1))
+        let components = try XCTUnwrap(URLComponents(url: thumbnail, resolvingAgainstBaseURL: false))
+
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, original.absoluteString)
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "at" })?.value, "1")
+    }
+
     @MainActor
     func testHotTopicChannelsRequestLargerFirstPage() async {
         var requestedLimit = 0

@@ -839,8 +839,14 @@ private struct TodayWorldGroupedPostRow: View {
 
     private func quoteMediaItems(_ quote: XQuotedPost) -> [TodayWorldMediaItem] {
         (quote.media ?? []).compactMap { media in
-            if media.isVideo, let preview = media.previewURL {
-                return TodayWorldMediaItem(url: preview, isVideo: true)
+            if media.isVideo {
+                if let videoURL = media.directPlaybackURL,
+                   let generated = MediaURL.videoThumbnail(for: videoURL, at: 1) {
+                    return TodayWorldMediaItem(url: generated, isVideo: true)
+                }
+                if let preview = media.previewURL {
+                    return TodayWorldMediaItem(url: preview, isVideo: true)
+                }
             }
             guard let url = media.displayURL else { return nil }
             return TodayWorldMediaItem(url: url, isVideo: media.isVideo)
@@ -850,6 +856,11 @@ private struct TodayWorldGroupedPostRow: View {
     private var ownMediaItems: [TodayWorldMediaItem] {
         let images = post.imageURLs.map { TodayWorldMediaItem(url: $0, isVideo: false) }
         let videoPreviews = (post.videos ?? []).compactMap { video -> TodayWorldMediaItem? in
+            if let rawVideoURL = video.playURL ?? video.url,
+               let videoURL = MediaURL.directVideo(rawVideoURL),
+               let generated = MediaURL.videoThumbnail(for: videoURL, at: 1) {
+                return TodayWorldMediaItem(url: generated, isVideo: true)
+            }
             guard let raw = video.coverURL ?? video.previewImageURL ?? video.preview,
                   let url = MediaURL.image(raw) else { return nil }
             return TodayWorldMediaItem(url: url, isVideo: true)
