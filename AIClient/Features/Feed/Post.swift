@@ -1140,6 +1140,7 @@ struct XQuotedMedia: Decodable, Hashable {
     var isVideo: Bool {
         ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
     }
+    var directPlaybackURL: URL? { isVideo ? url.flatMap(MediaURL.directVideo) : nil }
     var playbackURL: URL? { isVideo ? url.flatMap(MediaURL.video) : nil }
     var previewURL: URL? { thumbnailURL.flatMap(MediaURL.image) }
 }
