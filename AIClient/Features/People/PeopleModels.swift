@@ -201,8 +201,8 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var displayFocusTags: [String] {
         focusTags.map { tag in
             switch tag {
-            case "忠臣": "正方"
-            case "反贼": "反方"
+            case "忠臣": "赢"
+            case "反贼": "输"
             default: tag
             }
         }
@@ -527,6 +527,43 @@ struct BilibiliVideoSummary: Decodable, Hashable {
         case overview
         case keyPoints = "key_points"
     }
+}
+
+struct BilibiliInterpretationResponse: Decodable {
+    let success: Bool
+    let bvid: String
+    let status: String
+    let interpretation: BilibiliVideoInterpretation
+    let provider: String
+    let model: String
+    let cached: Bool
+    let estimatedCostCNY: Double
+    let pricingNote: String
+
+    enum CodingKeys: String, CodingKey {
+        case success, bvid, status, interpretation, provider, model, cached
+        case estimatedCostCNY = "estimated_cost_cny"
+        case pricingNote = "pricing_note"
+    }
+}
+
+struct BilibiliVideoInterpretation: Decodable, Hashable {
+    let overview: String
+    let visualFindings: [String]
+    let timeline: [BilibiliInterpretationEvent]
+    let creatorNotes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case overview, timeline
+        case visualFindings = "visual_findings"
+        case creatorNotes = "creator_notes"
+    }
+}
+
+struct BilibiliInterpretationEvent: Decodable, Hashable {
+    let time: String
+    let title: String
+    let detail: String
 }
 
 struct PersonVideoSubtitleCue: Decodable, Identifiable, Hashable {

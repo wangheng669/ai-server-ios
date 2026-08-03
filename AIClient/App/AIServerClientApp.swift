@@ -356,7 +356,10 @@ private struct RootNavigationBar: View {
 private final class TodayWorldStore: ObservableObject {
     @Published private(set) var payload: TodayWorldPayload?
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
     @Published private(set) var errorMessage: String?
+    private var nextPageBySystem: [String: Int] = [:]
+    private var hasMoreBySystem: [String: Bool] = [:]
 
     func load(force: Bool = false) async {
         guard !isLoading, force || payload == nil else { return }
@@ -365,8 +368,10 @@ private final class TodayWorldStore: ObservableObject {
         defer { isLoading = false }
 
         do {
-            payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchTodayWorld(limit: 3)
+            let freshPayload = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchTodayWorld(limit: 3, page: 1)
+            payload = freshPayload
+            resetPagination(from: freshPayload)
             errorMessage = nil
         } catch is CancellationError {
             return
@@ -375,6 +380,67 @@ private final class TodayWorldStore: ObservableObject {
                 errorMessage = (error as? LocalizedError)?.errorDescription ?? "暂时无法读取今日动态"
             }
         }
+    }
+
+    func loadMore(systemKey: String) async {
+        guard !isLoading, !isLoadingMore, hasMoreBySystem[systemKey] == true,
+              let current = payload else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+
+        let page = nextPageBySystem[systemKey] ?? 2
+        do {
+            let next = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchTodayWorld(limit: 3, page: page, systemKey: systemKey)
+            payload = merging(current, with: next)
+            nextPageBySystem[systemKey] = page + 1
+            hasMoreBySystem[systemKey] = next.sections.contains { $0.hasMore }
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
+    private func resetPagination(from payload: TodayWorldPayload) {
+        let keys = Set(payload.sections.compactMap { $0.entity?.companyKey })
+        nextPageBySystem = Dictionary(uniqueKeysWithValues: keys.map { ($0, 2) })
+        hasMoreBySystem = Dictionary(uniqueKeysWithValues: keys.map { key in
+            (key, payload.sections.contains { $0.entity?.companyKey == key && $0.hasMore })
+        })
+    }
+
+    private func merging(_ current: TodayWorldPayload, with next: TodayWorldPayload) -> TodayWorldPayload {
+        var sections = current.sections
+        for incoming in next.sections {
+            guard let index = sections.firstIndex(where: { $0.id == incoming.id }) else {
+                sections.append(incoming)
+                continue
+            }
+            let existing = sections[index]
+            var seen = Set(existing.items.map(\.id))
+            let items = existing.items + incoming.items.filter { seen.insert($0.id).inserted }
+            sections[index] = TodayWorldSection(
+                id: existing.id,
+                kind: existing.kind,
+                title: existing.title,
+                subtitle: existing.subtitle,
+                layout: existing.layout,
+                entity: existing.entity,
+                source: existing.source,
+                items: items,
+                itemCount: items.count,
+                hasMore: incoming.hasMore,
+                latestAt: existing.latestAt ?? incoming.latestAt
+            )
+        }
+        return TodayWorldPayload(
+            schemaVersion: current.schemaVersion,
+            date: current.date,
+            timezone: current.timezone,
+            generatedAt: next.generatedAt,
+            sections: sections
+        )
     }
 }
 
@@ -455,7 +521,14 @@ private struct TodayWorldView: View {
                 .scrollIndicators(.hidden)
 
                 if let selectedSystem {
-                    TodayWorldSelectedSystemView(system: selectedSystem) { selectedPost = $0 }
+                    TodayWorldSelectedSystemView(
+                        system: selectedSystem,
+                        onOpenPost: { selectedPost = $0 },
+                        onLoadMore: {
+                            await store.loadMore(systemKey: selectedSystem.key)
+                        },
+                        isLoadingMore: store.isLoadingMore
+                    )
                 }
 
                 Color.clear.frame(height: 88)
@@ -510,6 +583,7 @@ private struct TodayWorldLeaderSystem: Identifiable {
     let accountNames: [String]
     let groups: [TodayWorldAuthorGroup]
     let postCount: Int
+    let hasMore: Bool
     let leaderName: String
     let leaderAvatarURL: URL?
     var id: String { key }
@@ -541,6 +615,7 @@ private struct TodayWorldLeaderSystem: Identifiable {
                 accountNames: accounts[key] ?? [],
                 groups: systemGroups,
                 postCount: systemGroups.reduce(0) { $0 + $1.posts.count },
+                hasMore: payload.sections.contains { $0.entity?.companyKey == key && $0.hasMore },
                 leaderName: leaderSection?.entity?.name ?? leader?.authorName ?? fallbackLeaderName(for: key),
                 leaderAvatarURL: leaderSection?.entity?.avatarURL.flatMap(URL.init(string:)) ?? leader?.avatarURL
             )
@@ -604,6 +679,8 @@ private struct TodayWorldLeaderChip: View {
 private struct TodayWorldSelectedSystemView: View {
     let system: TodayWorldLeaderSystem
     let onOpenPost: (Post) -> Void
+    let onLoadMore: () async -> Void
+    let isLoadingMore: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -636,6 +713,25 @@ private struct TodayWorldSelectedSystemView: View {
             } else {
                 ForEach(system.groups) { group in
                     TodayWorldAuthorGroupView(group: group, onOpenPost: onOpenPost)
+                }
+
+                if system.hasMore {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(isLoadingMore ? "正在加载更多" : "继续上滑加载")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .task { await onLoadMore() }
+                } else {
+                    Text("今天的内容已全部加载")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
                 }
             }
         }

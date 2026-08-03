@@ -16,14 +16,18 @@ struct APIClient {
 
     func checkHealth() async throws { let _: HealthResponse = try await get(baseURL.appending(path: "health")) }
 
-    func fetchTodayWorld(limit: Int = 3) async throws -> TodayWorldPayload {
+    func fetchTodayWorld(limit: Int = 3, page: Int = 1, systemKey: String? = nil) async throws -> TodayWorldPayload {
         var components = URLComponents(
             url: baseURL.appending(path: "api/v1/today-world"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
-            .init(name: "limit", value: String(min(max(limit, 1), 20)))
+            .init(name: "limit", value: String(min(max(limit, 1), 20))),
+            .init(name: "page", value: String(max(page, 1)))
         ]
+        if let systemKey, !systemKey.isEmpty {
+            components?.queryItems?.append(.init(name: "system_key", value: systemKey))
+        }
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: TodayWorldResponse = try await get(
             url,
@@ -264,6 +268,24 @@ struct APIClient {
         ]
         guard let url = components?.url else { throw APIError.invalidURL }
         return try await get(url)
+    }
+
+    func interpretBilibiliVideo(bvid: String, title: String) async throws -> BilibiliInterpretationResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/v1/bilibili/interpretation"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [.init(name: "bvid", value: bvid), .init(name: "title", value: title)]
+        guard let url = components?.url else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 620
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+        do { return try JSONDecoder().decode(BilibiliInterpretationResponse.self, from: data) }
+        catch { throw APIError.decoding(error) }
     }
 
     func fetchXComments(tweetID: String, limit: Int = 30) async throws -> [XComment] {

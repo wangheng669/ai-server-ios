@@ -21,6 +21,11 @@ struct PostDetailView: View {
     @State private var bilibiliSummaryModel: String?
     @State private var bilibiliSummaryStatus = "loading"
     @State private var bilibiliSummaryError: String?
+    @State private var bilibiliInterpretation: BilibiliVideoInterpretation?
+    @State private var bilibiliInterpretationModel: String?
+    @State private var bilibiliInterpretationCost: Double?
+    @State private var bilibiliInterpretationStatus = "idle"
+    @State private var bilibiliInterpretationError: String?
     @State private var youtubePlaybackState: YouTubePlaybackState = .idle
     @State private var isYouTubeVideoReady = false
     @State private var youtubePlaybackLabel: String?
@@ -1620,12 +1625,86 @@ struct PostDetailView: View {
 
                     Divider()
 
+                    bilibiliVideoInterpretation
+
+                    Divider()
+
                     bilibiliSubtitles
 
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
                 .padding(.bottom, 34)
+            }
+        }
+    }
+
+    @ViewBuilder private var bilibiliVideoInterpretation: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "eye.fill").foregroundStyle(.blue)
+                Text("视频解读").font(.system(size: 19, weight: .bold))
+                Spacer()
+                if let bilibiliInterpretationModel {
+                    Text(bilibiliInterpretationModel).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if bilibiliInterpretationStatus == "idle" {
+                Text("由 GLM-4.6V 直接观看画面，补充字幕总结看不到的图表、动作、剪辑和时间线信息。")
+                    .font(.system(size: 15)).foregroundStyle(.secondary).lineSpacing(3)
+                Text("按官方标准价约 2 元/百万 Token；实际费用随视频时长变化，生成后显示本次估算。同一视频 30 天内读取缓存不重复收费。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button { Task { await loadBilibiliInterpretation() } } label: {
+                    Label("开始视频解读", systemImage: "play.rectangle.on.rectangle")
+                }
+                .buttonStyle(.borderedProminent).tint(.blue)
+            } else if bilibiliInterpretationStatus == "loading" {
+                ProgressView("GLM-4.6V 正在观看并解读视频…")
+                Text("需要先准备视频并完成视觉推理，首次通常需要几分钟。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let bilibiliInterpretationError {
+                ContentUnavailableView("视频解读暂不可用", systemImage: "eye.slash", description: Text(bilibiliInterpretationError))
+                Button("重试") { Task { await loadBilibiliInterpretation() } }.buttonStyle(.bordered).tint(.blue)
+            } else if let interpretation = bilibiliInterpretation {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(interpretation.overview).font(.system(size: 16)).lineSpacing(5).textSelection(.enabled)
+                    interpretationBulletSection("画面发现", items: interpretation.visualFindings, color: .blue)
+                    if !interpretation.timeline.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("事件时间线").font(.headline)
+                            ForEach(Array(interpretation.timeline.enumerated()), id: \.offset) { _, event in
+                                HStack(alignment: .top, spacing: 10) {
+                                    Text(event.time).font(.caption.monospacedDigit().weight(.bold)).foregroundStyle(.blue).frame(width: 48, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(event.title).font(.subheadline.weight(.semibold))
+                                        Text(event.detail).font(.subheadline).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    interpretationBulletSection("表达与创作观察", items: interpretation.creatorNotes, color: .indigo)
+                    if let bilibiliInterpretationCost {
+                        Text(String(format: "本次估算费用 ¥%.4f", bilibiliInterpretationCost))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(14).background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    @ViewBuilder private func interpretationBulletSection(_ title: String, items: [String], color: Color) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.headline)
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle().fill(color).frame(width: 6, height: 6).padding(.top, 7)
+                        Text(item).font(.subheadline).lineSpacing(3)
+                    }
+                }
             }
         }
     }
@@ -1814,6 +1893,26 @@ struct PostDetailView: View {
         } catch {
             bilibiliSummaryStatus = "failed"
             bilibiliSummaryError = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    private func loadBilibiliInterpretation() async {
+        guard let bilibiliBVID else { return }
+        bilibiliInterpretationStatus = "loading"
+        bilibiliInterpretationError = nil
+        do {
+            let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .interpretBilibiliVideo(bvid: bilibiliBVID, title: post.bilibiliTitle)
+            guard !Task.isCancelled else { return }
+            bilibiliInterpretation = payload.interpretation
+            bilibiliInterpretationModel = payload.model
+            bilibiliInterpretationCost = payload.estimatedCostCNY
+            bilibiliInterpretationStatus = payload.status
+        } catch is CancellationError {
+            return
+        } catch {
+            bilibiliInterpretationStatus = "failed"
+            bilibiliInterpretationError = NetworkErrorPresentation.message(for: error)
         }
     }
 
