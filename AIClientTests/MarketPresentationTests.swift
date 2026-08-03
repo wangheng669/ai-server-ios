@@ -135,6 +135,20 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.marketAsOfTimestamp, 1785660501902)
     }
 
+    func testPreMarketStockRequestsTrendFallback() throws {
+        let preMarket = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":180,"marketSession":"pre","trend":[]}"#.utf8)
+        )
+        let regular = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":180,"marketSession":"regular","trend":[]}"#.utf8)
+        )
+
+        XCTAssertTrue(marketQuoteNeedsTrendFallback(preMarket))
+        XCTAssertFalse(marketQuoteNeedsTrendFallback(regular))
+    }
+
     func testClosedIndexFutureDoesNotReplaceCashProxy() throws {
         let data = Data(#"{"symbol":"ES1!","name":"标普500 E-mini期货","price":7519.25,"marketSession":"closed"}"#.utf8)
         let future = try JSONDecoder().decode(MarketQuote.self, from: data)
