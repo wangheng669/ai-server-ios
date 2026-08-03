@@ -174,54 +174,17 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
     var unitSuffix: String { self == .consumerConfidence ? "点" : "%" }
 }
 
-struct WorldBankIndicatorPoint: Decodable, Equatable {
-    let year: Int
-    let value: Double?
-
-    init(year: Int, value: Double?) {
-        self.year = year
-        self.value = value
-    }
+private struct ChinaMacroAPIEnvelope: Decodable { let data: ChinaMacroAPISnapshot }
+private struct ChinaMacroAPISnapshot: Decodable {
+    let observations: [ChinaMacroAPIObservation]
+    let generatedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case date, value
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let rawYear = try container.decode(String.self, forKey: .date)
-        guard let year = Int(rawYear) else {
-            throw DecodingError.dataCorruptedError(forKey: .date, in: container, debugDescription: "Invalid year")
-        }
-        self.year = year
-        self.value = try container.decodeIfPresent(Double.self, forKey: .value)
+        case observations
+        case generatedAt = "generated_at"
     }
 }
-
-struct WorldBankIndicatorResponse: Decodable {
-    let points: [WorldBankIndicatorPoint]
-
-    init(from decoder: Decoder) throws {
-        var container = try decoder.unkeyedContainer()
-        _ = try container.decode(WorldBankMetadata.self)
-        points = try container.decode([WorldBankIndicatorPoint].self)
-    }
-
-    private struct WorldBankMetadata: Decodable {}
-}
-
-struct PBCMortgageAnnouncement: Equatable {
-    let year: Int
-    let month: Int
-    let day: Int
-    let url: URL
-
-    var dateKey: Int { year * 10_000 + month * 100 + day }
-}
-
-private struct ChinaMacroAPIEnvelope: Decodable { let data: ChinaMacroAPISnapshot }
-private struct ChinaMacroAPISnapshot: Decodable { let observations: [ChinaMacroAPIObservation] }
-private struct ChinaMacroAPIObservation: Decodable {
+struct ChinaMacroAPIObservation: Decodable {
     let metricKey: String
     let period: String
     let value: Double
@@ -235,19 +198,13 @@ private struct ChinaMacroAPIObservation: Decodable {
 struct ChinaMacroService {
     private let session: URLSession
     private let appBaseURL: URL
-    private let baseURL = URL(string: "https://api.worldbank.org/v2/country/CHN/indicator/")!
 
     init(session: URLSession = .shared, appBaseURL: URL = ServerConfiguration.currentURL) {
         self.session = session
         self.appBaseURL = appBaseURL
     }
 
-    func history() async throws -> [ChinaMacroYear] {
-        if let cached = try? await backendHistory(), !cached.isEmpty { return cached }
-        return try await directHistory()
-    }
-
-    private func backendHistory() async throws -> [ChinaMacroYear] {
+    func history() async throws -> (years: [ChinaMacroYear], generatedAt: Date) {
         let url = appBaseURL.appending(path: "api/v1/economy/china-macro")
         var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -255,283 +212,20 @@ struct ChinaMacroService {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
-        let observations = try JSONDecoder().decode(ChinaMacroAPIEnvelope.self, from: data).data.observations
-        var points: [String: [WorldBankIndicatorPoint]] = [:]
-        for item in observations {
-            guard let year = Int(item.period.prefix(4)) else { continue }
-            points[item.metricKey, default: []].append(WorldBankIndicatorPoint(year: year, value: item.value))
-        }
-        return Self.merge(
-            gdpGrowth: points["gdp_growth"] ?? [], unemployment: points["unemployment"] ?? [],
-            inflation: points["inflation"] ?? [], lendingRate: points["lending_rate"] ?? [],
-            depositRate: points["deposit_rate"] ?? [], mortgageRate: [],
-            householdLeverage: points["household_leverage"] ?? [], debtServiceRatio: points["debt_service_ratio"] ?? [],
-            incomeSurplusRate: points["income_surplus_rate"] ?? [], consumerConfidence: points["consumer_confidence"] ?? [],
-            electricityTotalGrowth: points["electricity_total_growth"] ?? [],
-            electricityPrimaryGrowth: points["electricity_primary_growth"] ?? [],
-            electricitySecondaryGrowth: points["electricity_secondary_growth"] ?? [],
-            electricityTertiaryGrowth: points["electricity_tertiary_growth"] ?? [],
-            electricityResidentialGrowth: points["electricity_residential_growth"] ?? [],
-            privateCredit: points["private_credit"] ?? []
-        )
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(ChinaMacroAPIEnvelope.self, from: data).data
+        let years = Self.merge(snapshot.observations)
+        guard !years.isEmpty else { throw URLError(.cannotParseResponse) }
+        return (years, snapshot.generatedAt)
     }
 
-    private func directHistory() async throws -> [ChinaMacroYear] {
-        async let gdpGrowth = seriesOrEmpty("NY.GDP.MKTP.KD.ZG")
-        async let unemployment = seriesOrEmpty("SL.UEM.TOTL.ZS")
-        async let inflation = seriesOrEmpty("FP.CPI.TOTL.ZG")
-        async let lendingRate = seriesOrEmpty("FR.INR.LEND")
-        async let depositRate = seriesOrEmpty("FR.INR.DPST")
-        async let householdLeverage = householdLeverageSeriesOrEmpty()
-        async let debtServiceRatio = debtServiceRatioSeriesOrEmpty()
-        async let incomeSurplusRate = incomeSurplusSeriesOrEmpty()
-        async let consumerConfidence = consumerConfidenceSeriesOrEmpty()
-        async let privateCredit = seriesOrEmpty("FD.AST.PRVT.GD.ZS")
-        let merged = await Self.merge(
-            gdpGrowth: gdpGrowth,
-            unemployment: unemployment,
-            inflation: inflation,
-            lendingRate: lendingRate,
-            depositRate: depositRate,
-            mortgageRate: [],
-            householdLeverage: householdLeverage,
-            debtServiceRatio: debtServiceRatio,
-            incomeSurplusRate: incomeSurplusRate,
-            consumerConfidence: consumerConfidence,
-            electricityTotalGrowth: [], electricityPrimaryGrowth: [], electricitySecondaryGrowth: [],
-            electricityTertiaryGrowth: [], electricityResidentialGrowth: [],
-            privateCredit: privateCredit
-        )
-        guard !merged.isEmpty else { throw URLError(.cannotParseResponse) }
-        return merged
-    }
-
-    private func seriesOrEmpty(_ indicator: String) async -> [WorldBankIndicatorPoint] {
-        (try? await series(indicator)) ?? []
-    }
-
-    private func series(_ indicator: String) async throws -> [WorldBankIndicatorPoint] {
-        let url = baseURL
-            .appending(path: indicator)
-            .appending(queryItems: [
-                URLQueryItem(name: "format", value: "json"),
-                URLQueryItem(name: "per_page", value: "100")
-            ])
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        return try JSONDecoder().decode(WorldBankIndicatorResponse.self, from: data).points
-    }
-
-    private func householdLeverageSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
-        (try? await householdLeverageSeries()) ?? []
-    }
-
-    private func householdLeverageSeries() async throws -> [WorldBankIndicatorPoint] {
-        let url = URL(string: "https://stats.bis.org/api/v1/data/WS_TC/Q.CN.H.A.M.770.A/all?startPeriod=2000")!
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
-        request.setValue("application/vnd.sdmx.structurespecificdata+xml;version=2.1", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let xml = String(data: data, encoding: .utf8) else {
-            throw URLError(.badServerResponse)
-        }
-        return Self.parseBISHouseholdLeverage(xml: xml)
-    }
-
-    static func parseBISHouseholdLeverage(xml: String) -> [WorldBankIndicatorPoint] {
-        parseBISQuarterlySeries(xml: xml)
-    }
-
-    private func debtServiceRatioSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
-        (try? await debtServiceRatioSeries()) ?? []
-    }
-
-    private func debtServiceRatioSeries() async throws -> [WorldBankIndicatorPoint] {
-        let url = URL(string: "https://stats.bis.org/api/v1/data/WS_DSR/Q.CN.P/all?startPeriod=2000")!
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
-        request.setValue("application/vnd.sdmx.structurespecificdata+xml;version=2.1", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let xml = String(data: data, encoding: .utf8) else { throw URLError(.badServerResponse) }
-        return Self.parseBISQuarterlySeries(xml: xml)
-    }
-
-    static func parseBISQuarterlySeries(xml: String) -> [WorldBankIndicatorPoint] {
-        let pattern = #"TIME_PERIOD="(\d{4})-Q([1-4])" OBS_VALUE="([0-9]+(?:\.[0-9]+)?)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let matches = regex.matches(in: xml, range: NSRange(xml.startIndex..<xml.endIndex, in: xml))
-        var latestByYear: [Int: (quarter: Int, value: Double)] = [:]
-        for match in matches {
-            guard let yearRange = Range(match.range(at: 1), in: xml),
-                  let quarterRange = Range(match.range(at: 2), in: xml),
-                  let valueRange = Range(match.range(at: 3), in: xml),
-                  let year = Int(xml[yearRange]),
-                  let quarter = Int(xml[quarterRange]),
-                  let value = Double(xml[valueRange]) else { continue }
-            if latestByYear[year]?.quarter ?? 0 < quarter {
-                latestByYear[year] = (quarter, value)
-            }
-        }
-        return latestByYear.map { WorldBankIndicatorPoint(year: $0.key, value: $0.value.value) }
-            .sorted { $0.year > $1.year }
-    }
-
-    private func consumerConfidenceSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
-        (try? await consumerConfidenceSeries()) ?? []
-    }
-
-    private func consumerConfidenceSeries() async throws -> [WorldBankIndicatorPoint] {
-        let url = URL(string: "https://sdmx.oecd.org/public/rest/data/OECD.SDD.STES,DSD_STES@DF_CS,4.0/CHN.M.CCICP......?startPeriod=2000&dimensionAtObservation=AllDimensions")!
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 25)
-        request.setValue("text/csv", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let csv = String(data: data, encoding: .utf8) else { throw URLError(.badServerResponse) }
-        return Self.parseOECDMonthlySeries(csv: csv)
-    }
-
-    static func parseOECDMonthlySeries(csv: String) -> [WorldBankIndicatorPoint] {
-        let rows = csv.split(whereSeparator: \Character.isNewline).map { String($0) }
-        guard let header = rows.first?.split(separator: ",").map(String.init),
-              let timeIndex = header.firstIndex(of: "TIME_PERIOD"),
-              let valueIndex = header.firstIndex(of: "OBS_VALUE") else { return [] }
-        var latest: [Int: (month: Int, value: Double)] = [:]
-        for row in rows.dropFirst() {
-            let fields = row.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            guard fields.indices.contains(timeIndex), fields.indices.contains(valueIndex) else { continue }
-            let parts = fields[timeIndex].split(separator: "-")
-            guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]),
-                  let value = Double(fields[valueIndex]) else { continue }
-            if latest[year]?.month ?? 0 < month { latest[year] = (month, value) }
-        }
-        return latest.map { WorldBankIndicatorPoint(year: $0.key, value: $0.value.value) }
-            .sorted { $0.year > $1.year }
-    }
-
-    private func incomeSurplusSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
-        let releases: [(Int, String)] = [
-            (2025, "https://www.stats.gov.cn/sj/zxfb/202601/t20260119_1962321.html"),
-            (2024, "https://www.stats.gov.cn/sj/zxfb/202501/t20250117_1958325.html"),
-            (2023, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202401/t20240117_1946643.html"),
-            (2022, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202301/t20230117_1892129.html"),
-            (2021, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202201/t20220117_1826442.html"),
-            (2020, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202101/t20210118_1812464.html")
-        ]
-        var points: [WorldBankIndicatorPoint] = []
-        for (year, address) in releases {
-            guard let url = URL(string: address), let html = try? await html(at: url),
-                  let value = Self.parseNBSIncomeSurplusRate(html: html) else { continue }
-            points.append(WorldBankIndicatorPoint(year: year, value: value))
-        }
-        return points
-    }
-
-    static func parseNBSIncomeSurplusRate(html: String) -> Double? {
-        let plain = html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        func firstNumber(after label: String) -> Double? {
-            let escaped = NSRegularExpression.escapedPattern(for: label)
-            guard let regex = try? NSRegularExpression(pattern: escaped + #"\s*([0-9]+)"#),
-                  let match = regex.firstMatch(in: plain, range: NSRange(plain.startIndex..<plain.endIndex, in: plain)),
-                  let range = Range(match.range(at: 1), in: plain) else { return nil }
-            return Double(plain[range])
-        }
-        guard let income = firstNumber(after: "全国居民人均可支配收入"),
-              let consumption = firstNumber(after: "全国居民人均消费支出"), income > 0 else { return nil }
-        return (income - consumption) / income * 100
-    }
-
-    func mortgageSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
-        (try? await mortgageSeries()) ?? []
-    }
-
-    private func mortgageSeries() async throws -> [WorldBankIndicatorPoint] {
-        let root = URL(string: "https://www.pbc.gov.cn")!
-        let listPath = "/zhengcehuobisi/125207/125213/125440/3876551/"
-        let listPages = ["index.html", "de24575c-2.html", "de24575c-3.html", "de24575c-4.html", "de24575c-5.html"]
-        var announcements: [PBCMortgageAnnouncement] = []
-
-        for page in listPages {
-            guard let html = try? await html(at: root.appending(path: listPath + page)) else { continue }
-            announcements.append(contentsOf: Self.parsePBCLPRAnnouncements(html: html, rootURL: root))
-        }
-
-        let latestByYear = Dictionary(grouping: announcements, by: \.year)
-            .compactMap { _, values in values.max { $0.dateKey < $1.dateKey } }
-            .sorted { $0.year > $1.year }
-
-        var points: [WorldBankIndicatorPoint] = []
-        for announcement in latestByYear {
-            guard let detail = try? await html(at: announcement.url) else { continue }
-            guard let value = Self.parseFiveYearLPR(html: detail) else { continue }
-            points.append(WorldBankIndicatorPoint(year: announcement.year, value: value))
-        }
-        return points
-    }
-
-    private func html(at url: URL) async throws -> String {
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
-        request.setValue("Mozilla/5.0 AIServerClient", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let html = String(data: data, encoding: .utf8) else {
-            throw URLError(.cannotDecodeContentData)
-        }
-        return html
-    }
-
-    static func parsePBCLPRAnnouncements(html: String, rootURL: URL) -> [PBCMortgageAnnouncement] {
-        let pattern = #"href=[\"']([^\"']+)[\"'][^>]*title=[\"'](20\d{2})年(\d{1,2})月(\d{1,2})日[^\"']*贷款市场报价利率"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let range = NSRange(html.startIndex..<html.endIndex, in: html)
-        return regex.matches(in: html, range: range).compactMap { match in
-            guard match.numberOfRanges == 5,
-                  let pathRange = Range(match.range(at: 1), in: html),
-                  let yearRange = Range(match.range(at: 2), in: html),
-                  let monthRange = Range(match.range(at: 3), in: html),
-                  let dayRange = Range(match.range(at: 4), in: html),
-                  let year = Int(html[yearRange]),
-                  let month = Int(html[monthRange]),
-                  let day = Int(html[dayRange]),
-                  let url = URL(string: String(html[pathRange]), relativeTo: rootURL)?.absoluteURL else { return nil }
-            return PBCMortgageAnnouncement(year: year, month: month, day: day, url: url)
-        }
-    }
-
-    static func parseFiveYearLPR(html: String) -> Double? {
-        let pattern = #"5年期以上LPR为\s*([0-9]+(?:\.[0-9]+)?)%"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..<html.endIndex, in: html)),
-              let valueRange = Range(match.range(at: 1), in: html) else { return nil }
-        return Double(html[valueRange])
-    }
-
-    static func merge(
-        gdpGrowth: [WorldBankIndicatorPoint],
-        unemployment: [WorldBankIndicatorPoint],
-        inflation: [WorldBankIndicatorPoint],
-        lendingRate: [WorldBankIndicatorPoint],
-        depositRate: [WorldBankIndicatorPoint],
-        mortgageRate: [WorldBankIndicatorPoint],
-        householdLeverage: [WorldBankIndicatorPoint],
-        debtServiceRatio: [WorldBankIndicatorPoint],
-        incomeSurplusRate: [WorldBankIndicatorPoint],
-        consumerConfidence: [WorldBankIndicatorPoint],
-        electricityTotalGrowth: [WorldBankIndicatorPoint],
-        electricityPrimaryGrowth: [WorldBankIndicatorPoint],
-        electricitySecondaryGrowth: [WorldBankIndicatorPoint],
-        electricityTertiaryGrowth: [WorldBankIndicatorPoint],
-        electricityResidentialGrowth: [WorldBankIndicatorPoint],
-        privateCredit: [WorldBankIndicatorPoint]
-    ) -> [ChinaMacroYear] {
+    static func merge(_ observations: [ChinaMacroAPIObservation]) -> [ChinaMacroYear] {
         var years: [Int: ChinaMacroYear] = [:]
-        func insert(_ points: [WorldBankIndicatorPoint], keyPath: WritableKeyPath<ChinaMacroYear, Double?>) {
-            for point in points where point.year >= 2000 && point.year <= Calendar.current.component(.year, from: Date()) {
-                var item = years[point.year] ?? ChinaMacroYear(
-                    year: point.year,
+        for observation in observations {
+            guard let year = Int(observation.period.prefix(4)), year >= 2000 else { continue }
+            var item = years[year] ?? ChinaMacroYear(
+                    year: year,
                     gdpGrowth: nil,
                     unemployment: nil,
                     inflation: nil,
@@ -548,27 +242,28 @@ struct ChinaMacroService {
                     electricityTertiaryGrowth: nil,
                     electricityResidentialGrowth: nil,
                     privateCredit: nil
-                )
-                item[keyPath: keyPath] = point.value
-                years[point.year] = item
+            )
+            switch observation.metricKey {
+            case "gdp_growth": item.gdpGrowth = observation.value
+            case "unemployment": item.unemployment = observation.value
+            case "inflation": item.inflation = observation.value
+            case "lending_rate": item.lendingRate = observation.value
+            case "deposit_rate": item.depositRate = observation.value
+            case "mortgage_rate": item.mortgageRate = observation.value
+            case "household_leverage": item.householdLeverage = observation.value
+            case "debt_service_ratio": item.debtServiceRatio = observation.value
+            case "income_surplus_rate": item.incomeSurplusRate = observation.value
+            case "consumer_confidence": item.consumerConfidence = observation.value
+            case "electricity_total_growth": item.electricityTotalGrowth = observation.value
+            case "electricity_primary_growth": item.electricityPrimaryGrowth = observation.value
+            case "electricity_secondary_growth": item.electricitySecondaryGrowth = observation.value
+            case "electricity_tertiary_growth": item.electricityTertiaryGrowth = observation.value
+            case "electricity_residential_growth": item.electricityResidentialGrowth = observation.value
+            case "private_credit": item.privateCredit = observation.value
+            default: continue
             }
+            years[year] = item
         }
-        insert(gdpGrowth, keyPath: \.gdpGrowth)
-        insert(unemployment, keyPath: \.unemployment)
-        insert(inflation, keyPath: \.inflation)
-        insert(lendingRate, keyPath: \.lendingRate)
-        insert(depositRate, keyPath: \.depositRate)
-        insert(mortgageRate, keyPath: \.mortgageRate)
-        insert(householdLeverage, keyPath: \.householdLeverage)
-        insert(debtServiceRatio, keyPath: \.debtServiceRatio)
-        insert(incomeSurplusRate, keyPath: \.incomeSurplusRate)
-        insert(consumerConfidence, keyPath: \.consumerConfidence)
-        insert(electricityTotalGrowth, keyPath: \.electricityTotalGrowth)
-        insert(electricityPrimaryGrowth, keyPath: \.electricityPrimaryGrowth)
-        insert(electricitySecondaryGrowth, keyPath: \.electricitySecondaryGrowth)
-        insert(electricityTertiaryGrowth, keyPath: \.electricityTertiaryGrowth)
-        insert(electricityResidentialGrowth, keyPath: \.electricityResidentialGrowth)
-        insert(privateCredit, keyPath: \.privateCredit)
         return years.values
             .filter {
                 $0.gdpGrowth != nil || $0.unemployment != nil || $0.inflation != nil ||
@@ -579,37 +274,6 @@ struct ChinaMacroService {
                     $0.electricityTertiaryGrowth != nil || $0.electricityResidentialGrowth != nil || $0.privateCredit != nil
             }
             .sorted { $0.year > $1.year }
-    }
-
-    static func mergingMortgage(
-        _ points: [WorldBankIndicatorPoint],
-        into years: [ChinaMacroYear]
-    ) -> [ChinaMacroYear] {
-        var merged = Dictionary(uniqueKeysWithValues: years.map { ($0.year, $0) })
-        for point in points {
-            var item = merged[point.year] ?? ChinaMacroYear(
-                year: point.year,
-                gdpGrowth: nil,
-                unemployment: nil,
-                inflation: nil,
-                lendingRate: nil,
-                depositRate: nil,
-                mortgageRate: nil,
-                householdLeverage: nil,
-                debtServiceRatio: nil,
-                incomeSurplusRate: nil,
-                consumerConfidence: nil,
-                electricityTotalGrowth: nil,
-                electricityPrimaryGrowth: nil,
-                electricitySecondaryGrowth: nil,
-                electricityTertiaryGrowth: nil,
-                electricityResidentialGrowth: nil,
-                privateCredit: nil
-            )
-            item.mortgageRate = point.value
-            merged[point.year] = item
-        }
-        return merged.values.sorted { $0.year > $1.year }
     }
 }
 
@@ -632,12 +296,10 @@ final class ChinaMacroStore {
         loadError = false
         defer { isLoading = false }
         do {
-            years = try await service.history()
+            let snapshot = try await service.history()
+            years = snapshot.years
             loadError = years.isEmpty
-            guard !years.isEmpty else { return }
-            let mortgageRates = await service.mortgageSeriesOrEmpty()
-            years = ChinaMacroService.mergingMortgage(mortgageRates, into: years)
-            lastUpdatedAt = Date()
+            lastUpdatedAt = snapshot.generatedAt
         } catch {
             loadError = true
         }

@@ -117,48 +117,24 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 1.2, count: 12), 11)
     }
 
-    func testDecodesWorldBankIndicatorAndPreservesMissingYears() throws {
-        let json = """
-        [
-          {"page":1,"pages":1,"per_page":100,"total":2},
-          [
-            {"date":"2025","value":0.0595646916565403},
-            {"date":"2024","value":null}
-          ]
-        ]
-        """
-        let response = try JSONDecoder().decode(WorldBankIndicatorResponse.self, from: Data(json.utf8))
-        XCTAssertEqual(response.points.count, 2)
-        XCTAssertEqual(response.points[0].year, 2025)
-        XCTAssertEqual(response.points[0].value, 0.0595646916565403)
-        XCTAssertNil(response.points[1].value)
-    }
-
-    func testMergesChinaMacroSeriesByYear() throws {
-        func points(_ json: String) throws -> [WorldBankIndicatorPoint] {
-            try JSONDecoder().decode(
-                WorldBankIndicatorResponse.self,
-                from: Data("[{\"page\":1},\(json)]".utf8)
-            ).points
-        }
-        let merged = ChinaMacroService.merge(
-            gdpGrowth: try points("[{\"date\":\"2024\",\"value\":5.0}]"),
-            unemployment: try points("[{\"date\":\"2024\",\"value\":4.6}]"),
-            inflation: try points("[{\"date\":\"2024\",\"value\":0.2},{\"date\":\"2023\",\"value\":0.1}]"),
-            lendingRate: try points("[{\"date\":\"2024\",\"value\":4.35}]"),
-            depositRate: try points("[{\"date\":\"2024\",\"value\":1.5}]"),
-            mortgageRate: try points("[{\"date\":\"2024\",\"value\":3.6}]"),
-            householdLeverage: try points("[{\"date\":\"2024\",\"value\":60.0}]"),
-            debtServiceRatio: try points("[{\"date\":\"2024\",\"value\":18.8}]"),
-            incomeSurplusRate: try points("[{\"date\":\"2024\",\"value\":31.68}]"),
-            consumerConfidence: try points("[{\"date\":\"2024\",\"value\":86.0}]"),
-            electricityTotalGrowth: try points("[{\"date\":\"2024\",\"value\":6.8}]"),
-            electricityPrimaryGrowth: [],
-            electricitySecondaryGrowth: try points("[{\"date\":\"2024\",\"value\":5.1}]"),
-            electricityTertiaryGrowth: [],
-            electricityResidentialGrowth: [],
-            privateCredit: try points("[{\"date\":\"2023\",\"value\":194.2}]")
-        )
+    func testMergesServerMacroObservationsByYear() {
+        let merged = ChinaMacroService.merge([
+            .init(metricKey: "gdp_growth", period: "2024", value: 5.0),
+            .init(metricKey: "unemployment", period: "2024", value: 4.6),
+            .init(metricKey: "inflation", period: "2024", value: 0.2),
+            .init(metricKey: "inflation", period: "2023", value: 0.1),
+            .init(metricKey: "lending_rate", period: "2024", value: 4.35),
+            .init(metricKey: "deposit_rate", period: "2024", value: 1.5),
+            .init(metricKey: "mortgage_rate", period: "2024", value: 3.6),
+            .init(metricKey: "household_leverage", period: "2024", value: 60.0),
+            .init(metricKey: "debt_service_ratio", period: "2024", value: 18.8),
+            .init(metricKey: "income_surplus_rate", period: "2024", value: 31.68),
+            .init(metricKey: "consumer_confidence", period: "2024", value: 86.0),
+            .init(metricKey: "electricity_total_growth", period: "2024", value: 6.8),
+            .init(metricKey: "electricity_secondary_growth", period: "2024", value: 5.1),
+            .init(metricKey: "private_credit", period: "2023", value: 194.2),
+            .init(metricKey: "unknown_future_metric", period: "2025", value: 1)
+        ])
         XCTAssertEqual(merged.map(\.year), [2024, 2023])
         XCTAssertEqual(merged[0].gdpGrowth, 5.0)
         XCTAssertEqual(merged[0].unemployment, 4.6)
@@ -174,82 +150,5 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(merged[0].electricitySecondaryGrowth, 5.1)
         XCTAssertNil(merged[0].privateCredit)
         XCTAssertEqual(merged[1].privateCredit, 194.2)
-    }
-
-    func testParsesLatestMonthOfOECDConsumerConfidenceForEachYear() {
-        let csv = """
-        DATAFLOW,REF_AREA,FREQ,MEASURE,TIME_PERIOD,OBS_VALUE
-        flow,CHN,M,CCICP,2024-07,86
-        flow,CHN,M,CCICP,2024-12,88.5
-        flow,CHN,M,CCICP,2025-11,90.3
-        """
-        XCTAssertEqual(ChinaMacroService.parseOECDMonthlySeries(csv: csv), [
-            WorldBankIndicatorPoint(year: 2025, value: 90.3),
-            WorldBankIndicatorPoint(year: 2024, value: 88.5)
-        ])
-    }
-
-    func testCalculatesResidentIncomeSurplusRateFromNBSRelease() {
-        let html = "全国居民人均可支配收入</span><span>43377</span>元，全国居民人均消费支出<span>29476</span>元"
-        let value = ChinaMacroService.parseNBSIncomeSurplusRate(html: html)
-        XCTAssertEqual(try XCTUnwrap(value), 32.047, accuracy: 0.001)
-    }
-
-    func testParsesPBCLPRAnnouncementsAndFiveYearRate() throws {
-        let listing = """
-        <a href="/rates/20260720/index.html" title="2026年7月20日全国银行间同业拆借中心受权公布贷款市场报价利率（LPR）公告">公告</a>
-        <a href='/rates/20260622/index.html' title='2026年6月22日全国银行间同业拆借中心受权公布贷款市场报价利率（LPR）公告'>公告</a>
-        """
-        let root = try XCTUnwrap(URL(string: "https://www.pbc.gov.cn"))
-        let announcements = ChinaMacroService.parsePBCLPRAnnouncements(html: listing, rootURL: root)
-        XCTAssertEqual(announcements.count, 2)
-        XCTAssertEqual(announcements[0].dateKey, 20260720)
-        XCTAssertEqual(announcements[0].url.absoluteString, "https://www.pbc.gov.cn/rates/20260720/index.html")
-
-        let detail = "1年期LPR为3.0%，5年期以上LPR为3.5%。以上LPR在下一次发布LPR之前有效。"
-        XCTAssertEqual(ChinaMacroService.parseFiveYearLPR(html: detail), 3.5)
-    }
-
-    func testParsesLatestQuarterOfBISHouseholdLeverageForEachYear() {
-        let xml = """
-        <Obs TIME_PERIOD="2024-Q3" OBS_VALUE="60.2"></Obs>
-        <Obs TIME_PERIOD="2024-Q4" OBS_VALUE="60.0"></Obs>
-        <Obs TIME_PERIOD="2025-Q2" OBS_VALUE="59.7"></Obs>
-        """
-        let points = ChinaMacroService.parseBISHouseholdLeverage(xml: xml)
-        XCTAssertEqual(points, [
-            WorldBankIndicatorPoint(year: 2025, value: 59.7),
-            WorldBankIndicatorPoint(year: 2024, value: 60.0)
-        ])
-    }
-
-    func testAddsMortgageRatesWithoutDiscardingLoadedMacroData() {
-        let base = [ChinaMacroYear(
-            year: 2026,
-            gdpGrowth: 4.8,
-            unemployment: 4.6,
-            inflation: 0.4,
-            lendingRate: 3.1,
-            depositRate: 1.2,
-            mortgageRate: nil,
-            householdLeverage: 59.7,
-            debtServiceRatio: 18.8,
-            incomeSurplusRate: 32.0,
-            consumerConfidence: 89.5,
-            electricityTotalGrowth: 5.0,
-            electricityPrimaryGrowth: 9.9,
-            electricitySecondaryGrowth: 3.7,
-            electricityTertiaryGrowth: 8.2,
-            electricityResidentialGrowth: 6.3,
-            privateCredit: 180
-        )]
-        let result = ChinaMacroService.mergingMortgage(
-            [WorldBankIndicatorPoint(year: 2026, value: 3.5)],
-            into: base
-        )
-        XCTAssertEqual(result[0].inflation, 0.4)
-        XCTAssertEqual(result[0].gdpGrowth, 4.8)
-        XCTAssertEqual(result[0].depositRate, 1.2)
-        XCTAssertEqual(result[0].mortgageRate, 3.5)
     }
 }
