@@ -144,12 +144,49 @@ final class CountryGDPRankingTests: XCTestCase {
         let merged = ChinaMacroService.merge(
             inflation: try points("[{\"date\":\"2024\",\"value\":0.2},{\"date\":\"2023\",\"value\":0.1}]"),
             lendingRate: try points("[{\"date\":\"2024\",\"value\":4.35}]"),
+            depositRate: try points("[{\"date\":\"2024\",\"value\":1.5}]"),
+            mortgageRate: try points("[{\"date\":\"2024\",\"value\":3.6}]"),
             privateCredit: try points("[{\"date\":\"2023\",\"value\":194.2}]")
         )
         XCTAssertEqual(merged.map(\.year), [2024, 2023])
         XCTAssertEqual(merged[0].inflation, 0.2)
         XCTAssertEqual(merged[0].lendingRate, 4.35)
+        XCTAssertEqual(merged[0].depositRate, 1.5)
+        XCTAssertEqual(merged[0].mortgageRate, 3.6)
         XCTAssertNil(merged[0].privateCredit)
         XCTAssertEqual(merged[1].privateCredit, 194.2)
+    }
+
+    func testParsesPBCLPRAnnouncementsAndFiveYearRate() throws {
+        let listing = """
+        <a href="/rates/20260720/index.html" title="2026年7月20日全国银行间同业拆借中心受权公布贷款市场报价利率（LPR）公告">公告</a>
+        <a href='/rates/20260622/index.html' title='2026年6月22日全国银行间同业拆借中心受权公布贷款市场报价利率（LPR）公告'>公告</a>
+        """
+        let root = try XCTUnwrap(URL(string: "https://www.pbc.gov.cn"))
+        let announcements = ChinaMacroService.parsePBCLPRAnnouncements(html: listing, rootURL: root)
+        XCTAssertEqual(announcements.count, 2)
+        XCTAssertEqual(announcements[0].dateKey, 20260720)
+        XCTAssertEqual(announcements[0].url.absoluteString, "https://www.pbc.gov.cn/rates/20260720/index.html")
+
+        let detail = "1年期LPR为3.0%，5年期以上LPR为3.5%。以上LPR在下一次发布LPR之前有效。"
+        XCTAssertEqual(ChinaMacroService.parseFiveYearLPR(html: detail), 3.5)
+    }
+
+    func testAddsMortgageRatesWithoutDiscardingLoadedMacroData() {
+        let base = [ChinaMacroYear(
+            year: 2026,
+            inflation: 0.4,
+            lendingRate: 3.1,
+            depositRate: 1.2,
+            mortgageRate: nil,
+            privateCredit: 180
+        )]
+        let result = ChinaMacroService.mergingMortgage(
+            [WorldBankIndicatorPoint(year: 2026, value: 3.5)],
+            into: base
+        )
+        XCTAssertEqual(result[0].inflation, 0.4)
+        XCTAssertEqual(result[0].depositRate, 1.2)
+        XCTAssertEqual(result[0].mortgageRate, 3.5)
     }
 }
