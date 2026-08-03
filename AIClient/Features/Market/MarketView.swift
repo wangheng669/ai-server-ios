@@ -143,7 +143,8 @@ private struct MarketHomeView: View {
                         }
                     }
                     .padding(.top, 8)
-                    .padding(.bottom, 24)
+                    // Keep the final market rows clear of the floating root navigation capsule.
+                    .padding(.bottom, 76)
                     .background(MarketStyle.canvas)
                 }
             }
@@ -302,9 +303,12 @@ private struct MarketTerminalHero: View {
             HStack(alignment: .top) {
                 HStack(spacing: 6) {
                     Circle().fill(sessionTint).frame(width: 7, height: 7)
-                    Text("\(region.rawValue) · \(sessionLabel)")
+                    Text(sessionHeadline)
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(sessionTint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .layoutPriority(1)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
@@ -318,11 +322,11 @@ private struct MarketTerminalHero: View {
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name)
+                        Text(displayedQuote?.presentationName ?? quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name)
                             .font(.system(size: 22, weight: .semibold))
                             .lineLimit(1)
                             .layoutPriority(1)
-                        Text(overnightQuote.map { "\(CoreDescriptor(symbol: region.primarySymbol).code) · \($0.displayCode) 夜盘" }
+                        Text(overnightQuote.map { "\($0.displayCode) · 指数期货夜盘" }
                             ?? quote?.displayCode
                             ?? CoreDescriptor(symbol: region.primarySymbol).code)
                             .font(.caption.weight(.medium))
@@ -431,8 +435,13 @@ private struct MarketTerminalHero: View {
 
     private var sessionLabel: String {
         if region == .crypto { return "24H 交易中" }
-        if overnightQuote != nil { return "夜盘" }
+        if overnightQuote != nil { return "股票休市" }
         return quote?.tradingSession.displayLabel ?? "行情更新"
+    }
+
+    private var sessionHeadline: String {
+        if region == .unitedStates, overnightQuote != nil { return "美股休市 · 期指夜盘" }
+        return "\(region.rawValue) · \(sessionLabel)"
     }
 
     private var sessionTint: Color {
@@ -462,7 +471,7 @@ private struct MarketTerminalHero: View {
     }
 
     private var heroAccessibilityLabel: String {
-        let name = quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
+        let name = displayedQuote?.presentationName ?? quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
         guard let displayedQuote else { return "\(name)，等待行情" }
         return "\(name)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
     }
@@ -740,25 +749,46 @@ private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(MarketRegion.allCases) { region in
-                Button { withAnimation(.easeOut(duration: 0.18)) { selection = region } } label: {
-                    VStack(spacing: 9) {
-                        Text(region.rawValue)
-                            .font(.subheadline.weight(selection == region ? .semibold : .medium))
-                        Capsule()
-                            .fill(selection == region ? MarketStyle.accent : Color.clear)
-                            .frame(width: 38, height: 2.5)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 4) {
+                    ForEach(MarketRegion.allCases) { region in
+                        regionButton(region, proxy: proxy)
                     }
-                    .foregroundStyle(selection == region ? MarketStyle.accent : Color.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 48)
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == region ? .isSelected : [])
+                .padding(.horizontal, 18)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: selection) { _, region in
+                withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(region, anchor: .center) }
             }
         }
-        .padding(.horizontal, 18)
         .overlay(alignment: .bottom) { Divider().opacity(0.5).padding(.horizontal, 18) }
+    }
+
+    private func regionButton(_ region: MarketRegion, proxy: ScrollViewProxy) -> some View {
+        let isSelected = selection == region
+        let weight: Font.Weight = isSelected ? .semibold : .medium
+        let foreground = isSelected ? MarketStyle.accent : Color.secondary
+        let indicator = isSelected ? MarketStyle.accent : Color.clear
+
+        return Button {
+            withAnimation(.easeOut(duration: 0.18)) {
+                selection = region
+                proxy.scrollTo(region, anchor: .center)
+            }
+        } label: {
+            VStack(spacing: 9) {
+                Text(region.rawValue).font(.subheadline.weight(weight))
+                Capsule().fill(indicator).frame(width: 34, height: 2.5)
+            }
+            .foregroundStyle(foreground)
+            .frame(width: 54)
+            .frame(minHeight: 48)
+        }
+        .id(region)
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -1286,10 +1316,14 @@ private struct MarketIndexTableRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Circle().fill(sessionTint).frame(width: 5, height: 5)
-                        Text(statusLabel).font(.caption2).foregroundStyle(.secondary)
+                        Text(statusLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
                     }
-                    Text(quote.presentationName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
-                    Text(quote.displayCode).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(displayedName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.68)
+                    Text(displayedCode).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             .frame(width: 112, alignment: .leading)
@@ -1312,8 +1346,14 @@ private struct MarketIndexTableRow: View {
             .foregroundStyle(displayedTint)
             .frame(width: 64, alignment: .trailing)
 
-            Sparkline(values: displayedTrend, color: displayedTint)
-                .frame(width: 60, height: 32)
+            Group {
+                if displayedTrend.count >= 3 {
+                    Sparkline(values: displayedTrend, color: displayedTint)
+                } else {
+                    Text("—").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: 60, height: 32)
         }
         .padding(.horizontal, 12)
         .frame(minHeight: 62)
@@ -1334,6 +1374,14 @@ private struct MarketIndexTableRow: View {
 
     private var displayedSymbol: String {
         overnightQuote?.symbol ?? quote.symbol
+    }
+
+    private var displayedName: String {
+        overnightQuote?.presentationName ?? quote.presentationName
+    }
+
+    private var displayedCode: String {
+        overnightQuote?.displayCode ?? quote.displayCode
     }
 
     private var displayedPercentValue: Double {
@@ -1365,7 +1413,8 @@ private struct MarketIndexTableRow: View {
     }
 
     private var displayedTrend: [Double] {
-        marketExtendedSessionTrend(for: quote, fallback: trend)
+        if overnightQuote != nil { return trend }
+        return marketExtendedSessionTrend(for: quote, fallback: trend)
     }
 
     private var displayedTint: Color {
@@ -1380,7 +1429,19 @@ private struct MarketIndexTableRow: View {
 
     private var statusLabel: String {
         guard let delaySeconds = quote.delaySeconds, delaySeconds > 0 else { return sessionLabel }
-        return "\(sessionLabel) · 延迟\(max(1, delaySeconds / 60))分钟"
+        return "\(compactSessionLabel)·延\(max(1, delaySeconds / 60))分"
+    }
+
+    private var compactSessionLabel: String {
+        switch quote.tradingSession {
+        case .regular: "交易中"
+        case .premarket: "盘前"
+        case .postmarket: "盘后"
+        case .overnight: "夜盘"
+        case .closed: "收盘"
+        case .alwaysOpen: "24H"
+        case .unknown: "行情"
+        }
     }
 
     private var sessionTint: Color {
@@ -1392,18 +1453,13 @@ private struct MarketIndexTableRow: View {
 }
 
 func marketExtendedSessionTrend(for quote: MarketQuote, fallback: [Double]) -> [Double] {
-    if quote.hasActiveExtendedSessionQuote, quote.nightTrend.count > 1 {
-        return quote.nightTrend
+    if quote.hasActiveExtendedSessionQuote {
+        // Never join a regular-session line to a pre/post-market price. The discontinuity can
+        // visually contradict the extended-session change shown in the same row.
+        return quote.nightTrend.count > 1 ? quote.nightTrend : []
     }
     if fallback.count > 1 {
         return fallback
-    }
-    if let previousClose = quote.previousClose,
-       let sessionPrice = quote.sessionPrice,
-       previousClose.isFinite,
-       sessionPrice.isFinite,
-       previousClose != sessionPrice {
-        return [previousClose, sessionPrice]
     }
     return fallback
 }
@@ -1752,8 +1808,8 @@ private struct MarketLiveStatus: View {
             } else if let age = store.cachedSnapshotAge {
                 Text(cacheLabel(age: age))
             } else if store.hasOpenMarket && store.realtimeIsFresh {
-                if let delay = store.maximumOpenMarketDelayMinutes {
-                    Text("实时连接 · 部分延迟\(delay)分钟")
+                if store.maximumOpenMarketDelayMinutes != nil {
+                    Text("行情已连接 · 延迟以品种标注为准")
                 } else {
                     Text("实时连接")
                 }
