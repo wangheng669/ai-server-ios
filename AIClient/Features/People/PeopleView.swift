@@ -4807,6 +4807,15 @@ private struct PersonPostTimelineRow: View {
                         .foregroundStyle(Color.accentColor)
                 }
 
+                if let reply = post.meta?.replyContext,
+                   let replyText = reply.displayText {
+                    XReplyContextCard(reply: reply, text: replyText)
+                } else if let handle = replyHandle {
+                    Label("回复 \(handle)", systemImage: "arrowshape.turn.up.left")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
                 if let quote = post.meta?.quotedTweet {
                     XQuotedPostCard(quote: quote)
                 }
@@ -4835,6 +4844,52 @@ private struct PersonPostTimelineRow: View {
 
     private var shouldOfferExpansion: Bool {
         displayContent.count > (compact ? 150 : 280) || displayContent.filter(\.isNewline).count > 4
+    }
+
+    private var replyHandle: String? {
+        guard let value = post.meta?.inReplyToScreenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@")),
+              !value.isEmpty else { return nil }
+        return "@\(value)"
+    }
+}
+
+private struct XReplyContextCard: View {
+    let reply: XReplyContext
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("回复 \(reply.handle ?? "这条动态")", systemImage: "arrowshape.turn.up.left")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 9) {
+                if let avatar = reply.avatarURL.flatMap(MediaURL.image) {
+                    RemoteImage(url: avatar, height: 28, cornerRadius: 14)
+                        .frame(width: 28, height: 28).clipped()
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        if let name = reply.authorName, !name.isEmpty {
+                            Text(name).font(.system(size: 13, weight: .semibold))
+                        }
+                        if let handle = reply.handle {
+                            Text(handle).font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(text)
+                        .font(.system(size: 14)).lineSpacing(3).foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        }
     }
 }
 

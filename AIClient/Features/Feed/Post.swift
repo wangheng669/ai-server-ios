@@ -1042,6 +1042,7 @@ struct PostMeta: Decodable, Hashable {
     let noteText: String?
     let inReplyToScreenName: String?
     let inReplyToStatusID: String?
+    let replyContext: XReplyContext?
     let quotedTweet: XQuotedPost?
     let photoCredit: String?
     let zhihuRank: Int?
@@ -1069,6 +1070,7 @@ struct PostMeta: Decodable, Hashable {
         case noteText = "note_text"
         case inReplyToScreenName = "in_reply_to_screen_name"
         case inReplyToStatusID = "in_reply_to_status_id"
+        case replyContext = "reply_context"
         case quotedTweet = "quoted_tweet"
         case photoCredit = "photo_credit"
         case zhihuRank = "zhihu_rank"
@@ -1098,6 +1100,7 @@ struct PostMeta: Decodable, Hashable {
         PostMeta(
             metrics: nil, lang: nil, urls: nil, rawText: nil, noteText: nil,
             inReplyToScreenName: nil, inReplyToStatusID: nil,
+            replyContext: nil,
             quotedTweet: nil, photoCredit: nil,
             zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
             zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
@@ -1111,6 +1114,29 @@ struct PostMeta: Decodable, Hashable {
             flashPlatformCount: platformCount,
             flashPlatforms: platforms
         )
+    }
+}
+
+struct XReplyContext: Decodable, Hashable {
+    let id: String?
+    let authorName: String?
+    let screenName: String?
+    let avatarURL: String?
+    let text: String?
+    let textZH: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, text
+        case authorName = "author_name"
+        case screenName = "screen_name"
+        case avatarURL = "avatar_url"
+        case textZH = "text_zh"
+    }
+
+    var displayText: String? { xNonempty(textZH) ?? xNonempty(text) }
+    var handle: String? {
+        guard let screenName = xNonempty(screenName) else { return nil }
+        return screenName.hasPrefix("@") ? screenName : "@\(screenName)"
     }
 }
 
