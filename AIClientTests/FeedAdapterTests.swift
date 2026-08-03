@@ -633,6 +633,11 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(posts.first?.formattedTime, "第 21 名 · 热度 12345")
     }
 
+    func testHiddenFeedChromeRemovesWeiboHeaderReservation() {
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: false), 53)
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 0)
+    }
+
     func testDecodesAndMapsFlashItem() throws {
         let json = #"{"success":true,"data":{"items":[{"id":"f1","time":"18:00","text":"快讯正文","source":"flash:jin10","category":"company","isImportant":false,"finalScore":7.4}],"hasMore":false}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(FlashResponse.self, from: json)

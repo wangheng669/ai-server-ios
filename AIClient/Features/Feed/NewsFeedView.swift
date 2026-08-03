@@ -42,6 +42,14 @@ private enum WeiboSection: String, CaseIterable, Identifiable {
     var title: String { self == .hot ? "热搜" : "关注" }
 }
 
+enum FeedChromeLayout {
+    static let headerHeight: CGFloat = 53
+
+    static func headerReservationHeight(isHidden: Bool) -> CGFloat {
+        isHidden ? 0 : headerHeight
+    }
+}
+
 private struct WeChatAccount: Identifiable {
     let id: Int
     let name: String
@@ -214,7 +222,7 @@ struct NewsFeedView: View {
             sourceBar
             Divider().opacity(0.55)
         }
-        .frame(height: 53)
+        .frame(height: FeedChromeLayout.headerHeight)
         .background(Color(uiColor: .systemBackground))
         .overlay(alignment: .bottom) {
             if model.isSwitchingSource {
@@ -223,7 +231,7 @@ struct NewsFeedView: View {
                     .tint(.blue)
             }
         }
-        .offset(y: isFeedChromeHidden ? -53 : 0)
+        .offset(y: isFeedChromeHidden ? -FeedChromeLayout.headerHeight : 0)
         .opacity(isFeedChromeHidden ? 0 : 1)
         .allowsHitTesting(!isFeedChromeHidden)
         .accessibilityHidden(isFeedChromeHidden)
@@ -381,7 +389,9 @@ struct NewsFeedView: View {
 
     private var weiboPage: some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: 53)
+            Color.clear.frame(
+                height: FeedChromeLayout.headerReservationHeight(isHidden: isFeedChromeHidden)
+            )
             weiboSectionSelector
             Divider().opacity(0.5)
             if weiboSection == .hot {
@@ -486,7 +496,11 @@ struct NewsFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func feedList(for source: FeedSource, posts: [Post], topInset: CGFloat = 53) -> some View {
+    private func feedList(
+        for source: FeedSource,
+        posts: [Post],
+        topInset: CGFloat = FeedChromeLayout.headerHeight
+    ) -> some View {
         let visiblePosts = visiblePosts(for: source, posts: posts)
         let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
         let usesFilteredPagination = source == .flash
@@ -653,7 +667,7 @@ struct NewsFeedView: View {
                             proxy.scrollTo("feed-top", anchor: .top)
                         }
                     }
-                    .padding(.top, isFeedChromeHidden ? 12 : 61)
+                    .padding(.top, isFeedChromeHidden ? 12 : FeedChromeLayout.headerHeight + 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
@@ -1012,7 +1026,10 @@ struct NewsFeedView: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private func feedStatus(for source: FeedSource, topInset: CGFloat = 53) -> some View {
+    @ViewBuilder private func feedStatus(
+        for source: FeedSource,
+        topInset: CGFloat = FeedChromeLayout.headerHeight
+    ) -> some View {
         if source == model.source, model.isLoading {
             FeedTimelineLoadingView(topInset: topInset)
         } else {
