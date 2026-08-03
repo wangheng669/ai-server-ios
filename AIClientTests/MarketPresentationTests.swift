@@ -149,6 +149,36 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertFalse(marketQuoteNeedsTrendFallback(regular))
     }
 
+    func testSinglePremarketPointDoesNotHideCompleteSparkline() throws {
+        let quote = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.75,"previousClose":195.04,"marketSession":"pre","sessionPrice":200.84,"sessionChangePercent":2.97,"trend":[194,196,198,200],"nightTrend":[200.84]}"#.utf8)
+        )
+
+        XCTAssertEqual(marketExtendedSessionTrend(for: quote, fallback: quote.trend), quote.trend)
+        XCTAssertEqual(quote.sessionPrice, 200.84)
+        XCTAssertTrue(quote.hasActiveExtendedSessionQuote)
+    }
+
+    func testMultiplePremarketPointsUsePremarketSparkline() throws {
+        let quote = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.75,"marketSession":"pre","sessionPrice":200.84,"trend":[194,196,198,200],"nightTrend":[200.2,200.84]}"#.utf8)
+        )
+
+        XCTAssertEqual(marketExtendedSessionTrend(for: quote, fallback: quote.trend), [200.2, 200.84])
+    }
+
+    func testPremarketPriceStillDrawsWhenAllTrendFeedsAreEmpty() throws {
+        let quote = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.75,"previousClose":195.04,"marketSession":"pre","sessionPrice":200.84,"sessionChangePercent":2.97,"trend":[],"nightTrend":[]}"#.utf8)
+        )
+
+        XCTAssertEqual(marketExtendedSessionTrend(for: quote, fallback: []), [195.04, 200.84])
+        XCTAssertEqual(quote.formattedSessionPercent, "+2.97%")
+    }
+
     func testClosedIndexFutureDoesNotReplaceCashProxy() throws {
         let data = Data(#"{"symbol":"ES1!","name":"标普500 E-mini期货","price":7519.25,"marketSession":"closed"}"#.utf8)
         let future = try JSONDecoder().decode(MarketQuote.self, from: data)
