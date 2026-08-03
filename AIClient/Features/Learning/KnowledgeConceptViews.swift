@@ -181,20 +181,25 @@ struct KnowledgeConceptCarouselCard: View {
     @ViewBuilder
     private var conceptImage: some View {
         KnowledgeConceptCachedImage(url: concept.coverURL) { image in
-            ZStack {
-                image
-                    .resizable()
-                    .scaledToFill()
-                    .blur(radius: 18)
-                    .scaleEffect(1.08)
-                    .overlay(Color.black.opacity(0.16))
+            GeometryReader { proxy in
+                ZStack {
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                        .blur(radius: 18)
+                        .scaleEffect(1.08)
+                        .overlay(Color.black.opacity(0.16))
 
-                image
-                    .resizable()
-                    .scaledToFit()
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipped()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
             .saturation(0.72)
             .contrast(0.96)
             .overlay(Color(red: 0.55, green: 0.34, blue: 0.14).opacity(0.05))

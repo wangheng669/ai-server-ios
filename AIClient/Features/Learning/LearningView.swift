@@ -563,7 +563,16 @@ struct LearningView: View {
                 }
             }
             .onChange(of: library.concepts, initial: true) { _, loadedConcepts in
+                #if DEBUG
+                let isConceptPreview = ProcessInfo.processInfo.arguments.contains(
+                    "--learning-concepts-preview"
+                ) || ProcessInfo.processInfo.arguments.contains(
+                    "--learning-concept-detail-preview"
+                )
+                let shuffled = isConceptPreview ? loadedConcepts : loadedConcepts.shuffled()
+                #else
                 let shuffled = loadedConcepts.shuffled()
+                #endif
                 shuffledConcepts = shuffled
                 let IDs = shuffled.map(\.id)
                 #if DEBUG
