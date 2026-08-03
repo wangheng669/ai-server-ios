@@ -201,8 +201,8 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
     var displayFocusTags: [String] {
         focusTags.map { tag in
             switch tag {
-            case "忠臣": "正方"
-            case "反贼": "反方"
+            case "忠臣": "赢"
+            case "反贼": "输"
             default: tag
             }
         }
