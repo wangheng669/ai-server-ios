@@ -253,7 +253,7 @@ private struct EditorialRootView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if let deploymentStatus {
+            if let deploymentStatus, selectedTab != .investment {
                 DeploymentStatusTip(
                     snapshot: deploymentStatus,
                     initiallyExpanded: deploymentPreview != nil
