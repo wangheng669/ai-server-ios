@@ -25,7 +25,10 @@ struct APIClient {
             .init(name: "limit", value: String(min(max(limit, 1), 20)))
         ]
         guard let url = components?.url else { throw APIError.invalidURL }
-        let response: TodayWorldResponse = try await get(url)
+        let response: TodayWorldResponse = try await get(
+            url,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
         guard response.success else { throw APIError.invalidResponse }
         return response.data
     }
@@ -353,12 +356,14 @@ struct APIClient {
 
     private func get<Response: Decodable>(
         _ url: URL,
-        retriesTransientFailures: Bool = true
+        retriesTransientFailures: Bool = true,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
     ) async throws -> Response {
         let attempts = retriesTransientFailures ? 2 : 1
         for attempt in 0..<attempts {
             do {
-                let (data, response) = try await session.data(from: url)
+                let request = URLRequest(url: url, cachePolicy: cachePolicy)
+                let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
                 if [500, 502, 503, 504].contains(http.statusCode), attempt + 1 < attempts {
                     try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
