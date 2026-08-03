@@ -648,7 +648,7 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
         } else {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
                 ForEach(visibleIdeologyCamps) { camp in
                     ideologyCampSection(
                         title: camp.title,
@@ -670,8 +670,8 @@ struct LearningView: View {
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 6)
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
         }
     }
 
@@ -716,7 +716,7 @@ struct LearningView: View {
         color: Color,
         people: [SpecialPerson]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Circle()
                     .fill(color)
@@ -730,11 +730,11 @@ struct LearningView: View {
 
             LazyVGrid(
                 columns: Array(
-                    repeating: GridItem(.flexible(), spacing: 10, alignment: .top),
-                    count: 4
+                    repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
+                    count: 5
                 ),
                 alignment: .leading,
-                spacing: 14
+                spacing: 10
             ) {
                 ForEach(people) { person in
                     Button {
@@ -922,16 +922,16 @@ private struct IdeologyPersonGridCell: View {
     let baseURL: URL
 
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 5) {
             AvatarView(
                 url: person.avatarURL(baseURL: baseURL),
                 name: person.name,
-                size: 62,
+                size: 50,
                 assetName: person.avatarAssetName
             )
 
             Text(person.name)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
