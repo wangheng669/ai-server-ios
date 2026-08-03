@@ -200,7 +200,7 @@ final class MarketStore {
             ?? ((dashboard?.coreIndices ?? []) + (dashboard?.metrics ?? [])).contains { $0.marketSession != "closed" }
     }
 
-    /// 收盘后服务端不再下发日内 trend，这里用 5 日图表中最近一个交易日的数据兜底。
+    /// 非正常交易时段服务端可能不下发日内 trend，这里用 5 日图表中最近一个交易日的数据兜底。
     func trendValues(for quote: MarketQuote?) -> [Double] {
         guard let quote else { return [] }
         if quote.trend.count > 1 { return quote.trend }
@@ -211,10 +211,17 @@ final class MarketStore {
         guard let dashboard else { return }
         var seen: Set<String> = []
         var symbols: [String] = []
-        for quote in dashboard.coreIndices + dashboard.referenceIndices + dashboard.metrics + dashboard.allRegionalComponents
-        where quote.trend.count <= 1 && quote.marketSession == "closed" && seen.insert(quote.symbol).inserted {
+        // Core stocks are the visible rows most affected by an empty sparkline. Keep US first so
+        // its pre-market rows cannot be displaced by the bounded index/metric backfill queue.
+        let quotes = (dashboard.componentsByRegion["us"] ?? [])
+            + dashboard.allRegionalComponents
+            + dashboard.coreIndices
+            + dashboard.referenceIndices
+            + dashboard.metrics
+        for quote in quotes
+        where marketQuoteNeedsTrendFallback(quote) && seen.insert(quote.symbol).inserted {
             symbols.append(quote.symbol)
-            if symbols.count >= 12 { break }
+            if symbols.count >= 24 { break }
         }
         for symbol in symbols {
             guard !Task.isCancelled else { return }
@@ -367,6 +374,10 @@ final class MarketStore {
         await refresh(force: false)
     }
 
+}
+
+func marketQuoteNeedsTrendFallback(_ quote: MarketQuote) -> Bool {
+    quote.trend.count <= 1 && quote.marketSession != "regular" && quote.marketSession != "always-open"
 }
 
 func marketChartNeedsRetry(_ chart: MarketChart) -> Bool {
