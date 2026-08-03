@@ -1183,8 +1183,8 @@ enum WikipediaReaderStyle {
           heading.textContent
         ).replace(/\s*编辑\s*$/, "").trim();
         const description = document.querySelector("meta[name='description']")?.content?.trim() || "";
-        const slides = [];
-        const sectionEntries = [];
+        let slides = [];
+        let sectionEntries = [];
         let currentSection = titleText;
         let currentSubsection = "";
         let sectionNumber = 0;
@@ -1192,10 +1192,29 @@ enum WikipediaReaderStyle {
         let paragraphLength = 0;
 
         const textOf = (node) => (node?.textContent || "").replace(/\s+/g, " ").trim();
+        const bestImageSource = (image) => {
+          const largestSource = (image?.getAttribute("srcset") || image?.dataset.srcset || "")
+            .split(",")
+            .map((candidate) => candidate.trim().split(/\s+/)[0])
+            .filter(Boolean)
+            .pop();
+          const source = largestSource || image?.dataset.src || image?.currentSrc || image?.src || "";
+          return /^data:image\/(?:svg\+xml|gif)/i.test(source) ? "" : source;
+        };
         const cloneClean = (node) => {
           const clone = node.cloneNode(true);
-          clone.querySelectorAll(".mw-editsection, style, script, .noprint, .navbox, .navbar, .metadata").forEach((item) => item.remove());
+          clone.querySelectorAll(".mw-editsection, .mw-empty-elt, style, script, template, .noprint, .nomobile, .navbox, .navbar, .metadata, [hidden], [aria-hidden='true']").forEach((item) => item.remove());
           clone.querySelectorAll("[id]").forEach((item) => item.removeAttribute("id"));
+          Array.from(clone.querySelectorAll("img")).forEach((image) => {
+            const source = bestImageSource(image);
+            if (!source) {
+              image.remove();
+              return;
+            }
+            image.src = source;
+            image.removeAttribute("srcset");
+            image.removeAttribute("loading");
+          });
           return clone;
         };
         const makeSlide = (type, slideTitle) => {
@@ -1287,7 +1306,9 @@ enum WikipediaReaderStyle {
         };
         const addMediaSlide = (node) => {
           const image = node.matches("img") ? node : node.querySelector("img");
-          if (!image || !image.src) return false;
+          if (!image) return false;
+          const imageSource = bestImageSource(image);
+          if (!imageSource) return false;
           const width = Number(image.getAttribute("width") || image.naturalWidth || 0);
           const height = Number(image.getAttribute("height") || image.naturalHeight || 0);
           if (width && height && width < 140 && height < 140) return false;
@@ -1297,6 +1318,9 @@ enum WikipediaReaderStyle {
           const frame = document.createElement("div");
           frame.className = "aiserver-deck-media-frame";
           const clonedImage = image.cloneNode(true);
+          clonedImage.src = imageSource;
+          clonedImage.removeAttribute("srcset");
+          clonedImage.removeAttribute("loading");
           clonedImage.removeAttribute("width");
           clonedImage.removeAttribute("height");
           frame.appendChild(clonedImage);
@@ -1370,7 +1394,13 @@ enum WikipediaReaderStyle {
             addParagraph(node);
             return;
           }
-          if (node.matches("figure, .thumb") && addMediaSlide(node)) return;
+          const isStructuredCollection = tagName === "TABLE" || tagName === "UL" || tagName === "OL";
+          const isMediaContainer = node.matches("figure, .thumb, .gallery, .gallerybox") ||
+            (!isStructuredCollection && node.querySelector("img"));
+          if (isMediaContainer) {
+            addMediaSlide(node);
+            return;
+          }
           if (tagName === "UL" || tagName === "OL") {
             addStructuredSlide(node);
             return;
@@ -1383,11 +1413,28 @@ enum WikipediaReaderStyle {
             addStructuredSlide(node);
             return;
           }
-          const directImages = node.querySelectorAll(":scope > img");
-          if (directImages.length && addMediaSlide(node)) return;
           if (textOf(node).length > 20 && node.children.length <= 2) addStructuredSlide(node);
         });
         flushParagraphs();
+
+        const sourceSlides = slides;
+        const validSlides = sourceSlides.filter((slide, index) => {
+          if (index === 0 || slide.classList.contains("aiserver-deck-section")) {
+            return textOf(slide).length > 0;
+          }
+          if (slide.classList.contains("aiserver-deck-media")) {
+            const image = slide.querySelector("img");
+            return Boolean(image?.getAttribute("src"));
+          }
+          const body = slide.querySelector(".aiserver-deck-body");
+          if (!body) return false;
+          return textOf(body).length > 0 || Boolean(body.querySelector("img, table, svg, video"));
+        });
+        sectionEntries = sectionEntries.map((entry) => {
+          const sourceSlide = sourceSlides[entry.slideIndex];
+          return { ...entry, slideIndex: validSlides.indexOf(sourceSlide) };
+        }).filter((entry) => entry.slideIndex >= 0);
+        slides = validSlides;
 
         const root = document.createElement("div");
         root.id = "aiserver-deck-root";
