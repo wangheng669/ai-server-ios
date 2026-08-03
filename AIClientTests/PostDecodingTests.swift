@@ -407,11 +407,13 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testDecodesXReplyAndQuotedVideoContext() throws {
-        let data = #"{"post":{"id":1,"source":"x","meta":{"in_reply_to_screen_name":"openai","in_reply_to_status_id":"42","quoted_tweet":{"id":"99","text":"Demo","author":{"name":"Example","screenName":"example"},"media":[{"type":"video","url":"https://example.com/demo.mp4","thumbnail_url":"https://example.com/demo.jpg","width":1920,"height":1080}]}}}}"#.data(using: .utf8)!
+        let data = #"{"post":{"id":1,"source":"x","meta":{"in_reply_to_screen_name":"openai","in_reply_to_status_id":"42","reply_context":{"id":"42","author_name":"OpenAI","screen_name":"openai","avatar_url":"https://example.com/openai.jpg","text":"Parent post","text_zh":"被回复的动态"},"quoted_tweet":{"id":"99","text":"Demo","author":{"name":"Example","screenName":"example"},"media":[{"type":"video","url":"https://example.com/demo.mp4","thumbnail_url":"https://example.com/demo.jpg","width":1920,"height":1080}]}}}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: data).post
 
         XCTAssertEqual(post.meta?.inReplyToScreenName, "openai")
         XCTAssertEqual(post.meta?.inReplyToStatusID, "42")
+        XCTAssertEqual(post.meta?.replyContext?.displayText, "被回复的动态")
+        XCTAssertEqual(post.meta?.replyContext?.handle, "@openai")
         let media = try XCTUnwrap(post.meta?.quotedTweet?.media?.first)
         XCTAssertTrue(media.isVideo)
         XCTAssertEqual(media.playbackURL?.absoluteString, "https://example.com/demo.mp4")
