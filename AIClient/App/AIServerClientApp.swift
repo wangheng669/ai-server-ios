@@ -425,26 +425,40 @@ private struct TodayWorldView: View {
 
     private func timeline(_ payload: TodayWorldPayload) -> some View {
         let groups = TodayWorldAuthorGroup.make(from: payload)
+        let memberCount = Set(groups.map(\.authorKey)).count
 
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                pageHeader(payload)
+                TodayWorldBriefingView(
+                    payload: payload,
+                    groups: groups,
+                    isRefreshing: store.isLoading
+                )
 
-                TodayWorldBriefingView(payload: payload, groups: groups)
+                HStack(spacing: 6) {
+                    Text("成员动态")
+                        .font(.system(size: 17, weight: .bold))
 
-                Text("成员动态")
-                    .font(.system(size: 20, weight: .bold))
-                    .padding(.horizontal, 18)
-                    .padding(.top, 22)
-                    .padding(.bottom, 8)
+                    Text("\(memberCount)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1), in: Capsule())
+
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 3)
 
                 if groups.isEmpty {
                     Text("今天还没有新的动态")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 24)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 18)
                 } else {
                     ForEach(groups) { group in
                         TodayWorldAuthorGroupView(group: group) { post in
@@ -453,47 +467,24 @@ private struct TodayWorldView: View {
                     }
                 }
 
-                Color.clear.frame(height: 104)
+                Color.clear.frame(height: 88)
             }
+            .padding(.top, 8)
         }
         .scrollIndicators(.hidden)
         .refreshable { await store.load(force: true) }
     }
 
-    private func pageHeader(_ payload: TodayWorldPayload) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("今日世界")
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .tracking(-0.7)
-
-            Spacer()
-
-            if store.isLoading {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Text(Self.displayDate(payload.date))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
-    }
-
     private var loadingView: some View {
-        VStack(spacing: 18) {
-            HStack {
-                Text("今日世界")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                Spacer()
-            }
+        VStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.1))
+                .frame(height: 92)
 
             ForEach(0..<3, id: \.self) { _ in
-                HStack(alignment: .top, spacing: 11) {
-                    Circle().fill(Color.secondary.opacity(0.12)).frame(width: 42, height: 42)
-                    VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Circle().fill(Color.secondary.opacity(0.12)).frame(width: 36, height: 36)
+                    VStack(alignment: .leading, spacing: 8) {
                         Capsule().fill(Color.secondary.opacity(0.12)).frame(width: 128, height: 13)
                         Capsule().fill(Color.secondary.opacity(0.10)).frame(height: 12)
                         Capsule().fill(Color.secondary.opacity(0.08)).frame(width: 230, height: 12)
@@ -501,7 +492,8 @@ private struct TodayWorldView: View {
                 }
             }
         }
-        .padding(18)
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
         .frame(maxHeight: .infinity, alignment: .top)
         .redacted(reason: .placeholder)
         .accessibilityLabel("正在载入今日世界")
@@ -519,23 +511,12 @@ private struct TodayWorldView: View {
             .buttonStyle(.borderedProminent)
         }
     }
-
-    private static func displayDate(_ value: String) -> String {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: value) else { return value }
-
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "M月d日 EEEE"
-        return formatter.string(from: date)
-    }
 }
 
 private struct TodayWorldBriefingView: View {
     let payload: TodayWorldPayload
     let groups: [TodayWorldAuthorGroup]
+    let isRefreshing: Bool
 
     private var totalCount: Int {
         groups.reduce(0) { $0 + $1.posts.count }
@@ -548,47 +529,55 @@ private struct TodayWorldBriefingView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("OpenAI · 今日 \(totalCount) 条动态 · \(activeAuthorCount) 位成员更新")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(displayDate)
+                    .font(.system(size: 12, weight: .medium))
 
-            HStack(alignment: .top, spacing: 10) {
+                Spacer()
+
+                Text("\(activeAuthorCount) 位成员 · \(totalCount) 条")
+                    .font(.system(size: 12, weight: .medium))
+
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+            }
+            .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 9) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.blue)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
                     .background(Color.blue.opacity(0.1), in: Circle())
 
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("今日焦点")
-                            .font(.system(size: 16, weight: .bold))
-                        Spacer()
-                        if totalCount > 0 {
-                            Text("\(totalCount) 条更新")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.blue)
-                        }
+                            .font(.system(size: 15, weight: .bold))
+                        Spacer(minLength: 0)
                     }
 
                     Text(briefingText)
-                        .font(.system(size: 14))
+                        .font(.system(size: 13.5))
                         .foregroundStyle(.primary)
-                        .lineSpacing(3)
-                        .lineLimit(3)
+                        .lineSpacing(2)
+                        .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
-        .padding(14)
-        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(12)
+        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 2)
+        .padding(.horizontal, 14)
     }
 
     private var briefingText: String {
@@ -599,6 +588,18 @@ private struct TodayWorldBriefingView: View {
             ? "\(leadingGroup.authorName) 今日更新 \(leadingGroup.posts.count) 条"
             : "\(leadingGroup.authorName) 等 \(activeAuthorCount) 位成员今日共更新 \(totalCount) 条"
         return "\(authorSummary)。最新：\(latestPost.displayContent)"
+    }
+
+    private var displayDate: String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: payload.date) else { return payload.date }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 EEEE"
+        return formatter.string(from: date)
     }
 }
 
@@ -670,34 +671,33 @@ private struct TodayWorldAuthorGroupView: View {
     let onOpenPost: (Post) -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AvatarView(url: group.avatarURL, name: group.authorName, size: 42)
+        HStack(alignment: .top, spacing: 10) {
+            AvatarView(url: group.avatarURL, name: group.authorName, size: 36)
 
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     Text(group.authorName)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .lineLimit(1)
 
                     Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 13))
+                        .font(.system(size: 12))
                         .foregroundStyle(.blue)
 
                     if let handle = group.handle {
                         Text(handle)
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
 
                     Spacer(minLength: 0)
-                }
 
-                Text(group.roleLabel)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
-                    .padding(.bottom, 4)
+                    Text(group.roleLabel)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
 
                 ForEach(Array(group.posts.enumerated()), id: \.element.id) { index, post in
                     TodayWorldGroupedPostRow(
@@ -709,9 +709,9 @@ private struct TodayWorldAuthorGroupView: View {
                 }
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .overlay(alignment: .bottom) { Divider().padding(.leading, 72) }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) { Divider().padding(.leading, 60) }
     }
 }
 
@@ -722,12 +722,12 @@ private struct TodayWorldGroupedPostRow: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 VStack(spacing: 0) {
                     Circle()
                         .fill(Color.blue)
-                        .frame(width: 6, height: 6)
-                        .padding(.top, 7)
+                        .frame(width: 5, height: 5)
+                        .padding(.top, 6)
 
                     if !isLast {
                         Rectangle()
@@ -737,19 +737,19 @@ private struct TodayWorldGroupedPostRow: View {
                 }
                 .frame(width: 8)
 
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 4) {
                     if let time = post.formattedTime {
                         Text(time)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                     }
 
                     Text(post.displayContent)
-                        .font(.system(size: 15))
+                        .font(.system(size: 14))
                         .foregroundStyle(.primary)
-                        .lineSpacing(2)
+                        .lineSpacing(1)
                         .multilineTextAlignment(.leading)
-                        .lineLimit(4)
+                        .lineLimit(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     if hasContext {
@@ -757,8 +757,8 @@ private struct TodayWorldGroupedPostRow: View {
                     }
                 }
             }
-            .padding(.top, 8)
-            .padding(.bottom, isLast ? 4 : 9)
+            .padding(.top, 6)
+            .padding(.bottom, isLast ? 2 : 7)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
