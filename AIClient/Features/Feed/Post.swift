@@ -384,7 +384,7 @@ struct Post: Decodable, Identifiable, Hashable {
     var displayContent: String { htmlText(contentZH) ?? originalDisplayContent }
     var originalDisplayContent: String { htmlText(content) ?? clean(text) ?? clean(summary) ?? displayTitle }
     var xStoredOriginalContent: String {
-        [meta?.noteText, meta?.rawText, originalDisplayContent]
+        [meta?.noteText, meta?.rawText, isChineseXSource ? contentZH : nil, originalDisplayContent]
             .compactMap(clean)
             .max(by: { $0.count < $1.count }) ?? originalDisplayContent
     }
@@ -401,6 +401,9 @@ struct Post: Decodable, Identifiable, Hashable {
         sourceName == "X"
             && xTweetID != nil
             && XPostTextFormatter.shouldWaitForFullText(xStoredOriginalContent)
+    }
+    var needsXStoredDetailRefresh: Bool {
+        needsXLiveDetail || needsXTranslation
     }
 
     func replacingTranslation(with translation: String) -> Post {
