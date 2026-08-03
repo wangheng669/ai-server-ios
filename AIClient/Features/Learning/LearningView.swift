@@ -259,7 +259,11 @@ struct LearningView: View {
             VStack(spacing: 7) {
                 Text(section.title)
                     .font(.system(size: 26, weight: .semibold, design: .serif))
-                    .foregroundStyle(selectedSection == section ? Color.primary : Color.secondary)
+                    .foregroundStyle(
+                        selectedSection == section
+                            ? Color.primary
+                            : KnowledgePagePalette.supportingText
+                    )
                 Circle()
                     .fill(selectedSection == section ? KnowledgePagePalette.accent : .clear)
                     .frame(width: 7, height: 7)
@@ -304,7 +308,7 @@ struct LearningView: View {
                         .font(.system(size: 34, weight: .semibold, design: .serif))
                     Text("把复杂的投资概念，讲成看得懂、用得上的判断框架。")
                         .font(.system(size: 14.5))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(KnowledgePagePalette.supportingText)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Label("投资视频课", systemImage: "play.circle.fill")
@@ -863,6 +867,7 @@ private enum KnowledgePagePalette {
         }
     )
     static let stroke = Color.primary.opacity(0.10)
+    static let supportingText = Color.primary.opacity(0.76)
 }
 
 enum IdeologyCamp: String, CaseIterable, Identifiable {
@@ -955,11 +960,11 @@ private struct WeeklyStudyCard: View {
                     .foregroundStyle(KnowledgePagePalette.accent)
                 Text("天")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KnowledgePagePalette.supportingText)
                 Spacer()
                 Text(studiedDays.isEmpty ? "完成课程后记录" : "保持节奏")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KnowledgePagePalette.supportingText)
             }
 
             HStack {
@@ -967,7 +972,7 @@ private struct WeeklyStudyCard: View {
                     VStack(spacing: 9) {
                         Text(day)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(KnowledgePagePalette.supportingText)
                         Circle()
                             .fill(
                                 studiedDays.contains(index)
@@ -1047,7 +1052,7 @@ private struct LearningVideoLessonCard: View {
                     .multilineTextAlignment(.leading)
                 Text(lesson.summary)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KnowledgePagePalette.supportingText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
