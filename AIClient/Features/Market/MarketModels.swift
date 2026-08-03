@@ -103,9 +103,6 @@ struct MarketDashboard: Codable {
         if next.trend.isEmpty {
             next.trend = marketAppendingLiveValue(next.price, to: quotes[index].trend)
         }
-        if next.nightTrend.isEmpty {
-            next.nightTrend = marketAppendingLiveValue(next.sessionPrice ?? next.price, to: quotes[index].nightTrend)
-        }
         quotes[index] = next
     }
 }
@@ -283,15 +280,12 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 
     var isUp: Bool { percentValue >= 0 }
 
+    var tradingSession: MarketTradingSession {
+        MarketTradingSession(rawValue: marketSession, legacyIsNightSession: isNightSession)
+    }
+
     var hasActiveExtendedSessionQuote: Bool {
-        guard sessionPrice != nil else { return false }
-        if isNightSession == true { return true }
-        switch marketSession?.lowercased() {
-        case "pre", "premarket", "post", "after", "overnight":
-            return true
-        default:
-            return false
-        }
+        sessionPrice != nil && tradingSession.isExtended
     }
 
     var formattedSessionPercent: String? {
@@ -401,6 +395,42 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         trend = try values.decodeIfPresent([Double].self, forKey: .trend) ?? []
         nightTrend = try values.decodeIfPresent([Double].self, forKey: .nightTrend) ?? []
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale)
+    }
+}
+
+enum MarketTradingSession: Equatable {
+    case regular, premarket, postmarket, overnight, closed, alwaysOpen, unknown
+
+    init(rawValue: String?, legacyIsNightSession: Bool? = nil) {
+        switch rawValue?.lowercased() {
+        case "regular": self = .regular
+        case "pre", "premarket": self = .premarket
+        case "post", "after": self = .postmarket
+        case "overnight": self = .overnight
+        case "always-open": self = .alwaysOpen
+        case "closed": self = legacyIsNightSession == true ? .overnight : .closed
+        default: self = legacyIsNightSession == true ? .overnight : .unknown
+        }
+    }
+
+    var displayLabel: String {
+        switch self {
+        case .regular: "交易中"
+        case .premarket: "盘前"
+        case .postmarket: "盘后"
+        case .overnight: "夜盘"
+        case .closed: "已收盘"
+        case .alwaysOpen: "24小时交易"
+        case .unknown: "行情更新"
+        }
+    }
+
+    var isExtended: Bool {
+        self == .premarket || self == .postmarket || self == .overnight
+    }
+
+    var isActivelyTrading: Bool {
+        self == .regular || self == .alwaysOpen || isExtended
     }
 }
 
@@ -1119,13 +1149,13 @@ extension MarketQuote {
     }
 
     var freshnessLabel: String {
-        if marketSession == "always-open" { return "24小时交易" }
+        if tradingSession == .alwaysOpen { return tradingSession.displayLabel }
         if let delaySeconds, delaySeconds > 0 { return "延迟\(max(1, delaySeconds / 60))分钟" }
-        if marketSession == "closed" {
+        if tradingSession == .closed {
             return marketAsOfTimestamp.map { "截至 \(marketShortTimestamp($0))" } ?? "已收盘"
         }
         if stale == true { return "数据延迟" }
-        return marketSession == "regular" ? "交易中" : "行情更新"
+        return tradingSession.displayLabel
     }
 
     var marketAsOfTimestamp: Int64? {
@@ -1161,12 +1191,7 @@ extension MarketQuote {
 
 func marketActiveIndexSession(_ quote: MarketQuote?) -> MarketQuote? {
     guard let quote else { return nil }
-    switch quote.marketSession?.lowercased() {
-    case "regular", "pre", "premarket", "post", "after", "overnight":
-        return quote
-    default:
-        return nil
-    }
+    return quote.tradingSession.isActivelyTrading && quote.tradingSession != .alwaysOpen ? quote : nil
 }
 
 func marketShortTimestamp(_ timestamp: Int64) -> String {
