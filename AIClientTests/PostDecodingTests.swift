@@ -448,6 +448,7 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(item.videoMedia?.isVideo == true)
         XCTAssertEqual(item.videoMedia?.width, 720)
         XCTAssertEqual(item.videoMedia?.height, 1280)
+        XCTAssertEqual(item.directVideoURL?.host, "video.twimg.com")
         XCTAssertEqual(item.videoURL?.path, "/api/v1/media-proxy")
         XCTAssertEqual(item.videoPreviewURL?.path, "/api/v1/image-proxy")
     }
@@ -898,6 +899,8 @@ final class PostDecodingTests: XCTestCase {
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
 
         XCTAssertEqual(post.videoURLs.count, 1)
+        XCTAssertEqual(post.directVideoURLs.first?.absoluteString, "https://video.twimg.com/demo.mp4")
+        XCTAssertEqual(post.videoURLs.first?.path, "/api/v1/media-proxy")
         XCTAssertNil(post.previewURL)
         XCTAssertEqual(post.videos?.first?.width, 1920)
         XCTAssertEqual(post.videos?.first?.height, 1080)
