@@ -942,6 +942,40 @@ func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketCh
     return changedSession || hasIntradayGap
 }
 
+struct MarketChartSessionBreak: Equatable {
+    let previousTimestamp: Int64
+    let currentTimestamp: Int64
+    let label: String
+}
+
+func marketChartLunchBreak(
+    points: [MarketChartPoint],
+    market: String?,
+    interval: String?,
+    timezone: String?
+) -> MarketChartSessionBreak? {
+    guard interval == "1m", market?.uppercased() == "CN", points.count > 1 else { return nil }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: timezone ?? "Asia/Shanghai") ?? TimeZone(identifier: "Asia/Shanghai")!
+    let sorted = points.sorted { $0.timestamp < $1.timestamp }
+
+    for (previous, current) in zip(sorted, sorted.dropFirst()) {
+        guard current.timestamp - previous.timestamp >= 60 * 60 * 1_000 else { continue }
+        let previousDate = Date(timeIntervalSince1970: Double(previous.timestamp) / 1_000)
+        let currentDate = Date(timeIntervalSince1970: Double(current.timestamp) / 1_000)
+        let previousMinute = calendar.component(.hour, from: previousDate) * 60 + calendar.component(.minute, from: previousDate)
+        let currentMinute = calendar.component(.hour, from: currentDate) * 60 + calendar.component(.minute, from: currentDate)
+        guard (11 * 60 + 15)...(11 * 60 + 45) ~= previousMinute,
+              (12 * 60 + 45)...(13 * 60 + 15) ~= currentMinute else { continue }
+        return MarketChartSessionBreak(
+            previousTimestamp: previous.timestamp,
+            currentTimestamp: current.timestamp,
+            label: "午间休市"
+        )
+    }
+    return nil
+}
+
 func marketChartXFraction(timestamp: Int64, firstTimestamp: Int64, lastTimestamp: Int64) -> CGFloat {
     guard lastTimestamp > firstTimestamp else { return 0 }
     return min(max(CGFloat(Double(timestamp - firstTimestamp) / Double(lastTimestamp - firstTimestamp)), 0), 1)
