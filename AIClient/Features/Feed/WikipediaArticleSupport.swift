@@ -1170,15 +1170,22 @@ enum WikipediaReaderStyle {
 
       const installDeck = () => {
         if (!document.body || document.getElementById("aiserver-deck-root")) return;
-        const article = document.querySelector(".mw-parser-output");
+        let article = document.querySelector(".mw-parser-output");
         const heading = document.getElementById("firstHeading");
         if (!article || !heading) return;
+        while (article.querySelector(":scope > .mw-parser-output")) {
+          article = article.querySelector(":scope > .mw-parser-output");
+        }
 
-        const titleText = heading.textContent.trim();
+        const titleText = (
+          heading.querySelector(".mw-page-title-main")?.textContent ||
+          Array.from(heading.childNodes).find((node) => node.nodeType === Node.TEXT_NODE)?.textContent ||
+          heading.textContent
+        ).replace(/\s*编辑\s*$/, "").trim();
         const description = document.querySelector("meta[name='description']")?.content?.trim() || "";
         const slides = [];
         const sectionEntries = [];
-        let currentSection = "导言";
+        let currentSection = titleText;
         let currentSubsection = "";
         let sectionNumber = 0;
         let paragraphBuffer = [];
@@ -1271,16 +1278,7 @@ enum WikipediaReaderStyle {
         cover.append(coverShade, coverCopy);
         sectionEntries.push({ title: "封面", slideIndex: 0 });
 
-        const infobox = article.querySelector(":scope > .infobox, :scope > table.infobox");
-        if (infobox) {
-          const dataSlide = makeSlide("aiserver-deck-content aiserver-deck-data", "关键资料");
-          appendHeader(dataSlide, titleText, "关键资料");
-          const body = document.createElement("div");
-          body.className = "aiserver-deck-body";
-          body.appendChild(cloneClean(infobox));
-          dataSlide.appendChild(body);
-          sectionEntries.push({ title: "关键资料", slideIndex: slides.length - 1 });
-        }
+        const infobox = article.querySelector(".infobox, table.infobox");
 
         const skipNode = (node) => {
           if (!(node instanceof HTMLElement)) return true;
@@ -1295,7 +1293,7 @@ enum WikipediaReaderStyle {
           if (width && height && width < 140 && height < 140) return false;
           flushParagraphs();
           const slide = makeSlide("aiserver-deck-media", currentSection);
-          appendHeader(slide, currentSection, currentSubsection || "图像资料");
+          appendHeader(slide, "WIKIPEDIA · 中文", currentSubsection || currentSection);
           const frame = document.createElement("div");
           frame.className = "aiserver-deck-media-frame";
           const clonedImage = image.cloneNode(true);
@@ -1312,17 +1310,29 @@ enum WikipediaReaderStyle {
           }
           return true;
         };
-        const addStructuredSlide = (node, label) => {
+        const addStructuredSlide = (node) => {
           flushParagraphs();
           const slide = makeSlide("aiserver-deck-content aiserver-deck-data", currentSection);
-          appendHeader(slide, currentSection, currentSubsection || label);
+          appendHeader(slide, "WIKIPEDIA · 中文", currentSubsection || currentSection);
           const body = document.createElement("div");
           body.className = "aiserver-deck-body";
           body.appendChild(cloneClean(node));
           slide.appendChild(body);
         };
 
-        Array.from(article.children).forEach((node) => {
+        const articleNodes = [];
+        const collectArticleNodes = (container) => {
+          Array.from(container.children).forEach((node) => {
+            if (node.tagName === "SECTION" || node.matches(".mw-parser-output")) {
+              collectArticleNodes(node);
+            } else {
+              articleNodes.push(node);
+            }
+          });
+        };
+        collectArticleNodes(article);
+
+        articleNodes.forEach((node) => {
           if (skipNode(node)) return;
           const tagName = node.tagName;
           const wrappedHeading = node.matches(".mw-heading2, .mw-heading3, .mw-heading4")
@@ -1362,24 +1372,24 @@ enum WikipediaReaderStyle {
           }
           if (node.matches("figure, .thumb") && addMediaSlide(node)) return;
           if (tagName === "UL" || tagName === "OL") {
-            addStructuredSlide(node, "条目资料");
+            addStructuredSlide(node);
             return;
           }
           if (tagName === "TABLE") {
-            addStructuredSlide(node, "资料表");
+            addStructuredSlide(node);
             return;
           }
           if (tagName === "BLOCKQUOTE" || tagName === "PRE" || node.matches(".poem, .quotebox")) {
-            addStructuredSlide(node, "引用资料");
+            addStructuredSlide(node);
             return;
           }
           const directImages = node.querySelectorAll(":scope > img");
           if (directImages.length && addMediaSlide(node)) return;
-          if (textOf(node).length > 20) addStructuredSlide(node, "补充资料");
+          if (textOf(node).length > 20 && node.children.length <= 2) addStructuredSlide(node);
         });
         flushParagraphs();
 
-        const root = document.createElement("main");
+        const root = document.createElement("div");
         root.id = "aiserver-deck-root";
         slides.forEach((slide, index) => {
           slide.dataset.pageIndex = String(index);
@@ -1413,10 +1423,8 @@ enum WikipediaReaderStyle {
           title.textContent = entry.title;
           button.append(number, title);
           button.addEventListener("click", () => {
-            currentIndex = entry.slideIndex;
-            root.children[entry.slideIndex]?.scrollIntoView({ behavior: "smooth", inline: "start" });
+            goToPage(entry.slideIndex);
             toc.classList.add("aiserver-hidden");
-            postState();
           });
           tocList.appendChild(button);
         });
@@ -1433,6 +1441,12 @@ enum WikipediaReaderStyle {
             isOriginalMode: !document.body.classList.contains("aiserver-deck-mode")
           });
         };
+        const goToPage = (pageIndex) => {
+          if (!document.body.classList.contains("aiserver-deck-mode")) return;
+          currentIndex = Math.min(slides.length - 1, Math.max(0, pageIndex));
+          root.scrollTo({ left: currentIndex * root.clientWidth, behavior: "smooth" });
+          postState();
+        };
         root.addEventListener("scroll", () => {
           clearTimeout(scrollTimer);
           scrollTimer = setTimeout(() => {
@@ -1441,10 +1455,8 @@ enum WikipediaReaderStyle {
           }, 90);
         }, { passive: true });
         tocClose.addEventListener("click", () => toc.classList.add("aiserver-hidden"));
-        window.__aiserverDeckPrevious = () => {
-          if (currentIndex <= 0) return;
-          root.children[currentIndex - 1]?.scrollIntoView({ behavior: "smooth", inline: "start" });
-        };
+        window.__aiserverDeckPrevious = () => goToPage(currentIndex - 1);
+        window.__aiserverDeckNext = () => goToPage(currentIndex + 1);
         window.__aiserverToggleTOC = () => toc.classList.toggle("aiserver-hidden");
         window.__aiserverToggleOriginal = () => {
           const deckMode = document.body.classList.toggle("aiserver-deck-mode");
@@ -1534,6 +1546,20 @@ private struct WikipediaWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        let previousPageGesture = UISwipeGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDeckSwipe(_:))
+        )
+        previousPageGesture.direction = .right
+        previousPageGesture.delegate = context.coordinator
+        webView.addGestureRecognizer(previousPageGesture)
+        let nextPageGesture = UISwipeGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDeckSwipe(_:))
+        )
+        nextPageGesture.direction = .left
+        nextPageGesture.delegate = context.coordinator
+        webView.addGestureRecognizer(nextPageGesture)
         context.coordinator.observe(webView)
         model.attach(webView)
         webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20))
@@ -1552,7 +1578,7 @@ private struct WikipediaWebView: UIViewRepresentable {
         webView.navigationDelegate = nil
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler, UIGestureRecognizerDelegate {
         private let model: WikipediaBrowserModel
         private let openLink: (WikipediaEntity) -> Void
         private var progressObservation: NSKeyValueObservation?
@@ -1577,6 +1603,25 @@ private struct WikipediaWebView: UIViewRepresentable {
         func stopObserving() {
             progressObservation?.invalidate()
             contentOffsetObservation?.invalidate()
+        }
+
+        @objc func handleDeckSwipe(_ gesture: UISwipeGestureRecognizer) {
+            guard let webView = gesture.view as? WKWebView else { return }
+            switch gesture.direction {
+            case .left:
+                webView.evaluateJavaScript("window.__aiserverDeckNext?.()")
+            case .right:
+                webView.evaluateJavaScript("window.__aiserverDeckPrevious?.()")
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
