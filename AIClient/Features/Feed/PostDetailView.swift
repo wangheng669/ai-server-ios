@@ -24,6 +24,7 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretation: BilibiliVideoInterpretation?
     @State private var bilibiliInterpretationModel: String?
     @State private var bilibiliInterpretationCost: Double?
+    @State private var bilibiliInterpretationCached = false
     @State private var bilibiliInterpretationStatus = "idle"
     @State private var bilibiliInterpretationError: String?
     @State private var youtubePlaybackState: YouTubePlaybackState = .idle
@@ -1686,8 +1687,24 @@ struct PostDetailView: View {
                     }
                     interpretationBulletSection("表达与创作观察", items: interpretation.creatorNotes, color: .indigo)
                     if let bilibiliInterpretationCost {
-                        Text(String(format: "本次估算费用 ¥%.4f", bilibiliInterpretationCost))
-                            .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            Image(systemName: bilibiliInterpretationCached ? "bolt.horizontal.circle.fill" : "yensign.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(bilibiliInterpretationCached ? .green : .orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(bilibiliInterpretationCached ? "缓存结果，本次未新增费用" : "本次视频解读费用")
+                                    .font(.subheadline.weight(.semibold))
+                                Text(String(format: "模型处理成本约 ¥%.3f", bilibiliInterpretationCost))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(
+                            (bilibiliInterpretationCached ? Color.green : Color.orange).opacity(0.10),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
                     }
                 }
                 .padding(14).background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
@@ -1907,6 +1924,7 @@ struct PostDetailView: View {
             bilibiliInterpretation = payload.interpretation
             bilibiliInterpretationModel = payload.model
             bilibiliInterpretationCost = payload.estimatedCostCNY
+            bilibiliInterpretationCached = payload.cached
             bilibiliInterpretationStatus = payload.status
         } catch is CancellationError {
             return
