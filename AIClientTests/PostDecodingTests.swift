@@ -525,6 +525,7 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertFalse(post.needsXLiveDetail)
         XCTAssertFalse(post.needsXTranslation)
+        XCTAssertFalse(post.needsXStoredDetailRefresh)
     }
 
     func testXDetailFetchesOnlyMissingStoredData() throws {
@@ -533,6 +534,7 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertTrue(post.needsXLiveDetail)
         XCTAssertTrue(post.needsXTranslation)
+        XCTAssertTrue(post.needsXStoredDetailRefresh)
     }
 
     func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
@@ -542,6 +544,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(post.isChineseXSource)
         XCTAssertEqual(post.xStoredOriginalContent, "第一段。\n\n第二段。")
         XCTAssertEqual(XPostTextFormatter.paragraphs(post.xStoredOriginalContent), ["第一段。", "第二段。"])
+    }
+
+    func testChineseXDetailUsesCompleteStoredChineseContentWithoutRefresh() throws {
+        let data = #"{"id":7,"source":"x","content":"列表摘要...","content_zh":"已经存储的完整中文正文，不需要进入详情后再次加载。","post_link":"https://x.com/example/status/123","meta":{"lang":"zh"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertEqual(post.xStoredOriginalContent, "已经存储的完整中文正文，不需要进入详情后再次加载。")
+        XCTAssertFalse(post.needsXLiveDetail)
+        XCTAssertFalse(post.needsXStoredDetailRefresh)
     }
 
     func testProtectsModelNamesInXTranslation() {

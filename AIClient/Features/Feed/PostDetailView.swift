@@ -2181,7 +2181,8 @@ struct PostDetailView: View {
             await detectVideoAspectRatio(url: video)
         }
 
-        if let detail = try? await client.fetchPost(id: post.id) {
+        if post.sourceName != "X" || post.needsXStoredDetailRefresh,
+           let detail = try? await client.fetchPost(id: post.id) {
             if detail.hasTranslation || !post.hasTranslation {
                 post = detail
             } else {
