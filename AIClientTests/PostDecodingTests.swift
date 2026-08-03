@@ -751,6 +751,24 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.youtubeCoverURL?.absoluteString, "https://i.ytimg.com/vi/DZR27djdRco/hqdefault.jpg")
     }
 
+    func testBilibiliRSSPostUsesBilibiliPresentationFromArticleLink() throws {
+        let json = #"{"id":1271,"title":"最新视频","source":"rss:1271","post_link":"https://www.bilibili.com/video/BV1Pxgy68Ek9","videos":[]}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertTrue(post.isRSS)
+        XCTAssertTrue(post.isBilibili)
+        XCTAssertEqual(post.sourceName, "B站")
+        XCTAssertEqual(post.bilibiliPlaybackPageURL?.absoluteString, "https://www.bilibili.com/video/BV1Pxgy68Ek9")
+    }
+
+    func testBilibiliRSSPostUsesBilibiliPresentationFromFeedMetadata() throws {
+        let json = #"{"id":1272,"title":"最新视频","source":"rss:1271","meta":{"rss_feed_name":"王骁 · 哔哩哔哩","rss_article_link":"https://example.com/video"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertTrue(post.isBilibili)
+        XCTAssertEqual(post.sourceName, "B站")
+    }
+
     func testTruthFeedUsesOnlyTranslatedContentAndRelevance() throws {
         let json = #"{"post":{"id":9,"content":"English original","content_zh":"中文翻译","source":"truth","final_score":8.2}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
