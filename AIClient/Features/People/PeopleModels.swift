@@ -509,6 +509,26 @@ struct BilibiliSubtitlesResponse: Decodable {
     let cues: [PersonVideoSubtitleCue]
 }
 
+struct BilibiliSummaryResponse: Decodable {
+    let success: Bool
+    let bvid: String
+    let status: String
+    let summary: BilibiliVideoSummary
+    let provider: String
+    let model: String
+    let cached: Bool
+}
+
+struct BilibiliVideoSummary: Decodable, Hashable {
+    let overview: String
+    let keyPoints: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case overview
+        case keyPoints = "key_points"
+    }
+}
+
 struct PersonVideoSubtitleCue: Decodable, Identifiable, Hashable {
     let startMS: Int64
     let endMS: Int64
