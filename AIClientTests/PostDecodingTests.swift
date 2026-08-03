@@ -54,6 +54,12 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(script.contains("--aiserver-paper: #fbf7ed"))
         XCTAssertTrue(script.contains("__aiserverToggleTOC"))
         XCTAssertTrue(script.contains("本文目录"))
+        XCTAssertTrue(script.contains("aiserver-deck-root"))
+        XCTAssertTrue(script.contains("scroll-snap-type: x mandatory"))
+        XCTAssertTrue(script.contains("__aiserverDeckPrevious"))
+        XCTAssertTrue(script.contains("__aiserverToggleOriginal"))
+        XCTAssertTrue(script.contains("mw-heading2"))
+        XCTAssertTrue(script.contains("关键资料"))
     }
 
     func testWikipediaLinksAreRecognizedForInReaderNavigation() throws {
