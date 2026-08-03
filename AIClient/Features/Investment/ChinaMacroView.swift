@@ -23,6 +23,11 @@ struct ChinaMacroYear: Identifiable, Equatable {
     var debtServiceRatio: Double?
     var incomeSurplusRate: Double?
     var consumerConfidence: Double?
+    var electricityTotalGrowth: Double?
+    var electricityPrimaryGrowth: Double?
+    var electricitySecondaryGrowth: Double?
+    var electricityTertiaryGrowth: Double?
+    var electricityResidentialGrowth: Double?
     var privateCredit: Double?
 
     var id: Int { year }
@@ -39,6 +44,11 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
     case debtServiceRatio
     case incomeSurplusRate
     case consumerConfidence
+    case electricityTotalGrowth
+    case electricityPrimaryGrowth
+    case electricitySecondaryGrowth
+    case electricityTertiaryGrowth
+    case electricityResidentialGrowth
     case privateCredit
 
     var id: Self { self }
@@ -55,6 +65,11 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .debtServiceRatio: "偿债率"
         case .incomeSurplusRate: "收支结余率"
         case .consumerConfidence: "消费信心"
+        case .electricityTotalGrowth: "全社会"
+        case .electricityPrimaryGrowth: "第一产业"
+        case .electricitySecondaryGrowth: "第二产业"
+        case .electricityTertiaryGrowth: "第三产业"
+        case .electricityResidentialGrowth: "居民生活"
         case .privateCredit: "私人部门信贷"
         }
     }
@@ -71,6 +86,11 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .debtServiceRatio: "私人非金融部门偿债率"
         case .incomeSurplusRate: "居民收支结余率（估算）"
         case .consumerConfidence: "消费者信心指数"
+        case .electricityTotalGrowth: "全社会用电量同比增速"
+        case .electricityPrimaryGrowth: "第一产业用电量同比增速"
+        case .electricitySecondaryGrowth: "第二产业用电量同比增速"
+        case .electricityTertiaryGrowth: "第三产业用电量同比增速"
+        case .electricityResidentialGrowth: "城乡居民生活用电量同比增速"
         case .privateCredit: "私人部门银行信贷 / GDP"
         }
     }
@@ -87,6 +107,11 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .debtServiceRatio: "私人非金融部门用于偿还本金和利息的收入占比；包含居民与非金融企业，不等同于居民房贷还款压力"
         case .incomeSurplusRate: "按（人均可支配收入－人均消费支出）÷人均可支配收入计算，是居民储蓄能力的近似观察值"
         case .consumerConfidence: "反映消费者对经济、收入和消费前景的主观判断；年度图取当年最后一个可用月"
+        case .electricityTotalGrowth: "全社会用电量变化，是观察实体经济与生活需求活跃度的高频指标"
+        case .electricityPrimaryGrowth: "农业、林业、牧业和渔业等第一产业用电变化"
+        case .electricitySecondaryGrowth: "工业与建筑业等第二产业用电变化，更直接反映生产景气"
+        case .electricityTertiaryGrowth: "服务业用电变化，辅助观察服务消费与数字经济活力"
+        case .electricityResidentialGrowth: "城乡居民日常生活用电变化，辅助观察生活需求"
         case .privateCredit: "银行对私人部门信贷占GDP的比例，反映杠杆水平"
         }
     }
@@ -98,6 +123,8 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .debtServiceRatio: "国际清算银行"
         case .incomeSurplusRate: "国家统计局（估算）"
         case .consumerConfidence: "OECD"
+        case .electricityTotalGrowth, .electricityPrimaryGrowth, .electricitySecondaryGrowth,
+             .electricityTertiaryGrowth, .electricityResidentialGrowth: "国家能源局"
         default: "世界银行"
         }
     }
@@ -114,6 +141,11 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .debtServiceRatio: .red
         case .incomeSurplusRate: .green
         case .consumerConfidence: .teal
+        case .electricityTotalGrowth: .yellow
+        case .electricityPrimaryGrowth: .green
+        case .electricitySecondaryGrowth: .orange
+        case .electricityTertiaryGrowth: .blue
+        case .electricityResidentialGrowth: .pink
         case .privateCredit: .purple
         }
     }
@@ -130,6 +162,11 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .debtServiceRatio: year.debtServiceRatio
         case .incomeSurplusRate: year.incomeSurplusRate
         case .consumerConfidence: year.consumerConfidence
+        case .electricityTotalGrowth: year.electricityTotalGrowth
+        case .electricityPrimaryGrowth: year.electricityPrimaryGrowth
+        case .electricitySecondaryGrowth: year.electricitySecondaryGrowth
+        case .electricityTertiaryGrowth: year.electricityTertiaryGrowth
+        case .electricityResidentialGrowth: year.electricityResidentialGrowth
         case .privateCredit: year.privateCredit
         }
     }
@@ -182,15 +219,64 @@ struct PBCMortgageAnnouncement: Equatable {
     var dateKey: Int { year * 10_000 + month * 100 + day }
 }
 
+private struct ChinaMacroAPIEnvelope: Decodable { let data: ChinaMacroAPISnapshot }
+private struct ChinaMacroAPISnapshot: Decodable { let observations: [ChinaMacroAPIObservation] }
+private struct ChinaMacroAPIObservation: Decodable {
+    let metricKey: String
+    let period: String
+    let value: Double
+
+    enum CodingKeys: String, CodingKey {
+        case metricKey = "metric_key"
+        case period, value
+    }
+}
+
 struct ChinaMacroService {
     private let session: URLSession
+    private let appBaseURL: URL
     private let baseURL = URL(string: "https://api.worldbank.org/v2/country/CHN/indicator/")!
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, appBaseURL: URL = ServerConfiguration.currentURL) {
         self.session = session
+        self.appBaseURL = appBaseURL
     }
 
     func history() async throws -> [ChinaMacroYear] {
+        if let cached = try? await backendHistory(), !cached.isEmpty { return cached }
+        return try await directHistory()
+    }
+
+    private func backendHistory() async throws -> [ChinaMacroYear] {
+        let url = appBaseURL.appending(path: "api/v1/economy/china-macro")
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let observations = try JSONDecoder().decode(ChinaMacroAPIEnvelope.self, from: data).data.observations
+        var points: [String: [WorldBankIndicatorPoint]] = [:]
+        for item in observations {
+            guard let year = Int(item.period.prefix(4)) else { continue }
+            points[item.metricKey, default: []].append(WorldBankIndicatorPoint(year: year, value: item.value))
+        }
+        return Self.merge(
+            gdpGrowth: points["gdp_growth"] ?? [], unemployment: points["unemployment"] ?? [],
+            inflation: points["inflation"] ?? [], lendingRate: points["lending_rate"] ?? [],
+            depositRate: points["deposit_rate"] ?? [], mortgageRate: [],
+            householdLeverage: points["household_leverage"] ?? [], debtServiceRatio: points["debt_service_ratio"] ?? [],
+            incomeSurplusRate: points["income_surplus_rate"] ?? [], consumerConfidence: points["consumer_confidence"] ?? [],
+            electricityTotalGrowth: points["electricity_total_growth"] ?? [],
+            electricityPrimaryGrowth: points["electricity_primary_growth"] ?? [],
+            electricitySecondaryGrowth: points["electricity_secondary_growth"] ?? [],
+            electricityTertiaryGrowth: points["electricity_tertiary_growth"] ?? [],
+            electricityResidentialGrowth: points["electricity_residential_growth"] ?? [],
+            privateCredit: points["private_credit"] ?? []
+        )
+    }
+
+    private func directHistory() async throws -> [ChinaMacroYear] {
         async let gdpGrowth = seriesOrEmpty("NY.GDP.MKTP.KD.ZG")
         async let unemployment = seriesOrEmpty("SL.UEM.TOTL.ZS")
         async let inflation = seriesOrEmpty("FP.CPI.TOTL.ZG")
@@ -212,6 +298,8 @@ struct ChinaMacroService {
             debtServiceRatio: debtServiceRatio,
             incomeSurplusRate: incomeSurplusRate,
             consumerConfidence: consumerConfidence,
+            electricityTotalGrowth: [], electricityPrimaryGrowth: [], electricitySecondaryGrowth: [],
+            electricityTertiaryGrowth: [], electricityResidentialGrowth: [],
             privateCredit: privateCredit
         )
         guard !merged.isEmpty else { throw URLError(.cannotParseResponse) }
@@ -432,6 +520,11 @@ struct ChinaMacroService {
         debtServiceRatio: [WorldBankIndicatorPoint],
         incomeSurplusRate: [WorldBankIndicatorPoint],
         consumerConfidence: [WorldBankIndicatorPoint],
+        electricityTotalGrowth: [WorldBankIndicatorPoint],
+        electricityPrimaryGrowth: [WorldBankIndicatorPoint],
+        electricitySecondaryGrowth: [WorldBankIndicatorPoint],
+        electricityTertiaryGrowth: [WorldBankIndicatorPoint],
+        electricityResidentialGrowth: [WorldBankIndicatorPoint],
         privateCredit: [WorldBankIndicatorPoint]
     ) -> [ChinaMacroYear] {
         var years: [Int: ChinaMacroYear] = [:]
@@ -449,6 +542,11 @@ struct ChinaMacroService {
                     debtServiceRatio: nil,
                     incomeSurplusRate: nil,
                     consumerConfidence: nil,
+                    electricityTotalGrowth: nil,
+                    electricityPrimaryGrowth: nil,
+                    electricitySecondaryGrowth: nil,
+                    electricityTertiaryGrowth: nil,
+                    electricityResidentialGrowth: nil,
                     privateCredit: nil
                 )
                 item[keyPath: keyPath] = point.value
@@ -465,13 +563,20 @@ struct ChinaMacroService {
         insert(debtServiceRatio, keyPath: \.debtServiceRatio)
         insert(incomeSurplusRate, keyPath: \.incomeSurplusRate)
         insert(consumerConfidence, keyPath: \.consumerConfidence)
+        insert(electricityTotalGrowth, keyPath: \.electricityTotalGrowth)
+        insert(electricityPrimaryGrowth, keyPath: \.electricityPrimaryGrowth)
+        insert(electricitySecondaryGrowth, keyPath: \.electricitySecondaryGrowth)
+        insert(electricityTertiaryGrowth, keyPath: \.electricityTertiaryGrowth)
+        insert(electricityResidentialGrowth, keyPath: \.electricityResidentialGrowth)
         insert(privateCredit, keyPath: \.privateCredit)
         return years.values
             .filter {
                 $0.gdpGrowth != nil || $0.unemployment != nil || $0.inflation != nil ||
                     $0.lendingRate != nil || $0.depositRate != nil ||
                     $0.mortgageRate != nil || $0.householdLeverage != nil || $0.debtServiceRatio != nil ||
-                    $0.incomeSurplusRate != nil || $0.consumerConfidence != nil || $0.privateCredit != nil
+                    $0.incomeSurplusRate != nil || $0.consumerConfidence != nil || $0.electricityTotalGrowth != nil ||
+                    $0.electricityPrimaryGrowth != nil || $0.electricitySecondaryGrowth != nil ||
+                    $0.electricityTertiaryGrowth != nil || $0.electricityResidentialGrowth != nil || $0.privateCredit != nil
             }
             .sorted { $0.year > $1.year }
     }
@@ -494,6 +599,11 @@ struct ChinaMacroService {
                 debtServiceRatio: nil,
                 incomeSurplusRate: nil,
                 consumerConfidence: nil,
+                electricityTotalGrowth: nil,
+                electricityPrimaryGrowth: nil,
+                electricitySecondaryGrowth: nil,
+                electricityTertiaryGrowth: nil,
+                electricityResidentialGrowth: nil,
                 privateCredit: nil
             )
             item.mortgageRate = point.value
@@ -540,6 +650,7 @@ private enum ChinaMacroSection: String, CaseIterable, Identifiable {
     case prices = "物价"
     case rates = "利率"
     case credit = "信用"
+    case energy = "用电"
 
     var id: Self { self }
 
@@ -550,6 +661,7 @@ private enum ChinaMacroSection: String, CaseIterable, Identifiable {
         case .prices: [.inflation, .depositRate]
         case .rates: [.mortgageRate, .lendingRate, .depositRate]
         case .credit: [.householdLeverage, .debtServiceRatio, .incomeSurplusRate, .consumerConfidence, .privateCredit]
+        case .energy: [.electricityTotalGrowth, .electricitySecondaryGrowth, .electricityTertiaryGrowth, .electricityResidentialGrowth, .electricityPrimaryGrowth]
         }
     }
 
@@ -560,6 +672,7 @@ private enum ChinaMacroSection: String, CaseIterable, Identifiable {
         case .prices: "价格与居民资金"
         case .rates: "利率环境"
         case .credit: "信用与杠杆"
+        case .energy: "用电与实体活力"
         }
     }
 }
@@ -609,6 +722,9 @@ struct ChinaMacroView: View {
                 section = .credit
                 metric = .consumerConfidence
                 presentation = ChinaMacroPresentation(metric: .consumerConfidence, year: nil)
+            } else if ProcessInfo.processInfo.arguments.contains("--china-macro-energy-preview") {
+                section = .energy
+                metric = .electricityTotalGrowth
             } else if ProcessInfo.processInfo.arguments.contains("--china-macro-sheet-preview") {
                 presentation = ChinaMacroPresentation(metric: .gdpGrowth, year: nil)
             }
@@ -653,6 +769,7 @@ struct ChinaMacroView: View {
     }
 
     private var sectionPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 4) {
             ForEach(ChinaMacroSection.allCases) { item in
                 Button {
@@ -661,7 +778,7 @@ struct ChinaMacroView: View {
                     Text(item.rawValue)
                         .font(.subheadline.weight(section == item ? .semibold : .regular))
                         .foregroundStyle(section == item ? InvestmentDesign.accent : .secondary)
-                        .frame(maxWidth: .infinity)
+                        .frame(minWidth: 58)
                         .padding(.vertical, 10)
                         .background(section == item ? InvestmentDesign.surface : Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 11))
@@ -672,6 +789,7 @@ struct ChinaMacroView: View {
         .padding(4)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private var snapshotBar: some View {
@@ -773,6 +891,13 @@ struct ChinaMacroView: View {
                 tint: .indigo,
                 metrics: [.debtServiceRatio, .incomeSurplusRate, .consumerConfidence],
                 insight: "把还款负担、居民结余能力与消费意愿放在一起观察"
+            )
+            storyCard(
+                section: .energy,
+                icon: "bolt.fill",
+                tint: .yellow,
+                metrics: [.electricityTotalGrowth, .electricitySecondaryGrowth, .electricityTertiaryGrowth],
+                insight: "全社会用电观察总活力，第二产业更贴近工业生产，第三产业反映服务业需求"
             )
         }
     }
@@ -1008,7 +1133,7 @@ struct ChinaMacroView: View {
         VStack(alignment: .leading, spacing: 7) {
             Label("数据来源与更新时间", systemImage: "checkmark.shield.fill")
                 .font(.footnote.weight(.semibold))
-            Text("世界银行 WDI：基础宏观指标；BIS：居民杠杆率与私人非金融部门偿债率；国家统计局：居民收支结余率（估算）；OECD：消费者信心指数；中国人民银行：5年期以上LPR。")
+            Text("页面主体数据由后端定时采集并落库；世界银行 WDI：基础宏观指标；BIS：杠杆与偿债率；国家统计局：居民收支；OECD：消费信心；国家能源局：全社会及分产业用电；中国人民银行：LPR。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("各指标最新年份以数值旁标注为准；页面刷新于 \(updatedAtText)。LPR是房贷定价基准，并非个人实际执行利率。")
@@ -1053,6 +1178,11 @@ struct ChinaMacroView: View {
         case .debtServiceRatio: "creditcard.trianglebadge.exclamationmark"
         case .incomeSurplusRate: "tray.and.arrow.down"
         case .consumerConfidence: "person.crop.circle.badge.questionmark"
+        case .electricityTotalGrowth: "bolt.fill"
+        case .electricityPrimaryGrowth: "leaf"
+        case .electricitySecondaryGrowth: "gearshape.2"
+        case .electricityTertiaryGrowth: "building.2"
+        case .electricityResidentialGrowth: "house.and.flag"
         case .privateCredit: "building.columns"
         }
     }
@@ -1369,6 +1499,8 @@ private struct ChinaMacroMetricSheet: View {
         case .debtServiceRatio: "国际清算银行 · Debt service ratios"
         case .incomeSurplusRate: "国家统计局 · 全国居民收入和消费支出（App计算）"
         case .consumerConfidence: "OECD · Consumer opinion surveys（中国）"
+        case .electricityTotalGrowth, .electricityPrimaryGrowth, .electricitySecondaryGrowth,
+             .electricityTertiaryGrowth, .electricityResidentialGrowth: "国家能源局 · 全社会用电量"
         default: "世界银行 · World Development Indicators"
         }
     }

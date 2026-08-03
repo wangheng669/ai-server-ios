@@ -152,6 +152,11 @@ final class CountryGDPRankingTests: XCTestCase {
             debtServiceRatio: try points("[{\"date\":\"2024\",\"value\":18.8}]"),
             incomeSurplusRate: try points("[{\"date\":\"2024\",\"value\":31.68}]"),
             consumerConfidence: try points("[{\"date\":\"2024\",\"value\":86.0}]"),
+            electricityTotalGrowth: try points("[{\"date\":\"2024\",\"value\":6.8}]"),
+            electricityPrimaryGrowth: [],
+            electricitySecondaryGrowth: try points("[{\"date\":\"2024\",\"value\":5.1}]"),
+            electricityTertiaryGrowth: [],
+            electricityResidentialGrowth: [],
             privateCredit: try points("[{\"date\":\"2023\",\"value\":194.2}]")
         )
         XCTAssertEqual(merged.map(\.year), [2024, 2023])
@@ -165,6 +170,8 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(merged[0].debtServiceRatio, 18.8)
         XCTAssertEqual(merged[0].incomeSurplusRate, 31.68)
         XCTAssertEqual(merged[0].consumerConfidence, 86.0)
+        XCTAssertEqual(merged[0].electricityTotalGrowth, 6.8)
+        XCTAssertEqual(merged[0].electricitySecondaryGrowth, 5.1)
         XCTAssertNil(merged[0].privateCredit)
         XCTAssertEqual(merged[1].privateCredit, 194.2)
     }
@@ -229,6 +236,11 @@ final class CountryGDPRankingTests: XCTestCase {
             debtServiceRatio: 18.8,
             incomeSurplusRate: 32.0,
             consumerConfidence: 89.5,
+            electricityTotalGrowth: 5.0,
+            electricityPrimaryGrowth: 9.9,
+            electricitySecondaryGrowth: 3.7,
+            electricityTertiaryGrowth: 8.2,
+            electricityResidentialGrowth: 6.3,
             privateCredit: 180
         )]
         let result = ChinaMacroService.mergingMortgage(
