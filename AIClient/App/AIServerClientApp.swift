@@ -843,6 +843,32 @@ private struct TodayWorldAuthorGroup: Identifiable {
     var posts: [Post]
 
     static func make(from payload: TodayWorldPayload) -> [TodayWorldAuthorGroup] {
+        var groups: [TodayWorldAuthorGroup] = []
+        var groupIndexByAuthor: [String: Int] = [:]
+
+        for section in payload.sections {
+            guard let entity = section.entity else { continue }
+            let handle = normalizedHandle(entity.xHandle)
+            let authorName = entity.name ?? "关注账号"
+            let authorKey = handle?.lowercased() ?? authorName.lowercased()
+            let companyKey = entity.companyKey ?? "altman"
+            let groupingKey = "\(companyKey):\(authorKey)"
+            guard groupIndexByAuthor[groupingKey] == nil else { continue }
+
+            groups.append(TodayWorldAuthorGroup(
+                id: section.id,
+                authorKey: authorKey,
+                authorName: authorName,
+                handle: handle,
+                avatarURL: entity.avatarURL.flatMap(URL.init(string:)),
+                companyKey: companyKey,
+                companyName: entity.companyName ?? "奥特曼系",
+                roleLabel: entity.type == "company" ? "\(authorName) 官方" : "\(entity.companyName ?? "体系")成员",
+                posts: []
+            ))
+            groupIndexByAuthor[groupingKey] = groups.count - 1
+        }
+
         let entries = payload.sections.flatMap { section in
             section.items.map { post in
                 TodayWorldPostEntry(post: post, section: section)
@@ -852,8 +878,6 @@ private struct TodayWorldAuthorGroup: Identifiable {
             postDate(lhs.post) > postDate(rhs.post)
         }
 
-        var groups: [TodayWorldAuthorGroup] = []
-        var groupIndexByAuthor: [String: Int] = [:]
         for entry in entries {
             let handle = entry.post.authorHandle ?? normalizedHandle(entry.section.entity?.xHandle)
             let authorName = entry.post.authorName.isEmpty
@@ -866,6 +890,20 @@ private struct TodayWorldAuthorGroup: Identifiable {
 
             if let index = groupIndexByAuthor[groupingKey] {
                 groups[index].posts.append(entry.post)
+                if groups[index].avatarURL == nil, let avatarURL = entry.post.avatarURL {
+                    let group = groups[index]
+                    groups[index] = TodayWorldAuthorGroup(
+                        id: group.id,
+                        authorKey: group.authorKey,
+                        authorName: group.authorName,
+                        handle: group.handle,
+                        avatarURL: avatarURL,
+                        companyKey: group.companyKey,
+                        companyName: group.companyName,
+                        roleLabel: group.roleLabel,
+                        posts: group.posts
+                    )
+                }
                 continue
             }
 
@@ -944,6 +982,14 @@ private struct TodayWorldAuthorGroupView: View {
                         onOpenPost(post)
                     }
                 }
+
+                if group.posts.isEmpty {
+                    Text("今天暂无动态")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 7)
+                        .padding(.bottom, 10)
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -986,7 +1032,7 @@ private struct TodayWorldGroupedPostRow: View {
                         .foregroundStyle(.primary)
                         .lineSpacing(1)
                         .multilineTextAlignment(.leading)
-                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     if hasContext {
