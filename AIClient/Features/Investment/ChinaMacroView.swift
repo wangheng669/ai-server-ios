@@ -50,6 +50,22 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         }
     }
 
+    var shortDescription: String {
+        switch self {
+        case .gdpGrowth: "衡量经济总量相较上一年的实际增长速度"
+        case .unemployment: "失业人口占全部劳动力的比例"
+        case .inflation: "居民日常消费的一篮子商品与服务价格变化"
+        case .lendingRate: "银行向优质客户发放贷款时的参考利率"
+        case .depositRate: "居民将资金存入银行可获得的年化回报"
+        case .mortgageRate: "5年期以上LPR，常用于住房贷款定价参考"
+        case .privateCredit: "银行对私人部门信贷占GDP的比例，反映杠杆水平"
+        }
+    }
+
+    var sourceName: String {
+        self == .mortgageRate ? "中国人民银行" : "世界银行"
+    }
+
     var color: Color {
         switch self {
         case .gdpGrowth: InvestmentDesign.accent
@@ -357,10 +373,18 @@ private enum ChinaMacroSection: String, CaseIterable, Identifiable {
     }
 }
 
+private struct ChinaMacroPresentation: Identifiable {
+    let metric: ChinaMacroMetric
+    let year: Int?
+    var id: String { "\(metric.rawValue)-\(year ?? -1)" }
+}
+
 struct ChinaMacroView: View {
     @State private var store = ChinaMacroStore()
     @State private var section = ChinaMacroSection.overview
     @State private var metric = ChinaMacroMetric.gdpGrowth
+    @State private var selectedYear: Int?
+    @State private var presentation: ChinaMacroPresentation?
 
     var body: some View {
         ScrollView {
@@ -373,6 +397,7 @@ struct ChinaMacroView: View {
                 } else if store.loadError && store.years.isEmpty {
                     unavailable
                 } else if section == .overview {
+                    snapshotBar
                     overview
                     sourceFooter
                 } else {
@@ -385,9 +410,21 @@ struct ChinaMacroView: View {
         }
         .background(InvestmentDesign.canvas)
         .refreshable { await store.load() }
-        .task { if store.years.isEmpty { await store.load() } }
+        .task {
+            if store.years.isEmpty { await store.load() }
+            if ProcessInfo.processInfo.arguments.contains("--china-macro-sheet-preview") {
+                presentation = ChinaMacroPresentation(metric: .gdpGrowth, year: nil)
+            }
+        }
         .onChange(of: section) { _, newSection in
             if let first = newSection.metrics.first { metric = first }
+            selectedYear = nil
+        }
+        .onChange(of: metric) { _, _ in selectedYear = nil }
+        .sheet(item: $presentation) { item in
+            ChinaMacroMetricSheet(metric: item.metric, years: store.years, initialYear: item.year)
+                .presentationDetents([.fraction(0.72), .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -426,6 +463,65 @@ struct ChinaMacroView: View {
         .padding(4)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var snapshotBar: some View {
+        HStack(spacing: 8) {
+            snapshotItem(
+                title: "增长",
+                value: latest(.gdpGrowth).flatMap { ChinaMacroMetric.gdpGrowth.value(in: $0) },
+                positiveText: "动能较强",
+                neutralText: "温和增长",
+                lowText: "动能偏弱",
+                tint: InvestmentDesign.accent
+            )
+            snapshotItem(
+                title: "物价",
+                value: latest(.inflation).flatMap { ChinaMacroMetric.inflation.value(in: $0) },
+                positiveText: "价格偏热",
+                neutralText: "价格温和",
+                lowText: "通胀低位",
+                tint: .orange
+            )
+            snapshotItem(
+                title: "利率",
+                value: latest(.mortgageRate).flatMap { ChinaMacroMetric.mortgageRate.value(in: $0) },
+                positiveText: "融资偏贵",
+                neutralText: "利率适中",
+                lowText: "利率较低",
+                tint: .purple
+            )
+        }
+    }
+
+    private func snapshotItem(
+        title: String,
+        value: Double?,
+        positiveText: String,
+        neutralText: String,
+        lowText: String,
+        tint: Color
+    ) -> some View {
+        let status: String = if let value {
+            value >= 5 ? positiveText : value >= 2 ? neutralText : lowText
+        } else {
+            "等待数据"
+        }
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                Circle().fill(tint).frame(width: 6, height: 6)
+                Text(status)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .background(InvestmentDesign.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var unavailable: some View {
@@ -488,7 +584,10 @@ struct ChinaMacroView: View {
         insight: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-                HStack {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { section = target }
+                } label: {
+                    HStack {
                     Label(target.title, systemImage: icon)
                         .font(.headline)
                         .foregroundStyle(.primary)
@@ -496,7 +595,9 @@ struct ChinaMacroView: View {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.tertiary)
+                    }
                 }
+                .buttonStyle(.plain)
                 HStack(alignment: .top, spacing: 0) {
                     ForEach(Array(metrics.enumerated()), id: \.element) { index, item in
                         if index > 0 { Divider().frame(height: 48).padding(.horizontal, 10) }
@@ -522,14 +623,14 @@ struct ChinaMacroView: View {
             RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
                 .stroke(InvestmentDesign.divider, lineWidth: 1)
         }
-        .contentShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-        .onTapGesture { section = target }
-        .accessibilityAddTraits(.isButton)
     }
 
     private func metricSummary(_ item: ChinaMacroMetric) -> some View {
         let latest = latest(item)
-        return VStack(alignment: .leading, spacing: 4) {
+        return Button {
+            presentation = ChinaMacroPresentation(metric: item, year: latest?.year)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
             Text(item.title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -541,8 +642,14 @@ struct ChinaMacroView: View {
             Text(latest.map { "\(String($0.year)) 年" } ?? "暂无数据")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+            Label("点按查看", systemImage: "rectangle.portrait.and.arrow.forward")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(item.title)，打开详细数据")
     }
 
     private func sparkline(_ item: ChinaMacroMetric, tint: Color) -> some View {
@@ -599,46 +706,41 @@ struct ChinaMacroView: View {
     }
 
     private var trendCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let displayed = selectedYear.flatMap { selected in
+            store.years.first { $0.year == selected && metric.value(in: $0) != nil }
+        } ?? latest(metric)
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(metric.longTitle).font(.headline)
                     Text("年度值 · 单位 %").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if let latest = latest(metric), let value = metric.value(in: latest) {
+                if let displayed, let value = metric.value(in: displayed) {
+                    Button {
+                        presentation = ChinaMacroPresentation(metric: metric, year: displayed.year)
+                    } label: {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("\(format(value))%")
                             .font(.system(size: 25, weight: .bold, design: .rounded))
                             .foregroundStyle(metric.color)
-                        Text("\(String(latest.year)) 年").font(.caption2).foregroundStyle(.secondary)
+                        Text("\(String(displayed.year)) 年 · 查看详情")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            Chart(store.years.reversed()) { item in
-                if let value = metric.value(in: item) {
-                    LineMark(x: .value("年份", item.year), y: .value(metric.title, value))
-                        .foregroundStyle(metric.color)
-                        .lineStyle(StrokeStyle(lineWidth: 2.5))
-                        .interpolationMethod(metric == .mortgageRate ? .stepEnd : .monotone)
-                    AreaMark(x: .value("年份", item.year), y: .value(metric.title, value))
-                        .foregroundStyle(metric.color.opacity(0.10))
-                        .interpolationMethod(metric == .mortgageRate ? .stepEnd : .monotone)
-                }
-            }
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 5)) {
-                    AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
-                    AxisValueLabel()
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) {
-                    AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
-                    AxisValueLabel()
-                }
-            }
-            .frame(height: 235)
+            InteractiveMacroChart(
+                metric: metric,
+                years: store.years,
+                selectedYear: $selectedYear,
+                height: 235
+            )
+            Label("在曲线上左右滑动，数据会自动吸附到最近年份", systemImage: "hand.draw")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding(16)
         .background(InvestmentDesign.surface)
@@ -652,14 +754,23 @@ struct ChinaMacroView: View {
                 .padding(16)
             ForEach(Array(metricYears.prefix(6))) { item in
                 Divider().padding(.leading, 16)
-                HStack {
+                Button {
+                    presentation = ChinaMacroPresentation(metric: metric, year: item.year)
+                } label: {
+                    HStack {
                     Text("\(String(item.year)) 年")
                         .font(.subheadline.weight(.semibold))
                     Spacer()
                     Text(metric.value(in: item).map { "\(format($0))%" } ?? "—")
                         .font(.system(.subheadline, design: .rounded).weight(.semibold))
                         .foregroundStyle(metric.color)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
@@ -705,6 +816,286 @@ struct ChinaMacroView: View {
         case .mortgageRate: "house"
         case .privateCredit: "building.columns"
         }
+    }
+}
+
+private struct InteractiveMacroChart: View {
+    let metric: ChinaMacroMetric
+    let years: [ChinaMacroYear]
+    @Binding var selectedYear: Int?
+    let height: CGFloat
+
+    private var points: [ChinaMacroYear] {
+        years
+            .filter { metric.value(in: $0) != nil }
+            .sorted { $0.year < $1.year }
+    }
+
+    private var selectedPoint: ChinaMacroYear? {
+        guard let selectedYear else { return nil }
+        return points.min { abs($0.year - selectedYear) < abs($1.year - selectedYear) }
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(points) { item in
+                if let value = metric.value(in: item) {
+                    AreaMark(
+                        x: .value("年份", item.year),
+                        y: .value(metric.title, value)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [metric.color.opacity(0.18), metric.color.opacity(0.02)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .interpolationMethod(metric == .mortgageRate ? .stepEnd : .monotone)
+
+                    LineMark(
+                        x: .value("年份", item.year),
+                        y: .value(metric.title, value)
+                    )
+                    .foregroundStyle(metric.color)
+                    .lineStyle(StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(metric == .mortgageRate ? .stepEnd : .monotone)
+                }
+            }
+
+            if let selectedPoint, let value = metric.value(in: selectedPoint) {
+                RuleMark(x: .value("选中年份", selectedPoint.year))
+                    .foregroundStyle(metric.color.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                PointMark(
+                    x: .value("选中年份", selectedPoint.year),
+                    y: .value("选中数值", value)
+                )
+                .foregroundStyle(metric.color)
+                .symbolSize(70)
+            }
+        }
+        .chartXScale(domain: (points.first?.year ?? 2000)...(points.last?.year ?? 2026))
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 5)) {
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
+                AxisTick().foregroundStyle(.secondary.opacity(0.25))
+                AxisValueLabel().font(.caption2)
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) {
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
+                AxisValueLabel().font(.caption2)
+            }
+        }
+        .chartXSelection(value: $selectedYear)
+        .chartPlotStyle { plot in
+            plot
+                .background(metric.color.opacity(0.025))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .frame(height: height)
+        .onChange(of: selectedYear) { _, candidate in
+            guard let candidate,
+                  let nearest = points.min(by: { abs($0.year - candidate) < abs($1.year - candidate) }),
+                  nearest.year != candidate else { return }
+            selectedYear = nearest.year
+        }
+        .sensoryFeedback(.selection, trigger: selectedYear)
+        .accessibilityLabel("\(metric.title)历史趋势图，可左右滑动选择年份")
+    }
+}
+
+private struct ChinaMacroMetricSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let metric: ChinaMacroMetric
+    let years: [ChinaMacroYear]
+    let initialYear: Int?
+    @State private var selectedYear: Int?
+
+    private var points: [ChinaMacroYear] {
+        years
+            .filter { metric.value(in: $0) != nil }
+            .sorted { $0.year < $1.year }
+    }
+
+    private var selectedPoint: ChinaMacroYear? {
+        guard let selectedYear else { return points.last }
+        return points.min { abs($0.year - selectedYear) < abs($1.year - selectedYear) }
+    }
+
+    private var selectedIndex: Int? {
+        guard let selectedPoint else { return nil }
+        return points.firstIndex(where: { $0.year == selectedPoint.year })
+    }
+
+    private var change: Double? {
+        guard let index = selectedIndex, index > points.startIndex,
+              let current = metric.value(in: points[index]),
+              let previous = metric.value(in: points[index - 1]) else { return nil }
+        return current - previous
+    }
+
+    private var average: Double? {
+        let values = points.compactMap { metric.value(in: $0) }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private var minimum: Double? { points.compactMap { metric.value(in: $0) }.min() }
+    private var maximum: Double? { points.compactMap { metric.value(in: $0) }.max() }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    metricIntro
+                    selectedValueCard
+                    chartCard
+                    statistics
+                    historyList
+                    sourceNote
+                }
+                .padding(16)
+            }
+            .background(InvestmentDesign.canvas)
+            .navigationTitle(metric.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .onAppear { selectedYear = initialYear ?? points.last?.year }
+    }
+
+    private var metricIntro: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(metric.longTitle)
+                .font(.title3.weight(.bold))
+            Text(metric.shortDescription)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var selectedValueCard: some View {
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(selectedPoint.map { "\(String($0.year)) 年" } ?? "暂无数据")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(selectedPoint.flatMap { metric.value(in: $0) }.map { "\(format($0))%" } ?? "—")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .foregroundStyle(metric.color)
+            }
+            Spacer()
+            if let change {
+                let isFlat = abs(change) < 0.005
+                Label(
+                    isFlat ? "与上年基本持平" : "较上年 \(change > 0 ? "+" : "")\(format(change)) 个百分点",
+                    systemImage: isFlat ? "arrow.right" : change > 0 ? "arrow.up.right" : "arrow.down.right"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isFlat ? Color.secondary : change > 0 ? Color.red : Color.green)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background((isFlat ? Color.secondary : change > 0 ? Color.red : Color.green).opacity(0.08))
+                .clipShape(Capsule())
+            }
+        }
+        .padding(16)
+        .background(InvestmentDesign.surface)
+        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+    }
+
+    private var chartCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("历史趋势").font(.headline)
+                Spacer()
+                Label("滑动查看", systemImage: "hand.draw")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            InteractiveMacroChart(
+                metric: metric,
+                years: years,
+                selectedYear: $selectedYear,
+                height: 260
+            )
+        }
+        .padding(16)
+        .background(InvestmentDesign.surface)
+        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+    }
+
+    private var statistics: some View {
+        HStack(spacing: 8) {
+            statisticCell("区间均值", value: average)
+            statisticCell("历史低点", value: minimum)
+            statisticCell("历史高点", value: maximum)
+        }
+    }
+
+    private func statisticCell(_ title: String, value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value.map { "\(format($0))%" } ?? "—")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(metric.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(InvestmentDesign.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var historyList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("年度明细")
+                .font(.headline)
+                .padding(16)
+            ForEach(points.suffix(10).reversed()) { item in
+                Divider().padding(.leading, 16)
+                Button { selectedYear = item.year } label: {
+                    HStack {
+                        Text("\(String(item.year)) 年")
+                        Spacer()
+                        Text(metric.value(in: item).map { "\(format($0))%" } ?? "—")
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                            .foregroundStyle(metric.color)
+                        Image(systemName: selectedPoint?.year == item.year ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(selectedPoint?.year == item.year ? metric.color : Color.secondary.opacity(0.35))
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(InvestmentDesign.surface)
+        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+    }
+
+    private var sourceNote: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("数据来源：\(metric.sourceName)", systemImage: "checkmark.shield.fill")
+                .font(.footnote.weight(.semibold))
+            Text("当前展示 \(points.first.map { String($0.year) } ?? "—")—\(points.last.map { String($0.year) } ?? "—") 年数据。各指标发布时间不同，最新年份可能不一致。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func format(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(abs(value) >= 100 ? 1 : 2)))
     }
 }
 
