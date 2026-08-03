@@ -148,6 +148,7 @@ final class CountryGDPRankingTests: XCTestCase {
             lendingRate: try points("[{\"date\":\"2024\",\"value\":4.35}]"),
             depositRate: try points("[{\"date\":\"2024\",\"value\":1.5}]"),
             mortgageRate: try points("[{\"date\":\"2024\",\"value\":3.6}]"),
+            householdLeverage: try points("[{\"date\":\"2024\",\"value\":60.0}]"),
             privateCredit: try points("[{\"date\":\"2023\",\"value\":194.2}]")
         )
         XCTAssertEqual(merged.map(\.year), [2024, 2023])
@@ -157,6 +158,7 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(merged[0].lendingRate, 4.35)
         XCTAssertEqual(merged[0].depositRate, 1.5)
         XCTAssertEqual(merged[0].mortgageRate, 3.6)
+        XCTAssertEqual(merged[0].householdLeverage, 60.0)
         XCTAssertNil(merged[0].privateCredit)
         XCTAssertEqual(merged[1].privateCredit, 194.2)
     }
@@ -176,6 +178,19 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(ChinaMacroService.parseFiveYearLPR(html: detail), 3.5)
     }
 
+    func testParsesLatestQuarterOfBISHouseholdLeverageForEachYear() {
+        let xml = """
+        <Obs TIME_PERIOD="2024-Q3" OBS_VALUE="60.2"></Obs>
+        <Obs TIME_PERIOD="2024-Q4" OBS_VALUE="60.0"></Obs>
+        <Obs TIME_PERIOD="2025-Q2" OBS_VALUE="59.7"></Obs>
+        """
+        let points = ChinaMacroService.parseBISHouseholdLeverage(xml: xml)
+        XCTAssertEqual(points, [
+            WorldBankIndicatorPoint(year: 2025, value: 59.7),
+            WorldBankIndicatorPoint(year: 2024, value: 60.0)
+        ])
+    }
+
     func testAddsMortgageRatesWithoutDiscardingLoadedMacroData() {
         let base = [ChinaMacroYear(
             year: 2026,
@@ -185,6 +200,7 @@ final class CountryGDPRankingTests: XCTestCase {
             lendingRate: 3.1,
             depositRate: 1.2,
             mortgageRate: nil,
+            householdLeverage: 59.7,
             privateCredit: 180
         )]
         let result = ChinaMacroService.mergingMortgage(
