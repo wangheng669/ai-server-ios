@@ -270,6 +270,24 @@ struct APIClient {
         return try await get(url)
     }
 
+    func interpretBilibiliVideo(bvid: String, title: String) async throws -> BilibiliInterpretationResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/v1/bilibili/interpretation"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [.init(name: "bvid", value: bvid), .init(name: "title", value: title)]
+        guard let url = components?.url else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 620
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+        do { return try JSONDecoder().decode(BilibiliInterpretationResponse.self, from: data) }
+        catch { throw APIError.decoding(error) }
+    }
+
     func fetchXComments(tweetID: String, limit: Int = 30) async throws -> [XComment] {
         var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/comments"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
