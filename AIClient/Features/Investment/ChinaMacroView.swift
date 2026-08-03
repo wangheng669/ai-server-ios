@@ -4,6 +4,8 @@ import SwiftUI
 
 struct ChinaMacroYear: Identifiable, Equatable {
     let year: Int
+    var gdpGrowth: Double?
+    var unemployment: Double?
     var inflation: Double?
     var lendingRate: Double?
     var depositRate: Double?
@@ -14,6 +16,8 @@ struct ChinaMacroYear: Identifiable, Equatable {
 }
 
 enum ChinaMacroMetric: String, CaseIterable, Identifiable {
+    case gdpGrowth
+    case unemployment
     case inflation
     case lendingRate
     case depositRate
@@ -24,6 +28,8 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .gdpGrowth: "GDP"
+        case .unemployment: "失业率"
         case .inflation: "通胀"
         case .lendingRate: "贷款利率"
         case .depositRate: "存款利率"
@@ -34,6 +40,8 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
 
     var longTitle: String {
         switch self {
+        case .gdpGrowth: "国内生产总值年增长率"
+        case .unemployment: "失业人口占劳动力比重"
         case .inflation: "居民消费价格年涨幅"
         case .lendingRate: "银行贷款利率"
         case .depositRate: "商业银行存款利率"
@@ -44,6 +52,8 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
+        case .gdpGrowth: InvestmentDesign.accent
+        case .unemployment: .cyan
         case .inflation: .orange
         case .lendingRate: InvestmentDesign.accent
         case .depositRate: .green
@@ -54,6 +64,8 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
 
     func value(in year: ChinaMacroYear) -> Double? {
         switch self {
+        case .gdpGrowth: year.gdpGrowth
+        case .unemployment: year.unemployment
         case .inflation: year.inflation
         case .lendingRate: year.lendingRate
         case .depositRate: year.depositRate
@@ -117,11 +129,15 @@ struct ChinaMacroService {
     }
 
     func history() async throws -> [ChinaMacroYear] {
+        async let gdpGrowth = seriesOrEmpty("NY.GDP.MKTP.KD.ZG")
+        async let unemployment = seriesOrEmpty("SL.UEM.TOTL.ZS")
         async let inflation = seriesOrEmpty("FP.CPI.TOTL.ZG")
         async let lendingRate = seriesOrEmpty("FR.INR.LEND")
         async let depositRate = seriesOrEmpty("FR.INR.DPST")
         async let privateCredit = seriesOrEmpty("FD.AST.PRVT.GD.ZS")
         let merged = await Self.merge(
+            gdpGrowth: gdpGrowth,
+            unemployment: unemployment,
             inflation: inflation,
             lendingRate: lendingRate,
             depositRate: depositRate,
@@ -218,6 +234,8 @@ struct ChinaMacroService {
     }
 
     static func merge(
+        gdpGrowth: [WorldBankIndicatorPoint],
+        unemployment: [WorldBankIndicatorPoint],
         inflation: [WorldBankIndicatorPoint],
         lendingRate: [WorldBankIndicatorPoint],
         depositRate: [WorldBankIndicatorPoint],
@@ -229,6 +247,8 @@ struct ChinaMacroService {
             for point in points where point.year >= 2000 && point.year <= Calendar.current.component(.year, from: Date()) {
                 var item = years[point.year] ?? ChinaMacroYear(
                     year: point.year,
+                    gdpGrowth: nil,
+                    unemployment: nil,
                     inflation: nil,
                     lendingRate: nil,
                     depositRate: nil,
@@ -239,6 +259,8 @@ struct ChinaMacroService {
                 years[point.year] = item
             }
         }
+        insert(gdpGrowth, keyPath: \.gdpGrowth)
+        insert(unemployment, keyPath: \.unemployment)
         insert(inflation, keyPath: \.inflation)
         insert(lendingRate, keyPath: \.lendingRate)
         insert(depositRate, keyPath: \.depositRate)
@@ -246,7 +268,8 @@ struct ChinaMacroService {
         insert(privateCredit, keyPath: \.privateCredit)
         return years.values
             .filter {
-                $0.inflation != nil || $0.lendingRate != nil || $0.depositRate != nil ||
+                $0.gdpGrowth != nil || $0.unemployment != nil || $0.inflation != nil ||
+                    $0.lendingRate != nil || $0.depositRate != nil ||
                     $0.mortgageRate != nil || $0.privateCredit != nil
             }
             .sorted { $0.year > $1.year }
@@ -260,6 +283,8 @@ struct ChinaMacroService {
         for point in points {
             var item = merged[point.year] ?? ChinaMacroYear(
                 year: point.year,
+                gdpGrowth: nil,
+                unemployment: nil,
                 inflation: nil,
                 lendingRate: nil,
                 depositRate: nil,
@@ -302,30 +327,56 @@ final class ChinaMacroStore {
     }
 }
 
+private enum ChinaMacroSection: String, CaseIterable, Identifiable {
+    case overview = "总览"
+    case growth = "增长"
+    case prices = "物价"
+    case rates = "利率"
+    case credit = "信用"
+
+    var id: Self { self }
+
+    var metrics: [ChinaMacroMetric] {
+        switch self {
+        case .overview: []
+        case .growth: [.gdpGrowth, .unemployment]
+        case .prices: [.inflation, .depositRate]
+        case .rates: [.mortgageRate, .lendingRate, .depositRate]
+        case .credit: [.privateCredit, .lendingRate]
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .overview: "中国经济脉搏"
+        case .growth: "增长动能"
+        case .prices: "价格与居民资金"
+        case .rates: "利率环境"
+        case .credit: "信用与杠杆"
+        }
+    }
+}
+
 struct ChinaMacroView: View {
     @State private var store = ChinaMacroStore()
-    @State private var metric = ChinaMacroMetric.inflation
+    @State private var section = ChinaMacroSection.overview
+    @State private var metric = ChinaMacroMetric.gdpGrowth
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
-                introduction
+                header
+                sectionPicker
                 if store.isLoading && store.years.isEmpty {
-                    ProgressView("正在读取中国年度宏观数据")
-                        .frame(maxWidth: .infinity, minHeight: 220)
+                    ProgressView("正在读取中国宏观数据")
+                        .frame(maxWidth: .infinity, minHeight: 260)
                 } else if store.loadError && store.years.isEmpty {
-                    ContentUnavailableView {
-                        Label("宏观数据暂不可用", systemImage: "chart.line.downtrend.xyaxis")
-                    } description: {
-                        Text("世界银行数据服务暂未响应")
-                    } actions: {
-                        Button("重新加载") { Task { await store.load() } }
-                    }
-                    .frame(minHeight: 280)
+                    unavailable
+                } else if section == .overview {
+                    overview
+                    sourceFooter
                 } else {
-                    latestCards
-                    trendCard
-                    annualTable
+                    detail
                     sourceFooter
                 }
             }
@@ -335,136 +386,293 @@ struct ChinaMacroView: View {
         .background(InvestmentDesign.canvas)
         .refreshable { await store.load() }
         .task { if store.years.isEmpty { await store.load() } }
+        .onChange(of: section) { _, newSection in
+            if let first = newSection.metrics.first { metric = first }
+        }
     }
 
-    private var introduction: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("中国年度宏观")
-                .font(.system(size: 25, weight: .bold, design: .rounded))
-            Text("把物价、贷款、存款、房贷定价基准与信贷规模放在同一条年度时间线上，观察资金价格与经济杠杆的长期变化。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(section.title)
+                .font(.system(size: 27, weight: .bold, design: .rounded))
+            HStack(spacing: 6) {
+                Image(systemName: "clock")
+                Text(latestYear.map { "数据更新至 \(String($0)) 年" } ?? "正在更新数据")
+                if store.isLoading && !store.years.isEmpty { ProgressView().controlSize(.mini) }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var latestCards: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 10) {
-                ForEach(ChinaMacroMetric.allCases) { item in
-                    let latest = store.years.first { item.value(in: $0) != nil }
-                    Button { metric = item } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label(item.title, systemImage: icon(for: item))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(item.color)
-                            Text(latest.flatMap { item.value(in: $0) }.map { format($0) } ?? "—")
-                                .font(.system(size: 24, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
-                            Text(latest.map { "\(String($0.year))年 · %" } ?? "暂无数据")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(width: 142, alignment: .leading)
-                        .padding(14)
-                        .background(metric == item ? item.color.opacity(0.10) : InvestmentDesign.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
-                                .stroke(metric == item ? item.color.opacity(0.55) : InvestmentDesign.divider, lineWidth: 1)
-                        }
-                    }
-                    .buttonStyle(.plain)
+    private var sectionPicker: some View {
+        HStack(spacing: 4) {
+            ForEach(ChinaMacroSection.allCases) { item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { section = item }
+                } label: {
+                    Text(item.rawValue)
+                        .font(.subheadline.weight(section == item ? .semibold : .regular))
+                        .foregroundStyle(section == item ? InvestmentDesign.accent : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(section == item ? InvestmentDesign.surface : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
                 }
+                .buttonStyle(.plain)
             }
         }
-        .scrollIndicators(.hidden)
+        .padding(4)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var unavailable: some View {
+        ContentUnavailableView {
+            Label("宏观数据暂不可用", systemImage: "chart.line.downtrend.xyaxis")
+        } description: {
+            Text("数据服务暂未响应")
+        } actions: {
+            Button("重新加载") { Task { await store.load() } }
+        }
+        .frame(minHeight: 300)
+    }
+
+    private var overview: some View {
+        VStack(spacing: 14) {
+            storyCard(
+                section: .growth,
+                icon: "chart.line.uptrend.xyaxis",
+                tint: InvestmentDesign.accent,
+                metrics: [.gdpGrowth, .unemployment],
+                insight: growthInsight
+            )
+            storyCard(
+                section: .prices,
+                icon: "cart",
+                tint: .orange,
+                metrics: [.inflation, .depositRate],
+                insight: "把居民物价变化与储蓄回报放在一起观察"
+            )
+            storyCard(
+                section: .rates,
+                icon: "house",
+                tint: .purple,
+                metrics: [.mortgageRate, .lendingRate, .privateCredit],
+                insight: "5年期LPR是房贷定价基准，实际利率还会加减点"
+            )
+            Button {
+                section = .credit
+            } label: {
+                HStack {
+                    Image(systemName: "chart.bar.doc.horizontal")
+                    Text("查看信用与杠杆历史")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(15)
+                .background(InvestmentDesign.surface)
+                .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func storyCard(
+        section target: ChinaMacroSection,
+        icon: String,
+        tint: Color,
+        metrics: [ChinaMacroMetric],
+        insight: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label(target.title, systemImage: icon)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                }
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(Array(metrics.enumerated()), id: \.element) { index, item in
+                        if index > 0 { Divider().frame(height: 48).padding(.horizontal, 10) }
+                        metricSummary(item)
+                    }
+                }
+                GeometryReader { proxy in
+                    sparkline(metrics.first ?? .inflation, tint: tint)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                Text(insight)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(InvestmentDesign.surface)
+        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
+                .stroke(InvestmentDesign.divider, lineWidth: 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .onTapGesture { section = target }
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func metricSummary(_ item: ChinaMacroMetric) -> some View {
+        let latest = latest(item)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(item.title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(latest.flatMap { item.value(in: $0) }.map { "\(format($0))%" } ?? "—")
+                .font(.system(size: 21, weight: .bold, design: .rounded))
+                .foregroundStyle(item.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(latest.map { "\(String($0.year)) 年" } ?? "暂无数据")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func sparkline(_ item: ChinaMacroMetric, tint: Color) -> some View {
+        let years = store.years
+            .filter { item.value(in: $0) != nil }
+            .sorted { $0.year < $1.year }
+        return Chart(years) { year in
+            if let value = item.value(in: year) {
+                LineMark(x: .value("年份", year.year), y: .value(item.title, value))
+                    .foregroundStyle(tint)
+                    .interpolationMethod(.monotone)
+                AreaMark(x: .value("年份", year.year), y: .value(item.title, value))
+                    .foregroundStyle(tint.opacity(0.08))
+                    .interpolationMethod(.monotone)
+            }
+        }
+        .chartXScale(domain: (years.first?.year ?? 2000)...(years.last?.year ?? 2026))
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+    }
+
+    private var detail: some View {
+        VStack(spacing: 14) {
+            metricPicker
+            trendCard
+            recentValues
+        }
+    }
+
+    private var metricPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(section.metrics) { item in
+                Button { metric = item } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: icon(for: item))
+                        Text(item.title)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(metric == item ? item.color : .secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(metric == item ? item.color.opacity(0.10) : InvestmentDesign.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(metric == item ? item.color.opacity(0.4) : InvestmentDesign.divider, lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private var trendCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(metric.longTitle)
-                    .font(.headline)
-                Text("年度值 · 单位 %")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(metric.longTitle).font(.headline)
+                    Text("年度值 · 单位 %").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let latest = latest(metric), let value = metric.value(in: latest) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("\(format(value))%")
+                            .font(.system(size: 25, weight: .bold, design: .rounded))
+                            .foregroundStyle(metric.color)
+                        Text("\(String(latest.year)) 年").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
             }
             Chart(store.years.reversed()) { item in
                 if let value = metric.value(in: item) {
                     LineMark(x: .value("年份", item.year), y: .value(metric.title, value))
                         .foregroundStyle(metric.color)
-                        .interpolationMethod(.monotone)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
+                        .interpolationMethod(metric == .mortgageRate ? .stepEnd : .monotone)
                     AreaMark(x: .value("年份", item.year), y: .value(metric.title, value))
-                        .foregroundStyle(metric.color.opacity(0.12))
-                        .interpolationMethod(.monotone)
+                        .foregroundStyle(metric.color.opacity(0.10))
+                        .interpolationMethod(metric == .mortgageRate ? .stepEnd : .monotone)
                 }
             }
-            .chartXScale(domain: 1999...(Calendar.current.component(.year, from: Date()) + 1))
             .chartXAxis {
-                AxisMarks(values: Array(stride(from: 2000, through: Calendar.current.component(.year, from: Date()), by: 5))) { value in
-                    AxisGridLine().foregroundStyle(.secondary.opacity(0.12))
-                    AxisValueLabel {
-                        if let year = value.as(Int.self) { Text(String(year)) }
-                    }
+                AxisMarks(values: .automatic(desiredCount: 5)) {
+                    AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
+                    AxisValueLabel()
                 }
             }
             .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine().foregroundStyle(.secondary.opacity(0.12))
-                    AxisValueLabel { if let number = value.as(Double.self) { Text(format(number)) } }
+                AxisMarks(position: .leading) {
+                    AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
+                    AxisValueLabel()
                 }
             }
-            .frame(height: 220)
+            .frame(height: 235)
         }
         .padding(16)
         .background(InvestmentDesign.surface)
         .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
     }
 
-    private var annualTable: some View {
-        ScrollView(.horizontal) {
-            VStack(spacing: 0) {
+    private var recentValues: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("最近数据")
+                .font(.headline)
+                .padding(16)
+            ForEach(Array(metricYears.prefix(6))) { item in
+                Divider().padding(.leading, 16)
                 HStack {
-                    Text("年份").frame(width: 52, alignment: .leading)
-                    Text("通胀").frame(width: 58, alignment: .trailing)
-                    Text("贷款").frame(width: 58, alignment: .trailing)
-                    Text("存款").frame(width: 58, alignment: .trailing)
-                    Text("房贷LPR").frame(width: 72, alignment: .trailing)
-                    Text("信贷/GDP").frame(width: 78, alignment: .trailing)
+                    Text("\(String(item.year)) 年")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(metric.value(in: item).map { "\(format($0))%" } ?? "—")
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .foregroundStyle(metric.color)
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-
-                ForEach(store.years) { item in
-                    Divider().padding(.leading, 14)
-                    HStack {
-                        Text(String(item.year)).font(.subheadline.weight(.semibold)).frame(width: 52, alignment: .leading)
-                        valueCell(item.inflation, width: 58)
-                        valueCell(item.lendingRate, width: 58)
-                        valueCell(item.depositRate, width: 58)
-                        valueCell(item.mortgageRate, width: 72)
-                        valueCell(item.privateCredit, width: 78)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .frame(width: 460)
-            .background(InvestmentDesign.surface)
-            .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
         }
-        .scrollIndicators(.hidden)
+        .background(InvestmentDesign.surface)
+        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
     }
 
     private var sourceFooter: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("数据来源：世界银行、中国人民银行", systemImage: "checkmark.shield.fill")
+        VStack(alignment: .leading, spacing: 7) {
+            Label("世界银行 · 中国人民银行", systemImage: "checkmark.shield.fill")
                 .font(.footnote.weight(.semibold))
-            Text("通胀、贷款、存款与信贷规模来自世界银行；房贷利率采用中国人民银行每年最后一次公布的5年期以上LPR，当年显示最新值。它是房贷定价基准，并非每位借款人的实际执行利率。空白表示该年度源数据未公布。")
+            Text("GDP、失业、物价、存贷款与信贷指标采用年度数据；5年期以上LPR为房贷定价基准，并非个人实际执行利率。不同指标发布节奏不同，页面会标注各自年份。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -472,11 +680,15 @@ struct ChinaMacroView: View {
         .padding(.vertical, 8)
     }
 
-    private func valueCell(_ value: Double?, width: CGFloat) -> some View {
-        Text(value.map { format($0) } ?? "—")
-            .font(.system(.subheadline, design: .rounded))
-            .foregroundStyle(value == nil ? Color.secondary : Color.primary)
-            .frame(width: width, alignment: .trailing)
+    private var latestYear: Int? { store.years.first?.year }
+    private var metricYears: [ChinaMacroYear] { store.years.filter { metric.value(in: $0) != nil } }
+    private func latest(_ item: ChinaMacroMetric) -> ChinaMacroYear? { store.years.first { item.value(in: $0) != nil } }
+
+    private var growthInsight: String {
+        guard let value = latest(.gdpGrowth).flatMap({ ChinaMacroMetric.gdpGrowth.value(in: $0) }) else {
+            return "观察经济增长与劳动力市场的长期变化"
+        }
+        return value >= 5 ? "经济增速保持较强韧性" : value >= 3 ? "经济维持温和增长" : "增长动能仍需修复"
     }
 
     private func format(_ value: Double) -> String {
@@ -485,6 +697,8 @@ struct ChinaMacroView: View {
 
     private func icon(for metric: ChinaMacroMetric) -> String {
         switch metric {
+        case .gdpGrowth: "chart.line.uptrend.xyaxis"
+        case .unemployment: "person.2"
         case .inflation: "cart"
         case .lendingRate: "percent"
         case .depositRate: "banknote"

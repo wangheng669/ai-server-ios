@@ -142,6 +142,8 @@ final class CountryGDPRankingTests: XCTestCase {
             ).points
         }
         let merged = ChinaMacroService.merge(
+            gdpGrowth: try points("[{\"date\":\"2024\",\"value\":5.0}]"),
+            unemployment: try points("[{\"date\":\"2024\",\"value\":4.6}]"),
             inflation: try points("[{\"date\":\"2024\",\"value\":0.2},{\"date\":\"2023\",\"value\":0.1}]"),
             lendingRate: try points("[{\"date\":\"2024\",\"value\":4.35}]"),
             depositRate: try points("[{\"date\":\"2024\",\"value\":1.5}]"),
@@ -149,6 +151,8 @@ final class CountryGDPRankingTests: XCTestCase {
             privateCredit: try points("[{\"date\":\"2023\",\"value\":194.2}]")
         )
         XCTAssertEqual(merged.map(\.year), [2024, 2023])
+        XCTAssertEqual(merged[0].gdpGrowth, 5.0)
+        XCTAssertEqual(merged[0].unemployment, 4.6)
         XCTAssertEqual(merged[0].inflation, 0.2)
         XCTAssertEqual(merged[0].lendingRate, 4.35)
         XCTAssertEqual(merged[0].depositRate, 1.5)
@@ -175,6 +179,8 @@ final class CountryGDPRankingTests: XCTestCase {
     func testAddsMortgageRatesWithoutDiscardingLoadedMacroData() {
         let base = [ChinaMacroYear(
             year: 2026,
+            gdpGrowth: 4.8,
+            unemployment: 4.6,
             inflation: 0.4,
             lendingRate: 3.1,
             depositRate: 1.2,
@@ -186,6 +192,7 @@ final class CountryGDPRankingTests: XCTestCase {
             into: base
         )
         XCTAssertEqual(result[0].inflation, 0.4)
+        XCTAssertEqual(result[0].gdpGrowth, 4.8)
         XCTAssertEqual(result[0].depositRate, 1.2)
         XCTAssertEqual(result[0].mortgageRate, 3.5)
     }
