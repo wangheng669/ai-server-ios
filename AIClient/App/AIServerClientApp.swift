@@ -379,6 +379,7 @@ private final class TodayWorldStore: ObservableObject {
 private struct TodayWorldView: View {
     @Binding var showsDetail: Bool
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayWorldStore()
     @State private var selectedPost: Post?
 
@@ -409,7 +410,11 @@ private struct TodayWorldView: View {
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
-            await store.load()
+            await store.load(force: true)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard rootTabIsActive, phase == .active else { return }
+            Task { await store.load(force: true) }
         }
         .onChange(of: selectedPost) { _, post in
             showsDetail = post != nil
