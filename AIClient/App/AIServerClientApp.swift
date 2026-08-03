@@ -157,6 +157,7 @@ private struct EditorialRootView: View {
             return .people
         }
         if ProcessInfo.processInfo.arguments.contains("--market-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
             ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
@@ -200,6 +201,7 @@ private struct EditorialRootView: View {
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
             ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) { return nil }

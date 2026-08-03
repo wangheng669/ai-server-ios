@@ -116,4 +116,40 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 1, count: 12), 11)
         XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 1.2, count: 12), 11)
     }
+
+    func testDecodesWorldBankIndicatorAndPreservesMissingYears() throws {
+        let json = """
+        [
+          {"page":1,"pages":1,"per_page":100,"total":2},
+          [
+            {"date":"2025","value":0.0595646916565403},
+            {"date":"2024","value":null}
+          ]
+        ]
+        """
+        let response = try JSONDecoder().decode(WorldBankIndicatorResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(response.points.count, 2)
+        XCTAssertEqual(response.points[0].year, 2025)
+        XCTAssertEqual(response.points[0].value, 0.0595646916565403)
+        XCTAssertNil(response.points[1].value)
+    }
+
+    func testMergesChinaMacroSeriesByYear() throws {
+        func points(_ json: String) throws -> [WorldBankIndicatorPoint] {
+            try JSONDecoder().decode(
+                WorldBankIndicatorResponse.self,
+                from: Data("[{\"page\":1},\(json)]".utf8)
+            ).points
+        }
+        let merged = ChinaMacroService.merge(
+            inflation: try points("[{\"date\":\"2024\",\"value\":0.2},{\"date\":\"2023\",\"value\":0.1}]"),
+            lendingRate: try points("[{\"date\":\"2024\",\"value\":4.35}]"),
+            privateCredit: try points("[{\"date\":\"2023\",\"value\":194.2}]")
+        )
+        XCTAssertEqual(merged.map(\.year), [2024, 2023])
+        XCTAssertEqual(merged[0].inflation, 0.2)
+        XCTAssertEqual(merged[0].lendingRate, 4.35)
+        XCTAssertNil(merged[0].privateCredit)
+        XCTAssertEqual(merged[1].privateCredit, 194.2)
+    }
 }
