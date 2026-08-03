@@ -535,7 +535,8 @@ struct LearningView: View {
                                         concept: concept,
                                         index: index,
                                         count: concepts.count,
-                                        width: max(300, proxy.size.width - 40)
+                                        width: max(300, proxy.size.width - 24),
+                                        height: proxy.size.height
                                     )
                                     .frame(width: proxy.size.width)
                                     .id(concept.id)
@@ -550,7 +551,9 @@ struct LearningView: View {
                         .scrollTargetBehavior(.paging)
                         .scrollPosition(id: $selectedConceptID)
                     }
-                    .frame(height: 452)
+                    .containerRelativeFrame(.vertical) { availableHeight, _ in
+                        max(520, availableHeight - 44)
+                    }
                 }
             }
             .onChange(of: library.concepts, initial: true) { _, loadedConcepts in
