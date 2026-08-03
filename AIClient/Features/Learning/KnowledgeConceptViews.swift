@@ -181,14 +181,23 @@ struct KnowledgeConceptCarouselCard: View {
     @ViewBuilder
     private var conceptImage: some View {
         KnowledgeConceptCachedImage(url: concept.coverURL) { image in
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-                .saturation(0.72)
-                .contrast(0.96)
-                .overlay(Color(red: 0.55, green: 0.34, blue: 0.14).opacity(0.05))
+            ZStack {
+                image
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: 18)
+                    .scaleEffect(1.08)
+                    .overlay(Color.black.opacity(0.16))
+
+                image
+                    .resizable()
+                    .scaledToFit()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .saturation(0.72)
+            .contrast(0.96)
+            .overlay(Color(red: 0.55, green: 0.34, blue: 0.14).opacity(0.05))
         } placeholder: { isLoading in
             imageFallback
                 .overlay {
