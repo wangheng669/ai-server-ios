@@ -384,7 +384,7 @@ private struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayWorldStore()
     @State private var selectedPost: Post?
-    @State private var expandedSystemKey = "altman"
+    @State private var selectedSystemKey = "musk"
 
     var body: some View {
         NavigationStack {
@@ -427,6 +427,7 @@ private struct TodayWorldView: View {
     private func timeline(_ payload: TodayWorldPayload) -> some View {
         let allGroups = TodayWorldAuthorGroup.make(from: payload)
         let systems = TodayWorldLeaderSystem.make(from: payload, groups: allGroups)
+        let selectedSystem = systems.first { $0.key == selectedSystemKey } ?? systems.first
 
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
@@ -437,17 +438,26 @@ private struct TodayWorldView: View {
                     isRefreshing: store.isLoading
                 )
 
-                ForEach(systems) { system in
-                    TodayWorldLeaderSystemView(
-                        system: system,
-                        isExpanded: expandedSystemKey == system.key,
-                        onToggle: {
-                            withAnimation(.easeInOut(duration: 0.22)) {
-                                expandedSystemKey = expandedSystemKey == system.key ? "" : system.key
-                            }
-                        },
-                        onOpenPost: { selectedPost = $0 }
-                    )
+                ScrollView(.horizontal) {
+                    HStack(spacing: 9) {
+                        ForEach(systems) { system in
+                            TodayWorldLeaderChip(
+                                system: system,
+                                isSelected: selectedSystem?.key == system.key,
+                                action: {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        selectedSystemKey = system.key
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                }
+                .scrollIndicators(.hidden)
+
+                if let selectedSystem {
+                    TodayWorldSelectedSystemView(system: selectedSystem) { selectedPost = $0 }
                 }
 
                 Color.clear.frame(height: 88)
@@ -502,6 +512,8 @@ private struct TodayWorldLeaderSystem: Identifiable {
     let accountNames: [String]
     let groups: [TodayWorldAuthorGroup]
     let postCount: Int
+    let leaderName: String
+    let leaderAvatarURL: URL?
     var id: String { key }
     var accountSummary: String { accountNames.joined(separator: " / ") }
     var latestHeadline: String? { groups.first?.posts.first?.displayContent }
@@ -519,108 +531,120 @@ private struct TodayWorldLeaderSystem: Identifiable {
         return ["altman", "pichai", "musk", "zuckerberg"].compactMap { key in
             guard let name = names[key] else { return nil }
             let systemGroups = groups.filter { $0.companyKey == key }
+            let leaderSection = payload.sections.first {
+                $0.entity?.companyKey == key && $0.entity?.xHandle?.lowercased() == leaderHandle(for: key)
+            }
+            let leader = systemGroups.first {
+                $0.handle?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@")) == leaderHandle(for: key)
+            }
             return TodayWorldLeaderSystem(
                 key: key,
                 name: name,
                 accountNames: accounts[key] ?? [],
                 groups: systemGroups,
-                postCount: systemGroups.reduce(0) { $0 + $1.posts.count }
+                postCount: systemGroups.reduce(0) { $0 + $1.posts.count },
+                leaderName: leaderSection?.entity?.name ?? leader?.authorName ?? fallbackLeaderName(for: key),
+                leaderAvatarURL: leaderSection?.entity?.avatarURL.flatMap(URL.init(string:)) ?? leader?.avatarURL
             )
         }
     }
+
+    private static func leaderHandle(for key: String) -> String {
+        ["altman": "sama", "pichai": "sundarpichai", "musk": "elonmusk", "zuckerberg": "finkd"][key] ?? ""
+    }
+
+    private static func fallbackLeaderName(for key: String) -> String {
+        ["altman": "Sam Altman", "pichai": "Sundar Pichai", "musk": "Elon Musk", "zuckerberg": "Mark Zuckerberg"][key] ?? ""
+    }
 }
 
-private struct TodayWorldLeaderSystemView: View {
+private struct TodayWorldLeaderChip: View {
     let system: TodayWorldLeaderSystem
-    let isExpanded: Bool
-    let onToggle: () -> Void
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    leaderAvatar
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(system.name)
+                            .font(.system(size: 14, weight: .bold))
+                        Text(system.leaderName)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                    }
+                }
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(system.postCount > 0 ? Color.green : Color.secondary.opacity(0.5))
+                        .frame(width: 5, height: 5)
+                    Text(system.postCount > 0 ? "\(system.postCount) 条更新" : "暂无更新")
+                        .font(.system(size: 10.5, weight: .semibold))
+                }
+            }
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .padding(10)
+            .frame(width: 142, alignment: .leading)
+            .background(isSelected ? Color(uiColor: .label) : Color.secondary.opacity(0.055))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.07), lineWidth: 0.6)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var leaderAvatar: some View {
+        AvatarView(url: system.leaderAvatarURL, name: system.leaderName, size: 34)
+        .overlay { Circle().stroke(Color.white.opacity(isSelected ? 0.25 : 0), lineWidth: 1) }
+    }
+}
+
+private struct TodayWorldSelectedSystemView: View {
+    let system: TodayWorldLeaderSystem
     let onOpenPost: (Post) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: onToggle) {
-                HStack(spacing: 10) {
-                    Image(systemName: leaderIcon)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(isExpanded ? Color.white : accentColor)
-                        .frame(width: 34, height: 34)
-                        .background(isExpanded ? Color.white.opacity(0.14) : accentColor.opacity(0.1), in: Circle())
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 7) {
-                            Text(system.name).font(.system(size: 17, weight: .bold))
-                            Text("· \(system.postCount) 条")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(isExpanded ? Color.white.opacity(0.68) : Color.secondary)
-                        }
-                        Text(system.accountSummary)
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(isExpanded ? Color.white.opacity(0.68) : Color.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 4)
-                    Text(isExpanded ? "收起" : "展开").font(.system(size: 11.5, weight: .medium))
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(system.name)
+                        .font(.system(size: 18, weight: .bold))
+                    Spacer()
+                    Text("\(system.postCount) 条")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(isExpanded ? Color.white : Color.primary)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 62)
-                .background(isExpanded ? Color(uiColor: .label) : Color.secondary.opacity(0.055))
-            }
-            .buttonStyle(.plain)
-
-            if !isExpanded, let headline = system.latestHeadline {
-                Text(headline)
-                    .font(.system(size: 12.5))
+                Text(system.accountSummary)
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .padding(.leading, 56)
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 10)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
-            if isExpanded {
-                if system.groups.isEmpty {
-                    Text("今天暂时没有新的动态")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(14)
-                } else {
-                    ForEach(system.groups) { group in
-                        TodayWorldAuthorGroupView(group: group, onOpenPost: onOpenPost)
-                    }
+            Divider().opacity(0.5)
+
+            if system.groups.isEmpty {
+                ContentUnavailableView(
+                    "近 7 天暂无动态",
+                    systemImage: "clock.badge.questionmark",
+                    description: Text("已关注 \(system.accountSummary)，有新内容时会自动出现在这里。")
+                )
+                .frame(minHeight: 190)
+            } else {
+                ForEach(system.groups) { group in
+                    TodayWorldAuthorGroupView(group: group, onOpenPost: onOpenPost)
                 }
             }
         }
         .background(Color(uiColor: .systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.primary.opacity(0.075), lineWidth: 0.6)
-        }
+        .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.075), lineWidth: 0.6) }
         .padding(.horizontal, 14)
-    }
-
-    private var leaderIcon: String {
-        switch system.key {
-        case "altman": "sparkles"
-        case "pichai": "g.circle.fill"
-        case "musk": "bolt.fill"
-        case "zuckerberg": "infinity"
-        default: "person.fill"
-        }
-    }
-
-    private var accentColor: Color {
-        switch system.key {
-        case "altman": .teal
-        case "pichai": .blue
-        case "musk": .indigo
-        case "zuckerberg": .cyan
-        default: .blue
-        }
     }
 }
 
@@ -665,12 +689,12 @@ private struct TodayWorldDailyDigestView: View {
             HStack(spacing: 7) {
                 Image(systemName: "doc.text.fill")
                     .foregroundStyle(.teal)
-                Text("今日摘要")
+                Text("动态摘要")
                     .font(.system(size: 15, weight: .bold))
             }
 
             if highlights.isEmpty {
-                Text("关注的体系今天暂未发布新动态。")
+                Text("关注的体系近 7 天暂未发布新动态。")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             } else {
