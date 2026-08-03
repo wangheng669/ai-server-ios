@@ -2,6 +2,15 @@ import Charts
 import Observation
 import SwiftUI
 
+private func chinaMacroTimestamp(_ date: Date?, includeYear: Bool = true) -> String {
+    guard let date else { return "尚未完成刷新" }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.dateFormat = includeYear ? "yyyy-MM-dd HH:mm" : "MM-dd HH:mm"
+    return formatter.string(from: date)
+}
+
 struct ChinaMacroYear: Identifiable, Equatable {
     let year: Int
     var gdpGrowth: Double?
@@ -320,6 +329,7 @@ final class ChinaMacroStore {
     var years: [ChinaMacroYear] = []
     var isLoading = false
     var loadError = false
+    var lastUpdatedAt: Date?
     private let service: ChinaMacroService
 
     init(service: ChinaMacroService = ChinaMacroService()) {
@@ -337,6 +347,7 @@ final class ChinaMacroStore {
             guard !years.isEmpty else { return }
             let mortgageRates = await service.mortgageSeriesOrEmpty()
             years = ChinaMacroService.mergingMortgage(mortgageRates, into: years)
+            lastUpdatedAt = Date()
         } catch {
             loadError = true
         }
@@ -422,7 +433,12 @@ struct ChinaMacroView: View {
         }
         .onChange(of: metric) { _, _ in selectedYear = nil }
         .sheet(item: $presentation) { item in
-            ChinaMacroMetricSheet(metric: item.metric, years: store.years, initialYear: item.year)
+            ChinaMacroMetricSheet(
+                metric: item.metric,
+                years: store.years,
+                initialYear: item.year,
+                updatedAt: store.lastUpdatedAt
+            )
                 .presentationDetents([.fraction(0.72), .large])
                 .presentationDragIndicator(.visible)
         }
@@ -432,10 +448,17 @@ struct ChinaMacroView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(section.title)
                 .font(.system(size: 27, weight: .bold, design: .rounded))
-            HStack(spacing: 6) {
-                Image(systemName: "clock")
-                Text(latestYear.map { "数据更新至 \(String($0)) 年" } ?? "正在更新数据")
-                if store.isLoading && !store.years.isEmpty { ProgressView().controlSize(.mini) }
+            HStack(spacing: 12) {
+                Label(
+                    latestYear.map { "最新数据 \(String($0)) 年" } ?? "正在更新数据",
+                    systemImage: "calendar"
+                )
+                if let updatedAt = store.lastUpdatedAt {
+                    Label(chinaMacroTimestamp(updatedAt, includeYear: false), systemImage: "arrow.clockwise")
+                }
+                if store.isLoading && !store.years.isEmpty {
+                    ProgressView().controlSize(.mini)
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -749,10 +772,20 @@ struct ChinaMacroView: View {
 
     private var recentValues: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("最近数据")
-                .font(.headline)
-                .padding(16)
-            ForEach(Array(metricYears.prefix(6))) { item in
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("历史数据").font(.headline)
+                    Text(historyRangeText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("展示最近 \(min(metricYears.count, 12)) 年")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            ForEach(Array(metricYears.prefix(12))) { item in
                 Divider().padding(.leading, 16)
                 Button {
                     presentation = ChinaMacroPresentation(metric: metric, year: item.year)
@@ -774,6 +807,18 @@ struct ChinaMacroView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
+            if metricYears.count > 12 {
+                Divider().padding(.leading, 16)
+                Button {
+                    presentation = ChinaMacroPresentation(metric: metric, year: nil)
+                } label: {
+                    Label("在弹窗中查看全部 \(metricYears.count) 个年份", systemImage: "calendar.badge.clock")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .background(InvestmentDesign.surface)
         .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
@@ -781,9 +826,12 @@ struct ChinaMacroView: View {
 
     private var sourceFooter: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Label("世界银行 · 中国人民银行", systemImage: "checkmark.shield.fill")
+            Label("数据来源与更新时间", systemImage: "checkmark.shield.fill")
                 .font(.footnote.weight(.semibold))
-            Text("GDP、失业、物价、存贷款与信贷指标采用年度数据；5年期以上LPR为房贷定价基准，并非个人实际执行利率。不同指标发布节奏不同，页面会标注各自年份。")
+            Text("世界银行 WDI：GDP、失业率、通胀、存贷款利率与私人信贷；中国人民银行：5年期以上LPR。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("各指标最新年份以数值旁标注为准；页面刷新于 \(updatedAtText)。LPR是房贷定价基准，并非个人实际执行利率。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -793,6 +841,13 @@ struct ChinaMacroView: View {
 
     private var latestYear: Int? { store.years.first?.year }
     private var metricYears: [ChinaMacroYear] { store.years.filter { metric.value(in: $0) != nil } }
+    private var historyRangeText: String {
+        guard let newest = metricYears.first?.year, let oldest = metricYears.last?.year else { return "暂无年份" }
+        return "共 \(metricYears.count) 年 · \(String(oldest))—\(String(newest))"
+    }
+    private var updatedAtText: String {
+        chinaMacroTimestamp(store.lastUpdatedAt)
+    }
     private func latest(_ item: ChinaMacroMetric) -> ChinaMacroYear? { store.years.first { item.value(in: $0) != nil } }
 
     private var growthInsight: String {
@@ -912,6 +967,7 @@ private struct ChinaMacroMetricSheet: View {
     let metric: ChinaMacroMetric
     let years: [ChinaMacroYear]
     let initialYear: Int?
+    let updatedAt: Date?
     @State private var selectedYear: Int?
 
     private var points: [ChinaMacroYear] {
@@ -979,6 +1035,18 @@ private struct ChinaMacroMetricSheet: View {
             Text(metric.shortDescription)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Label(metric.sourceName, systemImage: "building.columns")
+                Label(
+                    points.last.map { "最新 \(String($0.year)) 年" } ?? "暂无年份",
+                    systemImage: "calendar"
+                )
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            Label("刷新于 \(updatedAtText)", systemImage: "arrow.clockwise")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -1058,10 +1126,19 @@ private struct ChinaMacroMetricSheet: View {
 
     private var historyList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("年度明细")
-                .font(.headline)
-                .padding(16)
-            ForEach(points.suffix(10).reversed()) { item in
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("完整年度明细").font(.headline)
+                    Text("共 \(points.count) 年 · \(yearRangeText)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "calendar")
+                    .foregroundStyle(metric.color)
+            }
+            .padding(16)
+            ForEach(points.reversed()) { item in
                 Divider().padding(.leading, 16)
                 Button { selectedYear = item.year } label: {
                     HStack {
@@ -1086,12 +1163,27 @@ private struct ChinaMacroMetricSheet: View {
 
     private var sourceNote: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("数据来源：\(metric.sourceName)", systemImage: "checkmark.shield.fill")
+            Label("数据来源：\(sourceDetail)", systemImage: "checkmark.shield.fill")
                 .font(.footnote.weight(.semibold))
-            Text("当前展示 \(points.first.map { String($0.year) } ?? "—")—\(points.last.map { String($0.year) } ?? "—") 年数据。各指标发布时间不同，最新年份可能不一致。")
+            Text("指标数据覆盖 \(yearRangeText)，最新数据年份为 \(points.last.map { String($0.year) } ?? "—") 年。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("页面本次刷新：\(updatedAtText)。这是 App 获取数据的时间，不代表官方指标发布日期。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var yearRangeText: String {
+        "\(points.first.map { String($0.year) } ?? "—")—\(points.last.map { String($0.year) } ?? "—") 年"
+    }
+
+    private var sourceDetail: String {
+        metric == .mortgageRate ? "中国人民银行 · LPR公告" : "世界银行 · World Development Indicators"
+    }
+
+    private var updatedAtText: String {
+        chinaMacroTimestamp(updatedAt)
     }
 
     private func format(_ value: Double) -> String {
