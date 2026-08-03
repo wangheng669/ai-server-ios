@@ -267,6 +267,7 @@ private struct EditorialRootView: View {
         }
         .task {
             deploymentStore.start()
+            await peopleStore.load()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

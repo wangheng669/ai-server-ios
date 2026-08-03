@@ -30,7 +30,7 @@ final class PeopleStore {
     }
 
     func load(force: Bool = false) async {
-        guard force || people.isEmpty else { return }
+        guard !isLoading, force || people.isEmpty else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
