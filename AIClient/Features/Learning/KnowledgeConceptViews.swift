@@ -78,18 +78,21 @@ struct KnowledgeConceptCarouselCard: View {
     let index: Int
     let count: Int
     let width: CGFloat
+    let height: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             hero
 
-            VStack(alignment: .leading, spacing: 15) {
-                Text(concept.summary)
-                    .font(.system(size: 15.5, weight: .medium))
-                    .foregroundStyle(.primary.opacity(0.88))
-                    .lineSpacing(4)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 7) {
+                    cardSectionLabel("核心概览")
+                    Text(concept.summary)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.primary.opacity(0.88))
+                        .lineSpacing(5)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 HStack(alignment: .top, spacing: 11) {
                     Image(systemName: "sparkles")
@@ -103,25 +106,39 @@ struct KnowledgeConceptCarouselCard: View {
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(KnowledgeConceptPalette.accent)
                         Text(concept.importance)
-                            .font(.system(size: 13.5))
+                            .font(.system(size: 14))
                             .foregroundStyle(.secondary)
-                            .lineSpacing(3)
-                            .lineLimit(3)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 7) {
-                    ForEach(concept.keyPeople.prefix(3), id: \.self) { person in
-                        Text(person)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.primary.opacity(0.72))
-                            .padding(.horizontal, 10)
-                            .frame(height: 28)
-                            .background(Color.primary.opacity(0.05), in: Capsule())
+                if !concept.keyPeople.isEmpty {
+                    VStack(alignment: .leading, spacing: 9) {
+                        cardSectionLabel(concept.kind == .person ? "相关人物" : "关键人物")
+                        FlowLayout(spacing: 7) {
+                            ForEach(concept.keyPeople, id: \.self) { person in
+                                Text(person)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.primary.opacity(0.72))
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 28)
+                                    .background(Color.primary.opacity(0.05), in: Capsule())
+                            }
+                        }
                     }
+                }
 
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label("资料来源：维基百科", systemImage: "book.closed")
+                        if !concept.imageAttribution.isEmpty {
+                            Text("图片署名：\(concept.imageAttribution)")
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     Spacer(minLength: 4)
 
                     HStack(spacing: 5) {
@@ -131,10 +148,12 @@ struct KnowledgeConceptCarouselCard: View {
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(KnowledgeConceptPalette.accent)
                 }
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.secondary)
             }
-            .padding(18)
+            .padding(20)
         }
-        .frame(width: width, height: 452, alignment: .top)
+        .frame(width: width, height: height, alignment: .top)
         .background(KnowledgeConceptPalette.paper)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay {
@@ -148,11 +167,18 @@ struct KnowledgeConceptCarouselCard: View {
         .accessibilityHint("打开详细内容")
     }
 
+    private func cardSectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .bold))
+            .tracking(1.2)
+            .foregroundStyle(KnowledgeConceptPalette.accent)
+    }
+
     private var hero: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottomLeading) {
                 conceptImage
-                    .frame(width: proxy.size.width, height: 196)
+                    .frame(width: proxy.size.width, height: heroHeight)
                     .clipped()
 
                 LinearGradient(
@@ -193,11 +219,15 @@ struct KnowledgeConceptCarouselCard: View {
                 }
                 .padding(17)
             }
-            .frame(width: proxy.size.width, height: 196)
+            .frame(width: proxy.size.width, height: heroHeight)
             .clipped()
         }
-        .frame(height: 196)
+        .frame(height: heroHeight)
         .clipped()
+    }
+
+    private var heroHeight: CGFloat {
+        min(232, max(190, height * 0.34))
     }
 
     @ViewBuilder
