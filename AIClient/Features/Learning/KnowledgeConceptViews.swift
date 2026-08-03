@@ -84,72 +84,43 @@ struct KnowledgeConceptCarouselCard: View {
         VStack(alignment: .leading, spacing: 0) {
             hero
 
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 7) {
-                    cardSectionLabel("核心概览")
-                    Text(concept.summary)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.primary.opacity(0.88))
-                        .lineSpacing(5)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(alignment: .top, spacing: 11) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(KnowledgeConceptPalette.accent)
-                        .frame(width: 28, height: 28)
-                        .background(KnowledgeConceptPalette.accent.opacity(0.09), in: Circle())
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("理解要点")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(KnowledgeConceptPalette.accent)
-                        Text(concept.importance)
-                            .font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 12) {
+                    Text("W")
+                        .font(.system(size: 25, weight: .medium, design: .serif))
+                        .frame(width: 44, height: 44)
+                        .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("维基百科")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text(concept.wikipediaTitle)
+                            .font(.system(size: 12.5))
                             .foregroundStyle(.secondary)
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+
+                Text(concept.summary)
+                    .font(.system(size: 18, weight: .medium, design: .serif))
+                    .foregroundStyle(.primary.opacity(0.88))
+                    .lineSpacing(7)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Spacer(minLength: 0)
 
-                if !concept.keyPeople.isEmpty {
-                    VStack(alignment: .leading, spacing: 9) {
-                        cardSectionLabel(concept.kind == .person ? "相关人物" : "关键人物")
-                        FlowLayout(spacing: 7) {
-                            ForEach(concept.keyPeople, id: \.self) { person in
-                                Text(person)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.primary.opacity(0.72))
-                                    .padding(.horizontal, 10)
-                                    .frame(height: 28)
-                                    .background(Color.primary.opacity(0.05), in: Capsule())
-                            }
-                        }
-                    }
-                }
-
                 HStack(alignment: .bottom, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label("资料来源：维基百科", systemImage: "book.closed")
-                        if !concept.imageAttribution.isEmpty {
-                            Text("图片署名：\(concept.imageAttribution)")
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                    Text(concept.imageAttribution)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 4)
 
                     HStack(spacing: 5) {
-                        Text("查看详情")
-                        Image(systemName: "arrow.right")
+                        Text("打开维基百科")
+                        Image(systemName: "arrow.up.right")
                     }
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(KnowledgeConceptPalette.accent)
                 }
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 20)
             .padding(.top, 22)
@@ -159,14 +130,7 @@ struct KnowledgeConceptCarouselCard: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(concept.title)，\(concept.summary)")
-        .accessibilityHint("打开详细内容")
-    }
-
-    private func cardSectionLabel(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .bold))
-            .tracking(1.2)
-            .foregroundStyle(KnowledgeConceptPalette.accent)
+        .accessibilityHint("打开维基百科词条")
     }
 
     private var hero: some View {
@@ -184,12 +148,6 @@ struct KnowledgeConceptCarouselCard: View {
 
                 VStack(alignment: .leading, spacing: 9) {
                     HStack {
-                        Text(concept.subtitle.isEmpty ? concept.kind.title : concept.subtitle)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .padding(.horizontal, 10)
-                            .frame(height: 28)
-                            .background(.ultraThinMaterial, in: Capsule())
-
                         Spacer()
 
                         Text("\(index + 1) / \(count)")
@@ -200,11 +158,6 @@ struct KnowledgeConceptCarouselCard: View {
                     }
 
                     Spacer(minLength: 0)
-
-                    Text(concept.kind.title.uppercased())
-                        .font(.system(size: 10.5, weight: .bold))
-                        .tracking(2)
-                        .foregroundStyle(.white.opacity(0.72))
 
                     Text(concept.title)
                         .font(.system(size: 31, weight: .bold, design: .serif))
