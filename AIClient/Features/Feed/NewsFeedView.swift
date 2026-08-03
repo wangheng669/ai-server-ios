@@ -174,10 +174,13 @@ struct NewsFeedView: View {
             showsDetail = false
             hidesTabBar = false
         }
-        .task(id: "\(rootTabIsActive)-\(model.source.rawValue)") {
-            guard rootTabIsActive else { return }
+        .task(id: model.source.rawValue) {
             await model.loadInitial()
             hasLoadedFeedOnce = true
+        }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await model.loadInitial()
             #if DEBUG
             if opensZhihuDetailPreview,
                selectedPost == nil,
@@ -196,9 +199,6 @@ struct NewsFeedView: View {
                 selectedPost = first
             }
             #endif
-        }
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
             await model.warmSourceCache()
         }
     }

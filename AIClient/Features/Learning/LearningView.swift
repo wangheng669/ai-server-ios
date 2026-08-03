@@ -83,8 +83,7 @@ struct LearningView: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
+        .task {
             async let catalog: Void = store.load()
             async let bookshelf: Void = store.loadBookshelf()
             async let conceptLibrary: Void = store.loadConceptLibrary()
