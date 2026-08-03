@@ -711,27 +711,32 @@ private struct TodayWorldSelectedSystemView: View {
                 )
                 .frame(minHeight: 190)
             } else {
-                ForEach(system.groups) { group in
-                    TodayWorldAuthorGroupView(group: group, onOpenPost: onOpenPost)
-                }
-
-                if system.hasMore {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(isLoadingMore ? "正在加载更多" : "继续上滑加载")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(system.groups) { group in
+                        TodayWorldAuthorGroupView(group: group, onOpenPost: onOpenPost)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .task { await onLoadMore() }
-                } else {
-                    Text("今天的内容已全部加载")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.tertiary)
+
+                    if system.hasMore {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(isLoadingMore ? "正在加载更多" : "继续上滑加载")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                        .padding(.vertical, 16)
+                        .onAppear {
+                            guard !isLoadingMore else { return }
+                            Task { await onLoadMore() }
+                        }
+                    } else {
+                        Text("今天的内容已全部加载")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
                 }
             }
         }
@@ -906,7 +911,7 @@ private struct TodayWorldAuthorGroupView: View {
         HStack(alignment: .top, spacing: 10) {
             AvatarView(url: group.avatarURL, name: group.authorName, size: 36)
 
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 4) {
                     Text(group.authorName)
                         .font(.system(size: 15, weight: .bold))
