@@ -1117,7 +1117,48 @@ private struct TodayWorldGroupedPostRow: View {
     @ViewBuilder
     private var contextLine: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let replyHandle {
+            if let reply = post.meta?.replyContext,
+               let replyText = reply.displayText {
+                VStack(alignment: .leading, spacing: 7) {
+                    Label("回复 \(reply.handle ?? replyHandle ?? "这条动态")", systemImage: "arrowshape.turn.up.left")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    HStack(alignment: .top, spacing: 7) {
+                        AvatarView(
+                            url: reply.avatarURL.flatMap(MediaURL.image),
+                            name: reply.authorName ?? reply.handle ?? "回复",
+                            size: 22
+                        )
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 4) {
+                                if let name = reply.authorName, !name.isEmpty {
+                                    Text(name).fontWeight(.semibold)
+                                }
+                                if let handle = reply.handle {
+                                    Text(handle).foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.system(size: 12.5))
+                            .lineLimit(1)
+
+                            Text(replyText)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.primary)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .padding(9)
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
+                }
+            } else if let replyHandle {
                 Label("回复 \(replyHandle)", systemImage: "arrowshape.turn.up.left")
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -1205,6 +1246,9 @@ private struct TodayWorldGroupedPostRow: View {
     private var contextAccessibilityText: String {
         var parts: [String] = []
         if let replyHandle { parts.append("回复 \(replyHandle)") }
+        if let replyText = post.meta?.replyContext?.displayText {
+            parts.append("被回复内容：\(replyText)")
+        }
         if let quote = post.meta?.quotedTweet { parts.append(quoteSummary(quote)) }
         if ownImageCount > 0 { parts.append("包含 \(ownImageCount) 张图片") }
         if ownVideoCount > 0 { parts.append("包含 \(ownVideoCount) 个视频") }
