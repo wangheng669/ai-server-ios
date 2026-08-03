@@ -2019,8 +2019,13 @@ struct PostDetailView: View {
 
     @ViewBuilder
     private func xQuotedMedia(_ media: XQuotedMedia) -> some View {
-        if let videoURL = media.playbackURL {
-            XVideoPlayerView(url: videoURL, thumbnailURL: media.previewURL)
+        if let videoURL = media.directPlaybackURL ?? media.playbackURL {
+            XVideoPlayerView(
+                url: videoURL,
+                fallbackURL: media.directPlaybackURL == nil ? nil : media.playbackURL,
+                thumbnailURL: media.previewURL,
+                generatesThumbnailWhenMissing: false
+            )
                 .frame(height: xQuotedMediaHeight(media))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         } else if let imageURL = media.displayURL {
