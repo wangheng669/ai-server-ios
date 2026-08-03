@@ -384,7 +384,7 @@ private struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayWorldStore()
     @State private var selectedPost: Post?
-    @State private var expandedSystemKey = "musk"
+    @State private var expandedSystemKey = "altman"
 
     var body: some View {
         NavigationStack {
