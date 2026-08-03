@@ -14,6 +14,9 @@ struct PostDetailView: View {
     @State private var bilibiliPlaybackStartedAt: Date?
     @State private var bilibiliPlaybackRetryTask: Task<Void, Never>?
     @State private var bilibiliPlaybackRetryCount = 0
+    @State private var bilibiliSubtitleCues: [PersonVideoSubtitleCue] = []
+    @State private var bilibiliSubtitleStatus = "loading"
+    @State private var bilibiliSubtitleError: String?
     @State private var youtubePlaybackState: YouTubePlaybackState = .idle
     @State private var isYouTubeVideoReady = false
     @State private var youtubePlaybackLabel: String?
@@ -149,6 +152,8 @@ struct PostDetailView: View {
             await commentsTask?.value
             if post.isYouTube {
                 await playYouTubeVideo()
+            } else if post.isBilibili {
+                await loadBilibiliSubtitles()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
@@ -1604,10 +1609,54 @@ struct PostDetailView: View {
                         }
                     }
 
+                    Divider()
+
+                    bilibiliSubtitles
+
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
                 .padding(.bottom, 34)
+            }
+        }
+    }
+
+    @ViewBuilder private var bilibiliSubtitles: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "captions.bubble.fill")
+                    .foregroundStyle(.pink)
+                Text("中文字幕")
+                    .font(.system(size: 19, weight: .bold))
+            }
+
+            if bilibiliSubtitleStatus == "loading" {
+                ProgressView("正在解析字幕…")
+            } else if let bilibiliSubtitleError {
+                ContentUnavailableView(
+                    "字幕载入失败",
+                    systemImage: "captions.bubble",
+                    description: Text(bilibiliSubtitleError)
+                )
+            } else if bilibiliSubtitleCues.isEmpty {
+                ContentUnavailableView("该视频暂无可用字幕", systemImage: "captions.bubble")
+            } else {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(bilibiliSubtitleCues) { cue in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(bilibiliSubtitleTimeLabel(cue.startMS))
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 48, alignment: .leading)
+                            Text(cue.text)
+                                .font(.system(size: 16))
+                                .lineSpacing(3)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.vertical, 10)
+                        if cue.id != bilibiliSubtitleCues.last?.id { Divider() }
+                    }
+                }
             }
         }
     }
@@ -1649,6 +1698,37 @@ struct PostDetailView: View {
             }
         }
         return nil
+    }
+
+    private func loadBilibiliSubtitles() async {
+        guard let bilibiliBVID else {
+            bilibiliSubtitleStatus = "unavailable"
+            return
+        }
+        bilibiliSubtitleStatus = "loading"
+        bilibiliSubtitleError = nil
+        do {
+            let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchBilibiliSubtitles(bvid: bilibiliBVID)
+            guard !Task.isCancelled else { return }
+            bilibiliSubtitleCues = payload.cues
+            bilibiliSubtitleStatus = payload.status
+        } catch is CancellationError {
+            return
+        } catch {
+            bilibiliSubtitleStatus = "failed"
+            bilibiliSubtitleError = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    private func bilibiliSubtitleTimeLabel(_ milliseconds: Int64) -> String {
+        let totalSeconds = max(0, milliseconds / 1_000)
+        let hours = totalSeconds / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        let seconds = totalSeconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%02d:%02d", minutes, seconds)
     }
 
     private var bilibiliMetadata: some View {

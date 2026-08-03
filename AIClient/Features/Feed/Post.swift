@@ -347,6 +347,16 @@ struct Post: Decodable, Identifiable, Hashable {
         }
         return String(content.prefix(72)) + (content.count > 72 ? "…" : "")
     }
+    var bilibiliListContent: String {
+        let body = displayContent
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = bilibiliTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, body != title else { return title }
+        if body.count < 24 { return title }
+        if body.localizedCaseInsensitiveContains(title) { return body }
+        return title + "\n" + body
+    }
     var displaySummary: String? {
         let value = clean(summary) ?? clean(text)
         return value == displayTitle ? nil : value
