@@ -1370,8 +1370,7 @@ private struct MarketIndexTableRow: View {
     }
 
     private var displayedTrend: [Double] {
-        if usesEmbeddedExtendedSession, !quote.nightTrend.isEmpty { return quote.nightTrend }
-        return trend
+        marketExtendedSessionTrend(for: quote, fallback: trend)
     }
 
     private var displayedTint: Color {
@@ -1379,14 +1378,12 @@ private struct MarketIndexTableRow: View {
     }
 
     private var sessionLabel: String {
-        if overnightQuote != nil || quote.isNightSession == true { return "夜盘" }
-        if usesEmbeddedExtendedSession {
-            return switch quote.marketSession?.lowercased() {
-            case "pre", "premarket": "盘前"
-            case "post", "after": "盘后"
-            default: "夜盘"
-            }
+        switch quote.marketSession?.lowercased() {
+        case "pre", "premarket": return "盘前"
+        case "post", "after": return "盘后"
+        default: break
         }
+        if overnightQuote != nil || quote.isNightSession == true || usesEmbeddedExtendedSession { return "夜盘" }
         if quote.marketSession == "always-open" || quote.symbol.hasPrefix("BINANCE:") { return "24H" }
         return quote.marketSession == "regular" ? "交易中" : "已收盘"
     }
@@ -1402,6 +1399,23 @@ private struct MarketIndexTableRow: View {
             ? MarketStyle.accent
             : .secondary
     }
+}
+
+func marketExtendedSessionTrend(for quote: MarketQuote, fallback: [Double]) -> [Double] {
+    if quote.hasActiveExtendedSessionQuote, quote.nightTrend.count > 1 {
+        return quote.nightTrend
+    }
+    if fallback.count > 1 {
+        return fallback
+    }
+    if let previousClose = quote.previousClose,
+       let sessionPrice = quote.sessionPrice,
+       previousClose.isFinite,
+       sessionPrice.isFinite,
+       previousClose != sessionPrice {
+        return [previousClose, sessionPrice]
+    }
+    return fallback
 }
 
 private struct MarketWorldMap: View {
