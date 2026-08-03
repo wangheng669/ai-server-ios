@@ -137,6 +137,10 @@ struct XTweetDetailItem: Decodable, Equatable {
         videoMedia?.url.flatMap(MediaURL.video)
     }
 
+    var directVideoURL: URL? {
+        videoMedia?.url.flatMap(MediaURL.directVideo)
+    }
+
     var videoPreviewURL: URL? {
         videoMedia?.thumbnailURL.flatMap(MediaURL.image)
     }
@@ -624,6 +628,7 @@ struct Post: Decodable, Identifiable, Hashable {
         return urls
     }
     var videoURLs: [URL] { (videos ?? []).compactMap { $0.playURL ?? $0.url }.compactMap(MediaURL.video) }
+    var directVideoURLs: [URL] { (videos ?? []).compactMap { $0.playURL ?? $0.url }.compactMap(MediaURL.directVideo) }
     var bilibiliPlaybackPageURL: URL? {
         (videos ?? [])
             .compactMap { $0.playURL ?? $0.url }
@@ -1327,7 +1332,7 @@ enum MediaURL {
     private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com"]
 
     static func image(_ raw: String) -> URL? { resolved(raw, proxy: "image-proxy", hosts: imageHostSuffixes) }
-    static func video(_ raw: String) -> URL? {
+    static func directVideo(_ raw: String) -> URL? {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
         if let bvid = bilibiliBVID(from: direct) {
@@ -1336,7 +1341,12 @@ enum MediaURL {
                 .appending(path: bvid)
                 .appending(path: "video.mp4")
         }
-        return resolved(value, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
+        return direct
+    }
+
+    static func video(_ raw: String) -> URL? {
+        guard let direct = directVideo(raw) else { return nil }
+        return resolved(direct.absoluteString, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
     }
 
     static func videoThumbnail(for videoURL: URL) -> URL? {

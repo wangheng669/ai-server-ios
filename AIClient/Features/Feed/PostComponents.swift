@@ -622,12 +622,14 @@ struct XVideoPlayerView: View {
     @State private var isVideoReady = false
     @State private var thumbnailFailed = false
     @State private var isFullscreenPresented = false
+    @State private var playbackFallbackTask: Task<Void, Never>?
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let fallbackURL: URL?
     private let thumbnailURL: URL?
     private let contentMode: ContentMode
     private let chromeStyle: XVideoPlayerChromeStyle
     private let isPlaybackActive: Bool
+    private let generatesThumbnailWhenMissing: Bool
     private let onAspectRatioResolved: ((CGFloat) -> Void)?
 
     init(
@@ -637,6 +639,7 @@ struct XVideoPlayerView: View {
         contentMode: ContentMode = .fit,
         chromeStyle: XVideoPlayerChromeStyle = .standard,
         isPlaybackActive: Bool = true,
+        generatesThumbnailWhenMissing: Bool = true,
         onAspectRatioResolved: ((CGFloat) -> Void)? = nil
     ) {
         _playbackURL = State(initialValue: url)
@@ -645,6 +648,7 @@ struct XVideoPlayerView: View {
         self.contentMode = contentMode
         self.chromeStyle = chromeStyle
         self.isPlaybackActive = isPlaybackActive
+        self.generatesThumbnailWhenMissing = generatesThumbnailWhenMissing
         self.onAspectRatioResolved = onAspectRatioResolved
     }
 
@@ -844,6 +848,7 @@ struct XVideoPlayerView: View {
         isVideoReady = false
         playbackState = .preparing
         XVideoPlaybackSession.shared.play(player, url: sourceURL)
+        scheduleFallbackIfNeeded(from: sourceURL)
     }
 
     @MainActor
@@ -863,6 +868,8 @@ struct XVideoPlayerView: View {
     }
 
     private func stopPlayback() {
+        playbackFallbackTask?.cancel()
+        playbackFallbackTask = nil
         if let player {
             XVideoPlaybackSession.shared.pause(player, url: playbackURL)
         }
@@ -873,6 +880,8 @@ struct XVideoPlayerView: View {
 
     private func markVideoReady() {
         guard playbackState == .preparing else { return }
+        playbackFallbackTask?.cancel()
+        playbackFallbackTask = nil
         withAnimation(.easeOut(duration: 0.15)) {
             isVideoReady = true
             playbackState = .playing
@@ -882,16 +891,30 @@ struct XVideoPlayerView: View {
     private func markPlaybackFailed() {
         guard playbackState == .preparing || playbackState == .playing else { return }
         if let fallbackURL, !hasUsedFallback, playbackURL != fallbackURL {
-            stopPlayback()
-            preparedAsset = nil
-            hasUsedFallback = true
-            playbackURL = fallbackURL
-            beginPlayback(with: fallbackURL)
+            switchToFallback(fallbackURL)
             return
         }
         stopPlayback()
         isVideoReady = false
         playbackState = .failed
+    }
+
+    private func scheduleFallbackIfNeeded(from sourceURL: URL) {
+        playbackFallbackTask?.cancel()
+        guard let fallbackURL, !hasUsedFallback, sourceURL != fallbackURL else { return }
+        playbackFallbackTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled, playbackState == .preparing else { return }
+            switchToFallback(fallbackURL)
+        }
+    }
+
+    private func switchToFallback(_ fallbackURL: URL) {
+        stopPlayback()
+        preparedAsset = nil
+        hasUsedFallback = true
+        playbackURL = fallbackURL
+        beginPlayback(with: fallbackURL)
     }
 
     private func activateAudioSession() {
@@ -909,7 +932,8 @@ struct XVideoPlayerView: View {
             thumbnail = cached
             return
         }
-        if let thumbnailURL = thumbnailURL ?? MediaURL.videoThumbnail(for: playbackURL),
+        let resolvedThumbnailURL = thumbnailURL ?? (generatesThumbnailWhenMissing ? MediaURL.videoThumbnail(for: playbackURL) : nil)
+        if let thumbnailURL = resolvedThumbnailURL,
            let remoteThumbnail = await ImageLoader.load(
                thumbnailURL,
                targetSize: CGSize(width: 720, height: 720)
@@ -918,6 +942,10 @@ struct XVideoPlayerView: View {
             Self.thumbnailCache.setObject(remoteThumbnail, forKey: playbackURL as NSURL)
             thumbnail = remoteThumbnail
             thumbnailFailed = false
+            return
+        }
+        guard generatesThumbnailWhenMissing else {
+            thumbnailFailed = true
             return
         }
         guard !Task.isCancelled else { return }

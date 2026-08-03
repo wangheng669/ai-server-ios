@@ -2055,8 +2055,12 @@ struct PostDetailView: View {
         if post.sourceName == "X", let videoURL = xDetailVideoURL {
             XVideoPlayerView(
                 url: videoURL,
+                fallbackURL: xDetailVideoFallbackURL,
                 thumbnailURL: xDetailVideoPreviewURL,
-                onAspectRatioResolved: { detectedVideoAspectRatio = $0 }
+                generatesThumbnailWhenMissing: false,
+                onAspectRatioResolved: xVideoMetadataAspectRatio == nil
+                    ? { detectedVideoAspectRatio = $0 }
+                    : nil
             )
                 .id(videoURL)
                 .frame(height: xVideoHeight)
@@ -2087,6 +2091,10 @@ struct PostDetailView: View {
     }
 
     private var xDetailVideoURL: URL? {
+        post.directVideoURLs.first ?? xLiveDetail?.directVideoURL
+    }
+
+    private var xDetailVideoFallbackURL: URL? {
         post.videoURLs.first ?? xLiveDetail?.videoURL
     }
 
@@ -2100,17 +2108,20 @@ struct PostDetailView: View {
 
     private var xVideoHeight: CGFloat {
         let availableWidth = UIScreen.main.bounds.width - 30
+        let aspectRatio = detectedVideoAspectRatio ?? xVideoMetadataAspectRatio ?? (16.0 / 9.0)
+        return min(availableWidth / aspectRatio, 620)
+    }
+
+    private var xVideoMetadataAspectRatio: CGFloat? {
         let dimensions = post.videos?.first.map { ($0.width, $0.height) }
             ?? xLiveDetail?.videoMedia.map { ($0.width, $0.height) }
-        let metadataAspectRatio: CGFloat? = dimensions.flatMap { dimensions in
+        return dimensions.flatMap { dimensions in
             guard let width = dimensions.0,
                   let height = dimensions.1,
                   width > 0,
                   height > 0 else { return nil }
             return CGFloat(width) / CGFloat(height)
         }
-        let aspectRatio = detectedVideoAspectRatio ?? metadataAspectRatio ?? (16.0 / 9.0)
-        return min(availableWidth / aspectRatio, 620)
     }
 
     private func compactCount(_ value: Int) -> String {
@@ -2165,7 +2176,8 @@ struct PostDetailView: View {
             startVideoPlayback(url: video)
             await detectVideoAspectRatio(url: video)
         } else if post.sourceName == "X",
-                  let video = post.videoURLs.first {
+                  xVideoMetadataAspectRatio == nil,
+                  let video = post.directVideoURLs.first ?? post.videoURLs.first {
             await detectVideoAspectRatio(url: video)
         }
 
@@ -2187,8 +2199,9 @@ struct PostDetailView: View {
                 xLiveDetail = liveDetail
                 translationTweetID = liveDetail.id
                 if post.videoURLs.isEmpty,
-                   let videoURL = liveDetail.videoURL,
-                   detectedVideoAspectRatio == nil {
+                   let videoURL = liveDetail.directVideoURL ?? liveDetail.videoURL,
+                   detectedVideoAspectRatio == nil,
+                   xVideoMetadataAspectRatio == nil {
                     await detectVideoAspectRatio(url: videoURL)
                 }
                 if !presentedAsSheet,
