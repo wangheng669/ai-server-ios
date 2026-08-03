@@ -826,7 +826,9 @@ private struct MarketIndexTable: View {
                         MarketIndexTableRow(
                             quote: quote,
                             overnightQuote: nil,
-                            trend: store.trendValues(for: quote)
+                            trend: store.trendValues(for: quote),
+                            companyLogoPath: store.companyLogoPaths[quote.symbol],
+                            showsCompanyLogo: true
                         )
                     }
                     .buttonStyle(MarketPressStyle())
@@ -837,6 +839,21 @@ private struct MarketIndexTable: View {
         }
         .padding(.horizontal, 18)
         .animation(.easeOut(duration: 0.16), value: region)
+        .task(id: componentLogoRequestID) {
+            guard region == .unitedStates else { return }
+            await withTaskGroup(of: Void.self) { group in
+                for quote in store.dashboard?.components ?? [] {
+                    group.addTask {
+                        await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                    }
+                }
+            }
+        }
+    }
+
+    private var componentLogoRequestID: String {
+        guard region == .unitedStates else { return region.rawValue }
+        return (store.dashboard?.components ?? []).map(\.symbol).joined(separator: ",")
     }
 }
 
@@ -1249,16 +1266,23 @@ private struct MarketIndexTableRow: View {
     let quote: MarketQuote
     let overnightQuote: MarketQuote?
     let trend: [Double]
+    var companyLogoPath: String? = nil
+    var showsCompanyLogo = false
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Circle().fill(sessionTint).frame(width: 5, height: 5)
-                    Text(sessionLabel).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if showsCompanyLogo {
+                    CompanyLogo(quote: quote, path: companyLogoPath, size: 32)
                 }
-                Text(quote.presentationName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
-                Text(quote.displayCode).font(.caption2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Circle().fill(sessionTint).frame(width: 5, height: 5)
+                        Text(sessionLabel).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Text(quote.presentationName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
+                    Text(quote.displayCode).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             .frame(width: 112, alignment: .leading)
 
@@ -3163,22 +3187,33 @@ private struct MarketConstituentRow: View {
 private struct CompanyLogo: View {
     let quote: MarketQuote
     let path: String?
+    var size: CGFloat = 40
 
     var body: some View {
-        AsyncImage(url: logoURL) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFit().padding(6)
-            } else if phase.error == nil {
-                ProgressView().controlSize(.small)
+        Group {
+            if let logoURL {
+                AsyncImage(url: logoURL) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFit().padding(size * 0.15)
+                    } else if phase.error == nil {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        fallback
+                    }
+                }
             } else {
-                Image(systemName: "building.2.crop.circle")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.secondary)
+                fallback
             }
         }
-        .frame(width: 40, height: 40)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
-        .overlay { RoundedRectangle(cornerRadius: 10).stroke(MarketStyle.divider, lineWidth: 0.5) }
+        .frame(width: size, height: size)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: size * 0.25))
+        .overlay { RoundedRectangle(cornerRadius: size * 0.25).stroke(MarketStyle.divider, lineWidth: 0.5) }
+    }
+
+    private var fallback: some View {
+        Image(systemName: "building.2.crop.circle")
+            .font(.system(size: size * 0.45, weight: .medium))
+            .foregroundStyle(.secondary)
     }
 
     private var logoURL: URL? {
