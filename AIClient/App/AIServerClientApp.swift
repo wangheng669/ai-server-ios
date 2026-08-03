@@ -384,7 +384,7 @@ private struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayWorldStore()
     @State private var selectedPost: Post?
-    @State private var selectedCompanyKey = "all"
+    @State private var expandedSystemKey = "altman"
 
     var body: some View {
         NavigationStack {
@@ -426,58 +426,28 @@ private struct TodayWorldView: View {
 
     private func timeline(_ payload: TodayWorldPayload) -> some View {
         let allGroups = TodayWorldAuthorGroup.make(from: payload)
-        let companies = TodayWorldCompany.make(from: payload, groups: allGroups)
-        let groups = selectedCompanyKey == "all"
-            ? allGroups
-            : allGroups.filter { $0.companyKey == selectedCompanyKey }
-        let accountCount = Set(groups.map(\.authorKey)).count
-        let selectedCompany = companies.first { $0.key == selectedCompanyKey }
+        let systems = TodayWorldLeaderSystem.make(from: payload, groups: allGroups)
 
         return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                TodayWorldCompanyPicker(
-                    companies: companies,
-                    selectedKey: $selectedCompanyKey
-                )
-
-                TodayWorldBriefingView(
+            LazyVStack(alignment: .leading, spacing: 10) {
+                TodayWorldDailyDigestView(
                     payload: payload,
-                    groups: groups,
-                    companyName: selectedCompany?.name,
-                    companyCount: companies.count,
+                    groups: allGroups,
+                    systemCount: systems.count,
                     isRefreshing: store.isLoading
                 )
 
-                HStack(spacing: 6) {
-                    Text(selectedCompany.map { "\($0.name) 动态" } ?? "最新动态")
-                        .font(.system(size: 17, weight: .bold))
-
-                    Text("\(accountCount)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.1), in: Capsule())
-
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-                .padding(.bottom, 3)
-
-                if groups.isEmpty {
-                    Text(selectedCompany.map { "\($0.name) 今天还没有新的动态" } ?? "今天还没有新的动态")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 18)
-                } else {
-                    ForEach(groups) { group in
-                        TodayWorldAuthorGroupView(group: group) { post in
-                            selectedPost = post
-                        }
-                    }
+                ForEach(systems) { system in
+                    TodayWorldLeaderSystemView(
+                        system: system,
+                        isExpanded: expandedSystemKey == system.key,
+                        onToggle: {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                expandedSystemKey = expandedSystemKey == system.key ? "" : system.key
+                            }
+                        },
+                        onOpenPost: { selectedPost = $0 }
+                    )
                 }
 
                 Color.clear.frame(height: 88)
@@ -526,109 +496,150 @@ private struct TodayWorldView: View {
     }
 }
 
-private struct TodayWorldCompany: Identifiable {
+private struct TodayWorldLeaderSystem: Identifiable {
     let key: String
     let name: String
+    let accountNames: [String]
+    let groups: [TodayWorldAuthorGroup]
     let postCount: Int
     var id: String { key }
+    var accountSummary: String { accountNames.joined(separator: " / ") }
+    var latestHeadline: String? { groups.first?.posts.first?.displayContent }
 
-    static func make(from payload: TodayWorldPayload, groups: [TodayWorldAuthorGroup]) -> [TodayWorldCompany] {
+    static func make(from payload: TodayWorldPayload, groups: [TodayWorldAuthorGroup]) -> [TodayWorldLeaderSystem] {
         var names: [String: String] = [:]
+        var accounts: [String: [String]] = [:]
         for section in payload.sections {
             guard let key = section.entity?.companyKey, let name = section.entity?.companyName else { continue }
             names[key] = name
+            if let accountName = section.entity?.name, !(accounts[key] ?? []).contains(accountName) {
+                accounts[key, default: []].append(accountName)
+            }
         }
-        let order = ["openai", "google", "spacex", "xai"]
-        return order.compactMap { key in
+        return ["altman", "pichai", "musk", "zuckerberg"].compactMap { key in
             guard let name = names[key] else { return nil }
-            return TodayWorldCompany(
+            let systemGroups = groups.filter { $0.companyKey == key }
+            return TodayWorldLeaderSystem(
                 key: key,
                 name: name,
-                postCount: groups.filter { $0.companyKey == key }.reduce(0) { $0 + $1.posts.count }
+                accountNames: accounts[key] ?? [],
+                groups: systemGroups,
+                postCount: systemGroups.reduce(0) { $0 + $1.posts.count }
             )
         }
     }
 }
 
-private struct TodayWorldCompanyPicker: View {
-    let companies: [TodayWorldCompany]
-    @Binding var selectedKey: String
+private struct TodayWorldLeaderSystemView: View {
+    let system: TodayWorldLeaderSystem
+    let isExpanded: Bool
+    let onToggle: () -> Void
+    let onOpenPost: (Post) -> Void
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                chip(key: "all", name: "全部", count: companies.reduce(0) { $0 + $1.postCount })
-                ForEach(companies) { company in
-                    chip(key: company.key, name: company.name, count: company.postCount)
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: onToggle) {
+                HStack(spacing: 10) {
+                    Image(systemName: leaderIcon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isExpanded ? Color.white : accentColor)
+                        .frame(width: 34, height: 34)
+                        .background(isExpanded ? Color.white.opacity(0.14) : accentColor.opacity(0.1), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 7) {
+                            Text(system.name).font(.system(size: 17, weight: .bold))
+                            Text("· \(system.postCount) 条")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(isExpanded ? Color.white.opacity(0.68) : Color.secondary)
+                        }
+                        Text(system.accountSummary)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(isExpanded ? Color.white.opacity(0.68) : Color.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 4)
+                    Text(isExpanded ? "收起" : "展开").font(.system(size: 11.5, weight: .medium))
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(isExpanded ? Color.white : Color.primary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 62)
+                .background(isExpanded ? Color(uiColor: .label) : Color.secondary.opacity(0.055))
+            }
+            .buttonStyle(.plain)
+
+            if !isExpanded, let headline = system.latestHeadline {
+                Text(headline)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.leading, 56)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 10)
+            }
+
+            if isExpanded {
+                if system.groups.isEmpty {
+                    Text("今天暂时没有新的动态")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(14)
+                } else {
+                    ForEach(system.groups) { group in
+                        TodayWorldAuthorGroupView(group: group, onOpenPost: onOpenPost)
+                    }
                 }
             }
-            .padding(.horizontal, 14)
         }
-        .scrollIndicators(.hidden)
-        .padding(.bottom, 10)
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.075), lineWidth: 0.6)
+        }
+        .padding(.horizontal, 14)
     }
 
-    private func chip(key: String, name: String, count: Int) -> some View {
-        let selected = selectedKey == key
-        return Button {
-            withAnimation(.easeInOut(duration: 0.18)) { selectedKey = key }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon(for: key))
-                    .font(.system(size: 11, weight: .bold))
-                Text(name)
-                    .font(.system(size: 13, weight: .semibold))
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 10, weight: .bold))
-                        .opacity(0.72)
-                }
-            }
-            .foregroundStyle(selected ? Color.white : Color.primary)
-            .padding(.horizontal, 11)
-            .frame(height: 34)
-            .background(selected ? tint(for: key) : Color.secondary.opacity(0.08), in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(name)，\(count) 条动态")
-    }
-
-    private func icon(for key: String) -> String {
-        switch key {
-        case "google": "g.circle.fill"
-        case "spacex": "paperplane.fill"
-        case "xai": "xmark.circle.fill"
-        case "openai": "sparkles"
-        default: "square.grid.2x2.fill"
+    private var leaderIcon: String {
+        switch system.key {
+        case "altman": "sparkles"
+        case "pichai": "g.circle.fill"
+        case "musk": "bolt.fill"
+        case "zuckerberg": "infinity"
+        default: "person.fill"
         }
     }
 
-    private func tint(for key: String) -> Color {
-        switch key {
-        case "google": .blue
-        case "spacex": .indigo
-        case "xai": .primary
-        case "openai": .teal
+    private var accentColor: Color {
+        switch system.key {
+        case "altman": .teal
+        case "pichai": .blue
+        case "musk": .indigo
+        case "zuckerberg": .cyan
         default: .blue
         }
     }
 }
 
-private struct TodayWorldBriefingView: View {
+private struct TodayWorldDailyDigestView: View {
     let payload: TodayWorldPayload
     let groups: [TodayWorldAuthorGroup]
-    let companyName: String?
-    let companyCount: Int
+    let systemCount: Int
     let isRefreshing: Bool
 
     private var totalCount: Int {
         groups.reduce(0) { $0 + $1.posts.count }
     }
 
-    private var activeAuthorCount: Int { Set(groups.map(\.authorKey)).count }
-
-    private var leadingGroup: TodayWorldAuthorGroup? {
-        groups.max { $0.posts.count < $1.posts.count }
+    private var highlights: [(String, String)] {
+        groups.compactMap { group in
+            group.posts.first.map { (group.authorName, $0.displayContent) }
+        }
+        .prefix(3)
+        .map { $0 }
     }
 
     var body: some View {
@@ -641,9 +652,7 @@ private struct TodayWorldBriefingView: View {
 
                 Spacer()
 
-                Text(companyName == nil
-                     ? "\(companyCount) 家公司 · \(totalCount) 条"
-                     : "\(activeAuthorCount) 个账号 · \(totalCount) 条")
+                Text("\(systemCount) 个体系 · \(totalCount) 条")
                     .font(.system(size: 12, weight: .medium))
 
                 if isRefreshing {
@@ -653,26 +662,27 @@ private struct TodayWorldBriefingView: View {
             }
             .foregroundStyle(.secondary)
 
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.blue)
-                    .frame(width: 22, height: 22)
-                    .background(Color.blue.opacity(0.1), in: Circle())
+            HStack(spacing: 7) {
+                Image(systemName: "doc.text.fill")
+                    .foregroundStyle(.teal)
+                Text("今日摘要")
+                    .font(.system(size: 15, weight: .bold))
+            }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("今日焦点")
-                            .font(.system(size: 15, weight: .bold))
-                        Spacer(minLength: 0)
+            if highlights.isEmpty {
+                Text("关注的体系今天暂未发布新动态。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(highlights.enumerated()), id: \.offset) { _, highlight in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Circle().fill(Color.teal).frame(width: 4, height: 4)
+                            Text("\(highlight.0)：\(highlight.1)")
+                                .font(.system(size: 12.5))
+                                .lineLimit(1)
+                        }
                     }
-
-                    Text(briefingText)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(.primary)
-                        .lineSpacing(2)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -683,16 +693,6 @@ private struct TodayWorldBriefingView: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
         }
         .padding(.horizontal, 14)
-    }
-
-    private var briefingText: String {
-        guard let leadingGroup, let latestPost = leadingGroup.posts.first else {
-            return companyName.map { "\($0) 今天暂未发布新动态。" } ?? "关注的公司今天暂未发布新动态。"
-        }
-        let authorSummary = activeAuthorCount == 1
-            ? "\(leadingGroup.authorName) 今日更新 \(leadingGroup.posts.count) 条"
-            : "\(leadingGroup.authorName) 等 \(activeAuthorCount) 个账号今日共更新 \(totalCount) 条"
-        return "\(authorSummary)。最新：\(latestPost.displayContent)"
     }
 
     private var displayDate: String {
@@ -737,8 +737,8 @@ private struct TodayWorldAuthorGroup: Identifiable {
                 ? (entry.section.entity?.name ?? "OpenAI")
                 : entry.post.authorName
             let authorKey = handle?.lowercased() ?? authorName.lowercased()
-            let companyKey = entry.section.entity?.companyKey ?? "openai"
-            let companyName = entry.section.entity?.companyName ?? "OpenAI"
+            let companyKey = entry.section.entity?.companyKey ?? "altman"
+            let companyName = entry.section.entity?.companyName ?? "奥特曼系"
             let groupingKey = "\(companyKey):\(authorKey)"
 
             if let index = groupIndexByAuthor[groupingKey] {
@@ -756,7 +756,7 @@ private struct TodayWorldAuthorGroup: Identifiable {
                 avatarURL: avatarURL,
                 companyKey: companyKey,
                 companyName: companyName,
-                roleLabel: entry.section.entity?.type == "company" ? "\(companyName) 官方" : "\(companyName) 成员",
+                roleLabel: entry.section.entity?.type == "company" ? "\(authorName) 官方" : "\(companyName) 成员",
                 posts: [entry.post]
             ))
             groupIndexByAuthor[groupingKey] = groups.count - 1
