@@ -2611,6 +2611,19 @@ private struct MarketDetailChart: View {
                     )
                         .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
+                    if let sessionBreak = marketChartLunchBreak(
+                        points: points,
+                        market: chart?.market,
+                        interval: chart?.interval,
+                        timezone: chart?.timezone
+                    ) {
+                        MarketSessionBreakMarker(
+                            sessionBreak: sessionBreak,
+                            points: points,
+                            interval: chart?.interval
+                        )
+                        .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
+                    }
                     if let previousClose = store.quote(symbol: symbol)?.previousClose {
                         ChartReferenceLine(value: previousClose, values: values)
                     }
@@ -2703,6 +2716,40 @@ private struct MarketDetailChart: View {
         }
     }
 
+}
+
+private struct MarketSessionBreakMarker: View {
+    let sessionBreak: MarketChartSessionBreak
+    let points: [MarketChartPoint]
+    let interval: String?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let sorted = points.sorted { $0.timestamp < $1.timestamp }
+            let fractions = marketChartXFractions(timestamps: sorted.map(\.timestamp), interval: interval)
+            let fractionByTimestamp = Dictionary(uniqueKeysWithValues: zip(sorted.map(\.timestamp), fractions))
+            let start = fractionByTimestamp[sessionBreak.previousTimestamp] ?? 0
+            let end = fractionByTimestamp[sessionBreak.currentTimestamp] ?? start
+            let x = proxy.size.width * (start + end) / 2
+            ZStack(alignment: .topLeading) {
+                Path { path in
+                    path.move(to: CGPoint(x: x, y: 24))
+                    path.addLine(to: CGPoint(x: x, y: proxy.size.height))
+                }
+                .stroke(Color.secondary.opacity(0.28), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
+                Text(sessionBreak.label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 3)
+                    .background(.regularMaterial, in: Capsule())
+                    .fixedSize()
+                    .position(x: min(max(x, 30), proxy.size.width - 30), y: 10)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
 }
 
 private struct ChartInspectionOverlay: View {

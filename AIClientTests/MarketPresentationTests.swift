@@ -353,6 +353,39 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(fractions[2], 1)
     }
 
+    func testChinaIntradayChartRecognizesLunchBreakWithoutMislabelingOtherGaps() {
+        let timezone = TimeZone(identifier: "Asia/Shanghai")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timezone
+        func timestamp(hour: Int, minute: Int) -> Int64 {
+            let date = calendar.date(from: DateComponents(year: 2026, month: 8, day: 3, hour: hour, minute: minute))!
+            return Int64(date.timeIntervalSince1970 * 1_000)
+        }
+        func point(hour: Int, minute: Int) -> MarketChartPoint {
+            MarketChartPoint(timestamp: timestamp(hour: hour, minute: minute), open: 10, high: 10, low: 10, close: 10, volume: 1, state: "confirmed", source: "eastmoney", session: "regular")
+        }
+
+        let lunchBreak = marketChartLunchBreak(
+            points: [point(hour: 11, minute: 30), point(hour: 13, minute: 0)],
+            market: "CN",
+            interval: "1m",
+            timezone: "Asia/Shanghai"
+        )
+        XCTAssertEqual(lunchBreak?.label, "午间休市")
+        XCTAssertNil(marketChartLunchBreak(
+            points: [point(hour: 10, minute: 0), point(hour: 11, minute: 5)],
+            market: "CN",
+            interval: "1m",
+            timezone: "Asia/Shanghai"
+        ))
+        XCTAssertNil(marketChartLunchBreak(
+            points: [point(hour: 11, minute: 30), point(hour: 13, minute: 0)],
+            market: "US",
+            interval: "1m",
+            timezone: "America/New_York"
+        ))
+    }
+
     func testDailyChartKeepsCalendarTimeScale() {
         let day = Int64(24 * 60 * 60 * 1_000)
         let fractions = marketChartXFractions(timestamps: [0, day, 3 * day], interval: "1d")
