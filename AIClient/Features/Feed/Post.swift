@@ -289,6 +289,12 @@ struct HotTopic: Decodable {
         case latestHeat = "latest_heat"
         case rankChange = "rank_change"
     }
+
+    var resolvedHeat: Double? {
+        latestHeat
+            ?? meta?.lastPayload?.hotValue
+            ?? meta?.lastPayload?.heat.flatMap(Double.init)
+    }
 }
 
 struct FlashResponse: Decodable {
@@ -983,8 +989,8 @@ struct Post: Decodable, Identifiable, Hashable {
         case postTags
     }
 
-    static func hotTopic(_ topic: HotTopic, source: FeedSource) -> Post {
-        let rank = topic.latestRank
+    static func hotTopic(_ topic: HotTopic, source: FeedSource, displayRank: Int? = nil) -> Post {
+        let rank = displayRank ?? topic.latestRank
         let heat = topic.latestHeat.map { String(Int($0)) } ?? topic.meta?.lastPayload?.heat ?? topic.meta?.lastPayload?.hotValue.map { String(Int($0)) }
         let meta = [rank.map { "第 \($0) 名" }, heat.map { "热度 \($0)" }].compactMap { $0 }.joined(separator: " · ")
         return Post(

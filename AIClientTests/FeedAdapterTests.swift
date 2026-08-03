@@ -598,6 +598,41 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(post.isSynthetic)
     }
 
+    func testHotTopicDisplayRepairsDuplicateRanksAndTieOrdering() throws {
+        let json = #"{"success":true,"data":{"topics":[{"id":1,"keyword":"低热度插入项","latest_rank":6,"meta":{"last_payload":{"heat":"543815"}}},{"id":2,"keyword":"高热度正常项","latest_rank":6,"meta":{"last_payload":{"heat":"545903"}}},{"id":3,"keyword":"下一项","latest_rank":7,"meta":{"last_payload":{"heat":"540000"}}}]}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
+
+        let posts = APIClient.hotTopicPostsForDisplay(
+            response.data.topics,
+            page: 1,
+            limit: 20,
+            source: .weibo
+        )
+
+        XCTAssertEqual(posts.map(\.displayTitle), ["高热度正常项", "低热度插入项", "下一项"])
+        XCTAssertEqual(posts.map(\.feedRank), [1, 2, 3])
+        XCTAssertEqual(posts.map(\.formattedTime), [
+            "第 1 名 · 热度 545903",
+            "第 2 名 · 热度 543815",
+            "第 3 名 · 热度 540000"
+        ])
+    }
+
+    func testHotTopicDisplayContinuesRankAcrossPages() throws {
+        let json = #"{"success":true,"data":{"topics":[{"id":21,"keyword":"第二页第一项","latest_rank":20,"latest_heat":12345}]}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
+
+        let posts = APIClient.hotTopicPostsForDisplay(
+            response.data.topics,
+            page: 2,
+            limit: 20,
+            source: .weibo
+        )
+
+        XCTAssertEqual(posts.first?.feedRank, 21)
+        XCTAssertEqual(posts.first?.formattedTime, "第 21 名 · 热度 12345")
+    }
+
     func testDecodesAndMapsFlashItem() throws {
         let json = #"{"success":true,"data":{"items":[{"id":"f1","time":"18:00","text":"快讯正文","source":"flash:jin10","category":"company","isImportant":false,"finalScore":7.4}],"hasMore":false}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(FlashResponse.self, from: json)

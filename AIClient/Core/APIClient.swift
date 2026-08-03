@@ -45,7 +45,12 @@ struct APIClient {
     ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin:
-            return try await fetchHotTopics(page: page, limit: limit, source: source).map { .hotTopic($0, source: source) }
+            return Self.hotTopicPostsForDisplay(
+                try await fetchHotTopics(page: page, limit: limit, source: source),
+                page: page,
+                limit: limit,
+                source: source
+            )
         case .flash:
             return try await fetchFlash(
                 page: page,
@@ -228,6 +233,34 @@ struct APIClient {
         let response: HotTopicsResponse = try await get(url)
         guard response.success else { throw APIError.invalidResponse }
         return response.data.topics
+    }
+
+    static func hotTopicPostsForDisplay(
+        _ topics: [HotTopic],
+        page: Int,
+        limit: Int,
+        source: FeedSource
+    ) -> [Post] {
+        topics.enumerated()
+            .sorted { lhs, rhs in
+                let leftRank = lhs.element.latestRank ?? Int.max
+                let rightRank = rhs.element.latestRank ?? Int.max
+                if leftRank != rightRank { return leftRank < rightRank }
+
+                let leftHeat = lhs.element.resolvedHeat ?? -.infinity
+                let rightHeat = rhs.element.resolvedHeat ?? -.infinity
+                if leftHeat != rightHeat { return leftHeat > rightHeat }
+
+                return lhs.offset < rhs.offset
+            }
+            .enumerated()
+            .map { offset, item in
+                .hotTopic(
+                    item.element,
+                    source: source,
+                    displayRank: max(page - 1, 0) * limit + offset + 1
+                )
+            }
     }
 
     static func flashQueryItems(
