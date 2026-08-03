@@ -121,6 +121,26 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
+    func testWeChatRequestsAllScoresFromMaobidaoFeed() {
+        let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .wechat)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["source"], "rss:57")
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+    }
+
+    func testMaobidaoIsExcludedFromGenericRSSBecauseItHasDedicatedWeChatTab() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":57,"source":"rss:57","title":"猫笔刀"}"#.utf8)
+        )
+
+        XCTAssertTrue(post.hasDedicatedFeedTab)
+    }
+
     func testRSSFeedsUseElevatedScoreFilter() {
         let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .rss)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in

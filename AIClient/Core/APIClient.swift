@@ -161,7 +161,7 @@ struct APIClient {
 
     static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {
         let isSpecialRSS = source == .laozhong || source == .youtube
-        let includesAllScores = source == .newYorkTimes || source == .youtube
+        let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube
         var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc"),

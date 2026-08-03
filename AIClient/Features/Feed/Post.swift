@@ -806,7 +806,9 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
     var hasDedicatedFeedTab: Bool {
-        source == FeedSource.newYorkTimes.rawValue || source == "rss:79"
+        source == FeedSource.newYorkTimes.rawValue ||
+            source == FeedSource.wechat.rawValue ||
+            source == "rss:79"
     }
     var isYouTube: Bool {
         guard isRSS else { return false }
@@ -1427,6 +1429,7 @@ extension Int {
 
 enum FeedSource: String, CaseIterable, Identifiable {
     case newYorkTimes = "rss:47"
+    case wechat = "rss:57"
     case x, weibo
     case douyin = "douyin-hot"
     case bilibili, zhihu, xueqiu, truth, rss, laozhong, youtube, flash
@@ -1435,6 +1438,7 @@ enum FeedSource: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .newYorkTimes: "纽约时报"
+        case .wechat: "微信"
         case .x: "X"
         case .weibo: "微博"
         case .douyin: "抖音"

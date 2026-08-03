@@ -293,6 +293,12 @@ struct NewsFeedView: View {
                 .foregroundStyle(.primary)
                 .frame(width: 28, height: 22)
                 .fixedSize(horizontal: true, vertical: false)
+        } else if source == .wechat {
+            Image("WeChatMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 23, height: 23)
         } else if source == .x {
             Text("X")
                 .font(.system(size: 18, weight: .bold, design: .default))
@@ -2106,6 +2112,7 @@ private extension FeedSource {
     var systemIcon: String {
         switch self {
         case .newYorkTimes: "newspaper.fill"
+        case .wechat: "bubble.left.and.bubble.right.fill"
         case .x: "house.fill"
         case .truth: "t.square.fill"
         case .xueqiu: "circle.hexagongrid.fill"
@@ -2119,6 +2126,7 @@ private extension FeedSource {
     var iconColor: Color {
         switch self {
         case .newYorkTimes: .primary
+        case .wechat: Color(red: 0.03, green: 0.76, blue: 0.38)
         case .x, .zhihu, .truth: .blue
         case .xueqiu: Color(red: 0.95, green: 0.32, blue: 0.12)
         case .weibo, .youtube: .red
