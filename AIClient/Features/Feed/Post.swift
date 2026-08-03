@@ -1353,7 +1353,7 @@ enum MediaURL {
         return resolved(direct.absoluteString, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
     }
 
-    static func videoThumbnail(for videoURL: URL) -> URL? {
+    static func videoThumbnail(for videoURL: URL, at seconds: Double = 0) -> URL? {
         let originalURL: URL
         if videoURL.path.hasSuffix("/media-proxy"),
            let proxiedURL = URLComponents(url: videoURL, resolvingAgainstBaseURL: false)?
@@ -1370,7 +1370,10 @@ enum MediaURL {
             url: ServerConfiguration.currentURL.appending(path: "api/v1/video-thumbnail"),
             resolvingAgainstBaseURL: false
         )
-        components?.queryItems = [.init(name: "url", value: originalURL.absoluteString)]
+        components?.queryItems = [
+            .init(name: "url", value: originalURL.absoluteString),
+            .init(name: "at", value: seconds > 0 ? seconds.formatted(.number.precision(.fractionLength(0...2))) : nil)
+        ].filter { $0.value != nil }
         return components?.url
     }
 
