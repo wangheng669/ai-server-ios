@@ -366,7 +366,7 @@ private final class TodayWorldStore: ObservableObject {
 
         do {
             payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchTodayWorld(limit: 8)
+                .fetchTodayWorld(limit: 3)
             errorMessage = nil
         } catch is CancellationError {
             return
@@ -445,9 +445,7 @@ private struct TodayWorldView: View {
                                 system: system,
                                 isSelected: selectedSystem?.key == system.key,
                                 action: {
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        selectedSystemKey = system.key
-                                    }
+                                    selectedSystemKey = system.key
                                 }
                             )
                         }
@@ -630,7 +628,7 @@ private struct TodayWorldSelectedSystemView: View {
 
             if system.groups.isEmpty {
                 ContentUnavailableView(
-                    "近 7 天暂无动态",
+                    "今天暂无动态",
                     systemImage: "clock.badge.questionmark",
                     description: Text("已关注 \(system.accountSummary)，有新内容时会自动出现在这里。")
                 )
@@ -694,7 +692,7 @@ private struct TodayWorldDailyDigestView: View {
             }
 
             if highlights.isEmpty {
-                Text("关注的体系近 7 天暂未发布新动态。")
+                Text("关注的体系今天暂未发布新动态。")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             } else {
