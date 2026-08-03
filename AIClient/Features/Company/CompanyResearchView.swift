@@ -13,6 +13,7 @@ struct CompanyResearchProfile: Decodable, Identifiable, Hashable {
     let id: String
     let name: String
     let shortName: String
+    let logoUrl: URL
     let ticker: String
     let exchange: String
     let industry: String
@@ -165,11 +166,7 @@ struct CompanyResearchView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(String(company.shortName.prefix(1)))
-                    .font(.system(size: 24, weight: .bold, design: .serif))
-                    .foregroundStyle(companyAccent(company))
-                    .frame(width: 52, height: 52)
-                    .background(companyAccent(company).opacity(0.10), in: Circle())
+                companyLogo(company)
             }
 
             Text(company.tagline)
@@ -348,6 +345,27 @@ struct CompanyResearchView: View {
             .font(.caption.weight(.bold))
             .tracking(1.5)
             .foregroundStyle(.secondary)
+    }
+
+    private func companyLogo(_ company: CompanyResearchProfile) -> some View {
+        AsyncImage(url: company.logoUrl) { phase in
+            if case let .success(image) = phase {
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .padding(6)
+            } else {
+                Text(String(company.shortName.prefix(1)))
+                    .font(.system(size: 24, weight: .bold, design: .serif))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 104, height: 56)
+        .background(companyAccent(company), in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+        }
     }
 
     private func companyAccent(_ company: CompanyResearchProfile) -> Color {
