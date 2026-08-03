@@ -117,12 +117,18 @@ struct LearningView: View {
             #endif
         }
         .sheet(item: $selectedConcept) { concept in
-            KnowledgeConceptDetailSheet(
-                cards: shuffledConcepts.isEmpty
-                    ? (store.conceptLibrary?.concepts ?? [concept])
-                    : shuffledConcepts,
-                initialID: concept.id
-            )
+            if let url = concept.wikipediaURL {
+                WikipediaReaderView(
+                    entity: WikipediaEntity(
+                        id: concept.id,
+                        term: concept.wikipediaTitle,
+                        title: concept.wikipediaTitle,
+                        summary: concept.summary,
+                        url: url
+                    )
+                )
+                .wikipediaReaderPresentation()
+            }
         }
         .onChange(of: selectedRoute, initial: true) { _, route in
             showsDetail = route != nil || selectedIdeologyPerson != nil
