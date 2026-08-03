@@ -903,7 +903,7 @@ struct XVideoPlayerView: View {
         playbackFallbackTask?.cancel()
         guard let fallbackURL, !hasUsedFallback, sourceURL != fallbackURL else { return }
         playbackFallbackTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, playbackState == .preparing else { return }
             switchToFallback(fallbackURL)
         }
