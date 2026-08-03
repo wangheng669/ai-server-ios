@@ -132,6 +132,26 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
+    func testWeChatAggregatesMaobidaoAndXiaohuAI() {
+        XCTAssertEqual(APIClient.weChatFeedIDs, [57, 2373])
+    }
+
+    func testWeChatMergedPostsAreNewestFirstAndDeduplicated() throws {
+        let decoder = JSONDecoder()
+        let older = try decoder.decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:57","article_post_at":"2026-08-01T10:00:00Z"}"#.utf8)
+        )
+        let newer = try decoder.decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss:2373","article_post_at":"2026-08-03T14:08:00Z"}"#.utf8)
+        )
+
+        let result = APIClient.mergeWeChatPosts([older, newer, older])
+
+        XCTAssertEqual(result.map(\.id), [2, 1])
+    }
+
     func testMaobidaoIsExcludedFromGenericRSSBecauseItHasDedicatedWeChatTab() throws {
         let post = try JSONDecoder().decode(
             Post.self,
