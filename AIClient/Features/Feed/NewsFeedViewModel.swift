@@ -497,7 +497,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     func matchesCurrentSource(_ post: Post) -> Bool {
         switch source {
-        case .newYorkTimes: return post.source == FeedSource.newYorkTimes.rawValue
+        case .newYorkTimes, .wechat: return post.source == source.rawValue
         case .x: return post.sourceName == "X"
         case .bilibili: return post.isBilibili
         case .zhihu: return post.sourceName == "知乎"
@@ -516,7 +516,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func task(_ name: String, updates source: FeedSource) -> Bool {
         switch source {
-        case .newYorkTimes: return name == "rss"
+        case .newYorkTimes, .wechat: return name == "rss"
         case .x: return name == "x" || name == "x_home" || name == "x_home_following"
         case .weibo: return name == "weibo_hot"
         case .douyin: return name == "douyin_hot"
