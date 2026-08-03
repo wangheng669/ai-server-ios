@@ -303,7 +303,7 @@ final class NewsFeedViewModel: ObservableObject {
     func loadInitial() async {
         // Returning to a cached channel must preserve the exact feed snapshot.
         // Pull-to-refresh remains available when the user wants fresh content.
-        guard posts.isEmpty || isSwitchingSource else { return }
+        guard !isLoading, posts.isEmpty || isSwitchingSource else { return }
         await refresh()
     }
 

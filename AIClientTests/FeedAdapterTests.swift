@@ -503,6 +503,25 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testConcurrentInitialLoadsReuseTheActiveRequest() async {
+        var requestCount = 0
+        let firstRequestStarted = expectation(description: "first request started")
+        let model = NewsFeedViewModel(source: .flash) { _, _, _ in
+            requestCount += 1
+            firstRequestStarted.fulfill()
+            try await Task.sleep(for: .milliseconds(100))
+            return []
+        }
+
+        let backgroundLoad = Task { await model.loadInitial() }
+        await fulfillment(of: [firstRequestStarted], timeout: 1)
+        await model.loadInitial()
+        await backgroundLoad.value
+
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    @MainActor
     func testSwitchingSourceStartsNewestLoadBeforeCancelledLoadFinishes() async throws {
         let firstRequestStarted = expectation(description: "first request started")
         let model = NewsFeedViewModel(source: .x) { _, _, source in
