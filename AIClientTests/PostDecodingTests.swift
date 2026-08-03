@@ -51,18 +51,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(script.contains(".mw-parser-output"))
         XCTAssertTrue(script.contains("来自维基百科，自由的百科全书"))
         XCTAssertTrue(script.contains("font-size: 18px"))
+        XCTAssertTrue(script.contains("--aiserver-paper: #fbf7ed"))
+        XCTAssertTrue(script.contains("__aiserverToggleTOC"))
+        XCTAssertTrue(script.contains("本文目录"))
     }
 
-    func testWikipediaLinkOpensInNestedPresentationWithoutReplacingCurrentPage() throws {
-        let currentURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/人工智能"))
+    func testWikipediaLinksAreRecognizedForInReaderNavigation() throws {
         let destinationURL = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/机器学习"))
 
-        let entity = try XCTUnwrap(
-            WikipediaLinkPresentation.entity(for: destinationURL, currentURL: currentURL)
-        )
-
-        XCTAssertEqual(entity.title, "机器学习")
-        XCTAssertEqual(entity.url, destinationURL)
+        XCTAssertTrue(destinationURL.isWikipediaURL)
     }
 
     func testWikipediaSamePageAnchorRemainsInsideCurrentPresentation() throws {
