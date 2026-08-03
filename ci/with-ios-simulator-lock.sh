@@ -4,6 +4,7 @@ set -euo pipefail
 
 lock_dir=${IOS_SIMULATOR_LOCK_DIR:-/tmp/ai-server-ios-iphone16e.lock}
 wait_seconds=${IOS_SIMULATOR_LOCK_WAIT_SECONDS:-1200}
+hold_seconds=${IOS_SIMULATOR_LOCK_HOLD_SECONDS:-600}
 label=${IOS_SIMULATOR_LOCK_LABEL:-$(basename "$PWD")}
 hold=false
 show_status=false
@@ -12,11 +13,12 @@ usage() {
   cat <<'EOF'
 Usage:
   with-ios-simulator-lock.sh [--label NAME] -- COMMAND [ARG ...]
-  with-ios-simulator-lock.sh [--label NAME] --hold
+  with-ios-simulator-lock.sh [--label NAME] [--hold-seconds SECONDS] --hold
   with-ios-simulator-lock.sh --status
 
 Use --hold to reserve the shared iPhone 16e during interactive UI checks.
-Stop the holding process when verification is complete to release the lock.
+Interactive holds expire after 600 seconds by default. Stop the holding
+process as soon as verification is complete to release the lock earlier.
 EOF
 }
 
@@ -30,6 +32,11 @@ while [[ $# -gt 0 ]]; do
     --hold)
       hold=true
       shift
+      ;;
+    --hold-seconds)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      hold_seconds=$2
+      shift 2
       ;;
     --status)
       show_status=true
@@ -56,6 +63,11 @@ if [[ "$lock_dir" != /* || "$lock_dir" == "/" ]]; then
   exit 2
 fi
 
+if ! [[ "$hold_seconds" =~ ^[0-9]+$ ]] || (( hold_seconds < 30 || hold_seconds > 900 )); then
+  echo "Hold duration must be between 30 and 900 seconds." >&2
+  exit 2
+fi
+
 owner_file="$lock_dir/owner"
 host_name=$(hostname)
 
@@ -66,12 +78,14 @@ read_owner_field() {
 }
 
 describe_owner() {
-  local owner_label owner_pid owner_started owner_cwd
+  local owner_label owner_pid owner_started owner_cwd owner_mode owner_expires
   owner_label=$(read_owner_field label)
   owner_pid=$(read_owner_field pid)
   owner_started=$(read_owner_field started)
   owner_cwd=$(read_owner_field cwd)
-  echo "${owner_label:-unknown task} (pid ${owner_pid:-unknown}, since ${owner_started:-unknown}, cwd ${owner_cwd:-unknown})"
+  owner_mode=$(read_owner_field mode)
+  owner_expires=$(read_owner_field expires)
+  echo "${owner_label:-unknown task} (pid ${owner_pid:-unknown}, mode ${owner_mode:-unknown}, since ${owner_started:-unknown}, expires ${owner_expires:-not set}, cwd ${owner_cwd:-unknown})"
 }
 
 if [[ "$show_status" == true ]]; then
@@ -132,6 +146,13 @@ while [[ "$acquired" != true ]]; do
       echo "host=$host_name"
       echo "label=$label"
       echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      if [[ "$hold" == true ]]; then
+        echo "mode=interactive-hold"
+        echo "expires=$(date -u -r $(( $(date +%s) + hold_seconds )) +%Y-%m-%dT%H:%M:%SZ)"
+      else
+        echo "mode=command"
+        echo "expires="
+      fi
       echo "cwd=$PWD"
     } > "$owner_file"
     acquired=true
@@ -166,10 +187,13 @@ done
 echo "Reserved iPhone 16e for $label."
 
 if [[ "$hold" == true ]]; then
-  echo "Interactive hold is active; stop this process after UI verification."
-  while true; do
-    sleep 30
-  done
+  echo "Interactive hold is active for at most ${hold_seconds}s; stop this process after UI verification."
+  sleep "$hold_seconds" &
+  child_pid=$!
+  wait "$child_pid"
+  child_pid=""
+  echo "Interactive hold for $label reached its ${hold_seconds}s limit."
+  exit 0
 fi
 
 set +e
