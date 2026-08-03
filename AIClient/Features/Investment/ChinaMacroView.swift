@@ -20,6 +20,9 @@ struct ChinaMacroYear: Identifiable, Equatable {
     var depositRate: Double?
     var mortgageRate: Double?
     var householdLeverage: Double?
+    var debtServiceRatio: Double?
+    var incomeSurplusRate: Double?
+    var consumerConfidence: Double?
     var privateCredit: Double?
 
     var id: Int { year }
@@ -33,6 +36,9 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
     case depositRate
     case mortgageRate
     case householdLeverage
+    case debtServiceRatio
+    case incomeSurplusRate
+    case consumerConfidence
     case privateCredit
 
     var id: Self { self }
@@ -46,6 +52,9 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .depositRate: "存款利率"
         case .mortgageRate: "房贷利率"
         case .householdLeverage: "居民杠杆率"
+        case .debtServiceRatio: "偿债率"
+        case .incomeSurplusRate: "收支结余率"
+        case .consumerConfidence: "消费信心"
         case .privateCredit: "私人部门信贷"
         }
     }
@@ -59,6 +68,9 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .depositRate: "商业银行存款利率"
         case .mortgageRate: "5年期以上 LPR（房贷定价基准）"
         case .householdLeverage: "居民部门总信贷 / GDP"
+        case .debtServiceRatio: "私人非金融部门偿债率"
+        case .incomeSurplusRate: "居民收支结余率（估算）"
+        case .consumerConfidence: "消费者信心指数"
         case .privateCredit: "私人部门银行信贷 / GDP"
         }
     }
@@ -72,6 +84,9 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .depositRate: "居民将资金存入银行可获得的年化回报"
         case .mortgageRate: "5年期以上LPR，常用于住房贷款定价参考"
         case .householdLeverage: "居民及服务居民的非营利机构总债务占GDP比例，反映家庭部门杠杆水平"
+        case .debtServiceRatio: "私人非金融部门用于偿还本金和利息的收入占比；包含居民与非金融企业，不等同于居民房贷还款压力"
+        case .incomeSurplusRate: "按（人均可支配收入－人均消费支出）÷人均可支配收入计算，是居民储蓄能力的近似观察值"
+        case .consumerConfidence: "反映消费者对经济、收入和消费前景的主观判断；年度图取当年最后一个可用月"
         case .privateCredit: "银行对私人部门信贷占GDP的比例，反映杠杆水平"
         }
     }
@@ -80,6 +95,9 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         switch self {
         case .mortgageRate: "中国人民银行"
         case .householdLeverage: "国际清算银行"
+        case .debtServiceRatio: "国际清算银行"
+        case .incomeSurplusRate: "国家统计局（估算）"
+        case .consumerConfidence: "OECD"
         default: "世界银行"
         }
     }
@@ -93,6 +111,9 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .depositRate: .green
         case .mortgageRate: .pink
         case .householdLeverage: .indigo
+        case .debtServiceRatio: .red
+        case .incomeSurplusRate: .green
+        case .consumerConfidence: .teal
         case .privateCredit: .purple
         }
     }
@@ -106,9 +127,14 @@ enum ChinaMacroMetric: String, CaseIterable, Identifiable {
         case .depositRate: year.depositRate
         case .mortgageRate: year.mortgageRate
         case .householdLeverage: year.householdLeverage
+        case .debtServiceRatio: year.debtServiceRatio
+        case .incomeSurplusRate: year.incomeSurplusRate
+        case .consumerConfidence: year.consumerConfidence
         case .privateCredit: year.privateCredit
         }
     }
+
+    var unitSuffix: String { self == .consumerConfidence ? "点" : "%" }
 }
 
 struct WorldBankIndicatorPoint: Decodable, Equatable {
@@ -171,6 +197,9 @@ struct ChinaMacroService {
         async let lendingRate = seriesOrEmpty("FR.INR.LEND")
         async let depositRate = seriesOrEmpty("FR.INR.DPST")
         async let householdLeverage = householdLeverageSeriesOrEmpty()
+        async let debtServiceRatio = debtServiceRatioSeriesOrEmpty()
+        async let incomeSurplusRate = incomeSurplusSeriesOrEmpty()
+        async let consumerConfidence = consumerConfidenceSeriesOrEmpty()
         async let privateCredit = seriesOrEmpty("FD.AST.PRVT.GD.ZS")
         let merged = await Self.merge(
             gdpGrowth: gdpGrowth,
@@ -180,6 +209,9 @@ struct ChinaMacroService {
             depositRate: depositRate,
             mortgageRate: [],
             householdLeverage: householdLeverage,
+            debtServiceRatio: debtServiceRatio,
+            incomeSurplusRate: incomeSurplusRate,
+            consumerConfidence: consumerConfidence,
             privateCredit: privateCredit
         )
         guard !merged.isEmpty else { throw URLError(.cannotParseResponse) }
@@ -223,6 +255,24 @@ struct ChinaMacroService {
     }
 
     static func parseBISHouseholdLeverage(xml: String) -> [WorldBankIndicatorPoint] {
+        parseBISQuarterlySeries(xml: xml)
+    }
+
+    private func debtServiceRatioSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
+        (try? await debtServiceRatioSeries()) ?? []
+    }
+
+    private func debtServiceRatioSeries() async throws -> [WorldBankIndicatorPoint] {
+        let url = URL(string: "https://stats.bis.org/api/v1/data/WS_DSR/Q.CN.P/all?startPeriod=2000")!
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
+        request.setValue("application/vnd.sdmx.structurespecificdata+xml;version=2.1", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let xml = String(data: data, encoding: .utf8) else { throw URLError(.badServerResponse) }
+        return Self.parseBISQuarterlySeries(xml: xml)
+    }
+
+    static func parseBISQuarterlySeries(xml: String) -> [WorldBankIndicatorPoint] {
         let pattern = #"TIME_PERIOD="(\d{4})-Q([1-4])" OBS_VALUE="([0-9]+(?:\.[0-9]+)?)""#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let matches = regex.matches(in: xml, range: NSRange(xml.startIndex..<xml.endIndex, in: xml))
@@ -240,6 +290,70 @@ struct ChinaMacroService {
         }
         return latestByYear.map { WorldBankIndicatorPoint(year: $0.key, value: $0.value.value) }
             .sorted { $0.year > $1.year }
+    }
+
+    private func consumerConfidenceSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
+        (try? await consumerConfidenceSeries()) ?? []
+    }
+
+    private func consumerConfidenceSeries() async throws -> [WorldBankIndicatorPoint] {
+        let url = URL(string: "https://sdmx.oecd.org/public/rest/data/OECD.SDD.STES,DSD_STES@DF_CS,4.0/CHN.M.CCICP......?startPeriod=2000&dimensionAtObservation=AllDimensions")!
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 25)
+        request.setValue("text/csv", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let csv = String(data: data, encoding: .utf8) else { throw URLError(.badServerResponse) }
+        return Self.parseOECDMonthlySeries(csv: csv)
+    }
+
+    static func parseOECDMonthlySeries(csv: String) -> [WorldBankIndicatorPoint] {
+        let rows = csv.split(whereSeparator: \Character.isNewline).map { String($0) }
+        guard let header = rows.first?.split(separator: ",").map(String.init),
+              let timeIndex = header.firstIndex(of: "TIME_PERIOD"),
+              let valueIndex = header.firstIndex(of: "OBS_VALUE") else { return [] }
+        var latest: [Int: (month: Int, value: Double)] = [:]
+        for row in rows.dropFirst() {
+            let fields = row.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            guard fields.indices.contains(timeIndex), fields.indices.contains(valueIndex) else { continue }
+            let parts = fields[timeIndex].split(separator: "-")
+            guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]),
+                  let value = Double(fields[valueIndex]) else { continue }
+            if latest[year]?.month ?? 0 < month { latest[year] = (month, value) }
+        }
+        return latest.map { WorldBankIndicatorPoint(year: $0.key, value: $0.value.value) }
+            .sorted { $0.year > $1.year }
+    }
+
+    private func incomeSurplusSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
+        let releases: [(Int, String)] = [
+            (2025, "https://www.stats.gov.cn/sj/zxfb/202601/t20260119_1962321.html"),
+            (2024, "https://www.stats.gov.cn/sj/zxfb/202501/t20250117_1958325.html"),
+            (2023, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202401/t20240117_1946643.html"),
+            (2022, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202301/t20230117_1892129.html"),
+            (2021, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202201/t20220117_1826442.html"),
+            (2020, "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202101/t20210118_1812464.html")
+        ]
+        var points: [WorldBankIndicatorPoint] = []
+        for (year, address) in releases {
+            guard let url = URL(string: address), let html = try? await html(at: url),
+                  let value = Self.parseNBSIncomeSurplusRate(html: html) else { continue }
+            points.append(WorldBankIndicatorPoint(year: year, value: value))
+        }
+        return points
+    }
+
+    static func parseNBSIncomeSurplusRate(html: String) -> Double? {
+        let plain = html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        func firstNumber(after label: String) -> Double? {
+            let escaped = NSRegularExpression.escapedPattern(for: label)
+            guard let regex = try? NSRegularExpression(pattern: escaped + #"\s*([0-9]+)"#),
+                  let match = regex.firstMatch(in: plain, range: NSRange(plain.startIndex..<plain.endIndex, in: plain)),
+                  let range = Range(match.range(at: 1), in: plain) else { return nil }
+            return Double(plain[range])
+        }
+        guard let income = firstNumber(after: "全国居民人均可支配收入"),
+              let consumption = firstNumber(after: "全国居民人均消费支出"), income > 0 else { return nil }
+        return (income - consumption) / income * 100
     }
 
     func mortgageSeriesOrEmpty() async -> [WorldBankIndicatorPoint] {
@@ -315,6 +429,9 @@ struct ChinaMacroService {
         depositRate: [WorldBankIndicatorPoint],
         mortgageRate: [WorldBankIndicatorPoint],
         householdLeverage: [WorldBankIndicatorPoint],
+        debtServiceRatio: [WorldBankIndicatorPoint],
+        incomeSurplusRate: [WorldBankIndicatorPoint],
+        consumerConfidence: [WorldBankIndicatorPoint],
         privateCredit: [WorldBankIndicatorPoint]
     ) -> [ChinaMacroYear] {
         var years: [Int: ChinaMacroYear] = [:]
@@ -329,6 +446,9 @@ struct ChinaMacroService {
                     depositRate: nil,
                     mortgageRate: nil,
                     householdLeverage: nil,
+                    debtServiceRatio: nil,
+                    incomeSurplusRate: nil,
+                    consumerConfidence: nil,
                     privateCredit: nil
                 )
                 item[keyPath: keyPath] = point.value
@@ -342,12 +462,16 @@ struct ChinaMacroService {
         insert(depositRate, keyPath: \.depositRate)
         insert(mortgageRate, keyPath: \.mortgageRate)
         insert(householdLeverage, keyPath: \.householdLeverage)
+        insert(debtServiceRatio, keyPath: \.debtServiceRatio)
+        insert(incomeSurplusRate, keyPath: \.incomeSurplusRate)
+        insert(consumerConfidence, keyPath: \.consumerConfidence)
         insert(privateCredit, keyPath: \.privateCredit)
         return years.values
             .filter {
                 $0.gdpGrowth != nil || $0.unemployment != nil || $0.inflation != nil ||
                     $0.lendingRate != nil || $0.depositRate != nil ||
-                    $0.mortgageRate != nil || $0.householdLeverage != nil || $0.privateCredit != nil
+                    $0.mortgageRate != nil || $0.householdLeverage != nil || $0.debtServiceRatio != nil ||
+                    $0.incomeSurplusRate != nil || $0.consumerConfidence != nil || $0.privateCredit != nil
             }
             .sorted { $0.year > $1.year }
     }
@@ -367,6 +491,9 @@ struct ChinaMacroService {
                 depositRate: nil,
                 mortgageRate: nil,
                 householdLeverage: nil,
+                debtServiceRatio: nil,
+                incomeSurplusRate: nil,
+                consumerConfidence: nil,
                 privateCredit: nil
             )
             item.mortgageRate = point.value
@@ -422,7 +549,7 @@ private enum ChinaMacroSection: String, CaseIterable, Identifiable {
         case .growth: [.gdpGrowth, .unemployment]
         case .prices: [.inflation, .depositRate]
         case .rates: [.mortgageRate, .lendingRate, .depositRate]
-        case .credit: [.householdLeverage, .privateCredit, .lendingRate]
+        case .credit: [.householdLeverage, .debtServiceRatio, .incomeSurplusRate, .consumerConfidence, .privateCredit]
         }
     }
 
@@ -478,6 +605,10 @@ struct ChinaMacroView: View {
             if store.years.isEmpty { await store.load() }
             if ProcessInfo.processInfo.arguments.contains("--china-macro-household-preview") {
                 presentation = ChinaMacroPresentation(metric: .householdLeverage, year: nil)
+            } else if ProcessInfo.processInfo.arguments.contains("--china-macro-confidence-preview") {
+                section = .credit
+                metric = .consumerConfidence
+                presentation = ChinaMacroPresentation(metric: .consumerConfidence, year: nil)
             } else if ProcessInfo.processInfo.arguments.contains("--china-macro-sheet-preview") {
                 presentation = ChinaMacroPresentation(metric: .gdpGrowth, year: nil)
             }
@@ -640,8 +771,8 @@ struct ChinaMacroView: View {
                 section: .credit,
                 icon: "figure.2.and.child.holdinghands",
                 tint: .indigo,
-                metrics: [.householdLeverage, .privateCredit],
-                insight: "居民杠杆率单独衡量家庭部门债务，不再与企业信贷混用"
+                metrics: [.debtServiceRatio, .incomeSurplusRate, .consumerConfidence],
+                insight: "把还款负担、居民结余能力与消费意愿放在一起观察"
             )
         }
     }
@@ -704,7 +835,7 @@ struct ChinaMacroView: View {
             Text(item.title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(latest.flatMap { item.value(in: $0) }.map { "\(format($0))%" } ?? "—")
+            Text(latest.flatMap { item.value(in: $0) }.map { "\(format($0))\(item.unitSuffix)" } ?? "—")
                 .font(.system(size: 21, weight: .bold, design: .rounded))
                 .foregroundStyle(item.color)
                 .lineLimit(1)
@@ -750,6 +881,7 @@ struct ChinaMacroView: View {
     }
 
     private var metricPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 8) {
             ForEach(section.metrics) { item in
                 Button { metric = item } label: {
@@ -761,7 +893,7 @@ struct ChinaMacroView: View {
                     }
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(metric == item ? item.color : .secondary)
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 88)
                     .padding(.vertical, 11)
                     .background(metric == item ? item.color.opacity(0.10) : InvestmentDesign.surface)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -773,6 +905,7 @@ struct ChinaMacroView: View {
                 .buttonStyle(.plain)
             }
         }
+        }
     }
 
     private var trendCard: some View {
@@ -783,7 +916,7 @@ struct ChinaMacroView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(metric.longTitle).font(.headline)
-                    Text("年度值 · 单位 %").font(.caption).foregroundStyle(.secondary)
+                    Text("年度值 · 单位 \(metric.unitSuffix)").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if let displayed, let value = metric.value(in: displayed) {
@@ -791,7 +924,7 @@ struct ChinaMacroView: View {
                         presentation = ChinaMacroPresentation(metric: metric, year: displayed.year)
                     } label: {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(format(value))%")
+                        Text("\(format(value))\(metric.unitSuffix)")
                             .font(.system(size: 25, weight: .bold, design: .rounded))
                             .foregroundStyle(metric.color)
                         Text("\(String(displayed.year)) 年 · 查看详情")
@@ -841,7 +974,7 @@ struct ChinaMacroView: View {
                     Text("\(String(item.year)) 年")
                         .font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(metric.value(in: item).map { "\(format($0))%" } ?? "—")
+                    Text(metric.value(in: item).map { "\(format($0))\(metric.unitSuffix)" } ?? "—")
                         .font(.system(.subheadline, design: .rounded).weight(.semibold))
                         .foregroundStyle(metric.color)
                     Image(systemName: "chevron.up.chevron.down")
@@ -875,7 +1008,7 @@ struct ChinaMacroView: View {
         VStack(alignment: .leading, spacing: 7) {
             Label("数据来源与更新时间", systemImage: "checkmark.shield.fill")
                 .font(.footnote.weight(.semibold))
-            Text("世界银行 WDI：GDP、失业率、通胀、存贷款利率与私人信贷；BIS：居民部门总信贷/GDP；中国人民银行：5年期以上LPR。")
+            Text("世界银行 WDI：基础宏观指标；BIS：居民杠杆率与私人非金融部门偿债率；国家统计局：居民收支结余率（估算）；OECD：消费者信心指数；中国人民银行：5年期以上LPR。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("各指标最新年份以数值旁标注为准；页面刷新于 \(updatedAtText)。LPR是房贷定价基准，并非个人实际执行利率。")
@@ -917,6 +1050,9 @@ struct ChinaMacroView: View {
         case .depositRate: "banknote"
         case .mortgageRate: "house"
         case .householdLeverage: "figure.2.and.child.holdinghands"
+        case .debtServiceRatio: "creditcard.trianglebadge.exclamationmark"
+        case .incomeSurplusRate: "tray.and.arrow.down"
+        case .consumerConfidence: "person.crop.circle.badge.questionmark"
         case .privateCredit: "building.columns"
         }
     }
@@ -1104,7 +1240,7 @@ private struct ChinaMacroMetricSheet: View {
                 Text(selectedPoint.map { "\(String($0.year)) 年" } ?? "暂无数据")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(selectedPoint.flatMap { metric.value(in: $0) }.map { "\(format($0))%" } ?? "—")
+                Text(selectedPoint.flatMap { metric.value(in: $0) }.map { "\(format($0))\(metric.unitSuffix)" } ?? "—")
                     .font(.system(size: 36, weight: .bold, design: .rounded))
                     .foregroundStyle(metric.color)
             }
@@ -1112,7 +1248,7 @@ private struct ChinaMacroMetricSheet: View {
             if let change {
                 let isFlat = abs(change) < 0.005
                 Label(
-                    isFlat ? "与上年基本持平" : "较上年 \(change > 0 ? "+" : "")\(format(change)) 个百分点",
+                    isFlat ? "与上年基本持平" : "较上年 \(change > 0 ? "+" : "")\(format(change)) \(metric == .consumerConfidence ? "点" : "个百分点")",
                     systemImage: isFlat ? "arrow.right" : change > 0 ? "arrow.up.right" : "arrow.down.right"
                 )
                 .font(.caption.weight(.semibold))
@@ -1160,7 +1296,7 @@ private struct ChinaMacroMetricSheet: View {
     private func statisticCell(_ title: String, value: Double?) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(.caption2).foregroundStyle(.secondary)
-            Text(value.map { "\(format($0))%" } ?? "—")
+            Text(value.map { "\(format($0))\(metric.unitSuffix)" } ?? "—")
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(metric.color)
                 .lineLimit(1)
@@ -1192,7 +1328,7 @@ private struct ChinaMacroMetricSheet: View {
                     HStack {
                         Text("\(String(item.year)) 年")
                         Spacer()
-                        Text(metric.value(in: item).map { "\(format($0))%" } ?? "—")
+                        Text(metric.value(in: item).map { "\(format($0))\(metric.unitSuffix)" } ?? "—")
                             .font(.system(.body, design: .rounded).weight(.semibold))
                             .foregroundStyle(metric.color)
                         Image(systemName: selectedPoint?.year == item.year ? "checkmark.circle.fill" : "circle")
@@ -1230,6 +1366,9 @@ private struct ChinaMacroMetricSheet: View {
         switch metric {
         case .mortgageRate: "中国人民银行 · LPR公告"
         case .householdLeverage: "国际清算银行 · Credit to the non-financial sector"
+        case .debtServiceRatio: "国际清算银行 · Debt service ratios"
+        case .incomeSurplusRate: "国家统计局 · 全国居民收入和消费支出（App计算）"
+        case .consumerConfidence: "OECD · Consumer opinion surveys（中国）"
         default: "世界银行 · World Development Indicators"
         }
     }

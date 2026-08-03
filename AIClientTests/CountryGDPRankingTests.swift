@@ -149,6 +149,9 @@ final class CountryGDPRankingTests: XCTestCase {
             depositRate: try points("[{\"date\":\"2024\",\"value\":1.5}]"),
             mortgageRate: try points("[{\"date\":\"2024\",\"value\":3.6}]"),
             householdLeverage: try points("[{\"date\":\"2024\",\"value\":60.0}]"),
+            debtServiceRatio: try points("[{\"date\":\"2024\",\"value\":18.8}]"),
+            incomeSurplusRate: try points("[{\"date\":\"2024\",\"value\":31.68}]"),
+            consumerConfidence: try points("[{\"date\":\"2024\",\"value\":86.0}]"),
             privateCredit: try points("[{\"date\":\"2023\",\"value\":194.2}]")
         )
         XCTAssertEqual(merged.map(\.year), [2024, 2023])
@@ -159,8 +162,30 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(merged[0].depositRate, 1.5)
         XCTAssertEqual(merged[0].mortgageRate, 3.6)
         XCTAssertEqual(merged[0].householdLeverage, 60.0)
+        XCTAssertEqual(merged[0].debtServiceRatio, 18.8)
+        XCTAssertEqual(merged[0].incomeSurplusRate, 31.68)
+        XCTAssertEqual(merged[0].consumerConfidence, 86.0)
         XCTAssertNil(merged[0].privateCredit)
         XCTAssertEqual(merged[1].privateCredit, 194.2)
+    }
+
+    func testParsesLatestMonthOfOECDConsumerConfidenceForEachYear() {
+        let csv = """
+        DATAFLOW,REF_AREA,FREQ,MEASURE,TIME_PERIOD,OBS_VALUE
+        flow,CHN,M,CCICP,2024-07,86
+        flow,CHN,M,CCICP,2024-12,88.5
+        flow,CHN,M,CCICP,2025-11,90.3
+        """
+        XCTAssertEqual(ChinaMacroService.parseOECDMonthlySeries(csv: csv), [
+            WorldBankIndicatorPoint(year: 2025, value: 90.3),
+            WorldBankIndicatorPoint(year: 2024, value: 88.5)
+        ])
+    }
+
+    func testCalculatesResidentIncomeSurplusRateFromNBSRelease() {
+        let html = "全国居民人均可支配收入</span><span>43377</span>元，全国居民人均消费支出<span>29476</span>元"
+        let value = ChinaMacroService.parseNBSIncomeSurplusRate(html: html)
+        XCTAssertEqual(try XCTUnwrap(value), 32.047, accuracy: 0.001)
     }
 
     func testParsesPBCLPRAnnouncementsAndFiveYearRate() throws {
@@ -201,6 +226,9 @@ final class CountryGDPRankingTests: XCTestCase {
             depositRate: 1.2,
             mortgageRate: nil,
             householdLeverage: 59.7,
+            debtServiceRatio: 18.8,
+            incomeSurplusRate: 32.0,
+            consumerConfidence: 89.5,
             privateCredit: 180
         )]
         let result = ChinaMacroService.mergingMortgage(
