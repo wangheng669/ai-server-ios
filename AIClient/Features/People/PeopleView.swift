@@ -406,7 +406,7 @@ private struct PeopleSwimlaneExplorer: View {
 
                     Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.primary.opacity(0.76))
                         .lineLimit(1)
                 }
             }
@@ -418,7 +418,7 @@ private struct PeopleSwimlaneExplorer: View {
         .offset(x: focusPreviewOffset)
         .frame(maxWidth: .infinity)
         .frame(height: 78)
-        .background(.ultraThinMaterial)
+        .background(.regularMaterial)
         .overlay(alignment: .top) {
             Divider()
         }

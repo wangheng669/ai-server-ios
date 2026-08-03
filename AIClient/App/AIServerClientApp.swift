@@ -246,7 +246,7 @@ private struct EditorialRootView: View {
                 )
             }
         }
-        .background(Color.white.ignoresSafeArea())
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !hidesRootTabBar {
                 RootNavigationBar(selection: $selectedTab)
@@ -319,10 +319,10 @@ private struct RootNavigationBar: View {
         }
         .frame(maxWidth: 292)
         .frame(height: 46)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(.regularMaterial, in: Capsule())
         .overlay {
             Capsule()
-                .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
+                .stroke(Color.primary.opacity(0.16), lineWidth: 0.5)
         }
         .shadow(color: Color.black.opacity(0.08), radius: 12, y: 4)
         .frame(maxWidth: .infinity)
@@ -343,7 +343,11 @@ private struct RootNavigationBar: View {
                     .fill(selection == tab ? InvestmentDesign.accent : Color.clear)
                     .frame(width: 4, height: 4)
             }
-            .foregroundStyle(selection == tab ? InvestmentDesign.accent : Color.secondary)
+            .foregroundStyle(
+                selection == tab
+                    ? InvestmentDesign.accent
+                    : Color.primary.opacity(0.68)
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
@@ -637,6 +641,10 @@ private struct TodayWorldLeaderChip: View {
     let isSelected: Bool
     let action: () -> Void
 
+    private var selectedForeground: Color {
+        .white
+    }
+
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 7) {
@@ -647,7 +655,7 @@ private struct TodayWorldLeaderChip: View {
                             .font(.system(size: 14, weight: .bold))
                         Text(system.leaderName)
                             .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary)
+                            .foregroundStyle(isSelected ? selectedForeground.opacity(0.72) : Color.secondary)
                     }
                 }
                 HStack(spacing: 4) {
@@ -658,10 +666,10 @@ private struct TodayWorldLeaderChip: View {
                         .font(.system(size: 10.5, weight: .semibold))
                 }
             }
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .foregroundStyle(isSelected ? selectedForeground : Color.primary)
             .padding(10)
             .frame(width: 142, alignment: .leading)
-            .background(isSelected ? Color(uiColor: .label) : Color.secondary.opacity(0.055))
+            .background(isSelected ? InvestmentDesign.accent : Color.secondary.opacity(0.055))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -673,7 +681,7 @@ private struct TodayWorldLeaderChip: View {
 
     private var leaderAvatar: some View {
         AvatarView(url: system.leaderAvatarURL, name: system.leaderName, size: 34)
-        .overlay { Circle().stroke(Color.white.opacity(isSelected ? 0.25 : 0), lineWidth: 1) }
+        .overlay { Circle().stroke(selectedForeground.opacity(isSelected ? 0.25 : 0), lineWidth: 1) }
     }
 }
 
