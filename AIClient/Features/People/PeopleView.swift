@@ -2378,7 +2378,7 @@ private struct PersonActivityRow: View {
 
     private var activityText: String {
         guard let latestPost, !latestPost.needsXTranslation else { return person.summary }
-        return latestPost.displayContent
+        return latestPost.isBilibili ? latestPost.bilibiliListContent : latestPost.displayContent
     }
 
     var body: some View {
@@ -4768,6 +4768,10 @@ private struct PersonPostTimelineRow: View {
     let onOpen: () -> Void
     @State private var isExpanded = false
 
+    private var displayContent: String {
+        post.isBilibili ? post.bilibiliListContent : post.displayContent
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 13) {
             VStack(spacing: 0) {
@@ -4786,7 +4790,7 @@ private struct PersonPostTimelineRow: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 Button(action: onOpen) {
-                    Text(post.displayContent)
+                    Text(displayContent)
                         .font(.system(size: compact ? 15 : 16))
                         .lineSpacing(4)
                         .lineLimit(isExpanded ? nil : (compact ? 4 : 8))
@@ -4830,7 +4834,7 @@ private struct PersonPostTimelineRow: View {
     }
 
     private var shouldOfferExpansion: Bool {
-        post.displayContent.count > (compact ? 150 : 280) || post.displayContent.filter(\.isNewline).count > 4
+        displayContent.count > (compact ? 150 : 280) || displayContent.filter(\.isNewline).count > 4
     }
 }
 

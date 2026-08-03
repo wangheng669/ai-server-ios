@@ -501,6 +501,14 @@ struct PersonVideoSubtitlesResponse: Decodable {
     }
 }
 
+struct BilibiliSubtitlesResponse: Decodable {
+    let success: Bool
+    let bvid: String
+    let language: String
+    let status: String
+    let cues: [PersonVideoSubtitleCue]
+}
+
 struct PersonVideoSubtitleCue: Decodable, Identifiable, Hashable {
     let startMS: Int64
     let endMS: Int64

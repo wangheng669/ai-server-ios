@@ -769,6 +769,22 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.sourceName, "B站")
     }
 
+    func testBilibiliListContentKeepsTitleWhenHTMLPreviewHasTooLittleText() throws {
+        let json = #"{"id":1271,"title":"100天亏掉40%？理财大赛S2结果公布！","source":"rss:1271","content":"<iframe></iframe><br><img src='cover.jpg'><br>谁是理...","post_link":"https://www.bilibili.com/video/BV1Pxgy68Ek9"}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertEqual(post.bilibiliListContent, "100天亏掉40%？理财大赛S2结果公布！")
+    }
+
+    func testDecodesBilibiliSubtitleTimeline() throws {
+        let json = #"{"success":true,"bvid":"BV1Pxgy68Ek9","language":"zh-Hans","status":"ready","cues":[{"start_ms":1250,"end_ms":3400,"text":"欢迎来到本期视频"}]}"#.data(using: .utf8)!
+        let payload = try JSONDecoder().decode(BilibiliSubtitlesResponse.self, from: json)
+
+        XCTAssertEqual(payload.bvid, "BV1Pxgy68Ek9")
+        XCTAssertEqual(payload.cues.first?.startMS, 1250)
+        XCTAssertEqual(payload.cues.first?.text, "欢迎来到本期视频")
+    }
+
     func testTruthFeedUsesOnlyTranslatedContentAndRelevance() throws {
         let json = #"{"post":{"id":9,"content":"English original","content_zh":"中文翻译","source":"truth","final_score":8.2}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
