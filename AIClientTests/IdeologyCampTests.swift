@@ -17,15 +17,15 @@ final class IdeologyCampTests: XCTestCase {
     }
 
     func testUsesNeutralDisplayTitles() {
-        XCTAssertEqual(IdeologyCamp.loyalist.title, "正方")
-        XCTAssertEqual(IdeologyCamp.rebel.title, "反方")
+        XCTAssertEqual(IdeologyCamp.loyalist.title, "赢")
+        XCTAssertEqual(IdeologyCamp.rebel.title, "输")
     }
 
     func testUsesNeutralTitlesInPersonDetailsWithoutChangingServerTags() throws {
         let person = try decodePerson(name: "王冰冰", tag: "忠臣")
 
         XCTAssertEqual(person.focusTags.first, "忠臣")
-        XCTAssertEqual(person.displayFocusTags.first, "正方")
+        XCTAssertEqual(person.displayFocusTags.first, "赢")
     }
 
     private func decodePerson(name: String, tag: String) throws -> SpecialPerson {
