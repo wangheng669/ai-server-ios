@@ -253,6 +253,19 @@ struct APIClient {
         return try await get(url)
     }
 
+    func fetchBilibiliSummary(bvid: String, title: String) async throws -> BilibiliSummaryResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/v1/bilibili/summary"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            .init(name: "bvid", value: bvid),
+            .init(name: "title", value: title)
+        ]
+        guard let url = components?.url else { throw APIError.invalidURL }
+        return try await get(url)
+    }
+
     func fetchXComments(tweetID: String, limit: Int = 30) async throws -> [XComment] {
         var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/comments"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [

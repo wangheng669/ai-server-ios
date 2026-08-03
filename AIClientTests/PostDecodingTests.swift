@@ -782,6 +782,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(payload.cues.first?.text, "欢迎来到本期视频")
     }
 
+    func testDecodesBilibiliAISummary() throws {
+        let json = #"{"success":true,"bvid":"BV1Pxgy68Ek9","status":"ready","summary":{"overview":"比赛结果反映了不同策略的风险收益差异。","key_points":["高波动策略回撤明显","长期纪律比短期排名更重要"]},"provider":"qwen","model":"qwen3.5-flash","cached":true}"#.data(using: .utf8)!
+        let payload = try JSONDecoder().decode(BilibiliSummaryResponse.self, from: json)
+
+        XCTAssertEqual(payload.provider, "qwen")
+        XCTAssertEqual(payload.summary.keyPoints.count, 2)
+        XCTAssertTrue(payload.cached)
+    }
+
     func testTruthFeedUsesOnlyTranslatedContentAndRelevance() throws {
         let json = #"{"post":{"id":9,"content":"English original","content_zh":"中文翻译","source":"truth","final_score":8.2}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post

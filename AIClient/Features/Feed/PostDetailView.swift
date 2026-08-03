@@ -17,6 +17,10 @@ struct PostDetailView: View {
     @State private var bilibiliSubtitleCues: [PersonVideoSubtitleCue] = []
     @State private var bilibiliSubtitleStatus = "loading"
     @State private var bilibiliSubtitleError: String?
+    @State private var bilibiliSummary: BilibiliVideoSummary?
+    @State private var bilibiliSummaryModel: String?
+    @State private var bilibiliSummaryStatus = "loading"
+    @State private var bilibiliSummaryError: String?
     @State private var youtubePlaybackState: YouTubePlaybackState = .idle
     @State private var isYouTubeVideoReady = false
     @State private var youtubePlaybackLabel: String?
@@ -154,6 +158,7 @@ struct PostDetailView: View {
                 await playYouTubeVideo()
             } else if post.isBilibili {
                 await loadBilibiliSubtitles()
+                await loadBilibiliSummary()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
@@ -1611,12 +1616,81 @@ struct PostDetailView: View {
 
                     Divider()
 
+                    bilibiliAISummary
+
+                    Divider()
+
                     bilibiliSubtitles
 
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
                 .padding(.bottom, 34)
+            }
+        }
+    }
+
+    @ViewBuilder private var bilibiliAISummary: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.purple)
+                Text("AI 总结")
+                    .font(.system(size: 19, weight: .bold))
+                Spacer()
+                if let bilibiliSummaryModel {
+                    Text(bilibiliSummaryModel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if bilibiliSummaryStatus == "loading" {
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView("Qwen 正在总结视频内容…")
+                    Text("首次生成可能需要几十秒，之后会直接读取缓存。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let bilibiliSummaryError {
+                VStack(alignment: .leading, spacing: 10) {
+                    ContentUnavailableView(
+                        "AI 总结暂不可用",
+                        systemImage: "sparkles",
+                        description: Text(bilibiliSummaryError)
+                    )
+                    Button("重新生成") { Task { await loadBilibiliSummary() } }
+                        .buttonStyle(.bordered)
+                        .tint(.purple)
+                }
+            } else if let bilibiliSummary {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(bilibiliSummary.overview)
+                        .font(.system(size: 16))
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
+
+                    if !bilibiliSummary.keyPoints.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(Array(bilibiliSummary.keyPoints.enumerated()), id: \.offset) { index, point in
+                                HStack(alignment: .top, spacing: 10) {
+                                    Text("\(index + 1)")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 22, height: 22)
+                                        .background(Color.purple, in: Circle())
+                                    Text(point)
+                                        .font(.system(size: 15))
+                                        .lineSpacing(3)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(14)
+                .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
@@ -1718,6 +1792,28 @@ struct PostDetailView: View {
         } catch {
             bilibiliSubtitleStatus = "failed"
             bilibiliSubtitleError = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    private func loadBilibiliSummary() async {
+        guard let bilibiliBVID else {
+            bilibiliSummaryStatus = "unavailable"
+            return
+        }
+        bilibiliSummaryStatus = "loading"
+        bilibiliSummaryError = nil
+        do {
+            let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchBilibiliSummary(bvid: bilibiliBVID, title: post.bilibiliTitle)
+            guard !Task.isCancelled else { return }
+            bilibiliSummary = payload.summary
+            bilibiliSummaryModel = payload.model
+            bilibiliSummaryStatus = payload.status
+        } catch is CancellationError {
+            return
+        } catch {
+            bilibiliSummaryStatus = "failed"
+            bilibiliSummaryError = NetworkErrorPresentation.message(for: error)
         }
     }
 
