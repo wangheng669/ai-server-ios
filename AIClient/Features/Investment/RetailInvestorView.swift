@@ -886,40 +886,38 @@ private struct InvestorVideoInterpretationSheet: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    if let payload {
-                        interpretationContent(payload)
+                    if let payload, let interpretation = payload.interpretation {
+                        interpretationContent(payload, interpretation: interpretation)
                     } else if isLoading {
                         VStack(spacing: 12) {
                             ProgressView()
-                            Text("智谱正在观看并解读完整视频…")
+                            Text("正在查询后台解读结果…")
                                 .font(.headline)
-                            Text("首次需要下载和压缩视频，通常需要几分钟；同一视频会读取缓存。")
+                            Text("新视频会由服务端自动排队处理，不需要手动发起。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 52)
+                    } else if payload?.status == "pending" {
+                        ContentUnavailableView(
+                            "后台解读中",
+                            systemImage: "clock.arrow.circlepath",
+                            description: Text("服务端正在下载、压缩并解读这个视频，通常需要几分钟。")
+                        )
+                        Button("刷新状态") { Task { await interpret() } }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity)
                     } else if let errorMessage {
                         ContentUnavailableView(
                             "视频解读暂不可用",
                             systemImage: "eye.slash",
                             description: Text(errorMessage)
                         )
-                        Button("重试") { Task { await interpret() } }
+                        Button("刷新状态") { Task { await interpret() } }
                             .buttonStyle(.borderedProminent)
                             .frame(maxWidth: .infinity)
-                    } else {
-                        Text("智谱会直接观看完整视频，Qwen 再结合字幕整理解读、观点、关键数字、时间线和风险遗漏。")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(4)
-                        Button { Task { await interpret() } } label: {
-                            Label("开始视频解读", systemImage: "play.rectangle.on.rectangle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.blue)
                     }
                 }
                 .padding(18)
@@ -932,11 +930,14 @@ private struct InvestorVideoInterpretationSheet: View {
                 }
             }
         }
+        .task(id: item.id) { await interpret() }
     }
 
-    private func interpretationContent(_ payload: InvestorVideoInterpretationResponse) -> some View {
-        let interpretation = payload.interpretation
-        return VStack(alignment: .leading, spacing: 18) {
+    private func interpretationContent(
+        _ payload: InvestorVideoInterpretationResponse,
+        interpretation: BilibiliVideoInterpretation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Label(payload.cached ? "缓存结果" : "智谱完整视频解读", systemImage: "eye.fill")
                     .font(.subheadline.weight(.semibold))
@@ -994,7 +995,7 @@ private struct InvestorVideoInterpretationSheet: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            payload = try await service.interpretInvestorVideo(item)
+            payload = try await service.investorVideoInterpretationStatus(item)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1034,7 +1035,7 @@ private struct InvestorMoodVideoCard: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(action: onInterpret) {
-                    Label("视频解读", systemImage: "eye.fill")
+                    Label("查看解读", systemImage: "eye.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .frame(maxWidth: .infinity)
                 }

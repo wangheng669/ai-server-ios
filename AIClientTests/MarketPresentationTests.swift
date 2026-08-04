@@ -109,9 +109,18 @@ final class MarketPresentationTests: XCTestCase {
 
         XCTAssertEqual(response.sourceID, "123")
         XCTAssertEqual(response.model, "glm-4.6v")
-        XCTAssertEqual(response.interpretation.timeline.first?.time, "00:18")
+        XCTAssertEqual(response.interpretation?.timeline.first?.time, "00:18")
         XCTAssertEqual(response.estimatedCostCNY, 0.036)
         XCTAssertFalse(response.cached)
+    }
+
+    func testDecodesPendingInvestorVideoInterpretation() throws {
+        let data = Data(#"{"success":true,"source_id":"123","status":"pending","provider":"","model":"","cached":false,"estimated_cost_cny":0}"#.utf8)
+
+        let response = try JSONDecoder().decode(InvestorVideoInterpretationResponse.self, from: data)
+
+        XCTAssertEqual(response.status, "pending")
+        XCTAssertNil(response.interpretation)
     }
 
     func testDecodesMarketChartQualityContract() throws {
