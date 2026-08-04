@@ -4866,7 +4866,8 @@ private struct XReplyContextCard: View {
             HStack(alignment: .top, spacing: 9) {
                 if let avatar = reply.avatarURL.flatMap(MediaURL.image) {
                     RemoteImage(url: avatar, height: 28, cornerRadius: 14)
-                        .frame(width: 28, height: 28).clipped()
+                        .frame(width: 28, height: 28)
+                        .clipped()
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
@@ -4878,7 +4879,9 @@ private struct XReplyContextCard: View {
                         }
                     }
                     Text(text)
-                        .font(.system(size: 14)).lineSpacing(3).foregroundStyle(.primary)
+                        .font(.system(size: 14))
+                        .lineSpacing(3)
+                        .foregroundStyle(.primary)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AI 驱动的新闻聚合与分析平台 - 智能筛选、实时推送、深度洞察" />
+    <meta name="keywords" content="AI,新闻,聚合,分析,Truth Social,Twitter,实时行情" />
+    <title>AI · 新闻聚合与分析</title>
+    <style>
+      html,
+      body,
+      #app {
+        height: 100%;
+        margin: 0;
+        background: #0f172a;
+      }
+
+      .app-boot-shell {
+        min-height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0f172a;
+        color: #e5e7eb;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .app-boot-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+      }
+
+      .app-boot-spinner {
+        width: 22px;
+        height: 22px;
+        border: 2px solid rgba(148, 163, 184, 0.35);
+        border-top-color: #38bdf8;
+        border-radius: 999px;
+        animation: app-boot-spin 0.8s linear infinite;
+      }
+
+      .app-boot-title {
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+
+      .app-boot-subtitle {
+        margin-top: 2px;
+        color: #94a3b8;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .app-feed-preview {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow: hidden;
+        padding: max(14px, env(safe-area-inset-top)) 12px 18px;
+        background: #0f172a;
+        color: #e5e7eb;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .app-feed-preview[hidden] {
+        display: none;
+      }
+
+      .app-feed-preview__tabs {
+        display: flex;
+        gap: 8px;
+        overflow: hidden;
+        color: #94a3b8;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .app-feed-preview__tab {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 7px 10px;
+        background: rgba(148, 163, 184, 0.12);
+      }
+
+      .app-feed-preview__tab:first-child {
+        background: rgba(56, 189, 248, 0.2);
+        color: #e0f2fe;
+      }
+
+      .app-feed-preview__card {
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.96);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+      }
+
+      .app-feed-preview__meta {
+        margin-bottom: 6px;
+        color: #93c5fd;
+        font-size: 12px;
+        line-height: 1.3;
+      }
+
+      .app-feed-preview__text {
+        display: -webkit-box;
+        overflow: hidden;
+        color: #f8fafc;
+        font-size: 14px;
+        line-height: 1.5;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+      }
+
+      @keyframes app-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+    <script>
+      (() => {
+        const PRELOAD_SLOT = '__AI_HOME_FEED_PRELOAD__';
+        if (window[PRELOAD_SLOT]?.promise) return;
+
+        const trimTrailingSlash = (value) => String(value || '').replace(/\/+$/, '');
+        const normalizeBaseUrl = (value) => {
+          const raw = trimTrailingSlash(String(value || '').trim());
+          if (!raw || raw.includes('%')) return '';
+          const withProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(raw) ? raw : `http://${raw}`;
+          try {
+            const parsed = new URL(withProtocol);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return raw;
+            return trimTrailingSlash(parsed.toString());
+          } catch (_) {
+            return raw;
+          }
+        };
+        const readStorage = (key) => {
+          try {
+            return window.localStorage.getItem(key) || '';
+          } catch (_) {
+            return '';
+          }
+        };
+        const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }[char]));
+        const readPostText = (post) => (
+          post?.translation
+          || post?.summary
+          || post?.text
+          || post?.content
+          || post?.title
+          || post?.raw_content
+          || ''
+        );
+        const readPostAuthor = (post) => (
+          post?.user_screen_name
+          || post?.user_name
+          || post?.author
+          || post?.source
+          || '信息流'
+        );
+        const getPreviewRows = (payload) => {
+          const rows = Array.isArray(payload) ? payload : payload?.data;
+          return Array.isArray(rows) ? rows.filter(Boolean).slice(0, 4) : [];
+        };
+        const whenDomReady = () => new Promise((resolve) => {
+          if (document.readyState !== 'loading') {
+            resolve();
+            return;
+          }
+          document.addEventListener('DOMContentLoaded', resolve, { once: true });
+        });
+        const removePreviewWhenHydrated = (root, startedAt = Date.now()) => {
+          if (!root || !root.isConnected) return;
+          if (document.querySelector('.feed-perf-card') || Date.now() - startedAt > 10000) {
+            root.remove();
+            return;
+          }
+          window.setTimeout(() => removePreviewWhenHydrated(root, startedAt), 120);
+        };
+        const renderFeedPreview = async (payload) => {
+          const rows = getPreviewRows(payload);
+          if (rows.length === 0) return;
+          await whenDomReady();
+          if (document.querySelector('.feed-perf-card')) return;
+          const root = document.getElementById('app-feed-preview');
+          if (!root) return;
+          const cards = rows.map((post) => `
+            <article class="app-feed-preview__card">
+              <div class="app-feed-preview__meta">${escapeHtml(readPostAuthor(post))}</div>
+              <div class="app-feed-preview__text">${escapeHtml(readPostText(post))}</div>
+            </article>
+          `).join('');
+          root.innerHTML = `
+            <div class="app-feed-preview__tabs" aria-hidden="true">
+              <span class="app-feed-preview__tab">X</span>
+              <span class="app-feed-preview__tab">微博</span>
+              <span class="app-feed-preview__tab">B站</span>
+              <span class="app-feed-preview__tab">RSS</span>
+            </div>
+            ${cards}
+          `;
+          root.hidden = false;
+          try {
+            window.performance?.mark?.('app-feed-preview-rendered');
+          } catch (_) {}
+          removePreviewWhenHydrated(root);
+        };
+        const route = new URL(window.location.href);
+        if (route.pathname !== '/') return;
+        const source = String(route.searchParams.get('source') || 'x').trim();
+        const view = String(route.searchParams.get('view') || '').trim();
+        const hasSearch = String(route.searchParams.get('q') || route.searchParams.get('search') || '').trim();
+        if (source !== 'x' || view || hasSearch) return;
+        const renderBootPreview = route.searchParams.get('__rupb_preview') === '1';
+
+        const params = new URLSearchParams([
+          ['page', '1'],
+          ['limit', '20'],
+          ['final_score', '0'],
+          ['sort', 'time_desc'],
+          ['group_similar', '1'],
+          ['group_threshold', '70'],
+          ['source', 'x'],
+          ['x_feed_view', 'tracked'],
+          ['include_zero_score', 'true'],
+        ]);
+        const previewParams = new URLSearchParams(params);
+        previewParams.set('limit', '4');
+        const envBase = normalizeBaseUrl('');
+        const storageBase = normalizeBaseUrl(readStorage('api_base_url'));
+        const apiBase = storageBase || envBase;
+        const apiPath = `/api/v1/post/list?${params.toString()}`;
+        const previewApiPath = `/api/v1/post/list?${previewParams.toString()}`;
+        const headers = {};
+        const apiKey = String(route.searchParams.get('api_key') || readStorage('api_key') || '').trim();
+        if (apiKey) headers['X-API-Key'] = apiKey;
+
+        const url = apiBase ? `${apiBase}${apiPath}` : apiPath;
+        const previewUrl = apiBase ? `${apiBase}${previewApiPath}` : previewApiPath;
+        window[PRELOAD_SLOT] = {
+          url,
+          startedAt: Date.now(),
+          promise: fetch(url, {
+            headers,
+            credentials: apiBase ? 'omit' : 'same-origin',
+          }).then((response) => {
+            if (!response.ok) {
+              throw new Error(`Default home feed preload failed: ${response.status}`);
+            }
+            return response.json();
+          }).then((data) => ({ data })),
+        };
+        if (renderBootPreview) {
+          let previewRendered = false;
+          const renderPreviewOnce = (data) => {
+            if (previewRendered) return;
+            previewRendered = true;
+            void renderFeedPreview(data);
+          };
+          fetch(previewUrl, {
+            headers,
+            credentials: apiBase ? 'omit' : 'same-origin',
+          })
+            .then((response) => {
+              if (!response.ok) throw new Error(`Default home feed preview failed: ${response.status}`);
+              return response.json();
+            })
+            .then(renderPreviewOnce)
+            .catch(() => {
+              window[PRELOAD_SLOT].promise
+                .then(({ data }) => renderPreviewOnce(data))
+                .catch(() => {});
+            });
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-DIRCLStT.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-vue-tg1DzTf4.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-http-B8_nURbH.js">
+    <link rel="preload" as="style" crossorigin href="/assets/index-EroV95v4.css" fetchpriority="high">
+    <link rel="stylesheet" crossorigin href="/assets/index-EroV95v4.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" crossorigin href="/assets/index-EroV95v4.css"></noscript>
+    <script>(() => {
+      const homeStartupHrefs = ["/assets/HomeMarketView-Bm7JOZ9i.js","/assets/HomeMainFeedArea-DpwduJhu.js","/assets/HomeStickyHeader-Dqvse602.js","/assets/PostItem-vnDbwtht.js"];
+      if (!homeStartupHrefs.length) return;
+      const normalizeRoutePath = () => {
+        let path = window.location.pathname || '/';
+        const basePath = "/";
+        if (basePath !== '/' && path.startsWith(basePath)) {
+          path = '/' + path.slice(basePath.length).replace(/^\/+/, '');
+        }
+        return path.replace(/\/+$/, '') || '/';
+      };
+      const routePath = normalizeRoutePath();
+      const shouldPreloadHomeStartup = (
+        routePath === '/'
+        || routePath === '/daily'
+        || routePath === '/follow'
+        || /^\/posts\/\d+$/.test(routePath)
+      );
+      if (!shouldPreloadHomeStartup) return;
+      homeStartupHrefs.forEach((href) => {
+        const link = document.createElement('link');
+        link.rel = 'modulepreload';
+        link.crossOrigin = '';
+        link.href = href;
+        document.head.appendChild(link);
+      });
+    })();</script>
+  </head>
+  <body>
+    <div id="app-feed-preview" class="app-feed-preview" hidden aria-hidden="true"></div>
+    <div id="app">
+      <div class="app-boot-shell" role="status" aria-live="polite">
+        <div class="app-boot-card">
+          <div class="app-boot-spinner" aria-hidden="true"></div>
+          <div>
+            <div class="app-boot-title">AI 新闻加载中</div>
+            <div class="app-boot-subtitle">正在打开信息流</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

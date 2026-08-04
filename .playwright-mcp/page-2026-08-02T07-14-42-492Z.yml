@@ -1,0 +1,41 @@
+- generic [ref=e3]:
+  - text:    
+  - main "页面主内容" [ref=e4]:
+    - main [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - paragraph [ref=e8]: PROXY TRAFFIC OBSERVATORY
+          - heading "代理流量观察台" [level=1] [ref=e9]
+          - paragraph [ref=e10]: 找出过去 24 小时真正经过机场节点、消耗流量最高的请求来源。
+        - generic [ref=e11]: 等待数据
+      - generic [ref=e13]:
+        - article [ref=e14]:
+          - generic [ref=e15]: 已归属机场流量
+          - strong [ref=e16]: 0.0 MB
+          - generic [ref=e17]: 不包含国内 DIRECT
+        - article [ref=e18]:
+          - generic [ref=e19]: 最高消耗来源
+          - strong [ref=e20]: 未知来源
+          - generic [ref=e21]: 0.0 MB
+        - article [ref=e22]:
+          - generic [ref=e23]: 主要出口节点
+          - strong [ref=e24]: 暂无
+          - generic [ref=e25]: 按最高消耗来源
+        - article [ref=e26]:
+          - generic [ref=e27]: 监控入口
+          - strong [ref=e28]: "0"
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - generic [ref=e31]:
+            - paragraph [ref=e32]: TOP CONSUMERS
+            - heading "谁在消耗流量" [level=2] [ref=e33]
+          - generic [ref=e34]: 近 24 小时
+        - generic [ref=e35]: 当前没有可归属的代理流量
+  - navigation "移动端主导航" [ref=e37]:
+    - generic [ref=e38]:
+      - button "主页" [ref=e39] [cursor=pointer]:
+        - generic [ref=e40]: 
+      - button "市场" [ref=e42] [cursor=pointer]:
+        - generic [ref=e43]: 
+      - button "事件" [ref=e45] [cursor=pointer]:
+        - generic [ref=e46]: 

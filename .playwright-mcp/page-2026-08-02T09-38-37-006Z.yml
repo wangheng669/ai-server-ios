@@ -1,0 +1,47 @@
+- generic [ref=e3]:
+  - navigation "全局页面导航" [ref=e4]:
+    - button "信息 99+" [ref=e5] [cursor=pointer]:
+      - generic [ref=e6]: 
+      - generic [ref=e7]: 信息
+      - generic [ref=e8]: 99+
+    - button "日报" [ref=e9] [cursor=pointer]:
+      - generic [ref=e10]: 
+    - button "关注" [ref=e12] [cursor=pointer]:
+      - generic [ref=e13]: 
+    - button "事件" [ref=e15] [cursor=pointer]:
+      - generic [ref=e16]: 
+  - main "页面主内容" [ref=e18]:
+    - main [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - paragraph [ref=e22]: CLASH · 24H
+          - heading "机场流量驾驶舱" [level=1] [ref=e23]
+        - generic [ref=e24]:
+          - generic [ref=e25]: 0 KB 已归属流量
+          - generic "速度为最近 10 秒平均值；增量为最近 1 分钟已归属流量" [ref=e26]: 0 B/s +0 B/分钟
+          - generic "已识别连接流量 ÷ Clash 总流量。较多短请求未被连接流捕获" [ref=e27]: 0.0% 流量归因率
+          - generic "—秒采样；最近数据：等待数据" [ref=e28]: POLL 连接已中断
+      - generic [ref=e30]:
+        - article [ref=e31]:
+          - generic [ref=e32]:
+            - generic [ref=e33]:
+              - paragraph [ref=e34]: TOP DOMAINS
+              - heading "流量去了哪里" [level=2] [ref=e35]
+            - searchbox "筛选域名" [ref=e36]
+        - article [ref=e38]:
+          - generic [ref=e40]:
+            - paragraph [ref=e41]: TOP SOURCES
+            - heading "谁在消耗" [level=2] [ref=e42]
+        - article [ref=e44]:
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - paragraph [ref=e47]: SELECTED DOMAIN
+              - heading "暂无域名" [level=2] [ref=e48]
+            - strong [ref=e49]: 0 KB
+          - generic [ref=e50]:
+            - generic [ref=e51]: 下载 0 KB
+            - generic [ref=e52]: 上传 0 KB
+            - generic [ref=e53]: 占比 0.0%
+            - generic [ref=e54]: 起算 等待首条数据
+      - generic [ref=e56]: 较多短请求未被连接流捕获。仅统计代理节点增量，DIRECT 国内直连不计入；域名榜已按同一域名合并。
+  - text:   
