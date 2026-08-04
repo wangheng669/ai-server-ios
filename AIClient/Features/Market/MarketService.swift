@@ -103,6 +103,23 @@ struct MarketService {
         }
     }
 
+    func interpretInvestorVideo(_ item: InvestorMoodItem) async throws -> InvestorVideoInterpretationResponse {
+        let url = baseURL.appending(path: "api/v1/video/interpretation")
+        let payload = InvestorVideoInterpretationRequest(
+            sourceID: item.awemeId,
+            source: "douyin-investor-mood",
+            videoURL: item.videoUrl,
+            title: item.description,
+            transcript: ""
+        )
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = 620
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try JSONEncoder().encode(payload)
+        return try await request(urlRequest, as: InvestorVideoInterpretationResponse.self)
+    }
+
     func aShareTemperature(days: Int = 90) async throws -> MarketAShareTemperature {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/ashare-temperature"), resolvingAgainstBaseURL: false)
         components?.queryItems = [.init(name: "days", value: String(days))]
@@ -145,6 +162,27 @@ struct MarketService {
                 cachePolicy: bypassCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
             )
             if bypassCache { request.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
+            (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch {
+            throw MarketServiceError.transport(error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
+        do { return try JSONDecoder().decode(type, from: data) }
+        catch { throw MarketServiceError.decoding(error) }
+    }
+
+    private func request<Response: Decodable>(
+        _ request: URLRequest,
+        as type: Response.Type
+    ) async throws -> Response {
+        let data: Data
+        let response: URLResponse
+        do {
             (data, response) = try await session.data(for: request)
         } catch is CancellationError {
             throw CancellationError()

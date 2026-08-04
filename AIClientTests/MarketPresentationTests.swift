@@ -101,6 +101,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.items.first?.stale, true)
     }
 
+    func testDecodesInvestorVideoInterpretation() throws {
+        let data = Data(#"{"success":true,"source_id":"123","status":"ready","provider":"bigmodel","model":"glm-4.6v","cached":false,"estimated_cost_cny":0.036,"interpretation":{"overview":"作者认为短线仍需谨慎。","visual_findings":["画面显示上证指数分时图"],"timeline":[{"time":"00:18","title":"提出观点","detail":"作者判断市场仍在震荡。"}],"creator_notes":["观点主要依据短期走势，未讨论仓位风险。"]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(InvestorVideoInterpretationResponse.self, from: data)
+
+        XCTAssertEqual(response.sourceID, "123")
+        XCTAssertEqual(response.model, "glm-4.6v")
+        XCTAssertEqual(response.interpretation.timeline.first?.time, "00:18")
+        XCTAssertEqual(response.estimatedCostCNY, 0.036)
+        XCTAssertFalse(response.cached)
+    }
+
     func testDecodesMarketChartQualityContract() throws {
         let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
