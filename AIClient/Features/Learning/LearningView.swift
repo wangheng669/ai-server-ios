@@ -873,8 +873,8 @@ enum IdeologyCamp: String, CaseIterable, Identifiable {
     var id: Self { self }
     var title: String {
         switch self {
-        case .loyalist: "赢"
-        case .rebel: "输"
+        case .loyalist: "正方"
+        case .rebel: "反方"
         }
     }
 
@@ -904,8 +904,8 @@ private enum IdeologyCampFilter: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .all: "全部"
-        case .loyalist: "赢"
-        case .rebel: "输"
+        case .loyalist: "正方"
+        case .rebel: "反方"
         }
     }
 }
