@@ -96,7 +96,6 @@ struct NewsFeedView: View {
     @State private var preparedWebViews: [Int: WKWebView] = [:]
     @State private var showsAllRSSSources = false
     @State private var rssSourceSearch = ""
-    @State private var selectedWeChatFeedID: Int?
     @Namespace private var sourceSelectionAnimation
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -528,8 +527,8 @@ struct NewsFeedView: View {
     ) -> some View {
         let visiblePosts = visiblePosts(for: source, posts: posts)
         let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
+        let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
         let usesFilteredPagination = source == .flash
-            || source == .wechat
             || (source == .rss && !isSelectedRSSPage)
         return ScrollViewReader { proxy in
             ScrollView {
@@ -552,6 +551,16 @@ struct NewsFeedView: View {
                     if source == .wechat {
                         weChatAccountBar
                         Divider().opacity(0.55)
+                        if model.isLoadingWeChatSelection {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("正在加载该来源")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 22)
+                        }
                     }
                     if source == .flash {
                         flashFeedHeader
@@ -630,6 +639,8 @@ struct NewsFeedView: View {
                                 guard rootTabIsActive, source == model.source else { return }
                                 if isSelectedRSSPage {
                                     await model.loadMoreSelectedRSSIfNeeded(current: tail)
+                                } else if isSelectedWeChatPage {
+                                    await model.loadMoreSelectedWeChatIfNeeded(current: tail)
                                 } else {
                                     await model.loadMoreIfNeeded(
                                         current: tail,
@@ -649,7 +660,9 @@ struct NewsFeedView: View {
                                 await model.loadMoreIfNeeded(current: rawTail)
                             }
                     }
-                    if model.isLoadingMore || (isSelectedRSSPage && model.isLoadingMoreRSSSelection) {
+                    if model.isLoadingMore
+                        || (isSelectedRSSPage && model.isLoadingMoreRSSSelection)
+                        || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection) {
                         ProgressView().padding(20)
                     }
                     if model.errorMessage != nil {
@@ -658,6 +671,10 @@ struct NewsFeedView: View {
                                model.selectedRSSFeedID != nil,
                                let last = model.selectedRSSPosts.last {
                                 Task { await model.loadMoreSelectedRSSIfNeeded(current: last) }
+                            } else if source == .wechat,
+                                      model.selectedWeChatFeedID != nil,
+                                      let last = model.selectedWeChatPosts.last {
+                                Task { await model.loadMoreSelectedWeChatIfNeeded(current: last) }
                             } else if let last = model.posts.last {
                                 Task { await model.loadMoreIfNeeded(current: last) }
                             }
@@ -678,6 +695,8 @@ struct NewsFeedView: View {
                 guard source == model.source else { return }
                 if isSelectedRSSPage, let feedID = model.selectedRSSFeedID {
                     await model.selectRSSFeed(feedID)
+                } else if isSelectedWeChatPage, let feedID = model.selectedWeChatFeedID {
+                    await model.selectWeChatFeed(feedID)
                 } else {
                     await model.refresh()
                 }
@@ -761,8 +780,8 @@ struct NewsFeedView: View {
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
-        if source == .wechat, let selectedWeChatFeedID {
-            return posts.filter { $0.source == "rss:\(selectedWeChatFeedID)" }
+        if source == .wechat, model.selectedWeChatFeedID != nil {
+            return model.selectedWeChatPosts
         }
         if source == .rss {
             let rssPosts: [Post]
@@ -793,9 +812,9 @@ struct NewsFeedView: View {
                     id: nil,
                     name: "全部",
                     avatarURL: nil,
-                    isSelected: selectedWeChatFeedID == nil
+                    isSelected: model.selectedWeChatFeedID == nil
                 ) {
-                    selectedWeChatFeedID = nil
+                    Task { await model.selectWeChatFeed(nil) }
                 }
 
                 ForEach(weChatAccounts) { account in
@@ -804,10 +823,10 @@ struct NewsFeedView: View {
                         id: account.id,
                         name: account.name,
                         avatarURL: feed?.preferredAvatarURL,
-                        isSelected: selectedWeChatFeedID == account.id,
+                        isSelected: model.selectedWeChatFeedID == account.id,
                         rejectsUpscaledImages: true
                     ) {
-                        selectedWeChatFeedID = account.id
+                        Task { await model.selectWeChatFeed(account.id) }
                     }
                 }
             }
@@ -815,7 +834,7 @@ struct NewsFeedView: View {
             .padding(.vertical, 10)
         }
         .background(Color(uiColor: .systemBackground))
-        .sensoryFeedback(.selection, trigger: selectedWeChatFeedID)
+        .sensoryFeedback(.selection, trigger: model.selectedWeChatFeedID)
         .accessibilityLabel("微信公众号")
     }
 
