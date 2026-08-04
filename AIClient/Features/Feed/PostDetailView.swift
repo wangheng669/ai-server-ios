@@ -838,8 +838,6 @@ struct PostDetailView: View {
                         .foregroundStyle(Color(uiColor: .tertiaryLabel))
                         .lineSpacing(5)
 
-                    Divider().opacity(0.5)
-                    xueqiuDetailStats
                     Color.clear.frame(height: 8)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -885,29 +883,6 @@ struct PostDetailView: View {
             return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour().minute())
         } ?? post.formattedTime ?? ""
         return time.isEmpty ? "来自雪球" : "修改于 \(time) · 来自雪球"
-    }
-
-    private var xueqiuDetailStats: some View {
-        HStack {
-            Spacer()
-            xueqiuDetailStat(icon: "hand.thumbsup", value: post.meta?.metrics?.likes)
-            Spacer()
-            xueqiuDetailStat(icon: "star", value: post.meta?.metrics?.bookmarks)
-            Spacer()
-        }
-    }
-
-    private func xueqiuDetailStat(icon: String, value: Int?) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 27, weight: .medium))
-            if let value, value > 0 {
-                Text(value.formattedFeedCount)
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(minWidth: 70, minHeight: 62)
     }
 
     private var xueqiuDetailBottomBar: some View {
