@@ -88,7 +88,7 @@ private struct IndustryPanoramaService {
     }
 
     func industries() async throws -> [IndustryPayload] {
-        let url = baseURL.appending(path: "api/v1/industries/panorama")
+        let url = baseURL.appending(path: "api/ios/v1/industries/panorama")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)

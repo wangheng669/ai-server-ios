@@ -458,8 +458,8 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(item.videoMedia?.width, 720)
         XCTAssertEqual(item.videoMedia?.height, 1280)
         XCTAssertEqual(item.directVideoURL?.host, "video.twimg.com")
-        XCTAssertEqual(item.videoURL?.path, "/api/v1/media-proxy")
-        XCTAssertEqual(item.videoPreviewURL?.path, "/api/v1/image-proxy")
+        XCTAssertEqual(item.videoURL?.path, "/api/ios/v1/media-proxy")
+        XCTAssertEqual(item.videoPreviewURL?.path, "/api/ios/v1/image-proxy")
     }
 
     func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
@@ -638,11 +638,11 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testRSSFeedRecognizesServerManagedAvatar() throws {
-        let data = #"{"data":{"feeds":[{"id":78,"name":"人民日报微博","icon":"/img/rss-feed-icons/rss-feed-78.jpg","avatar_url":"/api/v1/rss/feeds/78/avatar?v=abc123","updated_at":"2026-07-20T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
+        let data = #"{"data":{"feeds":[{"id":78,"name":"人民日报微博","icon":"/img/rss-feed-icons/rss-feed-78.jpg","avatar_url":"/api/ios/v1/rss/feeds/78/avatar?v=abc123","updated_at":"2026-07-20T10:00:00Z","is_enabled":true}]}}"#.data(using: .utf8)!
         let feed = try JSONDecoder().decode(RSSFeedsResponse.self, from: data).data.feeds[0]
 
         XCTAssertTrue(feed.hasManagedAvatar)
-        XCTAssertEqual(feed.preferredAvatarURL?.path, "/api/v1/rss/feeds/78/avatar")
+        XCTAssertEqual(feed.preferredAvatarURL?.path, "/api/ios/v1/rss/feeds/78/avatar")
     }
 
     func testWikipediaCandidateExtractionFindsNamedEntitiesWithoutDuplicates() {
@@ -954,9 +954,9 @@ final class PostDecodingTests: XCTestCase {
 
         let playbackURL = try XCTUnwrap(post.videoURLs.first)
         let components = try XCTUnwrap(URLComponents(url: playbackURL, resolvingAgainstBaseURL: false))
-        XCTAssertEqual(components.path, "/api/v1/bilibili/hls/BV1c3NY6kERj/video.mp4")
+        XCTAssertEqual(components.path, "/api/ios/v1/bilibili/hls/BV1c3NY6kERj/video.mp4")
         XCTAssertNil(components.query)
-        XCTAssertEqual(post.previewURL?.path, "/api/v1/image-proxy")
+        XCTAssertEqual(post.previewURL?.path, "/api/ios/v1/image-proxy")
     }
 
     func testPrefersExplicitVideoPlayURL() throws {
@@ -972,7 +972,7 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertEqual(post.videoURLs.count, 1)
         XCTAssertEqual(post.directVideoURLs.first?.absoluteString, "https://video.twimg.com/demo.mp4")
-        XCTAssertEqual(post.videoURLs.first?.path, "/api/v1/media-proxy")
+        XCTAssertEqual(post.videoURLs.first?.path, "/api/ios/v1/media-proxy")
         XCTAssertNil(post.previewURL)
         XCTAssertEqual(post.videos?.first?.width, 1920)
         XCTAssertEqual(post.videos?.first?.height, 1080)
@@ -1023,7 +1023,7 @@ final class PostDecodingTests: XCTestCase {
             return XCTFail("Expected an image block")
         }
 
-        XCTAssertTrue(url.path.hasSuffix("/api/v1/image-proxy"))
+        XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
     }
 
     func testBuildsReadableNewYorkTimesParagraphsFromStoredText() throws {

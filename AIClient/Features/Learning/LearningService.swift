@@ -29,14 +29,14 @@ struct LearningService: LearningServing {
 
     func fetchCatalog() async throws -> LearningCatalog {
         let response: LearningCatalogResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/catalog")
+            baseURL.appending(path: "api/ios/v1/learning/catalog")
         )
         return response.data
     }
 
     func fetchTopic(id: String) async throws -> LearningTopic {
         let response: LearningTopicResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/topics").appending(path: id),
+            baseURL.appending(path: "api/ios/v1/learning/topics").appending(path: id),
             cachePolicy: .reloadRevalidatingCacheData
         )
         return response.data
@@ -44,7 +44,7 @@ struct LearningService: LearningServing {
 
     func fetchBookshelf() async throws -> LearningBookshelf {
         let response: LearningBookshelfResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/bookshelf"),
+            baseURL.appending(path: "api/ios/v1/learning/bookshelf"),
             cachePolicy: .reloadIgnoringLocalCacheData
         )
         return response.data
@@ -52,14 +52,14 @@ struct LearningService: LearningServing {
 
     func fetchConcepts() async throws -> KnowledgeConceptLibrary {
         let response: KnowledgeConceptLibraryResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/concepts")
+            baseURL.appending(path: "api/ios/v1/learning/concepts")
         )
         return response.data
     }
 
     func fetchConcept(id: String) async throws -> KnowledgeConceptDetail {
         let response: KnowledgeConceptDetailResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/concepts").appending(path: id),
+            baseURL.appending(path: "api/ios/v1/learning/concepts").appending(path: id),
             cachePolicy: .reloadRevalidatingCacheData
         )
         return response.data
@@ -67,14 +67,14 @@ struct LearningService: LearningServing {
 
     func fetchVideoLessons() async throws -> LearningVideoLibrary {
         let response: LearningVideoLibraryResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/video-lessons")
+            baseURL.appending(path: "api/ios/v1/learning/video-lessons")
         )
         return response.data
     }
 
     func fetchVideoLesson(id: String) async throws -> LearningVideoLesson {
         let response: LearningVideoLessonResponse = try await fetch(
-            baseURL.appending(path: "api/v1/learning/video-lessons").appending(path: id),
+            baseURL.appending(path: "api/ios/v1/learning/video-lessons").appending(path: id),
             cachePolicy: .reloadRevalidatingCacheData
         )
         return response.data

@@ -169,7 +169,7 @@ final class DeploymentStatusStore: ObservableObject {
     }
 
     private func loadSnapshot() async {
-        let url = baseURL.appending(path: "api/v1/system/ios-deployment")
+        let url = baseURL.appending(path: "api/ios/v1/system/ios-deployment")
         do {
             let (data, response) = try await session.data(from: url)
             guard !Task.isCancelled,

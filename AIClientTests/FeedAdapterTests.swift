@@ -331,7 +331,7 @@ final class FeedAdapterTests: XCTestCase {
             from: "/post/video-playback/stream?formatId=18",
             baseURL: URL(string: "http://example.com:3001")!
         ))
-        XCTAssertEqual(url.absoluteString, "http://example.com:3001/api/v1/post/video-playback/stream?formatId=18")
+        XCTAssertEqual(url.absoluteString, "http://example.com:3001/api/ios/v1/post/video-playback/stream?formatId=18")
     }
 
     func testVideoThumbnailUsesOriginalMediaURL() throws {
@@ -341,7 +341,7 @@ final class FeedAdapterTests: XCTestCase {
         let thumbnail = try XCTUnwrap(MediaURL.videoThumbnail(for: proxied))
         let components = try XCTUnwrap(URLComponents(url: thumbnail, resolvingAgainstBaseURL: false))
 
-        XCTAssertEqual(components.path, "/api/v1/video-thumbnail")
+        XCTAssertEqual(components.path, "/api/ios/v1/video-thumbnail")
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, original)
         XCTAssertEqual(thumbnail.host, baseURL.host)
     }
@@ -783,7 +783,7 @@ final class FeedAdapterTests: XCTestCase {
         let url = try XCTUnwrap(MediaURL.image("https://pbs.twimg.com/media/demo.jpg"))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
 
-        XCTAssertTrue(url.path.hasSuffix("/api/v1/image-proxy"))
+        XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, "https://pbs.twimg.com/media/demo.jpg")
     }
 
@@ -794,7 +794,7 @@ final class FeedAdapterTests: XCTestCase {
 
     func testNewYorkTimesImageUsesServerProxy() throws {
         let url = try XCTUnwrap(MediaURL.image("https://static01.nyt.com/images/example.jpg"))
-        XCTAssertTrue(url.path.hasSuffix("/api/v1/image-proxy"))
+        XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
     }
 
     func testNewYorkTimesArticleUsesServerPreviewEndpoint() throws {
@@ -803,13 +803,13 @@ final class FeedAdapterTests: XCTestCase {
         let url = try XCTUnwrap(APIClient.articlePreviewURL(for: article, baseURL: base))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
 
-        XCTAssertEqual(components.path, "/api/v1/post/preview")
+        XCTAssertEqual(components.path, "/api/ios/v1/post/preview")
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, article.absoluteString)
         XCTAssertNil(components.queryItems?.first(where: { $0.name == "prefer_remote" }))
     }
 
     func testNewYorkTimesHeroVariantsAreRecognizedAsTheSameImage() throws {
-        let hero = try XCTUnwrap(URL(string: "https://api.example/api/v1/image-proxy?url=https%3A%2F%2Fstatic01.nyt.com%2Fimages%2F2026%2F07%2F01%2Fhero%2Fhero-articleLarge.jpg"))
+        let hero = try XCTUnwrap(URL(string: "https://api.example/api/ios/v1/image-proxy?url=https%3A%2F%2Fstatic01.nyt.com%2Fimages%2F2026%2F07%2F01%2Fhero%2Fhero-articleLarge.jpg"))
         let inline = try XCTUnwrap(URL(string: "https://static01.nyt.com/images/2026/07/01/hero/hero-master1050.jpg"))
 
         XCTAssertTrue(NewYorkTimesArticle.isSameImageAsset(inline, hero))

@@ -18,14 +18,14 @@ struct MarketService {
     }
 
     func dashboard(refresh: Bool) async throws -> MarketDashboard {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/dashboard"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/dashboard"), resolvingAgainstBaseURL: false)
         if refresh { components?.queryItems = [.init(name: "refresh", value: "true")] }
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketDashboardResponse.self, bypassCache: refresh).data
     }
 
     func chart(symbol: String, range: MarketRange, refresh: Bool = false) async throws -> MarketChart {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/chart"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/chart"), resolvingAgainstBaseURL: false)
         var queryItems: [URLQueryItem] = [
             .init(name: "symbol", value: symbol),
             .init(name: "interval", value: range.apiInterval),
@@ -40,7 +40,7 @@ struct MarketService {
 
     /// 收盘后日内 trend 兜底：拉取 5 日 5 分钟线，客户端截取最近一个交易日。
     func recentIntradayChart(symbol: String) async throws -> MarketChart {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/chart"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/chart"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             .init(name: "symbol", value: symbol),
             .init(name: "interval", value: "5m"),
@@ -52,7 +52,7 @@ struct MarketService {
     }
 
     func indexConstituents(symbol: String, refresh: Bool = false) async throws -> MarketIndexConstituents {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/index-constituents"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/index-constituents"), resolvingAgainstBaseURL: false)
         var queryItems: [URLQueryItem] = [
             .init(name: "symbol", value: symbol),
             .init(name: "contract", value: "8")
@@ -64,7 +64,7 @@ struct MarketService {
     }
 
     func companyLogo(symbol: String, name: String) async throws -> String? {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/company-logo"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/company-logo"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             .init(name: "symbol", value: symbol),
             .init(name: "name", value: name)
@@ -75,21 +75,21 @@ struct MarketService {
     }
 
     func companyFinancials(symbol: String) async throws -> MarketCompanyFinancials {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/company-financials"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/company-financials"), resolvingAgainstBaseURL: false)
         components?.queryItems = [.init(name: "symbol", value: symbol)]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketCompanyFinancialsResponse.self).data
     }
 
     func famousHoldings(managerKey: String? = nil) async throws -> FamousHoldings {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/famous-holdings"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/famous-holdings"), resolvingAgainstBaseURL: false)
         if let managerKey { components?.queryItems = [.init(name: "manager", value: managerKey)] }
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: FamousHoldingsResponse.self).data
     }
 
     func investorMood() async throws -> InvestorMoodBoard {
-        let url = baseURL.appending(path: "api/v1/market/dashboard/investor-mood")
+        let url = baseURL.appending(path: "api/ios/v1/market/dashboard/investor-mood")
         return try await request(url, as: InvestorMoodResponse.self).data
     }
 
@@ -104,7 +104,7 @@ struct MarketService {
     }
 
     func investorVideoInterpretationStatus(_ item: InvestorMoodItem) async throws -> InvestorVideoInterpretationResponse {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/video/interpretation"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/video/interpretation"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             .init(name: "source", value: "douyin-investor-mood"),
             .init(name: "source_id", value: item.awemeId),
@@ -121,14 +121,14 @@ struct MarketService {
     }
 
     func aShareTemperature(days: Int = 90) async throws -> MarketAShareTemperature {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/ashare-temperature"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/ashare-temperature"), resolvingAgainstBaseURL: false)
         components?.queryItems = [.init(name: "days", value: String(days))]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketAShareTemperatureResponse.self).data
     }
 
     func koreaLeverage(refresh: Bool = false) async throws -> MarketKoreaLeverage {
-        let url = baseURL.appending(path: "api/v1/market/korea-leverage")
+        let url = baseURL.appending(path: "api/ios/v1/market/korea-leverage")
         return try await request(url, as: MarketKoreaLeverageResponse.self, bypassCache: refresh).data
     }
 
@@ -143,7 +143,7 @@ struct MarketService {
     }
 
     private func valuationHistory(market: String) async throws -> MarketValuationHistory {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/market/valuation-history"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/valuation-history"), resolvingAgainstBaseURL: false)
         components?.queryItems = [.init(name: "market", value: market)]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
         return try await request(url, as: MarketValuationHistoryResponse.self).data
