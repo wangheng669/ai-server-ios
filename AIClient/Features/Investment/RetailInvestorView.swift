@@ -817,7 +817,7 @@ struct RetailInvestorView: View {
     }
 
     private func investorMoodList(_ items: [InvestorMoodItem]) -> some View {
-        let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(3))
+        let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(2))
         return LazyVStack(spacing: 0) {
             ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
                 InvestorMoodVideoCard(
@@ -827,10 +827,10 @@ struct RetailInvestorView: View {
                 if index < visibleItems.count - 1 {
                     Divider()
                         .overlay(InvestmentDesign.divider)
-                        .padding(.leading, 142)
+                        .padding(.leading, 112)
                 }
             }
-            if items.count > 3 {
+            if items.count > 2 {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) {
                         showsAllInvestorMood.toggle()
@@ -1111,9 +1111,9 @@ private struct InvestorVideoInterpretationSheet: View {
                     } else if isLoading {
                         VStack(spacing: 12) {
                             ProgressView()
-                            Text("正在查询后台解读结果…")
+                            Text("正在获取视频解读…")
                                 .font(.headline)
-                            Text("新视频会由服务端自动排队处理，不需要手动发起。")
+                            Text("首次处理可能需要一两分钟，完成后会直接使用缓存结果。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
@@ -1230,15 +1230,15 @@ private struct InvestorMoodVideoCard: View {
         HStack(spacing: 13) {
             Button(action: onInterpret) {
                 thumbnail
-                    .frame(width: 112, height: 84)
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .frame(width: 88, height: 66)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(item.nickname)
-                        .font(.system(size: 14.5, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(1)
                     moodBadge
                     Spacer(minLength: 2)
@@ -1247,10 +1247,9 @@ private struct InvestorMoodVideoCard: View {
                         .foregroundStyle(.tertiary)
                 }
                 Text(summary)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .lineSpacing(2)
+                    .lineLimit(1)
                 Button(action: onInterpret) {
                     HStack(spacing: 5) {
                         Image(systemName: "sparkles.tv")
@@ -1265,7 +1264,7 @@ private struct InvestorMoodVideoCard: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 9)
         .accessibilityElement(children: .contain)
     }
 
@@ -1489,7 +1488,10 @@ final class RetailSentimentStore {
         do {
             let mood = try await moodRequest
             investorMood = mood
-            await service.prewarmInvestorMoodVideos(mood.items)
+            Task {
+                await service.prewarmInvestorMoodVideos(mood.items)
+                await service.prepareInvestorMoodInterpretations(mood.items)
+            }
         } catch is CancellationError {
             return
         } catch {
