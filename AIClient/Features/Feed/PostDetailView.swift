@@ -48,6 +48,10 @@ struct PostDetailView: View {
     @State private var xLiveTranslationText: String?
     @State private var isLoadingXFullText: Bool
     @State private var weiboImageSelection: ImageGallerySelection?
+    @State private var speechPlayer: AVPlayer?
+    @State private var isSpeechLoading = false
+    @State private var isSpeechPlaying = false
+    @State private var speechErrorMessage: String?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -168,6 +172,12 @@ struct PostDetailView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
+            if notification.object as? AVPlayerItem === speechPlayer?.currentItem {
+                speechPlayer = nil
+                isSpeechPlaying = false
+                speechErrorMessage = "音频播放失败，请稍后重试"
+                return
+            }
             guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
             player = nil
             if post.isYouTube {
@@ -178,9 +188,23 @@ struct PostDetailView: View {
                 isVideoReady = false
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+            guard notification.object as? AVPlayerItem === speechPlayer?.currentItem else { return }
+            speechPlayer = nil
+            isSpeechPlaying = false
+        }
         .onDisappear {
             player?.pause()
+            speechPlayer?.pause()
             bilibiliPlaybackRetryTask?.cancel()
+        }
+        .alert("朗读失败", isPresented: Binding(
+            get: { speechErrorMessage != nil },
+            set: { if !$0 { speechErrorMessage = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(speechErrorMessage ?? "请稍后重试")
         }
     }
 
@@ -889,6 +913,16 @@ struct PostDetailView: View {
     private var xueqiuDetailBottomBar: some View {
         HStack {
             Spacer()
+            Button { Task { await toggleXueqiuSpeech() } } label: {
+                if isSpeechLoading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: isSpeechPlaying ? "speaker.wave.2.fill" : "speaker.wave.2")
+                }
+            }
+            .disabled(isSpeechLoading)
+            .accessibilityLabel(isSpeechPlaying ? "暂停朗读" : "朗读正文")
+            Spacer()
             Image(systemName: "hand.thumbsup")
             Spacer()
             Image(systemName: "star")
@@ -899,6 +933,36 @@ struct PostDetailView: View {
         .padding(.vertical, 9)
         .background(.bar)
         .overlay(alignment: .top) { Divider().opacity(0.55) }
+    }
+
+    @MainActor
+    private func toggleXueqiuSpeech() async {
+        if let speechPlayer {
+            if speechPlayer.timeControlStatus == .playing {
+                speechPlayer.pause()
+                isSpeechPlaying = false
+            } else {
+                speechPlayer.play()
+                isSpeechPlaying = true
+            }
+            return
+        }
+        isSpeechLoading = true
+        defer { isSpeechLoading = false }
+        do {
+            let url = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .synthesizeSpeech(text: post.xueqiuBodyContent)
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            let newPlayer = AVPlayer(url: url)
+            speechPlayer = newPlayer
+            newPlayer.play()
+            isSpeechPlaying = true
+        } catch is CancellationError {
+            return
+        } catch {
+            speechErrorMessage = NetworkErrorPresentation.message(for: error)
+        }
     }
 
     private func xueqiuRichText(_ value: String) -> Text {

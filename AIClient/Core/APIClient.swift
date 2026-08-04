@@ -397,6 +397,20 @@ struct APIClient {
         return response.data
     }
 
+    func synthesizeSpeech(text: String) async throws -> URL {
+        var request = URLRequest(url: baseURL.appending(path: "api/v1/audio/speech"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 130
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(TextToSpeechRequest(text: text))
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+        let payload = try JSONDecoder().decode(TextToSpeechResponse.self, from: data)
+        guard payload.success, let url = URL(string: payload.data.audioUrl) else { throw APIError.invalidURL }
+        return url
+    }
+
     func resolveYouTubePlayback(url: URL, title: String) async throws -> VideoPlaybackSource {
         try await resolveVideoPlayback(url: url, title: title, formatID: "18")
     }
@@ -509,6 +523,19 @@ struct APIClient {
         }
         throw APIError.invalidResponse
     }
+}
+
+private struct TextToSpeechRequest: Encodable {
+    let text: String
+}
+
+private struct TextToSpeechResponse: Decodable {
+    let success: Bool
+    let data: TextToSpeechData
+}
+
+private struct TextToSpeechData: Decodable {
+    let audioUrl: String
 }
 
 struct NewYorkTimesArticle: Equatable {
