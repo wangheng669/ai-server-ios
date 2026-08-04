@@ -846,25 +846,7 @@ struct PostDetailView: View {
             Text("雪球正文")
                 .font(.system(size: 19, weight: .semibold))
             Spacer()
-            HStack(spacing: 14) {
-                Button { openOriginal() } label: {
-                    Image(systemName: "message.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(Color(red: 0.10, green: 0.68, blue: 0.46), in: Circle())
-                }
-                Menu {
-                    if let link = post.linkURL {
-                        ShareLink(item: link) { Label("分享", systemImage: "square.and.arrow.up") }
-                    }
-                    Button("打开雪球原文") { openOriginal() }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 32, height: 38)
-                }
-            }
+            Color.clear.frame(width: 44, height: 44)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 8)
@@ -930,16 +912,12 @@ struct PostDetailView: View {
     }
 
     private var xueqiuDetailBottomBar: some View {
-        HStack(spacing: 18) {
-            Text("发讨论...")
-                .font(.system(size: 15.5))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-            Image(systemName: "bubble.left")
+        HStack {
+            Spacer()
             Image(systemName: "hand.thumbsup")
+            Spacer()
             Image(systemName: "star")
+            Spacer()
         }
         .font(.system(size: 23, weight: .medium))
         .padding(.horizontal, 16)
