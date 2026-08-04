@@ -650,6 +650,10 @@ struct InvestorMoodItem: Decodable, Identifiable {
         proxiedMediaURL(from: coverUrl)
     }
 
+    var directCoverURL: URL? {
+        publicMediaURL(from: coverUrl)
+    }
+
     var prewarmURL: URL? {
         proxiedMediaURL(from: videoUrl, prewarm: true)
     }

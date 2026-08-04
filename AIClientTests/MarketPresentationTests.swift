@@ -86,6 +86,7 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.items.first?.videoUrl, "https://video.example.com/123.mp4")
         XCTAssertEqual(response.data.items.first?.directPlaybackURL?.absoluteString, "https://video.example.com/123.mp4")
         XCTAssertTrue(response.data.items.first?.playbackURL?.absoluteString.contains("/api/v1/media-proxy?") == true)
+        XCTAssertEqual(response.data.items.first?.directCoverURL?.absoluteString, "https://example.com/cover.jpg")
         XCTAssertTrue(response.data.items.first?.coverPlaybackURL?.absoluteString.contains("/api/v1/media-proxy?") == true)
         XCTAssertEqual(response.data.items.first?.stale, false)
     }

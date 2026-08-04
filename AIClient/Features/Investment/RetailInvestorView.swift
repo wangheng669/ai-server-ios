@@ -1060,7 +1060,8 @@ private struct InvestorMoodVideoCard: View {
             XVideoPlayerView(
                 url: playbackURL,
                 fallbackURL: item.directPlaybackURL == nil ? nil : item.playbackURL,
-                thumbnailURL: item.coverPlaybackURL,
+                thumbnailURL: item.directCoverURL,
+                fallbackThumbnailURL: item.coverPlaybackURL,
                 contentMode: .fill,
                 chromeStyle: .minimal,
                 isPlaybackActive: isPlaybackActive
