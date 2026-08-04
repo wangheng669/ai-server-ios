@@ -11,6 +11,7 @@ to an iPhone.
 - Runner directory: `/home/wanngheng/actions-runner/ai_server_ios_preflight`
 - User service: `actions-runner-ai-server-ios-preflight.service`
 - Workflow job: `Linux preflight on mac-x`
+- Status stage: `linux-preflight` through the existing deployment-status API
 
 The central Mac job starts only after preflight succeeds. Its own
 `ai-merge-to-main` concurrency group remains serialized.

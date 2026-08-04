@@ -34,7 +34,11 @@ jobs:
             AIServerClient.xcodeproj
 
       - name: Run repository preflight checks
-        run: ./ci/linux-preflight.sh origin/main
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+        run: |
+          ./ci/report-ios-deployment.sh running 0.01 linux-preflight || true
+          ./ci/linux-preflight.sh origin/main
 
   merge:
     name: Safely integrate on selected central Mac
