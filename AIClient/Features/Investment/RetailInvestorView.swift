@@ -571,47 +571,53 @@ struct RetailInvestorView: View {
     }
 
     private var sectorHighlights: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let leaders = Array(store.sectors.prefix(3))
+        let maxChange = max(leaders.map { abs($0.percentValue) }.max() ?? 0, 0.01)
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("领涨方向")
-                    .font(.system(size: 16, weight: .semibold))
+                Text("板块涨幅排行")
+                    .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("实时板块热度")
-                    .font(.system(size: 11, weight: .medium))
+                Text("约 10 分钟更新")
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
             if store.sectors.isEmpty {
-                placeholder("正在整理领涨板块")
+                placeholder("正在整理板块涨幅")
             } else {
-                ForEach(Array(store.sectors.prefix(5).enumerated()), id: \.element.id) { index, sector in
-                    HStack(spacing: 12) {
+                ForEach(Array(leaders.enumerated()), id: \.element.id) { index, sector in
+                    HStack(spacing: 10) {
                         Text(String(index + 1))
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 18)
-                        VStack(alignment: .leading, spacing: 5) {
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(index == 0 ? InvestmentDesign.gain : Color.secondary.opacity(0.58))
+                            .frame(width: 14)
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(sector.name)
-                                .font(.system(size: 14, weight: .semibold))
-                            Capsule()
-                                .fill(InvestmentDesign.gain.opacity(0.62))
-                                .frame(
-                                    width: max(14, min(54, abs(sector.percentValue) * 22)),
-                                    height: 3
-                                )
+                                .font(.system(size: 13, weight: .semibold))
+                            GeometryReader { proxy in
+                                Capsule()
+                                    .fill((sector.percentValue >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss).opacity(0.58))
+                                    .frame(width: max(10, proxy.size.width * abs(sector.percentValue) / maxChange))
+                            }
+                            .frame(height: 3)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         Spacer()
                         Text(RetailSentimentFormat.percent(sector.percentValue))
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(sector.percentValue >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
+                            .frame(width: 56, alignment: .trailing)
                     }
-                    .padding(.vertical, 5)
-                    if index < min(store.sectors.count, 5) - 1 {
-                        Divider().overlay(InvestmentDesign.divider).padding(.leading, 30)
+                    .frame(height: 32)
+                    if index < leaders.count - 1 {
+                        Divider().overlay(InvestmentDesign.divider).padding(.leading, 24)
                     }
                 }
             }
         }
-        .padding(16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(InvestmentDesign.surface)
     }
 
