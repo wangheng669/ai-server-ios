@@ -47,9 +47,17 @@ enum FeedChromeLayout {
     static let headerHeight: CGFloat = 53
 
     static func headerReservationHeight(isHidden: Bool) -> CGFloat {
-        // Keep the list geometry stable while the chrome moves off-screen. Changing
-        // this spacer during a drag forces every visible row to be laid out again.
-        headerHeight
+        isHidden ? 0 : headerHeight
+    }
+}
+
+enum FeedPaginationLayout {
+    static func taskPostID(
+        visibleTailID: Int,
+        rawTailID: Int?,
+        usesFilteredPagination: Bool
+    ) -> Int {
+        usesFilteredPagination ? rawTailID ?? visibleTailID : visibleTailID
     }
 }
 
@@ -611,9 +619,14 @@ struct NewsFeedView: View {
                         }
                     }
                     if let tail = visiblePosts.last {
+                        let paginationTaskPostID = FeedPaginationLayout.taskPostID(
+                            visibleTailID: tail.id,
+                            rawTailID: posts.last?.id,
+                            usesFilteredPagination: usesFilteredPagination
+                        )
                         Color.clear
                             .frame(height: 1)
-                            .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(tail.id)") {
+                            .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(paginationTaskPostID)") {
                                 guard rootTabIsActive, source == model.source else { return }
                                 if isSelectedRSSPage {
                                     await model.loadMoreSelectedRSSIfNeeded(current: tail)
