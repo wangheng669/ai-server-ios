@@ -1490,7 +1490,6 @@ final class RetailSentimentStore {
             investorMood = mood
             Task {
                 await service.prewarmInvestorMoodVideos(mood.items)
-                await service.prepareInvestorMoodInterpretations(mood.items)
             }
         } catch is CancellationError {
             return
