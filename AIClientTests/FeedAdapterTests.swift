@@ -489,7 +489,7 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testCacheWarmingMakesFirstSourceSelectionImmediate() async {
+    func testCacheWarmingOnlyPreloadsAdjacentSources() async {
         var requestedSources: [FeedSource] = []
         let model = NewsFeedViewModel(source: .x) { _, _, source in
             requestedSources.append(source)
@@ -497,10 +497,10 @@ final class FeedAdapterTests: XCTestCase {
         }
 
         await model.warmSourceCache()
-        model.select(.zhihu)
+        model.select(.weibo)
 
         XCTAssertFalse(model.isSwitchingSource)
-        XCTAssertEqual(Set(requestedSources), Set(FeedSource.allCases.filter { $0 != .x }))
+        XCTAssertEqual(Set(requestedSources), Set([.wechat, .weibo]))
     }
 
     @MainActor
@@ -633,9 +633,9 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(posts.first?.formattedTime, "第 21 名 · 热度 12345")
     }
 
-    func testHiddenFeedChromeRemovesWeiboHeaderReservation() {
+    func testHiddenFeedChromeKeepsStableHeaderReservation() {
         XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: false), 53)
-        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 0)
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 53)
     }
 
     func testDecodesAndMapsFlashItem() throws {

@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import QuartzCore
 
 enum RootTab: Hashable { case observation, investment, learning, people }
 
@@ -46,7 +47,9 @@ enum FeedChromeLayout {
     static let headerHeight: CGFloat = 53
 
     static func headerReservationHeight(isHidden: Bool) -> CGFloat {
-        isHidden ? 0 : headerHeight
+        // Keep the list geometry stable while the chrome moves off-screen. Changing
+        // this spacer during a drag forces every visible row to be laid out again.
+        headerHeight
     }
 }
 
@@ -355,12 +358,26 @@ struct NewsFeedView: View {
             set: { selectSource($0) }
         )) {
             ForEach(FeedSource.allCases) { source in
-                sourcePage(source)
-                    .tag(source)
+                Group {
+                    if activeSources.contains(source) {
+                        sourcePage(source)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .tag(source)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var activeSources: [FeedSource] {
+        let sources = FeedSource.allCases
+        guard let index = sources.firstIndex(of: model.source) else { return [model.source] }
+        let lower = max(sources.startIndex, index - 1)
+        let upper = min(sources.index(before: sources.endIndex), index + 1)
+        return Array(sources[lower...upper])
     }
 
     @ViewBuilder
@@ -548,16 +565,6 @@ struct NewsFeedView: View {
                             onOpen: { openPost(displayPost) }
                         )
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background {
-                                if source == .youtube,
-                                   index == 0,
-                                   let videoID = displayPost.youtubeVideoID {
-                                    YouTubeFirstVideoPrewarmer(videoID: videoID)
-                                        .frame(width: 1, height: 1)
-                                        .opacity(0.01)
-                                        .allowsHitTesting(false)
-                                }
-                            }
                             .contentShape(Rectangle())
                             .modifier(ConditionalTapGestureModifier(isEnabled: !post.isXueqiu) {
                                 if post.isFlash {
@@ -593,19 +600,8 @@ struct NewsFeedView: View {
                                 }
                             }
                             .task(id: "\(rootTabIsActive)-translate-\(post.id)") {
-                                guard rootTabIsActive, source == model.source else { return }
+                                guard rootTabIsActive, source == .x, source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
-                            }
-                            .task(id: "\(rootTabIsActive)-page-\(usesFilteredPagination ? posts.last?.id ?? -1 : post.id)") {
-                                guard rootTabIsActive, source == model.source else { return }
-                                if isSelectedRSSPage {
-                                    await model.loadMoreSelectedRSSIfNeeded(current: post)
-                                } else {
-                                    await model.loadMoreIfNeeded(
-                                        current: post,
-                                        thresholdPostID: usesFilteredPagination ? visiblePosts.last?.id : nil
-                                    )
-                                }
                             }
                         if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
@@ -613,6 +609,21 @@ struct NewsFeedView: View {
                             Divider().opacity(source == .flash ? 0.42 : 0.6)
                                 .padding(.leading, source == .flash ? 84 : 0)
                         }
+                    }
+                    if let tail = visiblePosts.last {
+                        Color.clear
+                            .frame(height: 1)
+                            .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(tail.id)") {
+                                guard rootTabIsActive, source == model.source else { return }
+                                if isSelectedRSSPage {
+                                    await model.loadMoreSelectedRSSIfNeeded(current: tail)
+                                } else {
+                                    await model.loadMoreIfNeeded(
+                                        current: tail,
+                                        thresholdPostID: usesFilteredPagination ? tail.id : nil
+                                    )
+                                }
+                            }
                     }
                     if visiblePosts.isEmpty,
                        !posts.isEmpty,
@@ -1991,6 +2002,7 @@ private struct SourceScrollOffsetPreserver: UIViewRepresentable {
         private var offsetObservation: NSKeyValueObservation?
         private var activeSource: FeedSource?
         private var isRestoring = false
+        private var lastOffsetSaveTime: CFTimeInterval = 0
 
         func update(scrollView: UIScrollView, source: FeedSource, store: FeedScrollPositionStore) {
             if self.scrollView !== scrollView {
@@ -1998,6 +2010,9 @@ private struct SourceScrollOffsetPreserver: UIViewRepresentable {
                 activeSource = source
                 offsetObservation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
                     guard let self, !self.isRestoring, let activeSource = self.activeSource else { return }
+                    let now = CACurrentMediaTime()
+                    guard now - self.lastOffsetSaveTime >= 0.12 else { return }
+                    self.lastOffsetSaveTime = now
                     store.save(scrollView.contentOffset, for: activeSource)
                 }
                 if let target = store.offset(for: source) {
@@ -2019,14 +2034,20 @@ private struct SourceScrollOffsetPreserver: UIViewRepresentable {
 
         private func restore(_ target: CGPoint, in scrollView: UIScrollView) {
             isRestoring = true
+            restore(target, in: scrollView, attempt: 0)
+        }
+
+        private func restore(_ target: CGPoint, in scrollView: UIScrollView, attempt: Int) {
             DispatchQueue.main.async {
                 scrollView.layoutIfNeeded()
-                scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
-                DispatchQueue.main.async {
-                    scrollView.layoutIfNeeded()
-                    scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
-                    self.isRestoring = false
+                let needsScrollableContent = target.y > -scrollView.adjustedContentInset.top + 1
+                let contentIsReady = scrollView.contentSize.height > scrollView.bounds.height + 1
+                if needsScrollableContent, !contentIsReady, attempt < 4 {
+                    self.restore(target, in: scrollView, attempt: attempt + 1)
+                    return
                 }
+                scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
+                self.isRestoring = false
             }
         }
 
@@ -2077,7 +2098,10 @@ private struct FeedChromeScrollModifier: ViewModifier {
                     geometry.contentOffset.y + geometry.contentInsets.top
                 } action: { oldOffset, newOffset in
                     guard isActive else { return }
-                    isAtTop = newOffset <= 8
+                    let nextIsAtTop = newOffset <= 8
+                    if isAtTop != nextIsAtTop {
+                        isAtTop = nextIsAtTop
+                    }
                     handleOffsetChange(from: oldOffset, to: newOffset)
                 }
         } else {
@@ -2355,7 +2379,22 @@ private struct WeiboFollowingSingleImage: View {
     }
 }
 
+private final class XAttributedTextBox {
+    let value: AttributedString
+    init(_ value: AttributedString) { self.value = value }
+}
+
 private struct NewsCardView: View {
+    private static let xTimelineCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 300
+        return cache
+    }()
+    private static let xAttributedTextCache: NSCache<NSString, XAttributedTextBox> = {
+        let cache = NSCache<NSString, XAttributedTextBox>()
+        cache.countLimit = 300
+        return cache
+    }()
     let post: Post
     var isFeaturedBilibili = false
     var isExpandedFlash = false
@@ -2480,7 +2519,13 @@ private struct NewsCardView: View {
     /// Keep ordinary posts complete in the timeline, while giving translated long-form
     /// posts the same compact handoff to detail that X uses for "Show more".
     private var xTimelineContent: String {
-        xTimelineParagraphs.joined(separator: "\n\n")
+        let key = NSString(string: "\(post.hasTranslation ? 1 : 0)|\(post.displayContent)")
+        if let cached = Self.xTimelineCache.object(forKey: key) {
+            return cached as String
+        }
+        let value = xTimelineParagraphs.joined(separator: "\n\n")
+        Self.xTimelineCache.setObject(value as NSString, forKey: key, cost: value.utf8.count)
+        return value
     }
 
     private var isLongXPost: Bool {
@@ -2488,6 +2533,10 @@ private struct NewsCardView: View {
     }
 
     private func xRichText(_ value: String) -> Text {
+        let cacheKey = value as NSString
+        if let cached = Self.xAttributedTextCache.object(forKey: cacheKey) {
+            return Text(cached.value)
+        }
         var attributed = AttributedString(value)
         let source = value as NSString
         let pattern = #"\$[A-Za-z][A-Za-z0-9.]{0,9}|https?://[^\s]+"#
@@ -2505,6 +2554,7 @@ private struct NewsCardView: View {
                 attributed[range].link = url
             }
         }
+        Self.xAttributedTextCache.setObject(XAttributedTextBox(attributed), forKey: cacheKey)
         return Text(attributed)
     }
 
