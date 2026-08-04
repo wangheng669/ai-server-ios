@@ -103,32 +103,16 @@ struct MarketService {
         }
     }
 
-    func prepareInvestorMoodInterpretations(_ items: [InvestorMoodItem]) async {
-        for item in items.prefix(6) {
-            guard !Task.isCancelled else { return }
-            _ = try? await investorVideoInterpretationStatus(item)
-        }
-    }
-
     func investorVideoInterpretationStatus(_ item: InvestorMoodItem) async throws -> InvestorVideoInterpretationResponse {
-        guard let videoURL = item.directPlaybackURL?.absoluteString,
-              !videoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw VideoInterpretationServiceError.missingVideo
-        }
-        let url = baseURL.appending(path: "api/v1/video/interpretation")
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/video/interpretation"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            .init(name: "source", value: "douyin-investor-mood"),
+            .init(name: "source_id", value: item.awemeId),
+        ]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
         var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
-        urlRequest.httpMethod = "POST"
-        urlRequest.timeoutInterval = 300
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.timeoutInterval = 20
         urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        urlRequest.httpBody = try JSONEncoder().encode(InvestorVideoInterpretationRequest(
-            sourceID: item.awemeId,
-            source: "douyin-investor-mood",
-            videoURL: videoURL,
-            title: item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? item.nickname
-                : item.description
-        ))
         do {
             return try await request(urlRequest, as: InvestorVideoInterpretationResponse.self)
         } catch MarketServiceError.httpStatus(let status) {
@@ -214,26 +198,11 @@ struct MarketService {
     }
 }
 
-private struct InvestorVideoInterpretationRequest: Encodable {
-    let sourceID: String
-    let source: String
-    let videoURL: String
-    let title: String
-
-    enum CodingKeys: String, CodingKey {
-        case source, title
-        case sourceID = "source_id"
-        case videoURL = "video_url"
-    }
-}
-
 enum VideoInterpretationServiceError: LocalizedError {
-    case missingVideo
     case unavailable(Int)
 
     var errorDescription: String? {
         switch self {
-        case .missingVideo: "这个视频暂时没有可用的播放地址"
         case .unavailable(let status): "视频解读服务暂不可用（\(status)）"
         }
     }
