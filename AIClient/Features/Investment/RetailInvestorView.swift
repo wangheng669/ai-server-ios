@@ -7,6 +7,7 @@ struct RetailInvestorView: View {
     private let marketStore: MarketStore
     @State private var selectedMarket: SentimentMarket = .china
     @State private var selectedInvestorMoodID: InvestorMoodItem.ID?
+    @State private var interpretationItem: InvestorMoodItem?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     @MainActor
@@ -79,6 +80,9 @@ struct RetailInvestorView: View {
         }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
+        .sheet(item: $interpretationItem) { item in
+            InvestorVideoInterpretationSheet(item: item, service: store.service)
+        }
     }
 
     @ViewBuilder
@@ -589,7 +593,8 @@ struct RetailInvestorView: View {
                     ForEach(items) { item in
                         InvestorMoodVideoCard(
                             item: item,
-                            isPlaybackActive: rootTabIsActive && selectedInvestorMoodID == item.id
+                            isPlaybackActive: rootTabIsActive && selectedInvestorMoodID == item.id,
+                            onInterpret: { interpretationItem = item }
                         )
                             .frame(width: cardWidth)
                             .id(item.id)
@@ -862,9 +867,144 @@ private struct InvestorMoodCount: Identifiable {
     let count: Int
 }
 
+private struct InvestorVideoInterpretationSheet: View {
+    let item: InvestorMoodItem
+    let service: MarketService
+    @Environment(\.dismiss) private var dismiss
+    @State private var payload: InvestorVideoInterpretationResponse?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.nickname).font(.headline)
+                        Text(item.description.nonEmpty ?? "散户观点视频")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let payload {
+                        interpretationContent(payload)
+                    } else if isLoading {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("智谱正在观看并解读完整视频…")
+                                .font(.headline)
+                            Text("首次需要下载和压缩视频，通常需要几分钟；同一视频会读取缓存。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 52)
+                    } else if let errorMessage {
+                        ContentUnavailableView(
+                            "视频解读暂不可用",
+                            systemImage: "eye.slash",
+                            description: Text(errorMessage)
+                        )
+                        Button("重试") { Task { await interpret() } }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("智谱会直接观看完整视频，Qwen 再结合字幕整理解读、观点、关键数字、时间线和风险遗漏。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(4)
+                        Button { Task { await interpret() } } label: {
+                            Label("开始视频解读", systemImage: "play.rectangle.on.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                    }
+                }
+                .padding(18)
+            }
+            .navigationTitle("视频解读")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func interpretationContent(_ payload: InvestorVideoInterpretationResponse) -> some View {
+        let interpretation = payload.interpretation
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label(payload.cached ? "缓存结果" : "智谱完整视频解读", systemImage: "eye.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(payload.cached ? .green : .blue)
+                Spacer()
+                Text(payload.model).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(interpretation.overview).font(.body).lineSpacing(5).textSelection(.enabled)
+            bulletSection("画面与关键发现", interpretation.visualFindings)
+            if !interpretation.timeline.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("视频时间线").font(.headline)
+                    ForEach(Array(interpretation.timeline.enumerated()), id: \.offset) { _, event in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(event.time)
+                                .font(.caption.monospacedDigit().weight(.bold))
+                                .foregroundStyle(.blue)
+                                .frame(width: 48, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(event.title).font(.subheadline.weight(.semibold))
+                                Text(event.detail).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            bulletSection("观点、证据与风险观察", interpretation.creatorNotes)
+            Label(
+                payload.cached
+                    ? "缓存结果，本次未新增模型费用"
+                    : String(format: "本次模型处理成本约 ¥%.3f", payload.estimatedCostCNY),
+                systemImage: payload.cached ? "bolt.horizontal.circle.fill" : "yensign.circle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(payload.cached ? .green : .orange)
+        }
+    }
+
+    private func bulletSection(_ title: String, _ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !items.isEmpty { Text(title).font(.headline) }
+            ForEach(Array(items.enumerated()), id: \.offset) { _, text in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle().fill(.blue).frame(width: 6, height: 6).padding(.top, 7)
+                    Text(text).font(.subheadline).lineSpacing(3)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func interpret() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            payload = try await service.interpretInvestorVideo(item)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 private struct InvestorMoodVideoCard: View {
     let item: InvestorMoodItem
     let isPlaybackActive: Bool
+    let onInterpret: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -893,6 +1033,13 @@ private struct InvestorMoodVideoCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+                Button(action: onInterpret) {
+                    Label("视频解读", systemImage: "eye.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
             }
             .padding(13)
         }
@@ -975,7 +1122,7 @@ final class RetailSentimentStore {
     private(set) var koreaLeverageErrorMessage: String?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
-    private let service: MarketService
+    let service: MarketService
     private var loaded = false
     private var loadedMarkets: Set<SentimentMarket> = []
     private var loadingMarkets: Set<SentimentMarket> = []
