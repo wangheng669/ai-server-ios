@@ -555,7 +555,7 @@ struct InvestorVideoInterpretationResponse: Decodable {
     let success: Bool
     let sourceID: String
     let status: String
-    let interpretation: BilibiliVideoInterpretation
+    let interpretation: BilibiliVideoInterpretation?
     let provider: String
     let model: String
     let cached: Bool
@@ -565,20 +565,6 @@ struct InvestorVideoInterpretationResponse: Decodable {
         case success, status, interpretation, provider, model, cached
         case sourceID = "source_id"
         case estimatedCostCNY = "estimated_cost_cny"
-    }
-}
-
-struct InvestorVideoInterpretationRequest: Encodable {
-    let sourceID: String
-    let source: String
-    let videoURL: String
-    let title: String
-    let transcript: String
-
-    enum CodingKeys: String, CodingKey {
-        case source, title, transcript
-        case sourceID = "source_id"
-        case videoURL = "video_url"
     }
 }
 

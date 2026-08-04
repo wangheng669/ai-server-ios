@@ -103,20 +103,16 @@ struct MarketService {
         }
     }
 
-    func interpretInvestorVideo(_ item: InvestorMoodItem) async throws -> InvestorVideoInterpretationResponse {
-        let url = baseURL.appending(path: "api/v1/video/interpretation")
-        let payload = InvestorVideoInterpretationRequest(
-            sourceID: item.awemeId,
-            source: "douyin-investor-mood",
-            videoURL: item.videoUrl,
-            title: item.description,
-            transcript: ""
-        )
-        var urlRequest = URLRequest(url: url)
-        urlRequest.httpMethod = "POST"
-        urlRequest.timeoutInterval = 620
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try JSONEncoder().encode(payload)
+    func investorVideoInterpretationStatus(_ item: InvestorMoodItem) async throws -> InvestorVideoInterpretationResponse {
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/video/interpretation"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            .init(name: "source", value: "douyin-investor-mood"),
+            .init(name: "source_id", value: item.awemeId),
+        ]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        urlRequest.timeoutInterval = 20
+        urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         return try await request(urlRequest, as: InvestorVideoInterpretationResponse.self)
     }
 
