@@ -626,6 +626,7 @@ struct XVideoPlayerView: View {
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let fallbackURL: URL?
     private let thumbnailURL: URL?
+    private let fallbackThumbnailURL: URL?
     private let contentMode: ContentMode
     private let chromeStyle: XVideoPlayerChromeStyle
     private let isPlaybackActive: Bool
@@ -636,6 +637,7 @@ struct XVideoPlayerView: View {
         url: URL,
         fallbackURL: URL? = nil,
         thumbnailURL: URL? = nil,
+        fallbackThumbnailURL: URL? = nil,
         contentMode: ContentMode = .fit,
         chromeStyle: XVideoPlayerChromeStyle = .standard,
         isPlaybackActive: Bool = true,
@@ -645,6 +647,7 @@ struct XVideoPlayerView: View {
         _playbackURL = State(initialValue: url)
         self.fallbackURL = fallbackURL == url ? nil : fallbackURL
         self.thumbnailURL = thumbnailURL
+        self.fallbackThumbnailURL = fallbackThumbnailURL == thumbnailURL ? nil : fallbackThumbnailURL
         self.contentMode = contentMode
         self.chromeStyle = chromeStyle
         self.isPlaybackActive = isPlaybackActive
@@ -933,11 +936,17 @@ struct XVideoPlayerView: View {
             return
         }
         let resolvedThumbnailURL = thumbnailURL ?? (generatesThumbnailWhenMissing ? MediaURL.videoThumbnail(for: playbackURL) : nil)
-        if let thumbnailURL = resolvedThumbnailURL,
-           let remoteThumbnail = await ImageLoader.load(
-               thumbnailURL,
-               targetSize: CGSize(width: 720, height: 720)
-            ) {
+        let thumbnailURLs = [resolvedThumbnailURL, fallbackThumbnailURL]
+            .compactMap { $0 }
+            .reduce(into: [URL]()) { result, url in
+                if !result.contains(url) { result.append(url) }
+            }
+        for thumbnailURL in thumbnailURLs {
+            guard !Task.isCancelled else { return }
+            guard let remoteThumbnail = await ImageLoader.load(
+                thumbnailURL,
+                targetSize: CGSize(width: 720, height: 720)
+            ) else { continue }
             guard !Task.isCancelled else { return }
             Self.thumbnailCache.setObject(remoteThumbnail, forKey: playbackURL as NSURL)
             thumbnail = remoteThumbnail
