@@ -633,9 +633,41 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(posts.first?.formattedTime, "第 21 名 · 热度 12345")
     }
 
-    func testHiddenFeedChromeKeepsStableHeaderReservation() {
+    func testHiddenFeedChromeRemovesHeaderReservation() {
         XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: false), 53)
-        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 53)
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 0)
+    }
+
+    func testFilteredPaginationTaskAdvancesWithRawTail() {
+        XCTAssertEqual(
+            FeedPaginationLayout.taskPostID(
+                visibleTailID: 3,
+                rawTailID: 10,
+                usesFilteredPagination: true
+            ),
+            10
+        )
+        XCTAssertEqual(
+            FeedPaginationLayout.taskPostID(
+                visibleTailID: 3,
+                rawTailID: 10,
+                usesFilteredPagination: false
+            ),
+            3
+        )
+    }
+
+    @MainActor
+    func testWechatInitialPageIsLargeEnoughForAccountFiltering() async {
+        var requestedLimit = 0
+        let model = NewsFeedViewModel(source: .wechat) { _, limit, _ in
+            requestedLimit = limit
+            return []
+        }
+
+        await model.refresh()
+
+        XCTAssertEqual(requestedLimit, 20)
     }
 
     func testDecodesAndMapsFlashItem() throws {

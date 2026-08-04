@@ -354,7 +354,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func pageSize(for source: FeedSource) -> Int {
         switch source {
-        case .weibo, .douyin, .truth: 20
+        case .wechat, .weibo, .douyin, .truth: 20
         case .flash: 20
         case .x: 10
         default: defaultPageSize
