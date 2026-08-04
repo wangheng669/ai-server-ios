@@ -23,7 +23,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private struct Snapshot { var posts: [Post]; var page: Int; var canLoadMore: Bool }
-    @Published private var cache: [FeedSource: Snapshot] = [:]
+    private var cache: [FeedSource: Snapshot] = [:]
+    private var pendingXTranslations: [Int: String] = [:]
+    private var xTranslationPublishTask: Task<Void, Never>?
     private var page = 1
     private let defaultPageSize = 5
     private var realtimeClient: RealtimeFeedClient?
@@ -242,11 +244,25 @@ final class NewsFeedViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty, value != post.originalDisplayContent else { return }
-            xTranslations[post.id] = value
+            pendingXTranslations[post.id] = value
+            scheduleXTranslationPublish()
         } catch is CancellationError {
             return
         } catch {
             // Translation is best-effort. Keep the original post visible on failure.
+        }
+    }
+
+    private func scheduleXTranslationPublish() {
+        guard xTranslationPublishTask == nil else { return }
+        xTranslationPublishTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard let self else { return }
+            let updates = pendingXTranslations
+            pendingXTranslations.removeAll(keepingCapacity: true)
+            xTranslationPublishTask = nil
+            guard !updates.isEmpty else { return }
+            xTranslations.merge(updates) { _, latest in latest }
         }
     }
 
@@ -311,7 +327,7 @@ final class NewsFeedViewModel: ObservableObject {
         guard let selectedIndex = FeedSource.allCases.firstIndex(of: source) else { return }
         let sources = FeedSource.allCases
             .enumerated()
-            .filter { $0.element != source }
+            .filter { $0.element != source && abs($0.offset - selectedIndex) == 1 }
             .sorted { abs($0.offset - selectedIndex) < abs($1.offset - selectedIndex) }
             .map(\.element)
 
