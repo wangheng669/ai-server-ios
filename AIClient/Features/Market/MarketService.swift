@@ -103,6 +103,23 @@ struct MarketService {
         }
     }
 
+    func investorVideoInterpretationStatus(_ item: InvestorMoodItem) async throws -> InvestorVideoInterpretationResponse {
+        var components = URLComponents(url: baseURL.appending(path: "api/v1/video/interpretation"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            .init(name: "source", value: "douyin-investor-mood"),
+            .init(name: "source_id", value: item.awemeId),
+        ]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        urlRequest.timeoutInterval = 20
+        urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        do {
+            return try await request(urlRequest, as: InvestorVideoInterpretationResponse.self)
+        } catch MarketServiceError.httpStatus(let status) {
+            throw VideoInterpretationServiceError.unavailable(status)
+        }
+    }
+
     func aShareTemperature(days: Int = 90) async throws -> MarketAShareTemperature {
         var components = URLComponents(url: baseURL.appending(path: "api/v1/market/ashare-temperature"), resolvingAgainstBaseURL: false)
         components?.queryItems = [.init(name: "days", value: String(days))]
@@ -157,6 +174,37 @@ struct MarketService {
         guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
         do { return try JSONDecoder().decode(type, from: data) }
         catch { throw MarketServiceError.decoding(error) }
+    }
+
+    private func request<Response: Decodable>(
+        _ request: URLRequest,
+        as type: Response.Type
+    ) async throws -> Response {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch {
+            throw MarketServiceError.transport(error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
+        do { return try JSONDecoder().decode(type, from: data) }
+        catch { throw MarketServiceError.decoding(error) }
+    }
+}
+
+enum VideoInterpretationServiceError: LocalizedError {
+    case unavailable(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let status): "视频解读服务暂不可用（\(status)）"
+        }
     }
 }
 

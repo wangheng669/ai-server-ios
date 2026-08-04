@@ -16,6 +16,11 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isLoadingRSSSelection = false
     @Published private(set) var isLoadingMoreRSSSelection = false
     @Published private(set) var canLoadMoreRSSSelection = true
+    @Published private(set) var selectedWeChatFeedID: Int?
+    @Published private(set) var selectedWeChatPosts: [Post] = []
+    @Published private(set) var isLoadingWeChatSelection = false
+    @Published private(set) var isLoadingMoreWeChatSelection = false
+    @Published private(set) var canLoadMoreWeChatSelection = true
     @Published private(set) var selectedFlashCategory: String?
     @Published var errorMessage: String?
     @Published var source: FeedSource {
@@ -23,7 +28,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private struct Snapshot { var posts: [Post]; var page: Int; var canLoadMore: Bool }
-    @Published private var cache: [FeedSource: Snapshot] = [:]
+    private var cache: [FeedSource: Snapshot] = [:]
+    private var pendingXTranslations: [Int: String] = [:]
+    private var xTranslationPublishTask: Task<Void, Never>?
     private var page = 1
     private let defaultPageSize = 5
     private var realtimeClient: RealtimeFeedClient?
@@ -33,12 +40,15 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
+    private let fetchWeChatFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchPostDetail: (Int) async throws -> Post
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
     private var selectedRSSPage = 1
     private let selectedRSSPageSize = 20
+    private var selectedWeChatPage = 1
+    private let selectedWeChatPageSize = 20
 
     init(
         source initialSource: FeedSource? = nil,
@@ -46,6 +56,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
+        fetchWeChatFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchPostDetail: ((Int) async throws -> Post)? = nil,
         fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil
     ) {
@@ -65,6 +76,14 @@ final class NewsFeedViewModel: ObservableObject {
         self.fetchRSSFeeds = { try await client.fetchRSSFeeds() }
         self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID, page, limit in
             try await client.fetchRSSFeedPosts(feedID: feedID, page: page, limit: limit)
+        }
+        self.fetchWeChatFeedPosts = fetchWeChatFeedPosts ?? fetchRSSFeedPosts ?? { feedID, page, limit in
+            try await client.fetchRSSFeedPosts(
+                feedID: feedID,
+                page: page,
+                limit: limit,
+                includesAllScores: true
+            )
         }
         self.fetchPostDetail = fetchPostDetail ?? { postID in
             try await client.fetchPost(id: postID)
@@ -173,6 +192,56 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
+    func selectWeChatFeed(_ feedID: Int?) async {
+        selectedWeChatFeedID = feedID
+        selectedWeChatPosts = []
+        selectedWeChatPage = 1
+        canLoadMoreWeChatSelection = true
+        guard let feedID else {
+            isLoadingWeChatSelection = false
+            return
+        }
+        isLoadingWeChatSelection = true
+        defer { if selectedWeChatFeedID == feedID { isLoadingWeChatSelection = false } }
+        do {
+            let result = try await fetchWeChatFeedPosts(feedID, 1, selectedWeChatPageSize)
+            guard !Task.isCancelled, selectedWeChatFeedID == feedID else { return }
+            selectedWeChatPosts = result
+            canLoadMoreWeChatSelection = !result.isEmpty
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedWeChatFeedID == feedID else { return }
+            errorMessage = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    func loadMoreSelectedWeChatIfNeeded(current post: Post) async {
+        guard let feedID = selectedWeChatFeedID,
+              post.id == selectedWeChatPosts.last?.id,
+              canLoadMoreWeChatSelection,
+              !isLoadingWeChatSelection,
+              !isLoadingMoreWeChatSelection else { return }
+        let nextPage = selectedWeChatPage + 1
+        isLoadingMoreWeChatSelection = true
+        defer { isLoadingMoreWeChatSelection = false }
+        do {
+            let result = try await fetchWeChatFeedPosts(feedID, nextPage, selectedWeChatPageSize)
+            guard !Task.isCancelled, selectedWeChatFeedID == feedID else { return }
+            let existingIDs = Set(selectedWeChatPosts.map(\.id))
+            selectedWeChatPosts += result.filter { !existingIDs.contains($0.id) }
+            selectedWeChatPage = nextPage
+            canLoadMoreWeChatSelection = !result.isEmpty
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedWeChatFeedID == feedID else { return }
+            errorMessage = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
     private func warmNewYorkTimesPostsIfNeeded(_ posts: [Post]) async throws -> [Post] {
         guard posts.contains(where: \.isNewYorkTimes) else { return posts }
         return try await prefetchNewYorkTimesBodies(for: posts)
@@ -242,11 +311,25 @@ final class NewsFeedViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty, value != post.originalDisplayContent else { return }
-            xTranslations[post.id] = value
+            pendingXTranslations[post.id] = value
+            scheduleXTranslationPublish()
         } catch is CancellationError {
             return
         } catch {
             // Translation is best-effort. Keep the original post visible on failure.
+        }
+    }
+
+    private func scheduleXTranslationPublish() {
+        guard xTranslationPublishTask == nil else { return }
+        xTranslationPublishTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard let self else { return }
+            let updates = pendingXTranslations
+            pendingXTranslations.removeAll(keepingCapacity: true)
+            xTranslationPublishTask = nil
+            guard !updates.isEmpty else { return }
+            xTranslations.merge(updates) { _, latest in latest }
         }
     }
 
@@ -303,7 +386,7 @@ final class NewsFeedViewModel: ObservableObject {
     func loadInitial() async {
         // Returning to a cached channel must preserve the exact feed snapshot.
         // Pull-to-refresh remains available when the user wants fresh content.
-        guard posts.isEmpty || isSwitchingSource else { return }
+        guard !isLoading, posts.isEmpty || isSwitchingSource else { return }
         await refresh()
     }
 
@@ -311,7 +394,7 @@ final class NewsFeedViewModel: ObservableObject {
         guard let selectedIndex = FeedSource.allCases.firstIndex(of: source) else { return }
         let sources = FeedSource.allCases
             .enumerated()
-            .filter { $0.element != source }
+            .filter { $0.element != source && abs($0.offset - selectedIndex) == 1 }
             .sorted { abs($0.offset - selectedIndex) < abs($1.offset - selectedIndex) }
             .map(\.element)
 
@@ -338,7 +421,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func pageSize(for source: FeedSource) -> Int {
         switch source {
-        case .weibo, .douyin, .truth: 20
+        case .wechat, .weibo, .douyin, .truth: 20
         case .flash: 20
         case .x: 10
         default: defaultPageSize
@@ -497,7 +580,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     func matchesCurrentSource(_ post: Post) -> Bool {
         switch source {
-        case .newYorkTimes: return post.source == FeedSource.newYorkTimes.rawValue
+        case .newYorkTimes, .wechat: return post.source == source.rawValue
         case .x: return post.sourceName == "X"
         case .bilibili: return post.isBilibili
         case .zhihu: return post.sourceName == "知乎"
@@ -516,7 +599,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func task(_ name: String, updates source: FeedSource) -> Bool {
         switch source {
-        case .newYorkTimes: return name == "rss"
+        case .newYorkTimes, .wechat: return name == "rss"
         case .x: return name == "x" || name == "x_home" || name == "x_home_following"
         case .weibo: return name == "weibo_hot"
         case .douyin: return name == "douyin_hot"

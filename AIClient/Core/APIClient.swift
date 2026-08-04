@@ -45,7 +45,12 @@ struct APIClient {
     ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin:
-            return try await fetchHotTopics(page: page, limit: limit, source: source).map { .hotTopic($0, source: source) }
+            return Self.hotTopicPostsForDisplay(
+                try await fetchHotTopics(page: page, limit: limit, source: source),
+                page: page,
+                limit: limit,
+                source: source
+            )
         case .flash:
             return try await fetchFlash(
                 page: page,
@@ -55,6 +60,8 @@ struct APIClient {
             ).map(Post.flash)
         case .xueqiu:
             return try await fetchXueqiuPosts(page: page, limit: limit)
+        case .wechat:
+            return try await fetchWeChatPosts(page: page, limit: limit)
         default:
             return try await fetchRegularPosts(page: page, limit: limit, source: source)
         }
@@ -78,18 +85,26 @@ struct APIClient {
         return feeds.filter { seen.insert($0.id).inserted }
     }
 
-    func fetchRSSFeedPosts(feedID: Int, page: Int = 1, limit: Int = 20) async throws -> [Post] {
+    func fetchRSSFeedPosts(
+        feedID: Int,
+        page: Int = 1,
+        limit: Int = 20,
+        includesAllScores: Bool = false
+    ) async throws -> [Post] {
         var parts = URLComponents(
             url: baseURL.appending(path: "api/v1/rss/feeds/\(feedID)/posts"),
             resolvingAgainstBaseURL: false
         )
-        parts?.queryItems = [
+        var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)),
             .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc"),
-            .init(name: "include_zero_score", value: "false"),
-            .init(name: "final_score", value: String(Post.minimumFeedScore))
+            .init(name: "include_zero_score", value: includesAllScores ? "true" : "false")
         ]
+        if !includesAllScores {
+            queryItems.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
+        }
+        parts?.queryItems = queryItems
         guard let url = parts?.url else { throw APIError.invalidURL }
         let response: RSSFeedPostsResponse = try await get(url)
         return response.data.posts
@@ -112,6 +127,39 @@ struct APIClient {
             .init(name: "sort", value: "time_desc"),
             .init(name: "include_zero_score", value: "true")
         ]
+    }
+
+    static let weChatFeedIDs = [57, 2373]
+
+    private func fetchWeChatPosts(page: Int, limit: Int) async throws -> [Post] {
+        let requestedCount = page * limit
+        let posts = try await withThrowingTaskGroup(of: [Post].self) { group in
+            for feedID in Self.weChatFeedIDs {
+                group.addTask {
+                    try await self.fetchRSSFeedPosts(
+                        feedID: feedID,
+                        page: 1,
+                        limit: requestedCount,
+                        includesAllScores: true
+                    )
+                }
+            }
+
+            var posts: [Post] = []
+            for try await result in group { posts += result }
+            return posts
+        }
+        let merged = Self.mergeWeChatPosts(posts)
+        let start = (page - 1) * limit
+        guard start < merged.count else { return [] }
+        return Array(merged.dropFirst(start).prefix(limit))
+    }
+
+    static func mergeWeChatPosts(_ posts: [Post]) -> [Post] {
+        var seen = Set<Int>()
+        return posts
+            .sorted { ($0.articlePostAt ?? "") > ($1.articlePostAt ?? "") }
+            .filter { seen.insert($0.id).inserted }
     }
 
     private func fetchXueqiuPosts(page: Int, limit: Int) async throws -> [Post] {
@@ -161,7 +209,7 @@ struct APIClient {
 
     static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {
         let isSpecialRSS = source == .laozhong || source == .youtube
-        let includesAllScores = source == .newYorkTimes || source == .youtube
+        let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube
         var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc"),
@@ -185,6 +233,34 @@ struct APIClient {
         let response: HotTopicsResponse = try await get(url)
         guard response.success else { throw APIError.invalidResponse }
         return response.data.topics
+    }
+
+    static func hotTopicPostsForDisplay(
+        _ topics: [HotTopic],
+        page: Int,
+        limit: Int,
+        source: FeedSource
+    ) -> [Post] {
+        topics.enumerated()
+            .sorted { lhs, rhs in
+                let leftRank = lhs.element.latestRank ?? Int.max
+                let rightRank = rhs.element.latestRank ?? Int.max
+                if leftRank != rightRank { return leftRank < rightRank }
+
+                let leftHeat = lhs.element.resolvedHeat ?? -.infinity
+                let rightHeat = rhs.element.resolvedHeat ?? -.infinity
+                if leftHeat != rightHeat { return leftHeat > rightHeat }
+
+                return lhs.offset < rhs.offset
+            }
+            .enumerated()
+            .map { offset, item in
+                .hotTopic(
+                    item.element,
+                    source: source,
+                    displayRank: max(page - 1, 0) * limit + offset + 1
+                )
+            }
     }
 
     static func flashQueryItems(

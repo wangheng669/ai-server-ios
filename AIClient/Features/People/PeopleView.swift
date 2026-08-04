@@ -406,7 +406,7 @@ private struct PeopleSwimlaneExplorer: View {
 
                     Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.primary.opacity(0.76))
                         .lineLimit(1)
                 }
             }
@@ -418,7 +418,7 @@ private struct PeopleSwimlaneExplorer: View {
         .offset(x: focusPreviewOffset)
         .frame(maxWidth: .infinity)
         .frame(height: 78)
-        .background(.ultraThinMaterial)
+        .background(.regularMaterial)
         .overlay(alignment: .top) {
             Divider()
         }
@@ -4863,14 +4863,12 @@ private struct XReplyContextCard: View {
             Label("回复 \(reply.handle ?? "这条动态")", systemImage: "arrowshape.turn.up.left")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-
             HStack(alignment: .top, spacing: 9) {
                 if let avatar = reply.avatarURL.flatMap(MediaURL.image) {
                     RemoteImage(url: avatar, height: 28, cornerRadius: 14)
                         .frame(width: 28, height: 28)
                         .clipped()
                 }
-
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         if let name = reply.authorName, !name.isEmpty {

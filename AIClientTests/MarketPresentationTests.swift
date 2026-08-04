@@ -86,6 +86,7 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.items.first?.videoUrl, "https://video.example.com/123.mp4")
         XCTAssertEqual(response.data.items.first?.directPlaybackURL?.absoluteString, "https://video.example.com/123.mp4")
         XCTAssertTrue(response.data.items.first?.playbackURL?.absoluteString.contains("/api/v1/media-proxy?") == true)
+        XCTAssertEqual(response.data.items.first?.directCoverURL?.absoluteString, "https://example.com/cover.jpg")
         XCTAssertTrue(response.data.items.first?.coverPlaybackURL?.absoluteString.contains("/api/v1/media-proxy?") == true)
         XCTAssertEqual(response.data.items.first?.stale, false)
     }
@@ -99,6 +100,27 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.items.first?.analysis, "")
         XCTAssertEqual(response.data.items.first?.reasons, [])
         XCTAssertEqual(response.data.items.first?.stale, true)
+    }
+
+    func testDecodesInvestorVideoInterpretation() throws {
+        let data = Data(#"{"success":true,"source_id":"123","status":"ready","provider":"bigmodel","model":"glm-4.6v","cached":false,"estimated_cost_cny":0.036,"interpretation":{"overview":"作者认为短线仍需谨慎。","visual_findings":["画面显示上证指数分时图"],"timeline":[{"time":"00:18","title":"提出观点","detail":"作者判断市场仍在震荡。"}],"creator_notes":["观点主要依据短期走势，未讨论仓位风险。"]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(InvestorVideoInterpretationResponse.self, from: data)
+
+        XCTAssertEqual(response.sourceID, "123")
+        XCTAssertEqual(response.model, "glm-4.6v")
+        XCTAssertEqual(response.interpretation?.timeline.first?.time, "00:18")
+        XCTAssertEqual(response.estimatedCostCNY, 0.036)
+        XCTAssertFalse(response.cached)
+    }
+
+    func testDecodesPendingInvestorVideoInterpretation() throws {
+        let data = Data(#"{"success":true,"source_id":"123","status":"pending","provider":"","model":"","cached":false,"estimated_cost_cny":0}"#.utf8)
+
+        let response = try JSONDecoder().decode(InvestorVideoInterpretationResponse.self, from: data)
+
+        XCTAssertEqual(response.status, "pending")
+        XCTAssertNil(response.interpretation)
     }
 
     func testDecodesMarketChartQualityContract() throws {

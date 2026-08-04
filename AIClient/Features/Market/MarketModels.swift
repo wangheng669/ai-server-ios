@@ -551,6 +551,23 @@ struct InvestorMoodBoard: Decodable {
     let items: [InvestorMoodItem]
 }
 
+struct InvestorVideoInterpretationResponse: Decodable {
+    let success: Bool
+    let sourceID: String
+    let status: String
+    let interpretation: BilibiliVideoInterpretation?
+    let provider: String
+    let model: String
+    let cached: Bool
+    let estimatedCostCNY: Double
+
+    enum CodingKeys: String, CodingKey {
+        case success, status, interpretation, provider, model, cached
+        case sourceID = "source_id"
+        case estimatedCostCNY = "estimated_cost_cny"
+    }
+}
+
 struct InvestorMoodItem: Decodable, Identifiable {
     var id: String { awemeId }
     let nickname: String
@@ -617,6 +634,10 @@ struct InvestorMoodItem: Decodable, Identifiable {
 
     var coverPlaybackURL: URL? {
         proxiedMediaURL(from: coverUrl)
+    }
+
+    var directCoverURL: URL? {
+        publicMediaURL(from: coverUrl)
     }
 
     var prewarmURL: URL? {

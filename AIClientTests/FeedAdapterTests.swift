@@ -121,6 +121,46 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
+    func testWeChatRequestsAllScoresFromMaobidaoFeed() {
+        let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .wechat)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["source"], "rss:57")
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+    }
+
+    func testWeChatAggregatesMaobidaoAndXiaohuAI() {
+        XCTAssertEqual(APIClient.weChatFeedIDs, [57, 2373])
+    }
+
+    func testWeChatMergedPostsAreNewestFirstAndDeduplicated() throws {
+        let decoder = JSONDecoder()
+        let older = try decoder.decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:57","article_post_at":"2026-08-01T10:00:00Z"}"#.utf8)
+        )
+        let newer = try decoder.decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss:2373","article_post_at":"2026-08-03T14:08:00Z"}"#.utf8)
+        )
+
+        let result = APIClient.mergeWeChatPosts([older, newer, older])
+
+        XCTAssertEqual(result.map(\.id), [2, 1])
+    }
+
+    func testMaobidaoIsExcludedFromGenericRSSBecauseItHasDedicatedWeChatTab() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":57,"source":"rss:57","title":"猫笔刀"}"#.utf8)
+        )
+
+        XCTAssertTrue(post.hasDedicatedFeedTab)
+    }
+
     func testRSSFeedsUseElevatedScoreFilter() {
         let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .rss)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
@@ -449,7 +489,7 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testCacheWarmingMakesFirstSourceSelectionImmediate() async {
+    func testCacheWarmingOnlyPreloadsAdjacentSources() async {
         var requestedSources: [FeedSource] = []
         let model = NewsFeedViewModel(source: .x) { _, _, source in
             requestedSources.append(source)
@@ -457,10 +497,10 @@ final class FeedAdapterTests: XCTestCase {
         }
 
         await model.warmSourceCache()
-        model.select(.zhihu)
+        model.select(.weibo)
 
         XCTAssertFalse(model.isSwitchingSource)
-        XCTAssertEqual(Set(requestedSources), Set(FeedSource.allCases.filter { $0 != .x }))
+        XCTAssertEqual(Set(requestedSources), Set([.wechat, .weibo]))
     }
 
     @MainActor
@@ -503,6 +543,25 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testConcurrentInitialLoadsReuseTheActiveRequest() async {
+        var requestCount = 0
+        let firstRequestStarted = expectation(description: "first request started")
+        let model = NewsFeedViewModel(source: .flash) { _, _, _ in
+            requestCount += 1
+            firstRequestStarted.fulfill()
+            try await Task.sleep(for: .milliseconds(100))
+            return []
+        }
+
+        let backgroundLoad = Task { await model.loadInitial() }
+        await fulfillment(of: [firstRequestStarted], timeout: 1)
+        await model.loadInitial()
+        await backgroundLoad.value
+
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    @MainActor
     func testSwitchingSourceStartsNewestLoadBeforeCancelledLoadFinishes() async throws {
         let firstRequestStarted = expectation(description: "first request started")
         let model = NewsFeedViewModel(source: .x) { _, _, source in
@@ -537,6 +596,106 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.feedRank, 2)
         XCTAssertEqual(post.formattedTime, "第 2 名 · 热度 9988")
         XCTAssertTrue(post.isSynthetic)
+    }
+
+    func testHotTopicDisplayRepairsDuplicateRanksAndTieOrdering() throws {
+        let json = #"{"success":true,"data":{"topics":[{"id":1,"keyword":"低热度插入项","latest_rank":6,"meta":{"last_payload":{"heat":"543815"}}},{"id":2,"keyword":"高热度正常项","latest_rank":6,"meta":{"last_payload":{"heat":"545903"}}},{"id":3,"keyword":"下一项","latest_rank":7,"meta":{"last_payload":{"heat":"540000"}}}]}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
+
+        let posts = APIClient.hotTopicPostsForDisplay(
+            response.data.topics,
+            page: 1,
+            limit: 20,
+            source: .weibo
+        )
+
+        XCTAssertEqual(posts.map(\.displayTitle), ["高热度正常项", "低热度插入项", "下一项"])
+        XCTAssertEqual(posts.map(\.feedRank), [1, 2, 3])
+        XCTAssertEqual(posts.map(\.formattedTime), [
+            "第 1 名 · 热度 545903",
+            "第 2 名 · 热度 543815",
+            "第 3 名 · 热度 540000"
+        ])
+    }
+
+    func testHotTopicDisplayContinuesRankAcrossPages() throws {
+        let json = #"{"success":true,"data":{"topics":[{"id":21,"keyword":"第二页第一项","latest_rank":20,"latest_heat":12345}]}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
+
+        let posts = APIClient.hotTopicPostsForDisplay(
+            response.data.topics,
+            page: 2,
+            limit: 20,
+            source: .weibo
+        )
+
+        XCTAssertEqual(posts.first?.feedRank, 21)
+        XCTAssertEqual(posts.first?.formattedTime, "第 21 名 · 热度 12345")
+    }
+
+    func testHiddenFeedChromeRemovesHeaderReservation() {
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: false), 53)
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 0)
+    }
+
+    func testFilteredPaginationTaskAdvancesWithRawTail() {
+        XCTAssertEqual(
+            FeedPaginationLayout.taskPostID(
+                visibleTailID: 3,
+                rawTailID: 10,
+                usesFilteredPagination: true
+            ),
+            10
+        )
+        XCTAssertEqual(
+            FeedPaginationLayout.taskPostID(
+                visibleTailID: 3,
+                rawTailID: 10,
+                usesFilteredPagination: false
+            ),
+            3
+        )
+    }
+
+    @MainActor
+    func testWeChatAggregateRequestsTwentyPosts() async {
+        var requestedLimit = 0
+        let model = NewsFeedViewModel(source: .wechat) { _, limit, _ in
+            requestedLimit = limit
+            return []
+        }
+
+        await model.refresh()
+
+        XCTAssertEqual(requestedLimit, 20)
+    }
+
+    @MainActor
+    func testWeChatAccountSelectionUsesServerFeedEndpointWithoutClientFiltering() async throws {
+        var requests: [(feedID: Int, page: Int, limit: Int)] = []
+        let first = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:2373"}"#.utf8)
+        )
+        let second = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss:2373"}"#.utf8)
+        )
+        let model = NewsFeedViewModel(
+            source: .wechat,
+            fetchWeChatFeedPosts: { feedID, page, limit in
+                requests.append((feedID, page, limit))
+                return page == 1 ? [first] : [second]
+            }
+        )
+
+        await model.selectWeChatFeed(2373)
+        await model.loadMoreSelectedWeChatIfNeeded(current: first)
+
+        XCTAssertEqual(requests.map(\.feedID), [2373, 2373])
+        XCTAssertEqual(requests.map(\.page), [1, 2])
+        XCTAssertEqual(requests.map(\.limit), [20, 20])
+        XCTAssertEqual(model.selectedWeChatPosts.map(\.id), [1, 2])
     }
 
     func testDecodesAndMapsFlashItem() throws {

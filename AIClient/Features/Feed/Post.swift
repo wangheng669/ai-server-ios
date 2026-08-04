@@ -289,6 +289,12 @@ struct HotTopic: Decodable {
         case latestHeat = "latest_heat"
         case rankChange = "rank_change"
     }
+
+    var resolvedHeat: Double? {
+        latestHeat
+            ?? meta?.lastPayload?.hotValue
+            ?? meta?.lastPayload?.heat.flatMap(Double.init)
+    }
 }
 
 struct FlashResponse: Decodable {
@@ -324,6 +330,12 @@ struct FeedCategory: Decodable { let id: Int; let name: String }
 struct Post: Decodable, Identifiable, Hashable {
     static let minimumFeedScore = 5
     static let importantFlashScore = 7.0
+    private static let htmlTextCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 1_200
+        cache.totalCostLimit = 12 * 1024 * 1024
+        return cache
+    }()
 
     let id: Int
     let title, text, summary, content, contentZH, source, formattedTime, weightReason: String?
@@ -806,7 +818,9 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
     var hasDedicatedFeedTab: Bool {
-        source == FeedSource.newYorkTimes.rawValue || source == "rss:79"
+        source == FeedSource.newYorkTimes.rawValue ||
+            source == FeedSource.wechat.rawValue ||
+            source == "rss:79"
     }
     var isYouTube: Bool {
         guard isRSS else { return false }
@@ -830,6 +844,10 @@ struct Post: Decodable, Identifiable, Hashable {
     private func htmlText(_ value: String?) -> String? {
         guard let value = clean(value) else { return nil }
         guard value.contains("<") || value.contains("&lt;") || value.contains("&amp;lt;") else { return value }
+        let cacheKey = value as NSString
+        if let cached = Self.htmlTextCache.object(forKey: cacheKey) {
+            return cached as String
+        }
         let decoded = decodeNumericHTMLEntities(value)
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
@@ -846,7 +864,9 @@ struct Post: Decodable, Identifiable, Hashable {
             let value = scalar.value
             return !(0xE000...0xF8FF).contains(value) && value != 0xFFFD
         }))
-        return clean(text)
+        guard let cleaned = clean(text) else { return nil }
+        Self.htmlTextCache.setObject(cleaned as NSString, forKey: cacheKey, cost: cleaned.utf8.count)
+        return cleaned
     }
 
     private func weiboText(_ value: String?) -> String? {
@@ -981,8 +1001,8 @@ struct Post: Decodable, Identifiable, Hashable {
         case postTags
     }
 
-    static func hotTopic(_ topic: HotTopic, source: FeedSource) -> Post {
-        let rank = topic.latestRank
+    static func hotTopic(_ topic: HotTopic, source: FeedSource, displayRank: Int? = nil) -> Post {
+        let rank = displayRank ?? topic.latestRank
         let heat = topic.latestHeat.map { String(Int($0)) } ?? topic.meta?.lastPayload?.heat ?? topic.meta?.lastPayload?.hotValue.map { String(Int($0)) }
         let meta = [rank.map { "第 \($0) 名" }, heat.map { "热度 \($0)" }].compactMap { $0 }.joined(separator: " · ")
         return Post(
@@ -1453,6 +1473,7 @@ extension Int {
 
 enum FeedSource: String, CaseIterable, Identifiable {
     case newYorkTimes = "rss:47"
+    case wechat = "rss:57"
     case x, weibo
     case douyin = "douyin-hot"
     case bilibili, zhihu, xueqiu, truth, rss, laozhong, youtube, flash
@@ -1461,6 +1482,7 @@ enum FeedSource: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .newYorkTimes: "纽约时报"
+        case .wechat: "微信"
         case .x: "X"
         case .weibo: "微博"
         case .douyin: "抖音"

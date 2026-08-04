@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import QuartzCore
 
 enum RootTab: Hashable { case observation, investment, learning, people }
 
@@ -40,6 +41,29 @@ private enum WeiboSection: String, CaseIterable, Identifiable {
 
     var id: Self { self }
     var title: String { self == .hot ? "热搜" : "关注" }
+}
+
+enum FeedChromeLayout {
+    static let headerHeight: CGFloat = 53
+
+    static func headerReservationHeight(isHidden: Bool) -> CGFloat {
+        isHidden ? 0 : headerHeight
+    }
+}
+
+enum FeedPaginationLayout {
+    static func taskPostID(
+        visibleTailID: Int,
+        rawTailID: Int?,
+        usesFilteredPagination: Bool
+    ) -> Int {
+        usesFilteredPagination ? rawTailID ?? visibleTailID : visibleTailID
+    }
+}
+
+private struct WeChatAccount: Identifiable {
+    let id: Int
+    let name: String
 }
 
 private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
@@ -174,10 +198,13 @@ struct NewsFeedView: View {
             showsDetail = false
             hidesTabBar = false
         }
-        .task(id: "\(rootTabIsActive)-\(model.source.rawValue)") {
-            guard rootTabIsActive else { return }
+        .task(id: model.source.rawValue) {
             await model.loadInitial()
             hasLoadedFeedOnce = true
+        }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await model.loadInitial()
             #if DEBUG
             if opensZhihuDetailPreview,
                selectedPost == nil,
@@ -196,9 +223,6 @@ struct NewsFeedView: View {
                 selectedPost = first
             }
             #endif
-        }
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
             await model.warmSourceCache()
         }
     }
@@ -208,7 +232,7 @@ struct NewsFeedView: View {
             sourceBar
             Divider().opacity(0.55)
         }
-        .frame(height: 53)
+        .frame(height: FeedChromeLayout.headerHeight)
         .background(Color(uiColor: .systemBackground))
         .overlay(alignment: .bottom) {
             if model.isSwitchingSource {
@@ -217,7 +241,7 @@ struct NewsFeedView: View {
                     .tint(.blue)
             }
         }
-        .offset(y: isFeedChromeHidden ? -53 : 0)
+        .offset(y: isFeedChromeHidden ? -FeedChromeLayout.headerHeight : 0)
         .opacity(isFeedChromeHidden ? 0 : 1)
         .allowsHitTesting(!isFeedChromeHidden)
         .accessibilityHidden(isFeedChromeHidden)
@@ -293,6 +317,12 @@ struct NewsFeedView: View {
                 .foregroundStyle(.primary)
                 .frame(width: 28, height: 22)
                 .fixedSize(horizontal: true, vertical: false)
+        } else if source == .wechat {
+            Image("WeChatMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 23, height: 23)
         } else if source == .x {
             Text("X")
                 .font(.system(size: 18, weight: .bold, design: .default))
@@ -335,12 +365,26 @@ struct NewsFeedView: View {
             set: { selectSource($0) }
         )) {
             ForEach(FeedSource.allCases) { source in
-                sourcePage(source)
-                    .tag(source)
+                Group {
+                    if activeSources.contains(source) {
+                        sourcePage(source)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .tag(source)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var activeSources: [FeedSource] {
+        let sources = FeedSource.allCases
+        guard let index = sources.firstIndex(of: model.source) else { return [model.source] }
+        let lower = max(sources.startIndex, index - 1)
+        let upper = min(sources.index(before: sources.endIndex), index + 1)
+        return Array(sources[lower...upper])
     }
 
     @ViewBuilder
@@ -360,14 +404,18 @@ struct NewsFeedView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: "\(rootTabIsActive)-\(source.rawValue)") {
-                if rootTabIsActive, source == .rss { await model.loadRSSFeedsIfNeeded() }
+                if rootTabIsActive, source == .rss || source == .wechat {
+                    await model.loadRSSFeedsIfNeeded()
+                }
             }
         }
     }
 
     private var weiboPage: some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: 53)
+            Color.clear.frame(
+                height: FeedChromeLayout.headerReservationHeight(isHidden: isFeedChromeHidden)
+            )
             weiboSectionSelector
             Divider().opacity(0.5)
             if weiboSection == .hot {
@@ -472,10 +520,16 @@ struct NewsFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func feedList(for source: FeedSource, posts: [Post], topInset: CGFloat = 53) -> some View {
+    private func feedList(
+        for source: FeedSource,
+        posts: [Post],
+        topInset: CGFloat = FeedChromeLayout.headerHeight
+    ) -> some View {
         let visiblePosts = visiblePosts(for: source, posts: posts)
         let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
-        let usesFilteredPagination = source == .flash || (source == .rss && !isSelectedRSSPage)
+        let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
+        let usesFilteredPagination = source == .flash
+            || (source == .rss && !isSelectedRSSPage)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -484,6 +538,20 @@ struct NewsFeedView: View {
                         rssSourceFilterBar
                         Divider().opacity(0.55)
                         if model.isLoadingRSSSelection {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("正在加载该来源")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 22)
+                        }
+                    }
+                    if source == .wechat {
+                        weChatAccountBar
+                        Divider().opacity(0.55)
+                        if model.isLoadingWeChatSelection {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
                                 Text("正在加载该来源")
@@ -514,16 +582,6 @@ struct NewsFeedView: View {
                             onOpen: { openPost(displayPost) }
                         )
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background {
-                                if source == .youtube,
-                                   index == 0,
-                                   let videoID = displayPost.youtubeVideoID {
-                                    YouTubeFirstVideoPrewarmer(videoID: videoID)
-                                        .frame(width: 1, height: 1)
-                                        .opacity(0.01)
-                                        .allowsHitTesting(false)
-                                }
-                            }
                             .contentShape(Rectangle())
                             .modifier(ConditionalTapGestureModifier(isEnabled: !post.isXueqiu) {
                                 if post.isFlash {
@@ -559,19 +617,8 @@ struct NewsFeedView: View {
                                 }
                             }
                             .task(id: "\(rootTabIsActive)-translate-\(post.id)") {
-                                guard rootTabIsActive, source == model.source else { return }
+                                guard rootTabIsActive, source == .x, source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
-                            }
-                            .task(id: "\(rootTabIsActive)-page-\(usesFilteredPagination ? posts.last?.id ?? -1 : post.id)") {
-                                guard rootTabIsActive, source == model.source else { return }
-                                if isSelectedRSSPage {
-                                    await model.loadMoreSelectedRSSIfNeeded(current: post)
-                                } else {
-                                    await model.loadMoreIfNeeded(
-                                        current: post,
-                                        thresholdPostID: usesFilteredPagination ? visiblePosts.last?.id : nil
-                                    )
-                                }
                             }
                         if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
@@ -579,6 +626,28 @@ struct NewsFeedView: View {
                             Divider().opacity(source == .flash ? 0.42 : 0.6)
                                 .padding(.leading, source == .flash ? 84 : 0)
                         }
+                    }
+                    if let tail = visiblePosts.last {
+                        let paginationTaskPostID = FeedPaginationLayout.taskPostID(
+                            visibleTailID: tail.id,
+                            rawTailID: posts.last?.id,
+                            usesFilteredPagination: usesFilteredPagination
+                        )
+                        Color.clear
+                            .frame(height: 1)
+                            .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(paginationTaskPostID)") {
+                                guard rootTabIsActive, source == model.source else { return }
+                                if isSelectedRSSPage {
+                                    await model.loadMoreSelectedRSSIfNeeded(current: tail)
+                                } else if isSelectedWeChatPage {
+                                    await model.loadMoreSelectedWeChatIfNeeded(current: tail)
+                                } else {
+                                    await model.loadMoreIfNeeded(
+                                        current: tail,
+                                        thresholdPostID: usesFilteredPagination ? tail.id : nil
+                                    )
+                                }
+                            }
                     }
                     if visiblePosts.isEmpty,
                        !posts.isEmpty,
@@ -591,7 +660,9 @@ struct NewsFeedView: View {
                                 await model.loadMoreIfNeeded(current: rawTail)
                             }
                     }
-                    if model.isLoadingMore || (isSelectedRSSPage && model.isLoadingMoreRSSSelection) {
+                    if model.isLoadingMore
+                        || (isSelectedRSSPage && model.isLoadingMoreRSSSelection)
+                        || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection) {
                         ProgressView().padding(20)
                     }
                     if model.errorMessage != nil {
@@ -600,6 +671,10 @@ struct NewsFeedView: View {
                                model.selectedRSSFeedID != nil,
                                let last = model.selectedRSSPosts.last {
                                 Task { await model.loadMoreSelectedRSSIfNeeded(current: last) }
+                            } else if source == .wechat,
+                                      model.selectedWeChatFeedID != nil,
+                                      let last = model.selectedWeChatPosts.last {
+                                Task { await model.loadMoreSelectedWeChatIfNeeded(current: last) }
                             } else if let last = model.posts.last {
                                 Task { await model.loadMoreIfNeeded(current: last) }
                             }
@@ -620,6 +695,8 @@ struct NewsFeedView: View {
                 guard source == model.source else { return }
                 if isSelectedRSSPage, let feedID = model.selectedRSSFeedID {
                     await model.selectRSSFeed(feedID)
+                } else if isSelectedWeChatPage, let feedID = model.selectedWeChatFeedID {
+                    await model.selectWeChatFeed(feedID)
                 } else {
                     await model.refresh()
                 }
@@ -633,7 +710,7 @@ struct NewsFeedView: View {
                             proxy.scrollTo("feed-top", anchor: .top)
                         }
                     }
-                    .padding(.top, isFeedChromeHidden ? 12 : 61)
+                    .padding(.top, isFeedChromeHidden ? 12 : FeedChromeLayout.headerHeight + 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
@@ -703,6 +780,9 @@ struct NewsFeedView: View {
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
+        if source == .wechat, model.selectedWeChatFeedID != nil {
+            return model.selectedWeChatPosts
+        }
         if source == .rss {
             let rssPosts: [Post]
             if model.selectedRSSFeedID != nil {
@@ -717,6 +797,46 @@ struct NewsFeedView: View {
     }
 
     private var rssQualityThreshold: Double { 6.0 }
+
+    private var weChatAccounts: [WeChatAccount] {
+        [
+            .init(id: 57, name: "猫笔刀"),
+            .init(id: 2373, name: "小互 AI")
+        ]
+    }
+
+    private var weChatAccountBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                sourceAvatarButton(
+                    id: nil,
+                    name: "全部",
+                    avatarURL: nil,
+                    isSelected: model.selectedWeChatFeedID == nil
+                ) {
+                    Task { await model.selectWeChatFeed(nil) }
+                }
+
+                ForEach(weChatAccounts) { account in
+                    let feed = model.rssFeeds.first { $0.id == account.id }
+                    sourceAvatarButton(
+                        id: account.id,
+                        name: account.name,
+                        avatarURL: feed?.preferredAvatarURL,
+                        isSelected: model.selectedWeChatFeedID == account.id,
+                        rejectsUpscaledImages: true
+                    ) {
+                        Task { await model.selectWeChatFeed(account.id) }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .sensoryFeedback(.selection, trigger: model.selectedWeChatFeedID)
+        .accessibilityLabel("微信公众号")
+    }
 
     private var rssSourceFilterBar: some View {
         rssSourcePickerTrigger
@@ -853,16 +973,15 @@ struct NewsFeedView: View {
         }
     }
 
-    private func rssSourceButton(
+    private func sourceAvatarButton(
         id: Int?,
         name: String,
         avatarURL: URL?,
-        rejectsUpscaledImages: Bool = false
+        isSelected: Bool,
+        rejectsUpscaledImages: Bool = false,
+        action: @escaping () -> Void
     ) -> some View {
-        let isSelected = model.selectedRSSFeedID == id
-        return Button {
-            Task { await model.selectRSSFeed(id) }
-        } label: {
+        Button(action: action) {
             VStack(spacing: 5) {
                 ZStack {
                     if let id {
@@ -950,7 +1069,10 @@ struct NewsFeedView: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private func feedStatus(for source: FeedSource, topInset: CGFloat = 53) -> some View {
+    @ViewBuilder private func feedStatus(
+        for source: FeedSource,
+        topInset: CGFloat = FeedChromeLayout.headerHeight
+    ) -> some View {
         if source == model.source, model.isLoading {
             FeedTimelineLoadingView(topInset: topInset)
         } else {
@@ -1912,6 +2034,7 @@ private struct SourceScrollOffsetPreserver: UIViewRepresentable {
         private var offsetObservation: NSKeyValueObservation?
         private var activeSource: FeedSource?
         private var isRestoring = false
+        private var lastOffsetSaveTime: CFTimeInterval = 0
 
         func update(scrollView: UIScrollView, source: FeedSource, store: FeedScrollPositionStore) {
             if self.scrollView !== scrollView {
@@ -1919,6 +2042,9 @@ private struct SourceScrollOffsetPreserver: UIViewRepresentable {
                 activeSource = source
                 offsetObservation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
                     guard let self, !self.isRestoring, let activeSource = self.activeSource else { return }
+                    let now = CACurrentMediaTime()
+                    guard now - self.lastOffsetSaveTime >= 0.12 else { return }
+                    self.lastOffsetSaveTime = now
                     store.save(scrollView.contentOffset, for: activeSource)
                 }
                 if let target = store.offset(for: source) {
@@ -1940,14 +2066,20 @@ private struct SourceScrollOffsetPreserver: UIViewRepresentable {
 
         private func restore(_ target: CGPoint, in scrollView: UIScrollView) {
             isRestoring = true
+            restore(target, in: scrollView, attempt: 0)
+        }
+
+        private func restore(_ target: CGPoint, in scrollView: UIScrollView, attempt: Int) {
             DispatchQueue.main.async {
                 scrollView.layoutIfNeeded()
-                scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
-                DispatchQueue.main.async {
-                    scrollView.layoutIfNeeded()
-                    scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
-                    self.isRestoring = false
+                let needsScrollableContent = target.y > -scrollView.adjustedContentInset.top + 1
+                let contentIsReady = scrollView.contentSize.height > scrollView.bounds.height + 1
+                if needsScrollableContent, !contentIsReady, attempt < 4 {
+                    self.restore(target, in: scrollView, attempt: attempt + 1)
+                    return
                 }
+                scrollView.setContentOffset(self.clamped(target, in: scrollView), animated: false)
+                self.isRestoring = false
             }
         }
 
@@ -1998,7 +2130,10 @@ private struct FeedChromeScrollModifier: ViewModifier {
                     geometry.contentOffset.y + geometry.contentInsets.top
                 } action: { oldOffset, newOffset in
                     guard isActive else { return }
-                    isAtTop = newOffset <= 8
+                    let nextIsAtTop = newOffset <= 8
+                    if isAtTop != nextIsAtTop {
+                        isAtTop = nextIsAtTop
+                    }
                     handleOffsetChange(from: oldOffset, to: newOffset)
                 }
         } else {
@@ -2106,6 +2241,7 @@ private extension FeedSource {
     var systemIcon: String {
         switch self {
         case .newYorkTimes: "newspaper.fill"
+        case .wechat: "bubble.left.and.bubble.right.fill"
         case .x: "house.fill"
         case .truth: "t.square.fill"
         case .xueqiu: "circle.hexagongrid.fill"
@@ -2119,6 +2255,7 @@ private extension FeedSource {
     var iconColor: Color {
         switch self {
         case .newYorkTimes: .primary
+        case .wechat: Color(red: 0.03, green: 0.76, blue: 0.38)
         case .x, .zhihu, .truth: .blue
         case .xueqiu: Color(red: 0.95, green: 0.32, blue: 0.12)
         case .weibo, .youtube: .red
@@ -2274,7 +2411,22 @@ private struct WeiboFollowingSingleImage: View {
     }
 }
 
+private final class XAttributedTextBox {
+    let value: AttributedString
+    init(_ value: AttributedString) { self.value = value }
+}
+
 private struct NewsCardView: View {
+    private static let xTimelineCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 300
+        return cache
+    }()
+    private static let xAttributedTextCache: NSCache<NSString, XAttributedTextBox> = {
+        let cache = NSCache<NSString, XAttributedTextBox>()
+        cache.countLimit = 300
+        return cache
+    }()
     let post: Post
     var isFeaturedBilibili = false
     var isExpandedFlash = false
@@ -2399,7 +2551,13 @@ private struct NewsCardView: View {
     /// Keep ordinary posts complete in the timeline, while giving translated long-form
     /// posts the same compact handoff to detail that X uses for "Show more".
     private var xTimelineContent: String {
-        xTimelineParagraphs.joined(separator: "\n\n")
+        let key = NSString(string: "\(post.hasTranslation ? 1 : 0)|\(post.displayContent)")
+        if let cached = Self.xTimelineCache.object(forKey: key) {
+            return cached as String
+        }
+        let value = xTimelineParagraphs.joined(separator: "\n\n")
+        Self.xTimelineCache.setObject(value as NSString, forKey: key, cost: value.utf8.count)
+        return value
     }
 
     private var isLongXPost: Bool {
@@ -2407,6 +2565,10 @@ private struct NewsCardView: View {
     }
 
     private func xRichText(_ value: String) -> Text {
+        let cacheKey = value as NSString
+        if let cached = Self.xAttributedTextCache.object(forKey: cacheKey) {
+            return Text(cached.value)
+        }
         var attributed = AttributedString(value)
         let source = value as NSString
         let pattern = #"\$[A-Za-z][A-Za-z0-9.]{0,9}|https?://[^\s]+"#
@@ -2424,6 +2586,7 @@ private struct NewsCardView: View {
                 attributed[range].link = url
             }
         }
+        Self.xAttributedTextCache.setObject(XAttributedTextBox(attributed), forKey: cacheKey)
         return Text(attributed)
     }
 

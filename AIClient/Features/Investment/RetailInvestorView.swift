@@ -6,7 +6,8 @@ struct RetailInvestorView: View {
     private let store: RetailSentimentStore
     private let marketStore: MarketStore
     @State private var selectedMarket: SentimentMarket = .china
-    @State private var selectedInvestorMoodID: InvestorMoodItem.ID?
+    @State private var interpretationItem: InvestorMoodItem?
+    @State private var showsAllInvestorMood = false
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     @MainActor
@@ -47,15 +48,17 @@ struct RetailInvestorView: View {
                     if selectedMarket == .korea {
                         koreaLeverageContent
                     } else {
-                        marketSignalStrip
+                        sentimentDailyHeader
                         sectionGap
-                        marketTemperatureCard
+                        sentimentDecisionHero
+                        sentimentDecisionGrid
+                        actionPlaybook
+                        sectionGap
+                        investorMoodCard
                         if selectedMarket == .china {
                             sectionGap
                             sectorHighlights
                         }
-                        sectionGap
-                        investorMoodCard
                         methodologyNote
                     }
                 }
@@ -79,6 +82,9 @@ struct RetailInvestorView: View {
         }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
+        .sheet(item: $interpretationItem) { item in
+            InvestorVideoInterpretationSheet(item: item, service: store.service)
+        }
     }
 
     @ViewBuilder
@@ -173,6 +179,229 @@ struct RetailInvestorView: View {
         .background(InvestmentDesign.surface)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedMarket.title)市场情绪 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
+    }
+
+    private var sentimentDailyHeader: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("情绪日报")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text(
+                    Date.now.formatted(
+                        Date.FormatStyle()
+                            .month(.defaultDigits)
+                            .day(.defaultDigits)
+                            .weekday(.wide)
+                            .locale(Locale(identifier: "zh_CN"))
+                    )
+                )
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if store.isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                Label("实时更新", systemImage: "waveform.path.ecg")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(InvestmentDesign.accentSoft, in: Capsule())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
+        .background(InvestmentDesign.surface)
+    }
+
+    private var sentimentDecisionHero: some View {
+        let snapshot = store.snapshot(for: selectedMarket)
+        let score = snapshot?.score
+        let accent = temperatureColor(score)
+        let breadth = selectedBreadth
+        return VStack(alignment: .leading, spacing: 17) {
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: sentimentSymbol(score))
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 46, height: 46)
+                    .background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(sentimentVerdict(score))
+                        .font(.system(size: 23, weight: .bold))
+                    Text(selectedMarket.title + " · " + (snapshot?.label.nonEmpty ?? "等待数据"))
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                HStack(alignment: .lastTextBaseline, spacing: 3) {
+                    Text(score.map { String(Int($0.rounded())) } ?? "—")
+                        .font(.system(size: 43, weight: .bold, design: .rounded))
+                        .foregroundStyle(accent)
+                        .contentTransition(.numericText())
+                    Text("/100")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Text(decisionNarrative(score: score, breadth: breadth))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+
+            HStack(spacing: 8) {
+                decisionDriver("赚钱效应", state: breadthEffectLabel(breadth), tint: breadth.up >= breadth.down ? InvestmentDesign.gain : InvestmentDesign.loss)
+                decisionDriver("市场温度", state: snapshot?.label.nonEmpty ?? "待更新", tint: accent)
+                decisionDriver("情绪分歧", state: breadth.flatRatio > 0.12 ? "较明显" : "可控", tint: InvestmentDesign.warning)
+            }
+        }
+        .padding(18)
+        .background(
+            LinearGradient(
+                colors: [InvestmentDesign.secondarySurface, accent.opacity(0.08)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(accent.opacity(0.16), lineWidth: 0.75)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var sentimentDecisionGrid: some View {
+        let snapshot = store.snapshot(for: selectedMarket)
+        let breadth = selectedBreadth
+        return HStack(spacing: 10) {
+            decisionMetricCard(
+                title: "上涨占比",
+                value: breadth.total > 0 ? String(format: "%.1f%%", breadth.upRatio * 100) : "—",
+                detail: breadth.total > 0 ? "上涨 \(breadth.up) · 下跌 \(breadth.down)" : "等待行情数据",
+                icon: "chart.bar.xaxis",
+                tint: breadth.up >= breadth.down ? InvestmentDesign.gain : InvestmentDesign.loss
+            )
+            decisionMetricCard(
+                title: "估值位置",
+                value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—",
+                detail: snapshot?.primaryTitle.nonEmpty ?? "等待估值数据",
+                icon: "scope",
+                tint: .blue
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var actionPlaybook: some View {
+        let score = store.snapshot(for: selectedMarket)?.score
+        return VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                Label("今日应对", systemImage: "checklist")
+                    .font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Text("基于当前情绪")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            HStack(spacing: 0) {
+                ForEach(Array(actionSuggestions(score).enumerated()), id: \.offset) { index, suggestion in
+                    VStack(spacing: 7) {
+                        Text(String(index + 1))
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(suggestion.tint)
+                            .frame(width: 25, height: 25)
+                            .background(suggestion.tint.opacity(0.12), in: Circle())
+                        Text(suggestion.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    if index < 2 {
+                        Rectangle().fill(InvestmentDesign.divider).frame(width: 0.5, height: 34)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(InvestmentDesign.surface)
+        .overlay(alignment: .bottom) { Divider().overlay(InvestmentDesign.divider) }
+    }
+
+    private func decisionDriver(_ title: String, state: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 9.5)).foregroundStyle(.tertiary)
+            Text(state).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(tint)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(InvestmentDesign.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func decisionMetricCard(title: String, value: String, detail: String, icon: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label(title, systemImage: icon)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .contentTransition(.numericText())
+            Text(detail)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func sentimentVerdict(_ score: Double?) -> String {
+        guard let score else { return "正在汇总市场" }
+        switch score {
+        case ..<30: return "市场偏谨慎"
+        case ..<70: return "市场相对均衡"
+        case ..<90: return "市场情绪升温"
+        default: return "市场情绪过热"
+        }
+    }
+
+    private func sentimentSymbol(_ score: Double?) -> String {
+        guard let score else { return "waveform.path.ecg" }
+        switch score {
+        case ..<30: return "shield.lefthalf.filled"
+        case ..<70: return "equal.circle.fill"
+        default: return "flame.fill"
+        }
+    }
+
+    private func decisionNarrative(score: Double?, breadth: SentimentBreadth) -> String {
+        guard score != nil else { return "正在读取估值、市场广度与散户样本，稍后给出今日结论。" }
+        if breadth.total == 0 { return temperatureNarrative(score) }
+        if breadth.down > breadth.up { return "下跌家数占优，赚钱效应偏弱；先观察承接力度，再决定是否提高仓位。" }
+        return "上涨家数占优，市场承接尚可；关注量能持续性，避免在情绪高点盲目追涨。"
+    }
+
+    private func breadthEffectLabel(_ breadth: SentimentBreadth) -> String {
+        guard breadth.total > 0 else { return "待更新" }
+        if breadth.upRatio >= 0.6 { return "较强" }
+        if breadth.upRatio >= 0.42 { return "一般" }
+        return "偏弱"
+    }
+
+    private func actionSuggestions(_ score: Double?) -> [(title: String, tint: Color)] {
+        guard let score else { return [("等待数据", .secondary), ("保持观察", .blue), ("控制风险", .orange)] }
+        if score < 30 { return [("控制仓位", InvestmentDesign.loss), ("等待确认", InvestmentDesign.warning), ("避免追高", .blue)] }
+        if score < 70 { return [("均衡配置", .blue), ("精选个股", InvestmentDesign.warning), ("设置止损", InvestmentDesign.loss)] }
+        return [("分批止盈", InvestmentDesign.gain), ("降低追涨", InvestmentDesign.warning), ("警惕拥挤", InvestmentDesign.loss)]
     }
 
     private enum TemperatureFactorKind {
@@ -342,47 +571,53 @@ struct RetailInvestorView: View {
     }
 
     private var sectorHighlights: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let leaders = Array(store.sectors.prefix(3))
+        let maxChange = max(leaders.map { abs($0.percentValue) }.max() ?? 0, 0.01)
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("领涨方向")
-                    .font(.system(size: 16, weight: .semibold))
+                Text("板块涨幅排行")
+                    .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("实时板块热度")
-                    .font(.system(size: 11, weight: .medium))
+                Text("约 10 分钟更新")
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
             if store.sectors.isEmpty {
-                placeholder("正在整理领涨板块")
+                placeholder("正在整理板块涨幅")
             } else {
-                ForEach(Array(store.sectors.prefix(5).enumerated()), id: \.element.id) { index, sector in
-                    HStack(spacing: 12) {
+                ForEach(Array(leaders.enumerated()), id: \.element.id) { index, sector in
+                    HStack(spacing: 10) {
                         Text(String(index + 1))
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 18)
-                        VStack(alignment: .leading, spacing: 5) {
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(index == 0 ? InvestmentDesign.gain : Color.secondary.opacity(0.58))
+                            .frame(width: 14)
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(sector.name)
-                                .font(.system(size: 14, weight: .semibold))
-                            Capsule()
-                                .fill(InvestmentDesign.gain.opacity(0.62))
-                                .frame(
-                                    width: max(14, min(54, abs(sector.percentValue) * 22)),
-                                    height: 3
-                                )
+                                .font(.system(size: 13, weight: .semibold))
+                            GeometryReader { proxy in
+                                Capsule()
+                                    .fill((sector.percentValue >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss).opacity(0.58))
+                                    .frame(width: max(10, proxy.size.width * abs(sector.percentValue) / maxChange))
+                            }
+                            .frame(height: 3)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         Spacer()
                         Text(RetailSentimentFormat.percent(sector.percentValue))
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(sector.percentValue >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
+                            .frame(width: 56, alignment: .trailing)
                     }
-                    .padding(.vertical, 5)
-                    if index < min(store.sectors.count, 5) - 1 {
-                        Divider().overlay(InvestmentDesign.divider).padding(.leading, 30)
+                    .frame(height: 32)
+                    if index < leaders.count - 1 {
+                        Divider().overlay(InvestmentDesign.divider).padding(.leading, 24)
                     }
                 }
             }
         }
-        .padding(16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(InvestmentDesign.surface)
     }
 
@@ -534,10 +769,10 @@ struct RetailInvestorView: View {
     private var investorMoodCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("投资者样本")
+                Text("散户正在说")
                     .font(.system(size: 16, weight: .semibold))
                 Spacer()
-                Text("仅供观察")
+                Text("视频由后台自动解读")
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -545,7 +780,7 @@ struct RetailInvestorView: View {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
                 investorMoodSummary(items)
-                investorMoodCarousel(items)
+                investorMoodList(items)
             }
         }
         .padding(.vertical, 16)
@@ -581,51 +816,41 @@ struct RetailInvestorView: View {
         .padding(.horizontal, 16)
     }
 
-    private func investorMoodCarousel(_ items: [InvestorMoodItem]) -> some View {
-        GeometryReader { proxy in
-            let cardWidth = min(max(proxy.size.width - 52, 270), 320)
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(items) { item in
-                        InvestorMoodVideoCard(
-                            item: item,
-                            isPlaybackActive: rootTabIsActive && selectedInvestorMoodID == item.id
-                        )
-                            .frame(width: cardWidth)
-                            .id(item.id)
-                            .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                                content
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.96)
-                                    .opacity(phase.isIdentity ? 1 : 0.82)
-                            }
-                    }
+    private func investorMoodList(_ items: [InvestorMoodItem]) -> some View {
+        let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(2))
+        return LazyVStack(spacing: 0) {
+            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
+                InvestorMoodVideoCard(
+                    item: item,
+                    onInterpret: { interpretationItem = item }
+                )
+                if index < visibleItems.count - 1 {
+                    Divider()
+                        .overlay(InvestmentDesign.divider)
+                        .padding(.leading, 112)
                 }
-                .scrollTargetLayout()
-                .padding(.horizontal, 16)
             }
-            .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-            .scrollPosition(id: $selectedInvestorMoodID)
-            .onAppear {
-                selectFirstInvestorMoodItemIfNeeded(items)
-            }
-            .onChange(of: items.map(\.id)) { _, _ in
-                selectFirstInvestorMoodItemIfNeeded(items)
+            if items.count > 2 {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        showsAllInvestorMood.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(showsAllInvestorMood ? "收起列表" : "查看全部 \(items.count) 条")
+                        Image(systemName: showsAllInvestorMood ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                }
+                .buttonStyle(.plain)
+                .overlay(alignment: .top) { Divider().overlay(InvestmentDesign.divider) }
             }
         }
-        .frame(height: 530)
-    }
-
-    private func selectFirstInvestorMoodItemIfNeeded(_ items: [InvestorMoodItem]) {
-        guard !items.isEmpty else {
-            selectedInvestorMoodID = nil
-            return
-        }
-        if let selectedInvestorMoodID,
-           items.contains(where: { $0.id == selectedInvestorMoodID }) {
-            return
-        }
-        selectedInvestorMoodID = items.first?.id
+        .padding(.horizontal, 16)
     }
 
     private var methodologyNote: some View {
@@ -862,85 +1087,211 @@ private struct InvestorMoodCount: Identifiable {
     let count: Int
 }
 
-private struct InvestorMoodVideoCard: View {
+private struct InvestorVideoInterpretationSheet: View {
     let item: InvestorMoodItem
-    let isPlaybackActive: Bool
+    let service: MarketService
+    @Environment(\.dismiss) private var dismiss
+    @State private var payload: InvestorVideoInterpretationResponse?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            media
-                .frame(height: 410)
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 14,
-                        topTrailingRadius: 14
-                    )
-                )
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.nickname).font(.headline)
+                        Text(item.description.nonEmpty ?? "散户观点视频")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
+                    if let payload, let interpretation = payload.interpretation {
+                        interpretationContent(payload, interpretation: interpretation)
+                    } else if isLoading {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("正在获取视频解读…")
+                                .font(.headline)
+                            Text("首次处理可能需要一两分钟，完成后会直接使用缓存结果。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 52)
+                    } else if payload?.status == "pending" {
+                        ContentUnavailableView(
+                            "后台解读中",
+                            systemImage: "clock.arrow.circlepath",
+                            description: Text("服务端正在下载、压缩并解读这个视频，通常需要几分钟。")
+                        )
+                        Button("刷新状态") { Task { await interpret() } }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity)
+                    } else if let errorMessage {
+                        ContentUnavailableView(
+                            "视频解读暂不可用",
+                            systemImage: "eye.slash",
+                            description: Text(errorMessage)
+                        )
+                        Button("刷新状态") { Task { await interpret() } }
+                            .buttonStyle(.borderedProminent)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(18)
+            }
+            .navigationTitle("视频解读")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+        .task(id: item.id) { await interpret() }
+    }
+
+    private func interpretationContent(
+        _ payload: InvestorVideoInterpretationResponse,
+        interpretation: BilibiliVideoInterpretation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label(payload.cached ? "缓存结果" : "智谱完整视频解读", systemImage: "eye.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(payload.cached ? .green : .blue)
+                Spacer()
+                Text(payload.model).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(interpretation.overview).font(.body).lineSpacing(5).textSelection(.enabled)
+            bulletSection("画面与关键发现", interpretation.visualFindings)
+            if !interpretation.timeline.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("视频时间线").font(.headline)
+                    ForEach(Array(interpretation.timeline.enumerated()), id: \.offset) { _, event in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(event.time)
+                                .font(.caption.monospacedDigit().weight(.bold))
+                                .foregroundStyle(.blue)
+                                .frame(width: 48, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(event.title).font(.subheadline.weight(.semibold))
+                                Text(event.detail).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            bulletSection("观点、证据与风险观察", interpretation.creatorNotes)
+            Label(
+                payload.cached
+                    ? "缓存结果，本次未新增模型费用"
+                    : String(format: "本次模型处理成本约 ¥%.3f", payload.estimatedCostCNY),
+                systemImage: payload.cached ? "bolt.horizontal.circle.fill" : "yensign.circle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(payload.cached ? .green : .orange)
+        }
+    }
+
+    private func bulletSection(_ title: String, _ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !items.isEmpty { Text(title).font(.headline) }
+            ForEach(Array(items.enumerated()), id: \.offset) { _, text in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle().fill(.blue).frame(width: 6, height: 6).padding(.top, 7)
+                    Text(text).font(.subheadline).lineSpacing(3)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func interpret() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            payload = try await service.investorVideoInterpretationStatus(item)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct InvestorMoodVideoCard: View {
+    let item: InvestorMoodItem
+    let onInterpret: () -> Void
+
+    var body: some View {
+        HStack(spacing: 13) {
+            Button(action: onInterpret) {
+                thumbnail
+                    .frame(width: 88, height: 66)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
                     Text(item.nickname)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(1)
                     moodBadge
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 2)
                     Text(RetailSentimentFormat.relativeTime(item.createdAt))
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
                 Text(summary)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                Button(action: onInterpret) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles.tv")
+                        Text("查看视频解读")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
+                }
+                .buttonStyle(.plain)
             }
-            .padding(13)
         }
-        .background(
-            InvestmentDesign.secondarySurface,
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
-        }
+        .padding(.vertical, 9)
         .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
-    private var media: some View {
-        if let playbackURL = item.directPlaybackURL ?? item.playbackURL {
-            XVideoPlayerView(
-                url: playbackURL,
-                fallbackURL: item.directPlaybackURL == nil ? nil : item.playbackURL,
-                thumbnailURL: item.coverPlaybackURL,
-                contentMode: .fill,
-                chromeStyle: .minimal,
-                isPlaybackActive: isPlaybackActive
-            )
-        } else {
-            ZStack {
-                Color.black
-                AsyncImage(url: URL(string: item.coverUrl)) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Image(systemName: "video.slash.fill")
-                            .font(.system(size: 34, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                    }
+    private var thumbnail: some View {
+        ZStack {
+            Color.black
+            AsyncImage(url: item.directCoverURL ?? item.coverPlaybackURL ?? URL(string: item.coverUrl)) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    LinearGradient(
+                        colors: [.black, RetailSentimentFormat.moodColor(item.label).opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 }
-                Label("视频暂不可播放", systemImage: "clock")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(.black.opacity(0.62), in: Capsule())
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 14)
             }
-            .clipped()
+            Circle()
+                .fill(.black.opacity(0.58))
+                .frame(width: 30, height: 30)
+            Image(systemName: "play.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: 1)
         }
+        .clipped()
     }
 
     private var summary: String {
@@ -975,7 +1326,7 @@ final class RetailSentimentStore {
     private(set) var koreaLeverageErrorMessage: String?
     private(set) var isLoading = false
     private(set) var errorMessage: String?
-    private let service: MarketService
+    let service: MarketService
     private var loaded = false
     private var loadedMarkets: Set<SentimentMarket> = []
     private var loadingMarkets: Set<SentimentMarket> = []
@@ -1137,7 +1488,9 @@ final class RetailSentimentStore {
         do {
             let mood = try await moodRequest
             investorMood = mood
-            await service.prewarmInvestorMoodVideos(mood.items)
+            Task {
+                await service.prewarmInvestorMoodVideos(mood.items)
+            }
         } catch is CancellationError {
             return
         } catch {
