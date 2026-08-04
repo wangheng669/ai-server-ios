@@ -16,6 +16,11 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isLoadingRSSSelection = false
     @Published private(set) var isLoadingMoreRSSSelection = false
     @Published private(set) var canLoadMoreRSSSelection = true
+    @Published private(set) var selectedWeChatFeedID: Int?
+    @Published private(set) var selectedWeChatPosts: [Post] = []
+    @Published private(set) var isLoadingWeChatSelection = false
+    @Published private(set) var isLoadingMoreWeChatSelection = false
+    @Published private(set) var canLoadMoreWeChatSelection = true
     @Published private(set) var selectedFlashCategory: String?
     @Published var errorMessage: String?
     @Published var source: FeedSource {
@@ -35,12 +40,15 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
+    private let fetchWeChatFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchPostDetail: (Int) async throws -> Post
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
     private var selectedRSSPage = 1
     private let selectedRSSPageSize = 20
+    private var selectedWeChatPage = 1
+    private let selectedWeChatPageSize = 20
 
     init(
         source initialSource: FeedSource? = nil,
@@ -48,6 +56,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
+        fetchWeChatFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchPostDetail: ((Int) async throws -> Post)? = nil,
         fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil
     ) {
@@ -67,6 +76,14 @@ final class NewsFeedViewModel: ObservableObject {
         self.fetchRSSFeeds = { try await client.fetchRSSFeeds() }
         self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID, page, limit in
             try await client.fetchRSSFeedPosts(feedID: feedID, page: page, limit: limit)
+        }
+        self.fetchWeChatFeedPosts = fetchWeChatFeedPosts ?? fetchRSSFeedPosts ?? { feedID, page, limit in
+            try await client.fetchRSSFeedPosts(
+                feedID: feedID,
+                page: page,
+                limit: limit,
+                includesAllScores: true
+            )
         }
         self.fetchPostDetail = fetchPostDetail ?? { postID in
             try await client.fetchPost(id: postID)
@@ -171,6 +188,56 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             guard selectedRSSFeedID == feedID else { return }
+            errorMessage = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    func selectWeChatFeed(_ feedID: Int?) async {
+        selectedWeChatFeedID = feedID
+        selectedWeChatPosts = []
+        selectedWeChatPage = 1
+        canLoadMoreWeChatSelection = true
+        guard let feedID else {
+            isLoadingWeChatSelection = false
+            return
+        }
+        isLoadingWeChatSelection = true
+        defer { if selectedWeChatFeedID == feedID { isLoadingWeChatSelection = false } }
+        do {
+            let result = try await fetchWeChatFeedPosts(feedID, 1, selectedWeChatPageSize)
+            guard !Task.isCancelled, selectedWeChatFeedID == feedID else { return }
+            selectedWeChatPosts = result
+            canLoadMoreWeChatSelection = !result.isEmpty
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedWeChatFeedID == feedID else { return }
+            errorMessage = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    func loadMoreSelectedWeChatIfNeeded(current post: Post) async {
+        guard let feedID = selectedWeChatFeedID,
+              post.id == selectedWeChatPosts.last?.id,
+              canLoadMoreWeChatSelection,
+              !isLoadingWeChatSelection,
+              !isLoadingMoreWeChatSelection else { return }
+        let nextPage = selectedWeChatPage + 1
+        isLoadingMoreWeChatSelection = true
+        defer { isLoadingMoreWeChatSelection = false }
+        do {
+            let result = try await fetchWeChatFeedPosts(feedID, nextPage, selectedWeChatPageSize)
+            guard !Task.isCancelled, selectedWeChatFeedID == feedID else { return }
+            let existingIDs = Set(selectedWeChatPosts.map(\.id))
+            selectedWeChatPosts += result.filter { !existingIDs.contains($0.id) }
+            selectedWeChatPage = nextPage
+            canLoadMoreWeChatSelection = !result.isEmpty
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedWeChatFeedID == feedID else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }

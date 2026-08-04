@@ -658,7 +658,7 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testWechatInitialPageIsLargeEnoughForAccountFiltering() async {
+    func testWeChatAggregateRequestsTwentyPosts() async {
         var requestedLimit = 0
         let model = NewsFeedViewModel(source: .wechat) { _, limit, _ in
             requestedLimit = limit
@@ -668,6 +668,34 @@ final class FeedAdapterTests: XCTestCase {
         await model.refresh()
 
         XCTAssertEqual(requestedLimit, 20)
+    }
+
+    @MainActor
+    func testWeChatAccountSelectionUsesServerFeedEndpointWithoutClientFiltering() async throws {
+        var requests: [(feedID: Int, page: Int, limit: Int)] = []
+        let first = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:2373"}"#.utf8)
+        )
+        let second = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss:2373"}"#.utf8)
+        )
+        let model = NewsFeedViewModel(
+            source: .wechat,
+            fetchWeChatFeedPosts: { feedID, page, limit in
+                requests.append((feedID, page, limit))
+                return page == 1 ? [first] : [second]
+            }
+        )
+
+        await model.selectWeChatFeed(2373)
+        await model.loadMoreSelectedWeChatIfNeeded(current: first)
+
+        XCTAssertEqual(requests.map(\.feedID), [2373, 2373])
+        XCTAssertEqual(requests.map(\.page), [1, 2])
+        XCTAssertEqual(requests.map(\.limit), [20, 20])
+        XCTAssertEqual(model.selectedWeChatPosts.map(\.id), [1, 2])
     }
 
     func testDecodesAndMapsFlashItem() throws {
