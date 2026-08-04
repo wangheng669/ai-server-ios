@@ -1,0 +1,14 @@
+[Unit]
+Description=GitHub Actions runner for ai-server-ios Linux preflight
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wanngheng/actions-runner/ai_server_ios_preflight
+ExecStart=/home/wanngheng/actions-runner/ai_server_ios_preflight/run.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
