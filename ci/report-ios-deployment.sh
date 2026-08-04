@@ -22,4 +22,4 @@ curl --fail --silent --show-error \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $api_key" \
   --data "$payload" \
-  "$base_url/api/v1/system/ios-deployment" >/dev/null
+  "$base_url/api/ios/v1/system/ios-deployment" >/dev/null

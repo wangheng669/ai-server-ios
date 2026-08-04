@@ -647,7 +647,7 @@ struct InvestorMoodItem: Decodable, Identifiable {
     private func proxiedMediaURL(from value: String, prewarm: Bool = false) -> URL? {
         guard let source = publicMediaURL(from: value) else { return nil }
         var components = URLComponents(
-            url: ServerConfiguration.currentURL.appending(path: "api/v1/media-proxy"),
+            url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/media-proxy"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [

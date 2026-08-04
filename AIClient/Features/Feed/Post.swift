@@ -1409,7 +1409,7 @@ enum MediaURL {
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
         if let bvid = bilibiliBVID(from: direct) {
             return ServerConfiguration.currentURL
-                .appending(path: "api/v1/bilibili/hls")
+                .appending(path: "api/ios/v1/bilibili/hls")
                 .appending(path: bvid)
                 .appending(path: "video.mp4")
         }
@@ -1435,7 +1435,7 @@ enum MediaURL {
         }
 
         var components = URLComponents(
-            url: ServerConfiguration.currentURL.appending(path: "api/v1/video-thumbnail"),
+            url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/video-thumbnail"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -1454,7 +1454,7 @@ enum MediaURL {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
         guard let host = direct.host?.lowercased(), hosts.contains(where: { host == $0 || host.hasSuffix(".\($0)") }) else { return direct }
-        var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/v1/\(proxy)"), resolvingAgainstBaseURL: false)
+        var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/\(proxy)"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "url", value: direct.absoluteString), .init(name: "soft", value: "1"), .init(name: "context", value: "ios-feed")]
         return parts?.url
     }

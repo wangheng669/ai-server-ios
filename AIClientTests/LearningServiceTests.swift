@@ -19,7 +19,7 @@ final class LearningServiceTests: XCTestCase {
                     "summary": "估值指标",
                     "category": "股票",
                     "source_url": "https://www.futunn.com/learn/detail-pe",
-                    "thumbnail_url": "/api/v1/learning/media/cover.jpg",
+                    "thumbnail_url": "/api/ios/v1/learning/media/cover.jpg",
                     "has_video": true
                   }]
                 }]
@@ -87,13 +87,13 @@ final class LearningServiceTests: XCTestCase {
                 {
                   "id":"1","lesson_id":"2","title":"标题","summary":"",
                   "category":"股票","source_url":"https://www.futunn.com/learn/detail",
-                  "thumbnail_url":"/api/v1/learning/media/a.jpg","has_video":false
+                  "thumbnail_url":"/api/ios/v1/learning/media/a.jpg","has_video":false
                 }
                 """.utf8
             )
         )
         let url = topic.mediaURL(topic.thumbnailURLValue, baseURL: URL(string: "https://api.example.com")!)
-        XCTAssertEqual(url?.absoluteString, "https://api.example.com/api/v1/learning/media/a.jpg")
+        XCTAssertEqual(url?.absoluteString, "https://api.example.com/api/ios/v1/learning/media/a.jpg")
     }
 
     func testDecodesFilteredWeReadBookshelf() throws {

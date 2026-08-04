@@ -78,7 +78,7 @@ struct CountryGDPService {
     }
 
     func ranking() async throws -> CountryGDPRanking {
-        let url = baseURL.appending(path: "api/v1/economy/gdp-ranking")
+        let url = baseURL.appending(path: "api/ios/v1/economy/gdp-ranking")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
@@ -94,7 +94,7 @@ struct CountryGDPService {
 
     func history(countryCode: String) async throws -> CountryGDPHistory {
         var components = URLComponents(
-            url: baseURL.appending(path: "api/v1/economy/gdp-ranking/country"),
+            url: baseURL.appending(path: "api/ios/v1/economy/gdp-ranking/country"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [URLQueryItem(name: "code", value: countryCode)]
@@ -165,7 +165,7 @@ struct GlobalAssetsService {
     }
 
     func ranking() async throws -> GlobalAssetsRanking {
-        let url = baseURL.appending(path: "api/v1/economy/global-assets")
+        let url = baseURL.appending(path: "api/ios/v1/economy/global-assets")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)

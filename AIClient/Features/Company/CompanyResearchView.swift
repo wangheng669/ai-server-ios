@@ -96,7 +96,7 @@ struct CompanyResearchService {
     var session: URLSession = .shared
 
     func fetch() async throws -> CompanyResearchPayload {
-        let url = baseURL.appending(path: "api/v1/market/company-research")
+        let url = baseURL.appending(path: "api/ios/v1/market/company-research")
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)

@@ -153,7 +153,7 @@ final class PersonPushNotificationManager: ObservableObject {
         enabled: Bool
     ) async throws {
         let url = ServerConfiguration.currentURL
-            .appending(path: "api/v1/ios/push/subscriptions")
+            .appending(path: "api/ios/v1/ios/push/subscriptions")
         var request = URLRequest(url: url, timeoutInterval: 12)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

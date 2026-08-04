@@ -190,7 +190,7 @@ module TestFlightProcessing
   def notify_server(status:, details:, error: nil)
     base_url = ENV.fetch("DEPLOYMENT_STATUS_BASE_URL", "https://api.wanghengai.xin")
     api_key = required_env("DEPLOYMENT_STATUS_API_KEY")
-    uri = URI.join("#{base_url.sub(%r{/*$}, "")}/", "api/v1/system/ios-testflight-notification")
+    uri = URI.join("#{base_url.sub(%r{/*$}, "")}/", "api/ios/v1/system/ios-testflight-notification")
     payload = {
       status: status,
       version: details.fetch("version", "unknown"),

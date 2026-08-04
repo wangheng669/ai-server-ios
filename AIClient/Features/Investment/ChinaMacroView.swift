@@ -205,7 +205,7 @@ struct ChinaMacroService {
     }
 
     func history() async throws -> (years: [ChinaMacroYear], generatedAt: Date) {
-        let url = appBaseURL.appending(path: "api/v1/economy/china-macro")
+        let url = appBaseURL.appending(path: "api/ios/v1/economy/china-macro")
         var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)

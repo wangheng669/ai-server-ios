@@ -10,7 +10,7 @@ struct PeopleService {
     }
 
     func specialPeople() async throws -> SpecialPeopleResponse {
-        let url = baseURL.appending(path: "api/v1/people/directory")
+        let url = baseURL.appending(path: "api/ios/v1/people/directory")
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw PeopleServiceError.invalidResponse
@@ -21,7 +21,7 @@ struct PeopleService {
     }
 
     func searchXPeople(query: String, limit: Int = 8) async throws -> [XPersonSearchResult] {
-        let endpoint = baseURL.appending(path: "api/v1/people/x/search")
+        let endpoint = baseURL.appending(path: "api/ios/v1/people/x/search")
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             .init(name: "query", value: query),
@@ -40,7 +40,7 @@ struct PeopleService {
     }
 
     func importXPerson(screenName: String) async throws -> XPersonImportResponse {
-        let url = baseURL.appending(path: "api/v1/people/x/import")
+        let url = baseURL.appending(path: "api/ios/v1/people/x/import")
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -56,7 +56,7 @@ struct PeopleService {
     }
 
     func searchWikipediaPeople(query: String, limit: Int = 8) async throws -> [WikipediaPersonSearchResult] {
-        let endpoint = baseURL.appending(path: "api/v1/people/wikipedia/search")
+        let endpoint = baseURL.appending(path: "api/ios/v1/people/wikipedia/search")
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             .init(name: "query", value: query),
@@ -75,7 +75,7 @@ struct PeopleService {
     }
 
     func importWikipediaPerson(_ result: WikipediaPersonSearchResult) async throws -> WikipediaPersonImportResponse {
-        let url = baseURL.appending(path: "api/v1/people/wikipedia/import")
+        let url = baseURL.appending(path: "api/ios/v1/people/wikipedia/import")
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -100,7 +100,7 @@ struct PeopleService {
 
     func posts(userID: String, page: Int = 1, limit: Int = 12) async throws -> [Post] {
         let endpoint = baseURL
-            .appending(path: "api/v1/post/user")
+            .appending(path: "api/ios/v1/post/user")
             .appending(path: userID)
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         components?.queryItems = [
@@ -117,7 +117,7 @@ struct PeopleService {
     }
 
     func relatedDiscussions(for person: SpecialPerson, limit: Int = 12) async throws -> [Post] {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/people/discussions"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/people/discussions"), resolvingAgainstBaseURL: false)
         var queryItems = person.discussionKeywords.map { URLQueryItem(name: "alias", value: $0) }
         queryItems.append(.init(name: "limit", value: String(limit)))
         if let handle = person.handle?.dropFirst() {
@@ -136,7 +136,7 @@ struct PeopleService {
 
     func relatedVideos(personID: String) async throws -> [PersonVideo] {
         let url = baseURL
-            .appending(path: "api/v1/people")
+            .appending(path: "api/ios/v1/people")
             .appending(path: personID)
             .appending(path: "videos")
         let (data, response) = try await session.data(from: url)
@@ -150,7 +150,7 @@ struct PeopleService {
 
     func articles(personID: String, query: String? = nil) async throws -> [PersonArticle] {
         let endpoint = baseURL
-            .appending(path: "api/v1/people")
+            .appending(path: "api/ios/v1/people")
             .appending(path: personID)
             .appending(path: "articles")
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
@@ -172,7 +172,7 @@ struct PeopleService {
 
     func article(id: Int64) async throws -> PersonArticle {
         let url = baseURL
-            .appending(path: "api/v1/people/articles")
+            .appending(path: "api/ios/v1/people/articles")
             .appending(path: String(id))
         var request = URLRequest(url: url, timeoutInterval: 180)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -187,7 +187,7 @@ struct PeopleService {
 
     func subtitles(videoID: Int64) async throws -> PersonVideoSubtitlesResponse {
         let url = baseURL
-            .appending(path: "api/v1/people/videos")
+            .appending(path: "api/ios/v1/people/videos")
             .appending(path: String(videoID))
             .appending(path: "subtitles")
         var request = URLRequest(url: url, timeoutInterval: 90)

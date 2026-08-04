@@ -18,7 +18,7 @@ struct APIClient {
 
     func fetchTodayWorld(limit: Int = 3, page: Int = 1, systemKey: String? = nil) async throws -> TodayWorldPayload {
         var components = URLComponents(
-            url: baseURL.appending(path: "api/v1/today-world"),
+            url: baseURL.appending(path: "api/ios/v1/today-world"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -71,7 +71,7 @@ struct APIClient {
         let pageSize = 20
         var feeds: [RSSFeedSource] = []
         for page in 1...10 {
-            var parts = URLComponents(url: baseURL.appending(path: "api/v1/rss/feeds"), resolvingAgainstBaseURL: false)
+            var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/rss/feeds"), resolvingAgainstBaseURL: false)
             parts?.queryItems = [
                 .init(name: "page", value: String(page)),
                 .init(name: "exclude_social", value: "true")
@@ -92,7 +92,7 @@ struct APIClient {
         includesAllScores: Bool = false
     ) async throws -> [Post] {
         var parts = URLComponents(
-            url: baseURL.appending(path: "api/v1/rss/feeds/\(feedID)/posts"),
+            url: baseURL.appending(path: "api/ios/v1/rss/feeds/\(feedID)/posts"),
             resolvingAgainstBaseURL: false
         )
         var queryItems: [URLQueryItem] = [
@@ -111,7 +111,7 @@ struct APIClient {
     }
 
     func fetchWeiboFollowingPosts(page: Int, limit: Int = 20) async throws -> [Post] {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/post/list"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         components?.queryItems = Self.weiboFollowingQueryItems(page: page, limit: limit)
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: PostListResponse = try await get(url)
@@ -167,7 +167,7 @@ struct APIClient {
             for feedID in [14, 16] {
                 group.addTask {
                     var parts = URLComponents(
-                        url: baseURL.appending(path: "api/v1/rss/feeds/\(feedID)/posts"),
+                        url: baseURL.appending(path: "api/ios/v1/rss/feeds/\(feedID)/posts"),
                         resolvingAgainstBaseURL: false
                     )
                     parts?.queryItems = [
@@ -194,7 +194,7 @@ struct APIClient {
     }
 
     private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
-        var components = URLComponents(url: baseURL.appending(path: "api/v1/post/list"), resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
         var queryItems = Self.regularPostQueryItems(page: page, limit: limit, source: source)
         if isSpecialRSS {
@@ -226,7 +226,7 @@ struct APIClient {
     }
 
     private func fetchHotTopics(page: Int, limit: Int, source: FeedSource) async throws -> [HotTopic] {
-        let path = source == .weibo ? "api/v1/weibo/hot/topics" : "api/v1/douyin/hot/topics"
+        let path = source == .weibo ? "api/ios/v1/weibo/hot/topics" : "api/ios/v1/douyin/hot/topics"
         var parts = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "page", value: String(page)), .init(name: "size", value: String(limit)), .init(name: "sort", value: "rank")]
         guard let url = parts?.url else { throw APIError.invalidURL }
@@ -290,7 +290,7 @@ struct APIClient {
         category: String?,
         importantOnly: Bool
     ) async throws -> [FlashItem] {
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/market/flash/live"), resolvingAgainstBaseURL: false)
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/flash/live"), resolvingAgainstBaseURL: false)
         parts?.queryItems = Self.flashQueryItems(
             page: page,
             limit: limit,
@@ -307,7 +307,7 @@ struct APIClient {
         let key = "rss.category.\(name)"
         let cached = UserDefaults.standard.integer(forKey: key)
         if cached > 0 { return cached }
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/categories"), resolvingAgainstBaseURL: false)
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/categories"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "compact", value: "1"), .init(name: "q", value: name)]
         guard let url = parts?.url else { throw APIError.invalidURL }
         let response: CategoryResponse = try await get(url)
@@ -319,13 +319,13 @@ struct APIClient {
     }
 
     func fetchPost(id: Int) async throws -> Post {
-        let response: PostDetailResponse = try await get(baseURL.appending(path: "api/v1/post/\(id)/raw"))
+        let response: PostDetailResponse = try await get(baseURL.appending(path: "api/ios/v1/post/\(id)/raw"))
         return response.post
     }
 
     func fetchBilibiliSubtitles(bvid: String) async throws -> BilibiliSubtitlesResponse {
         var components = URLComponents(
-            url: baseURL.appending(path: "api/v1/bilibili/subtitles"),
+            url: baseURL.appending(path: "api/ios/v1/bilibili/subtitles"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [.init(name: "bvid", value: bvid)]
@@ -335,7 +335,7 @@ struct APIClient {
 
     func fetchBilibiliSummary(bvid: String, title: String) async throws -> BilibiliSummaryResponse {
         var components = URLComponents(
-            url: baseURL.appending(path: "api/v1/bilibili/summary"),
+            url: baseURL.appending(path: "api/ios/v1/bilibili/summary"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -348,7 +348,7 @@ struct APIClient {
 
     func interpretBilibiliVideo(bvid: String, title: String) async throws -> BilibiliInterpretationResponse {
         var components = URLComponents(
-            url: baseURL.appending(path: "api/v1/bilibili/interpretation"),
+            url: baseURL.appending(path: "api/ios/v1/bilibili/interpretation"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [.init(name: "bvid", value: bvid), .init(name: "title", value: title)]
@@ -365,7 +365,7 @@ struct APIClient {
     }
 
     func fetchXComments(tweetID: String, limit: Int = 30) async throws -> [XComment] {
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/comments"), resolvingAgainstBaseURL: false)
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/x/comments"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
             .init(name: "tweet_id", value: tweetID),
             .init(name: "limit", value: String(limit))
@@ -377,7 +377,7 @@ struct APIClient {
     }
 
     func fetchXTweetDetail(tweetID: String) async throws -> XTweetDetailItem {
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/tweet"), resolvingAgainstBaseURL: false)
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/x/tweet"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "tweet_id", value: tweetID)]
         guard let url = parts?.url else { throw APIError.invalidURL }
         let response: XTweetDetailResponse = try await get(url)
@@ -386,7 +386,7 @@ struct APIClient {
     }
 
     func fetchXTranslation(tweetID: String) async throws -> XTranslation {
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/x/translation"), resolvingAgainstBaseURL: false)
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/x/translation"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
             .init(name: "tweet_id", value: tweetID),
             .init(name: "to", value: "zh")
@@ -398,7 +398,7 @@ struct APIClient {
     }
 
     func synthesizeSpeech(text: String) async throws -> URL {
-        var request = URLRequest(url: baseURL.appending(path: "api/v1/audio/speech"))
+        var request = URLRequest(url: baseURL.appending(path: "api/ios/v1/audio/speech"))
         request.httpMethod = "POST"
         request.timeoutInterval = 130
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -420,7 +420,7 @@ struct APIClient {
     }
 
     private func resolveVideoPlayback(url: URL, title: String, formatID: String) async throws -> VideoPlaybackSource {
-        var request = URLRequest(url: baseURL.appending(path: "api/v1/post/video-playback/source"))
+        var request = URLRequest(url: baseURL.appending(path: "api/ios/v1/post/video-playback/source"))
         request.httpMethod = "POST"
         request.timeoutInterval = 35
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -443,7 +443,7 @@ struct APIClient {
         guard !trimmed.isEmpty else { return nil }
         if let absolute = URL(string: trimmed), absolute.scheme != nil { return absolute }
         if trimmed.hasPrefix("/post/") {
-            return URL(string: "api/v1" + trimmed, relativeTo: baseURL)?.absoluteURL
+            return URL(string: "api/ios/v1" + trimmed, relativeTo: baseURL)?.absoluteURL
         }
         return URL(string: trimmed, relativeTo: baseURL)?.absoluteURL
     }
@@ -451,7 +451,7 @@ struct APIClient {
     func bookmarkXPost(tweetID: String) async throws -> XBookmarkResult {
         let value = tweetID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.allSatisfy(\.isNumber) else { throw APIError.invalidXPostID }
-        var request = URLRequest(url: baseURL.appending(path: "api/v1/x/bookmark"))
+        var request = URLRequest(url: baseURL.appending(path: "api/ios/v1/x/bookmark"))
         request.httpMethod = "POST"
         request.timeoutInterval = 35
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -482,7 +482,7 @@ struct APIClient {
     }
 
     static func articlePreviewURL(for articleURL: URL, baseURL: URL) -> URL? {
-        var parts = URLComponents(url: baseURL.appending(path: "api/v1/post/preview"), resolvingAgainstBaseURL: false)
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/preview"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
             .init(name: "url", value: articleURL.absoluteString),
         ]
