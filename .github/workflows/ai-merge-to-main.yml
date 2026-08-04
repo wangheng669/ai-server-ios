@@ -11,13 +11,32 @@ permissions:
   actions: write
   contents: write
 
-concurrency:
-  group: ai-merge-to-main
-  cancel-in-progress: false
-
 jobs:
+  preflight:
+    name: Linux preflight on mac-x
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - mac-x-preflight
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out task commit with full history
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Run repository preflight checks
+        run: ./ci/linux-preflight.sh origin/main
+
   merge:
     name: Safely integrate on selected central Mac
+    needs: preflight
+    concurrency:
+      group: ai-merge-to-main
+      cancel-in-progress: false
     runs-on:
       - self-hosted
       - macOS
