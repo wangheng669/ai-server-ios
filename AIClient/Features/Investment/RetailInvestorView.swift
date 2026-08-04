@@ -6,8 +6,8 @@ struct RetailInvestorView: View {
     private let store: RetailSentimentStore
     private let marketStore: MarketStore
     @State private var selectedMarket: SentimentMarket = .china
-    @State private var selectedInvestorMoodID: InvestorMoodItem.ID?
     @State private var interpretationItem: InvestorMoodItem?
+    @State private var showsAllInvestorMood = false
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     @MainActor
@@ -774,7 +774,7 @@ struct RetailInvestorView: View {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
                 investorMoodSummary(items)
-                investorMoodCarousel(items)
+                investorMoodList(items)
             }
         }
         .padding(.vertical, 16)
@@ -810,52 +810,41 @@ struct RetailInvestorView: View {
         .padding(.horizontal, 16)
     }
 
-    private func investorMoodCarousel(_ items: [InvestorMoodItem]) -> some View {
-        GeometryReader { proxy in
-            let cardWidth = max(proxy.size.width - 32, 280)
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(items) { item in
-                        InvestorMoodVideoCard(
-                            item: item,
-                            isPlaybackActive: rootTabIsActive && selectedInvestorMoodID == item.id,
-                            onInterpret: { interpretationItem = item }
-                        )
-                            .frame(width: cardWidth)
-                            .id(item.id)
-                            .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                                content
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.96)
-                                    .opacity(phase.isIdentity ? 1 : 0.82)
-                            }
-                    }
+    private func investorMoodList(_ items: [InvestorMoodItem]) -> some View {
+        let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(3))
+        return LazyVStack(spacing: 0) {
+            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
+                InvestorMoodVideoCard(
+                    item: item,
+                    onInterpret: { interpretationItem = item }
+                )
+                if index < visibleItems.count - 1 {
+                    Divider()
+                        .overlay(InvestmentDesign.divider)
+                        .padding(.leading, 142)
                 }
-                .scrollTargetLayout()
-                .padding(.horizontal, 16)
             }
-            .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-            .scrollPosition(id: $selectedInvestorMoodID)
-            .onAppear {
-                selectFirstInvestorMoodItemIfNeeded(items)
-            }
-            .onChange(of: items.map(\.id)) { _, _ in
-                selectFirstInvestorMoodItemIfNeeded(items)
+            if items.count > 3 {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        showsAllInvestorMood.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(showsAllInvestorMood ? "收起列表" : "查看全部 \(items.count) 条")
+                        Image(systemName: showsAllInvestorMood ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                }
+                .buttonStyle(.plain)
+                .overlay(alignment: .top) { Divider().overlay(InvestmentDesign.divider) }
             }
         }
-        .frame(height: 548)
-    }
-
-    private func selectFirstInvestorMoodItemIfNeeded(_ items: [InvestorMoodItem]) {
-        guard !items.isEmpty else {
-            selectedInvestorMoodID = nil
-            return
-        }
-        if let selectedInvestorMoodID,
-           items.contains(where: { $0.id == selectedInvestorMoodID }) {
-            return
-        }
-        selectedInvestorMoodID = items.first?.id
+        .padding(.horizontal, 16)
     }
 
     private var methodologyNote: some View {
@@ -1229,92 +1218,75 @@ private struct InvestorVideoInterpretationSheet: View {
 
 private struct InvestorMoodVideoCard: View {
     let item: InvestorMoodItem
-    let isPlaybackActive: Bool
     let onInterpret: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            media
-                .frame(height: 410)
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 14,
-                        topTrailingRadius: 14
-                    )
-                )
+        HStack(spacing: 13) {
+            Button(action: onInterpret) {
+                thumbnail
+                    .frame(width: 112, height: 84)
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            }
+            .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
                     Text(item.nickname)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14.5, weight: .semibold))
                         .lineLimit(1)
                     moodBadge
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 2)
                     Text(RetailSentimentFormat.relativeTime(item.createdAt))
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
                 Text(summary)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2)
                 Button(action: onInterpret) {
-                    Label("查看解读", systemImage: "eye.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles.tv")
+                        Text("查看视频解读")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
                 }
-                .buttonStyle(.bordered)
-                .tint(.blue)
+                .buttonStyle(.plain)
             }
-            .padding(13)
         }
-        .background(
-            InvestmentDesign.secondarySurface,
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
-        }
+        .padding(.vertical, 12)
         .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
-    private var media: some View {
-        if let playbackURL = item.directPlaybackURL ?? item.playbackURL {
-            XVideoPlayerView(
-                url: playbackURL,
-                fallbackURL: item.directPlaybackURL == nil ? nil : item.playbackURL,
-                thumbnailURL: item.directCoverURL,
-                fallbackThumbnailURL: item.coverPlaybackURL,
-                contentMode: .fill,
-                chromeStyle: .minimal,
-                isPlaybackActive: isPlaybackActive
-            )
-        } else {
-            ZStack {
-                Color.black
-                AsyncImage(url: URL(string: item.coverUrl)) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Image(systemName: "video.slash.fill")
-                            .font(.system(size: 34, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                    }
+    private var thumbnail: some View {
+        ZStack {
+            Color.black
+            AsyncImage(url: item.directCoverURL ?? item.coverPlaybackURL ?? URL(string: item.coverUrl)) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    LinearGradient(
+                        colors: [.black, RetailSentimentFormat.moodColor(item.label).opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 }
-                Label("视频暂不可播放", systemImage: "clock")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(.black.opacity(0.62), in: Capsule())
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 14)
             }
-            .clipped()
+            Circle()
+                .fill(.black.opacity(0.58))
+                .frame(width: 30, height: 30)
+            Image(systemName: "play.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: 1)
         }
+        .clipped()
     }
 
     private var summary: String {
