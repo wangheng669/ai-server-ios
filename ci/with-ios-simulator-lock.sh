@@ -8,12 +8,14 @@ hold_seconds=${IOS_SIMULATOR_LOCK_HOLD_SECONDS:-600}
 label=${IOS_SIMULATOR_LOCK_LABEL:-$(basename "$PWD")}
 hold=false
 show_status=false
+assert_held=false
 
 usage() {
   cat <<'EOF'
 Usage:
   with-ios-simulator-lock.sh [--label NAME] -- COMMAND [ARG ...]
   with-ios-simulator-lock.sh [--label NAME] [--hold-seconds SECONDS] --hold
+  with-ios-simulator-lock.sh [--label NAME] --assert-held
   with-ios-simulator-lock.sh --status
 
 Use --hold to reserve the shared iPhone 16e during interactive UI checks.
@@ -40,6 +42,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --status)
       show_status=true
+      shift
+      ;;
+    --assert-held)
+      assert_held=true
       shift
       ;;
     --)
@@ -71,6 +77,38 @@ fi
 owner_file="$lock_dir/owner"
 host_name=$(hostname)
 
+find_unmanaged_automation() {
+  local candidate_pid parent_info parent_pid parent_command managed
+  while read -r candidate_pid; do
+    [[ -n "$candidate_pid" && "$candidate_pid" != "$$" ]] || continue
+    parent_pid=$candidate_pid
+    managed=false
+    while [[ "$parent_pid" =~ ^[0-9]+$ ]] && (( parent_pid > 1 )); do
+      parent_info=$(ps -p "$parent_pid" -o ppid=,command= 2>/dev/null || true)
+      [[ -n "$parent_info" ]] || break
+      read -r parent_pid parent_command <<< "$parent_info"
+      if [[ "$parent_command" == *"with-ios-simulator-lock.sh"* ]]; then
+        managed=true
+        break
+      fi
+    done
+    if [[ "$managed" == false ]]; then
+      ps -p "$candidate_pid" -o pid=,command= 2>/dev/null || true
+    fi
+  done < <(ps ax -o pid=,command= | awk -v self="$$" '
+    $1 == self { next }
+    /[w]ith-ios-simulator-lock\.sh/ { next }
+    /[x]codebuild .*test/ ||
+    /[m]aestro .*test/ ||
+    /[i]db (ui|xctest|record|launch)/ ||
+    /[f]b-idb .* (ui|xctest|record|launch)/ ||
+    /[s]imctl (io|ui) / ||
+    /[a]ppium/ ||
+    /[W]ebDriverAgentRunner/ ||
+    /[x]ctest .*Runner/ { print $1 }
+  ')
+}
+
 read_owner_field() {
   local field=$1
   [[ -f "$owner_file" ]] || return 0
@@ -88,10 +126,34 @@ describe_owner() {
   echo "${owner_label:-unknown task} (pid ${owner_pid:-unknown}, mode ${owner_mode:-unknown}, since ${owner_started:-unknown}, expires ${owner_expires:-not set}, cwd ${owner_cwd:-unknown})"
 }
 
+if [[ "$assert_held" == true ]]; then
+  [[ "$show_status" == false && "$hold" == false && $# -eq 0 ]] || {
+    echo "--assert-held cannot be combined with another action or command." >&2
+    exit 2
+  }
+  if [[ ! -d "$lock_dir" ]]; then
+    echo "iPhone 16e simulator lock is not held." >&2
+    exit 1
+  fi
+  owner_label=$(read_owner_field label)
+  if [[ -n "$label" && "$owner_label" != "$label" ]]; then
+    echo "iPhone 16e is held by $(describe_owner), not by $label." >&2
+    exit 1
+  fi
+  echo "iPhone 16e lock is held by $(describe_owner)."
+  exit 0
+fi
+
 if [[ "$show_status" == true ]]; then
   if [[ -d "$lock_dir" ]]; then
     echo "iPhone 16e is reserved by $(describe_owner)."
     exit 0
+  fi
+  unmanaged=$(find_unmanaged_automation)
+  if [[ -n "$unmanaged" ]]; then
+    echo "iPhone 16e has unmanaged automation processes (no repository lock):"
+    echo "$unmanaged"
+    exit 1
   fi
   echo "iPhone 16e is available."
   exit 0
@@ -183,6 +245,14 @@ while [[ "$acquired" != true ]]; do
   fi
   sleep 2
 done
+
+unmanaged=$(find_unmanaged_automation)
+if [[ -n "$unmanaged" ]]; then
+  echo "Refusing to start while unmanaged simulator automation is active:" >&2
+  echo "$unmanaged" >&2
+  echo "Stop it, or restart it through ci/with-ios-simulator-lock.sh." >&2
+  exit 1
+fi
 
 echo "Reserved iPhone 16e for $label."
 

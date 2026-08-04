@@ -36,6 +36,8 @@ GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停�
 - 真机安装默认使用用户当前所在且已连接目标 iPhone 的 Mac：当前会话运行在 MacBook Air 时直接用 MacBook Air，本人在 Mac mini 时直接用 Mac mini，不跨机器绕行。先测试，再本地构建、签名并用 `devicectl` 安装。设备处于 Xcode `Preparing` 时应等待并重试，不要把构建成功或回退任务已触发当作安装成功。
 - 当前 Mac 无法识别目标 iPhone、签名无效或本地直装失败时，先报告本机安装未完成；只有用户明确要求使用 Mac mini 回退时，才触发 `Build on Mac mini and install on iPhone`，`git_ref` 使用 `main`，并等待安装命令成功。临时测试未合并分支时使用该分支或提交 SHA，不改动 `main`。
 - 模拟器统一复用现有 `iPhone 16e`。测试、安装、启动或界面操作必须通过 `./ci/with-ios-simulator-lock.sh --label <任务名> -- <命令>`；交互验收先用同一脚本的 `--hold` 独占，完成后立即停止持锁进程。不得绕过锁，也不要无故创建或切换设备。
+- Codex 的 Computer Use、浏览器界面控制、截图、辅助功能树读取，以及直接使用 `idb`、Maestro、`simctl io/ui` 或 Xcode UI，全部视为模拟器操作。调用这些非子进程式工具前必须先用 `--hold` 持锁，再用相同 `--label` 执行 `--assert-held`；未持锁、标签不匹配或 `--status` 报告 unmanaged automation 时不得继续。常驻 `idb_companion` 本身不算占用，但任何通过它发起的界面会话都必须持锁。
+- 不得同时启动两个自动化会话，即使它们来自同一个任务或 AI。锁脚本会拒绝与未通过锁启动的 `xcodebuild test`、Maestro、idb UI/XCTest、Appium、WebDriverAgent 等进程并行；发现此类进程时应停止或等待，不得绕过检测。
 - 真机只安装已合并的稳定 `main`；多个任务连续合并时以最后一次累计全部改动的安装结果为准。
 
 ## 多任务并行与共享资源调度
