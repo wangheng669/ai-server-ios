@@ -22,11 +22,16 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Check out task commit with full history
+      - name: Check out preflight paths
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 50
+          filter: blob:none
+          sparse-checkout: |
+            .github
+            ci
+            AIServerClient.xcodeproj
 
       - name: Run repository preflight checks
         run: ./ci/linux-preflight.sh origin/main

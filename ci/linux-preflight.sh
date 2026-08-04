@@ -9,7 +9,8 @@ merge_base="$(git merge-base "$base_ref" HEAD)"
 echo "Checking task changes since $merge_base"
 git diff --check "$merge_base"...HEAD
 
-if git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- ':!*.md'; then
+if git diff --unified=0 "$merge_base"...HEAD -- ':!*.md' \
+  | grep -E '^\+(<<<<<<<|=======|>>>>>>>)'; then
   echo "Unresolved merge markers found." >&2
   exit 1
 fi
