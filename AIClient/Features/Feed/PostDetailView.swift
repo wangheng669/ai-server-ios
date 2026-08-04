@@ -759,9 +759,6 @@ struct PostDetailView: View {
 
     private var xueqiuDetail: some View {
         VStack(spacing: 0) {
-            xueqiuDetailToolbar
-            Divider().opacity(0.55)
-
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     xueqiuDetailAuthor
@@ -829,28 +826,6 @@ struct PostDetailView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) { xueqiuDetailBottomBar }
-    }
-
-    private var xueqiuDetailToolbar: some View {
-        HStack {
-            Button {
-                player?.pause()
-                dismiss()
-            } label: {
-                Image(systemName: dismissIconName)
-                    .font(.system(size: 22, weight: .medium))
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel(dismissAccessibilityLabel)
-            Spacer()
-            Text("雪球正文")
-                .font(.system(size: 19, weight: .semibold))
-            Spacer()
-            Color.clear.frame(width: 44, height: 44)
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 8)
-        .frame(height: 56)
     }
 
     private var xueqiuDetailAuthor: some View {
