@@ -1447,12 +1447,22 @@ enum MediaURL {
     static func image(_ raw: String) -> URL? {
         let decoded = raw.replacingOccurrences(of: "&amp;", with: "&")
         if let proxyURL = URL(string: decoded),
-           proxyURL.host()?.lowercased() == "wechat2rss.xlab.app",
-           proxyURL.path.hasSuffix("/img-proxy/"),
+           proxyURL.host?.lowercased() == "wechat2rss.xlab.app",
+           proxyURL.path.hasSuffix("/img-proxy"),
            let original = URLComponents(url: proxyURL, resolvingAgainstBaseURL: false)?
             .queryItems?.first(where: { $0.name == "u" })?.value,
-           !original.isEmpty {
-            return resolved(original, proxy: "image-proxy", hosts: imageHostSuffixes)
+           let originalURL = URL(string: original),
+           originalURL.host?.lowercased().hasSuffix("qpic.cn") == true {
+            var parts = URLComponents(
+                url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/image-proxy"),
+                resolvingAgainstBaseURL: false
+            )
+            parts?.queryItems = [
+                .init(name: "url", value: originalURL.absoluteString),
+                .init(name: "soft", value: "1"),
+                .init(name: "context", value: "ios-feed")
+            ]
+            return parts?.url
         }
         return resolved(decoded, proxy: "image-proxy", hosts: imageHostSuffixes)
     }
