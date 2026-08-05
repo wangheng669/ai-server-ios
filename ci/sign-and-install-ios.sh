@@ -118,7 +118,20 @@ refresh_signing_with_xcode() {
 }
 
 if find "$APP_PATH" -type d -name '*.appex' -print -quit | grep -q .; then
-  echo "App extensions detected; using Xcode automatic signing for the app and every extension."
+  if codesign --verify --deep --strict --verbose=2 "$APP_PATH"; then
+    echo "App and embedded extensions are already signed; installing the prepared build directly."
+    if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+      ./ci/report-ios-deployment.sh running 0.92 installing || true
+    fi
+    if install_app_with_connectivity_retry "$APP_PATH"; then
+      echo "Installed $BUNDLE_ID on $DEVICE_UDID using the prepared signed build."
+      exit 0
+    fi
+    echo "The prepared signed build was rejected; refreshing signing with Xcode."
+  else
+    echo "Prepared app signature is incomplete; refreshing signing with Xcode."
+  fi
+  echo "App extensions detected; using Xcode automatic signing fallback for the app and every extension."
   refresh_signing_with_xcode
   if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
     ./ci/report-ios-deployment.sh running 0.92 installing || true

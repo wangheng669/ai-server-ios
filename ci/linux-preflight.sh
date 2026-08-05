@@ -33,6 +33,10 @@ if ((${#changed_shell_files[@]})); then
   fi
 fi
 
+if git diff --name-only "$merge_base"...HEAD -- ci/sign-and-install-ios.sh ci/test-sign-and-install-ios.sh | grep -q .; then
+  bash ci/test-sign-and-install-ios.sh
+fi
+
 if python3 -c 'import yaml' >/dev/null 2>&1; then
   python3 - <<'PY'
 from pathlib import Path
