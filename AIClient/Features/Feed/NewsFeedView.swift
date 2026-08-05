@@ -405,7 +405,7 @@ struct NewsFeedView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: "\(rootTabIsActive)-\(source.rawValue)") {
                 if rootTabIsActive, source == .rss || source == .wechat {
-                    await model.loadRSSFeedsIfNeeded()
+                    await model.loadRSSFeedsIfNeeded(forceRefresh: source == .wechat)
                 }
             }
         }

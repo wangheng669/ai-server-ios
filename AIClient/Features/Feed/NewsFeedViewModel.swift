@@ -55,6 +55,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
+        fetchRSSFeeds: (() async throws -> [RSSFeedSource])? = nil,
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchWeChatFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchPostDetail: ((Int) async throws -> Post)? = nil,
@@ -73,7 +74,7 @@ final class NewsFeedViewModel: ObservableObject {
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
         }
-        self.fetchRSSFeeds = { try await client.fetchRSSFeeds() }
+        self.fetchRSSFeeds = fetchRSSFeeds ?? { try await client.fetchRSSFeeds() }
         self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID, page, limit in
             try await client.fetchRSSFeedPosts(feedID: feedID, page: page, limit: limit)
         }
@@ -128,8 +129,8 @@ final class NewsFeedViewModel: ObservableObject {
         #endif
     }
 
-    func loadRSSFeedsIfNeeded() async {
-        guard rssFeeds.isEmpty else { return }
+    func loadRSSFeedsIfNeeded(forceRefresh: Bool = false) async {
+        guard forceRefresh || rssFeeds.isEmpty else { return }
         do {
             rssFeeds = try await fetchRSSFeeds()
         } catch is CancellationError {
