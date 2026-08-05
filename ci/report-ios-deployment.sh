@@ -23,6 +23,7 @@ json_seconds() {
 }
 
 preflight_seconds=$(json_seconds "${IOS_PREFLIGHT_SECONDS:-}")
+prepare_seconds=$(json_seconds "${IOS_PREPARE_SECONDS:-}")
 merge_seconds=$(json_seconds "${IOS_MERGE_SECONDS:-}")
 build_seconds=$(json_seconds "${IOS_BUILD_SECONDS:-}")
 install_seconds=$(json_seconds "${IOS_INSTALL_SECONDS:-}")
@@ -36,9 +37,9 @@ if [[ "$workflow_started" != null ]]; then
   total_seconds=$(($(date +%s) - workflow_started))
 fi
 
-payload=$(printf '{"phase":"%s","progress":%s,"stage":"%s","commit":"%s","runId":"%s","timings":{"preflight":%s,"merge":%s,"install":%s,"queue":null,"total":%s}}' \
+payload=$(printf '{"phase":"%s","progress":%s,"stage":"%s","commit":"%s","runId":"%s","timings":{"preflight":%s,"prepare":%s,"merge":%s,"install":%s,"queue":null,"total":%s}}' \
   "$phase" "$progress" "$stage" "${GITHUB_SHA:-}" "${GITHUB_RUN_ID:-}" \
-  "$preflight_seconds" "$merge_seconds" "$device_delivery_seconds" "$total_seconds")
+  "$preflight_seconds" "$prepare_seconds" "$merge_seconds" "$device_delivery_seconds" "$total_seconds")
 
 for path in "$preferred_path" /api/v1/system/ios-deployment; do
   status=$(curl --silent --show-error \
