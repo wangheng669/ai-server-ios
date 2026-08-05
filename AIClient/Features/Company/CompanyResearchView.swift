@@ -197,7 +197,7 @@ struct CompanyResearchView: View {
                     ContentUnavailableView("暂无公司", systemImage: "building.2", description: Text("公司档案将在服务端持续补充"))
                 }
             }
-            .background(Color(uiColor: .systemBackground))
+            .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
         .task { await store.load() }
@@ -206,7 +206,7 @@ struct CompanyResearchView: View {
     private func companyPage(_ company: CompanyResearchProfile) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     hero(company)
                         .id(Section.overview)
                     sectionTabs(company, proxy: proxy)
@@ -223,59 +223,80 @@ struct CompanyResearchView: View {
                         .id(Section.sources)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 48)
+                .padding(.top, 12)
+                .padding(.bottom, 56)
             }
+            .background(Color(uiColor: .systemGroupedBackground))
             .refreshable { await store.load(force: true) }
         }
     }
 
     private func hero(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack(alignment: .center, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center, spacing: 12) {
                 companyLogo(company)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(company.shortName).font(.title2.bold())
+                    Text(company.shortName)
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
                     Text("\(company.ticker) · \(company.exchange)")
-                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        .font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.68))
                 }
                 Spacer()
                 Text(company.industry)
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9).padding(.vertical, 6)
-                    .foregroundStyle(companyAccent(company))
-                    .background(companyAccent(company).opacity(0.09), in: Capsule())
+                    .foregroundStyle(.white)
+                    .background(.white.opacity(0.15), in: Capsule())
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(marketPrice(company.market))
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(company.tagline)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.76))
+                    .lineSpacing(3)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(marketPrice(company.market))
+                        .font(.system(size: 38, weight: .bold, design: .rounded))
                     Text(marketChange(company.market))
                         .font(.subheadline.bold())
-                        .foregroundStyle(marketChangeColor(company.market))
-                    Text(company.market?.status ?? "行情暂不可用")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.14), in: Capsule())
                 }
             }
 
-            HStack(spacing: 0) {
-                marketMetric("总市值", marketCap(company.market?.marketCap))
-                marketMetric("市盈率", formattedMultiple(company.market?.pe))
-                marketMetric("最新 ROE", latestROE(company))
+            HStack(spacing: 8) {
+                heroMetric("总市值", marketCap(company.market?.marketCap))
+                heroMetric("市盈率", formattedMultiple(company.market?.pe))
+                heroMetric("最新 ROE", latestROE(company))
             }
 
             pageIndicator(company)
         }
-        .padding(.vertical, 4)
+        .foregroundStyle(.white)
+        .padding(20)
+        .background {
+            ZStack(alignment: .topTrailing) {
+                LinearGradient(
+                    colors: [companyAccent(company), companyAccent(company).opacity(0.68)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 190, height: 190)
+                    .offset(x: 72, y: -84)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .shadow(color: companyAccent(company).opacity(0.22), radius: 18, y: 9)
     }
 
     private func pageIndicator(_ company: CompanyResearchProfile) -> some View {
         HStack(spacing: 5) {
             ForEach(store.companies) { item in
                 Capsule()
-                    .fill(item.id == company.id ? companyAccent(company) : Color.secondary.opacity(0.18))
+                    .fill(item.id == company.id ? Color.white : Color.white.opacity(0.28))
                     .frame(width: item.id == company.id ? 18 : 5, height: 5)
                     .animation(.easeInOut(duration: 0.2), value: company.id)
             }
@@ -296,8 +317,9 @@ struct CompanyResearchView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(4)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .padding(5)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 9, y: 4)
     }
 
     private func compactTab(_ title: String, selected: Bool, color: Color) -> some View {
@@ -310,40 +332,40 @@ struct CompanyResearchView: View {
     }
 
     private func thesisCard(_ company: CompanyResearchProfile) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "scope")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(companyAccent(company))
-                .frame(width: 38, height: 38)
-                .background(companyAccent(company).opacity(0.1), in: RoundedRectangle(cornerRadius: 11))
-            VStack(alignment: .leading, spacing: 9) {
-                HStack {
-                    Text("核心判断").font(.headline)
-                    Spacer()
-                    Text("持续跟踪")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(companyAccent(company))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(companyAccent(company).opacity(0.08), in: Capsule())
-                }
-                Text(company.thesis)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(4)
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                Label("核心判断", systemImage: "scope")
+                    .font(.headline)
+                    .foregroundStyle(companyAccent(company))
+                Spacer()
+                Text("INVESTMENT THESIS")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.tertiary)
             }
+            Text(company.thesis)
+                .font(.system(.body, design: .rounded, weight: .medium))
+                .lineSpacing(5)
         }
-        .padding(18)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+        .padding(20)
+        .background(companyAccent(company).opacity(0.075), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(alignment: .leading) {
+            Capsule().fill(companyAccent(company)).frame(width: 4).padding(.vertical, 18)
+        }
     }
 
     private func financialSection(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("经营趋势").font(.title3.bold())
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("经营趋势").font(.title3.bold())
+                    Text("收入与归母净利润").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text("单位：\(company.financials.unit)").font(.caption).foregroundStyle(.secondary)
+                Text(company.financials.unit)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Color.secondary.opacity(0.08), in: Capsule())
             }
 
             Chart(company.financials.years) { item in
@@ -377,14 +399,19 @@ struct CompanyResearchView: View {
                 }
             }
         }
-        .padding(18)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+        .padding(20)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+        .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
     }
 
     private func eventSection(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("重要事件").font(.title3.bold())
+            HStack {
+                Text("重要事件").font(.title3.bold())
+                Spacer()
+                Image(systemName: "bell.badge")
+                    .foregroundStyle(companyAccent(company))
+            }
             eventRow(
                 color: companyAccent(company), icon: "arrow.triangle.2.circlepath",
                 eyebrow: "股份回购 · \(company.buyback.status)",
@@ -407,35 +434,43 @@ struct CompanyResearchView: View {
                     .foregroundStyle(companyAccent(company))
             }
         }
-        .padding(18)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+        .padding(20)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+        .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
     }
 
     private func consensusSection(_ consensus: CompanyResearchConsensus, company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text("市场一致预期").font(.title3.bold())
+                Label("市场一致预期", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.title3.bold())
+                    .foregroundStyle(companyAccent(company))
                 Spacer()
                 Text(consensus.status)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(companyAccent(company))
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(companyAccent(company).opacity(0.09), in: Capsule())
             }
 
             Text(consensus.period)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            ForEach(consensus.metrics, id: \.label) { metric in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+            ForEach(Array(consensus.metrics.enumerated()), id: \.element.label) { index, metric in
+                HStack(spacing: 12) {
+                    Text("\(index + 1)")
+                        .font(.caption.bold())
+                        .foregroundStyle(companyAccent(company))
+                        .frame(width: 28, height: 28)
+                        .background(companyAccent(company).opacity(0.1), in: Circle())
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(metric.label).font(.subheadline.weight(.medium))
-                        Text(metric.note).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
                     Text(metric.value)
                         .font(.headline.monospacedDigit())
-                        .multilineTextAlignment(.trailing)
+                    Text("\(metric.label) · \(metric.note)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
                 }
             }
 
@@ -453,9 +488,16 @@ struct CompanyResearchView: View {
                     .foregroundStyle(companyAccent(company))
             }
         }
-        .padding(18)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+        .padding(20)
+        .background {
+            RoundedRectangle(cornerRadius: 22)
+                .fill(Color(uiColor: .secondarySystemBackground))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22)
+                        .fill(LinearGradient(colors: [companyAccent(company).opacity(0.07), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+        }
+        .overlay { RoundedRectangle(cornerRadius: 22).stroke(companyAccent(company).opacity(0.14), lineWidth: 0.8) }
     }
 
     private func eventRow(color: Color, icon: String, eyebrow: String, title: String, detail: String) -> some View {
@@ -474,34 +516,44 @@ struct CompanyResearchView: View {
 
     private func researchSection(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionEyebrow("研究框架")
-                .padding(.bottom, 8)
-            researchGroup("看点", icon: "scope", items: company.highlights)
+            HStack {
+                Text("研究框架").font(.title3.bold())
+                Spacer()
+                Text("四维跟踪")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(companyAccent(company))
+            }
+            .padding(.bottom, 8)
+            researchGroup("看点", icon: "scope", color: companyAccent(company), items: company.highlights)
             Divider().padding(.leading, 38)
-            researchGroup("壁垒", icon: "shield", items: company.moats)
+            researchGroup("壁垒", icon: "shield", color: .blue, items: company.moats)
             Divider().padding(.leading, 38)
-            researchGroup("风险", icon: "exclamationmark.triangle", items: company.risks)
+            researchGroup("风险", icon: "exclamationmark.triangle", color: .orange, items: company.risks)
             Divider().padding(.leading, 38)
-            researchGroup("跟踪", icon: "checklist", items: company.questions)
+            researchGroup("跟踪", icon: "checklist", color: .purple, items: company.questions)
         }
-        .padding(18)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+        .padding(20)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+        .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
     }
 
-    private func researchGroup(_ title: String, icon: String, items: [String]) -> some View {
+    private func researchGroup(_ title: String, icon: String, color: Color, items: [String]) -> some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
+                .foregroundStyle(color)
+                .frame(width: 28, height: 28)
+                .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 10) {
                 Text(title).font(.headline)
                 ForEach(items, id: \.self) { item in
-                    Text(item)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(3)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Circle().fill(color.opacity(0.65)).frame(width: 5, height: 5)
+                        Text(item)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(3)
+                    }
                 }
             }
         }
@@ -510,7 +562,11 @@ struct CompanyResearchView: View {
 
     private func sourcesSection(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionEyebrow("原始资料")
+            HStack {
+                Text("原始资料").font(.title3.bold())
+                Spacer()
+                Image(systemName: "doc.text.magnifyingglass").foregroundStyle(.secondary)
+            }
             ForEach(company.sources, id: \.url) { source in
                 Link(destination: source.url) {
                     HStack {
@@ -525,6 +581,8 @@ struct CompanyResearchView: View {
             Text("档案更新于 \(company.updatedAt.formatted(date: .abbreviated, time: .omitted))")
                 .font(.caption).foregroundStyle(.tertiary)
         }
+        .padding(20)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
     }
 
     private func sectionEyebrow(_ text: String) -> some View {
@@ -581,12 +639,14 @@ struct CompanyResearchView: View {
         }
     }
 
-    private func marketMetric(_ label: String, _ value: String) -> some View {
+    private func heroMetric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.62))
             Text(value).font(.subheadline.bold()).lineLimit(1).minimumScaleFactor(0.7)
         }
+        .padding(.horizontal, 11).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func summaryMetric(_ label: String, _ value: String) -> some View {
