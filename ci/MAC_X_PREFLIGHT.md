@@ -12,6 +12,7 @@ to an iPhone.
 - User service: `actions-runner-ai-server-ios-preflight.service`
 - Workflow job: `Linux preflight on mac-x`
 - Status stage: `linux-preflight` through the existing deployment-status API
+- Completed delivery status also reports preflight, merge/test, build/install, queue, and total durations for the governance page.
 
 The central Mac job starts only after preflight succeeds. Its own
 `ai-merge-to-main` concurrency group remains serialized.
