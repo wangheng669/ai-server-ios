@@ -4,7 +4,9 @@ set -euo pipefail
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
 workflow_started_epoch=$(date +%s)
-git fetch --no-tags origin main:refs/remotes/origin/main
+git fetch --no-tags --deepen=50 origin \
+  "${GITHUB_SHA:-HEAD}" \
+  main:refs/remotes/origin/main
 preflight_started_epoch=$workflow_started_epoch
 preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finished.XXXXXX")
 
