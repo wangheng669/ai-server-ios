@@ -2297,6 +2297,9 @@ private struct MarketIndexDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .task(id: historicalSymbol) {
             if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol) }
+            if !isIndex && !isCrypto {
+                await store.loadChart(symbol: historicalSymbol, range: .year)
+            }
             if let quote {
                 await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
                 if showsCompanyProfile {
@@ -2431,6 +2434,10 @@ private struct MarketIndexDetailView: View {
                 metricDivider
                 metric("最低", quote?.low, MarketStyle.loss)
                 metricDivider
+                if !isIndex && !isCrypto {
+                    metric("52周最低", market52WeekLow(store.chart(symbol: historicalSymbol, range: .year)), MarketStyle.loss)
+                    metricDivider
+                }
                 metric("昨收", quote?.previousClose)
             }
             Divider()
