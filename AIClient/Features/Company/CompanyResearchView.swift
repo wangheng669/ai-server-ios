@@ -377,11 +377,11 @@ struct CompanyResearchView: View {
     }
 
     private func financialSection(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("经营趋势").font(.title3.bold())
-                    Text("收入与归母净利润").font(.caption).foregroundStyle(.secondary)
+                    Text("历史财报 · 收入、利润与资本回报").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(company.financials.unit)
@@ -390,7 +390,8 @@ struct CompanyResearchView: View {
                     .background(Color.secondary.opacity(0.08), in: Capsule())
             }
 
-            Chart(company.financials.years) { item in
+            Chart {
+                ForEach(company.financials.years) { item in
                 BarMark(x: .value("年度", item.year), y: .value("金额", item.revenue))
                     .foregroundStyle(companyAccent(company).opacity(0.18))
                     .cornerRadius(5)
@@ -399,10 +400,11 @@ struct CompanyResearchView: View {
                     .foregroundStyle(companyAccent(company))
                     .cornerRadius(5)
                     .position(by: .value("指标", "归母净利润"))
+                }
             }
             .chartYAxis(.hidden)
             .chartXAxis { AxisMarks { AxisValueLabel().font(.caption) } }
-            .frame(height: 150)
+            .frame(height: 136)
 
             HStack(spacing: 18) {
                 Label("营业收入", systemImage: "square.fill")
@@ -413,18 +415,104 @@ struct CompanyResearchView: View {
             }
             .font(.caption)
 
-            if let latest = company.financials.years.last {
-                HStack(spacing: 0) {
-                    summaryMetric("营收", String(format: "%.1f", latest.revenue))
-                    summaryMetric("归母净利润", String(format: "%.1f", latest.netProfit))
-                    summaryMetric("ROE", String(format: "%.2f%%", latest.roe))
+            if let latest = company.financials.years.last,
+               let previous = company.financials.years.dropLast().last {
+                Divider()
+                Text("最新年度 · \(latest.year)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    changeMetric("营收", latest.revenue, growth: growth(latest.revenue, previous.revenue), color: companyAccent(company))
+                    changeMetric("净利润", latest.netProfit, growth: growth(latest.netProfit, previous.netProfit), color: companyAccent(company))
+                    changeMetric("ROE", latest.roe, growth: latest.roe - previous.roe, color: companyAccent(company), isPercent: true)
                 }
             }
+
+            Divider()
+            financialTable(company)
+
+            Link(destination: company.financials.source.url) {
+                HStack {
+                    Label("查看原始财报", systemImage: "doc.text")
+                    Spacer()
+                    Text(company.financials.source.title).lineLimit(1)
+                    Image(systemName: "arrow.up.right")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(companyAccent(company))
+            }
         }
-        .padding(20)
+        .padding(18)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
         .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
     }
+
+    private func financialTable(_ company: CompanyResearchProfile) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                tableCell("年度", alignment: .leading, weight: .semibold)
+                tableCell("营收", alignment: .trailing, weight: .semibold)
+                tableCell("净利润", alignment: .trailing, weight: .semibold)
+                tableCell("净利率", alignment: .trailing, weight: .semibold)
+                tableCell("ROE", alignment: .trailing, weight: .semibold)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 8)
+
+            ForEach(Array(company.financials.years.enumerated()), id: \.element.id) { index, item in
+                if index > 0 { Divider() }
+                HStack(spacing: 4) {
+                    tableCell(item.year, alignment: .leading, weight: .medium)
+                    tableCell(compactNumber(item.revenue), alignment: .trailing, weight: .regular)
+                    tableCell(compactNumber(item.netProfit), alignment: .trailing, weight: .regular)
+                    tableCell(percent(item.netProfit / item.revenue * 100), alignment: .trailing, weight: .regular)
+                    tableCell(percent(item.roe), alignment: .trailing, weight: .regular)
+                }
+                .padding(.vertical, 9)
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .padding(12)
+        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func tableCell(_ text: String, alignment: Alignment, weight: Font.Weight) -> some View {
+        Text(text)
+            .fontWeight(weight)
+            .lineLimit(1)
+            .minimumScaleFactor(0.65)
+            .frame(maxWidth: .infinity, alignment: alignment)
+    }
+
+    private func changeMetric(_ label: String, _ value: Double, growth: Double, color: Color, isPercent: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(isPercent ? percent(value) : compactNumber(value))
+                .font(.subheadline.bold()).monospacedDigit()
+            Text(isPercent ? "同比 \(signedPercentPoint(growth))" : "同比 \(signedPercent(growth))")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(growth >= 0 ? color : .red)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func growth(_ current: Double, _ previous: Double) -> Double {
+        guard previous != 0 else { return 0 }
+        return (current / previous - 1) * 100
+    }
+
+    private func compactNumber(_ value: Double) -> String {
+        if abs(value) >= 1_000 { return String(format: "%.0f", value) }
+        return String(format: "%.1f", value)
+    }
+
+    private func percent(_ value: Double) -> String { String(format: "%.1f%%", value) }
+
+    private func signedPercent(_ value: Double) -> String { String(format: "%+.1f%%", value) }
+
+    private func signedPercentPoint(_ value: Double) -> String { String(format: "%+.1fpp", value) }
 
     private func eventSection(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 16) {
