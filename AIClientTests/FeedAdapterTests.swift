@@ -820,6 +820,40 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
     }
 
+    func testWeChatRSSImageUnwrapsBlockedProxyAndUsesServerProxy() throws {
+        let raw = "https://wechat2rss.xlab.app/img-proxy/?k=1&u=https%3A%2F%2Fmmbiz.qpic.cn%2Fsz_mmbiz_jpg%2Fdemo%2F0%3Fwx_fmt%3Djpeg"
+        let url = try XCTUnwrap(MediaURL.image(raw))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+
+        XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
+        XCTAssertEqual(
+            components.queryItems?.first(where: { $0.name == "url" })?.value,
+            "https://mmbiz.qpic.cn/sz_mmbiz_jpg/demo/0?wx_fmt=jpeg"
+        )
+    }
+
+    func testWeChatArticlePreservesTextAndInlineImageOrder() throws {
+        let html = """
+        <p>第一段正文。</p>
+        <p><img src="https://wechat2rss.xlab.app/img-proxy/?k=1&amp;u=https%3A%2F%2Fmmbiz.qpic.cn%2Fdemo.jpg"></p>
+        <p>第二段正文。</p>
+        """
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 57,
+            "source": "rss:57",
+            "content": html
+        ])
+        let post = try JSONDecoder().decode(Post.self, from: payload)
+
+        XCTAssertEqual(post.weChatArticleBlocks.count, 3)
+        XCTAssertEqual(post.weChatArticleBlocks[0], .text("第一段正文。"))
+        guard case .image(let url) = post.weChatArticleBlocks[1] else {
+            return XCTFail("Expected inline image")
+        }
+        XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
+        XCTAssertEqual(post.weChatArticleBlocks[2], .text("第二段正文。"))
+    }
+
     func testNewYorkTimesArticleUsesServerPreviewEndpoint() throws {
         let article = try XCTUnwrap(URL(string: "https://www.nytimes.com/2026/07/19/example.html"))
         let base = try XCTUnwrap(URL(string: "https://api.wanghengai.xin"))

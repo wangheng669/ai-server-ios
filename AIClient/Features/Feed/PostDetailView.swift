@@ -413,71 +413,50 @@ struct PostDetailView: View {
     private var weChatDetail: some View {
         VStack(spacing: 0) {
             weChatDetailHeader
-            Divider().opacity(0.55)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 12) {
-                        AvatarView(url: post.avatarURL, name: post.sourceName, size: 44)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(post.sourceName)
-                                .font(.system(size: 16, weight: .semibold))
-                            Text("微信公众号")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(Color(red: 0.03, green: 0.72, blue: 0.36))
-                        }
-                        Spacer(minLength: 8)
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(Color(red: 0.03, green: 0.72, blue: 0.36))
-                            .accessibilityLabel("已收录公众号")
-                    }
-                    .padding(.bottom, 22)
-
                     Text(post.displayTitle)
-                        .font(.system(size: 28, weight: .bold))
-                        .tracking(-0.5)
-                        .lineSpacing(5)
+                        .font(.system(size: 25, weight: .semibold))
+                        .tracking(-0.25)
+                        .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 7) {
-                        Text(post.authorName == "RSS" ? post.sourceName : post.authorName)
-                            .foregroundStyle(Color(red: 0.03, green: 0.62, blue: 0.32))
+                    HStack(spacing: 8) {
+                        Text(post.sourceName)
+                            .foregroundStyle(Color(red: 0.34, green: 0.48, blue: 0.62))
                         if let time = post.formattedTime { Text(time) }
-                        Text("原创")
                     }
-                    .font(.system(size: 13.5))
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
-                    .padding(.top, 13)
-                    .padding(.bottom, 22)
-
-                    if let cover = rssContentImageURLs.first {
-                        RemoteImage(url: cover, height: 230, cornerRadius: 8)
-                            .padding(.bottom, 24)
-                    }
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
 
                     LazyVStack(alignment: .leading, spacing: 20) {
-                        ForEach(Array(weChatParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                            Text(paragraph)
-                                .font(.system(size: 17))
-                                .foregroundStyle(.primary.opacity(0.92))
-                                .lineSpacing(8)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
+                        ForEach(Array(post.weChatArticleBlocks.enumerated()), id: \.offset) { _, block in
+                            switch block {
+                            case .text(let paragraph):
+                                Text(paragraph)
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(Color(uiColor: .label).opacity(0.9))
+                                    .lineSpacing(8)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            case .image(let url):
+                                WeChatArticleImage(url: url)
+                            }
                         }
                     }
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle")
-                        Text("内容由服务端同步")
-                    }
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 30)
+                    Text("阅读原文")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(red: 0.34, green: 0.48, blue: 0.62))
+                        .padding(.top, 34)
+                        .onTapGesture { openOriginal() }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-                .padding(.bottom, 30)
+                .padding(.horizontal, 18)
+                .padding(.top, 24)
+                .padding(.bottom, 36)
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -495,8 +474,8 @@ struct PostDetailView: View {
             .accessibilityLabel(dismissAccessibilityLabel)
 
             Spacer(minLength: 0)
-            Text("公众号文章")
-                .font(.system(size: 16, weight: .semibold))
+            Text(post.sourceName)
+                .font(.system(size: 16, weight: .medium))
             Spacer(minLength: 0)
 
             Button { openOriginal() } label: {
@@ -548,14 +527,6 @@ struct PostDetailView: View {
         .frame(height: 56)
         .background(.bar)
         .overlay(alignment: .top) { Divider().opacity(0.65) }
-    }
-
-    private var weChatParagraphs: [String] {
-        let paragraphs = post.displayContent
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return paragraphs.isEmpty ? [post.displayContent] : paragraphs
     }
 
     private var weiboDetail: some View {
@@ -3591,6 +3562,27 @@ private extension NSString {
             searchRange = NSRange(location: nextLocation, length: length - nextLocation)
         }
         return result
+    }
+}
+
+private struct WeChatArticleImage: View {
+    let url: URL
+    @State private var aspectRatio: CGFloat = 1.5
+
+    var body: some View {
+        GeometryReader { proxy in
+            RemoteImage(
+                url: url,
+                height: max(120, proxy.size.width / aspectRatio),
+                contentMode: .fit,
+                onImageLoaded: { image in
+                    guard image.size.width > 0, image.size.height > 0 else { return }
+                    aspectRatio = image.size.width / image.size.height
+                }
+            )
+        }
+        .frame(height: max(120, (UIScreen.main.bounds.width - 36) / aspectRatio))
+        .frame(maxWidth: .infinity)
     }
 }
 
