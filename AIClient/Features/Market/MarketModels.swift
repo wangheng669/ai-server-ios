@@ -206,6 +206,7 @@ struct MarketCompanyFinancialsResponse: Decodable {
 struct MarketCompanyFinancials: Decodable {
     let symbol: String
     let netIncomeTTM: Double?
+    let week52Low: Double?
     let currency: String
     let period: String
     let fiscalYear: String?
@@ -984,7 +985,8 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
 }
 
 func market52WeekLow(_ chart: MarketChart?) -> Double? {
-    chart?.candles
+    guard chart?.quality.status == .complete else { return nil }
+    return chart?.candles
         .filter { $0.state != "invalid" && $0.low.isFinite && $0.low > 0 }
         .map(\.low)
         .min()

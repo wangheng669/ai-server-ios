@@ -150,6 +150,14 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(market52WeekLow(response.data), 185.5)
     }
 
+    func test52WeekLowRejectsPartialHistory() throws {
+        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","market":"US","tradingDate":"2026-08-04","timezone":"America/New_York","session":"closed","interval":"1d","quality":{"status":"partial","expected":6,"actual":6,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"source":"yahoo"},"candles":[{"timestamp":1,"open":210,"high":215,"low":205,"close":212,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"}]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
+
+        XCTAssertNil(market52WeekLow(response.data))
+    }
+
     func testCryptoDisplayCodeUsesTradingPair() throws {
         let data = Data(#"{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":64000}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
