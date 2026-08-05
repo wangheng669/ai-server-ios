@@ -55,11 +55,11 @@ jobs:
     outputs:
       duration_seconds: ${{ steps.central_prepare.outputs.duration_seconds }}
     steps:
-      - name: Check out task commit with full history
+      - name: Check out task commit for cache warming
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Resolve dependencies and warm device build cache
         id: central_prepare
