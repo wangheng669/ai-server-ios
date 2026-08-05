@@ -37,9 +37,27 @@ if [[ "$workflow_started" != null ]]; then
   total_seconds=$(($(date +%s) - workflow_started))
 fi
 
-payload=$(printf '{"phase":"%s","progress":%s,"stage":"%s","commit":"%s","runId":"%s","timings":{"preflight":%s,"prepare":%s,"merge":%s,"install":%s,"queue":null,"total":%s}}' \
-  "$phase" "$progress" "$stage" "${GITHUB_SHA:-}" "${GITHUB_RUN_ID:-}" \
-  "$preflight_seconds" "$prepare_seconds" "$merge_seconds" "$device_delivery_seconds" "$total_seconds")
+commit_message=${IOS_COMMIT_MESSAGE:-}
+if [[ -z "$commit_message" && -n "${GITHUB_SHA:-}" ]] && git cat-file -e "${GITHUB_SHA}^{commit}" 2>/dev/null; then
+  commit_message=$(git log -1 --format=%s "$GITHUB_SHA")
+fi
+
+payload=$(jq -cn \
+  --arg phase "$phase" \
+  --argjson progress "$progress" \
+  --arg stage "$stage" \
+  --arg commit "${GITHUB_SHA:-}" \
+  --arg commitMessage "$commit_message" \
+  --arg sourceBranch "${GITHUB_REF_NAME:-}" \
+  --arg runId "${GITHUB_RUN_ID:-}" \
+  --argjson preflight "$preflight_seconds" \
+  --argjson prepare "$prepare_seconds" \
+  --argjson merge "$merge_seconds" \
+  --argjson install "$device_delivery_seconds" \
+  --argjson total "$total_seconds" \
+  '{phase:$phase, progress:$progress, stage:$stage, commit:$commit, commitMessage:$commitMessage,
+    sourceBranch:$sourceBranch, runId:$runId,
+    timings:{preflight:$preflight, prepare:$prepare, merge:$merge, install:$install, queue:null, total:$total}}')
 
 for path in "$preferred_path" /api/v1/system/ios-deployment; do
   status=$(curl --silent --show-error \
