@@ -671,6 +671,29 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testForcedRSSFeedRefreshReplacesCachedAvatarMetadata() async throws {
+        var requestCount = 0
+        let first = try JSONDecoder().decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":2373,"name":"小互AI","avatar_url":"https://example.com/old.jpg","is_enabled":true}"#.utf8)
+        )
+        let refreshed = try JSONDecoder().decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":2373,"name":"小互AI","avatar_url":"https://wx.qlogo.cn/avatar.jpg","is_enabled":true}"#.utf8)
+        )
+        let model = NewsFeedViewModel(source: .wechat, fetchRSSFeeds: {
+            requestCount += 1
+            return requestCount == 1 ? [first] : [refreshed]
+        })
+
+        await model.loadRSSFeedsIfNeeded()
+        await model.loadRSSFeedsIfNeeded(forceRefresh: true)
+
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertEqual(model.rssFeeds.first?.avatar, "https://wx.qlogo.cn/avatar.jpg")
+    }
+
+    @MainActor
     func testWeChatAccountSelectionUsesServerFeedEndpointWithoutClientFiltering() async throws {
         var requests: [(feedID: Int, page: Int, limit: Int)] = []
         let first = try JSONDecoder().decode(
