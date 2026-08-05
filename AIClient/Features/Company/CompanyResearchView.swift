@@ -191,7 +191,6 @@ struct CompanyResearchView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    topControls
                     hero(company)
                         .id(Section.overview)
                     sectionTabs(company, proxy: proxy)
@@ -205,40 +204,10 @@ struct CompanyResearchView: View {
                         .id(Section.sources)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 10)
+                .padding(.top, 16)
                 .padding(.bottom, 48)
             }
             .refreshable { await store.load(force: true) }
-        }
-    }
-
-    private var topControls: some View {
-        HStack {
-            Spacer()
-            companyPicker
-        }
-    }
-
-    private var companyPicker: some View {
-        Menu {
-            ForEach(store.companies) { company in
-                Button(company.name) {
-                    selectedCompanyID = company.id
-                    selectedSection = .overview
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text("公司切换")
-                Image(systemName: "chevron.down")
-                    .font(.caption2.bold())
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-            .overlay { Capsule().stroke(Color.secondary.opacity(0.14), lineWidth: 0.5) }
         }
     }
 
@@ -501,23 +470,56 @@ struct CompanyResearchView: View {
     }
 
     private func companyLogo(_ company: CompanyResearchProfile) -> some View {
-        AsyncImage(url: company.logoUrl) { phase in
-            if case let .success(image) = phase {
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .padding(6)
-            } else {
-                Text(String(company.shortName.prefix(1)))
-                    .font(.system(size: 24, weight: .bold, design: .serif))
-                    .foregroundStyle(companyAccent(company))
-            }
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(logoBackground(company))
+            companyLogoContent(company)
         }
         .frame(width: 58, height: 46)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.14), lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(company.shortName)标志")
+    }
+
+    @ViewBuilder
+    private func companyLogoContent(_ company: CompanyResearchProfile) -> some View {
+        switch company.id {
+        case "pdd-holdings":
+            Text("PDD")
+                .font(.system(size: 14, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+        case "nvidia":
+            Text("N")
+                .font(.system(size: 25, weight: .black, design: .rounded))
+                .foregroundStyle(Color(red: 0.46, green: 0.72, blue: 0.12))
+        case "alphabet":
+            Text("G")
+                .font(.system(size: 25, weight: .bold, design: .rounded))
+                .foregroundStyle(Color(red: 0.10, green: 0.38, blue: 0.84))
+        default:
+            AsyncImage(url: company.logoUrl) { phase in
+                if case let .success(image) = phase {
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .padding(6)
+                } else {
+                    Text(String(company.shortName.prefix(1)))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(companyAccent(company))
+                }
+            }
+        }
+    }
+
+    private func logoBackground(_ company: CompanyResearchProfile) -> Color {
+        switch company.id {
+        case "pdd-holdings": Color(red: 0.83, green: 0.11, blue: 0.16)
+        case "nvidia": Color(red: 0.08, green: 0.09, blue: 0.08)
+        default: Color(uiColor: .systemBackground)
         }
     }
 
