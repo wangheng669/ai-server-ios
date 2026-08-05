@@ -77,6 +77,11 @@ struct WeiboInlineEmoji: Hashable {
     let url: URL
 }
 
+enum WeChatArticleBlock: Hashable {
+    case text(String)
+    case image(URL)
+}
+
 struct XCommentsResponse: Decodable {
     let success: Bool
     let data: Payload
@@ -539,6 +544,42 @@ struct Post: Decodable, Identifiable, Hashable {
         (images ?? [])
             .filter { !$0.isKnownInlineAsset }
             .compactMap { MediaURL.image($0.url) }
+    }
+    var weChatArticleBlocks: [WeChatArticleBlock] {
+        guard let content, !content.isEmpty,
+              let imageRegex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
+            return [.text(displayContent)]
+        }
+
+        let source = content as NSString
+        let matches = imageRegex.matches(in: content, range: NSRange(location: 0, length: source.length))
+        var blocks: [WeChatArticleBlock] = []
+        var cursor = 0
+
+        func appendText(_ range: NSRange) {
+            guard range.length > 0 else { return }
+            let text = htmlText(source.substring(with: range))?
+                .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let text, !text.isEmpty else { return }
+            for paragraph in text.components(separatedBy: "\n")
+                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !paragraph.isEmpty {
+                blocks.append(.text(paragraph))
+            }
+        }
+
+        for match in matches {
+            appendText(NSRange(location: cursor, length: match.range.location - cursor))
+            let tag = source.substring(with: match.range)
+            if let rawURL = htmlAttribute("src", in: tag),
+               let url = MediaURL.image(rawURL.replacingOccurrences(of: "&amp;", with: "&")) {
+                blocks.append(.image(url))
+            }
+            cursor = NSMaxRange(match.range)
+        }
+        appendText(NSRange(location: cursor, length: source.length - cursor))
+
+        return blocks.isEmpty ? [.text(displayContent)] : blocks
     }
     var weiboFollowingImageURLs: [URL] {
         imageURLs.filter { url in
@@ -1401,9 +1442,30 @@ struct PostVideo: Decodable, Hashable {
 }
 
 enum MediaURL {
-    private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com"]
+    private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com", "qpic.cn"]
 
-    static func image(_ raw: String) -> URL? { resolved(raw, proxy: "image-proxy", hosts: imageHostSuffixes) }
+    static func image(_ raw: String) -> URL? {
+        let decoded = raw.replacingOccurrences(of: "&amp;", with: "&")
+        if let proxyURL = URL(string: decoded),
+           proxyURL.host?.lowercased() == "wechat2rss.xlab.app",
+           proxyURL.path.hasSuffix("/img-proxy"),
+           let original = URLComponents(url: proxyURL, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "u" })?.value,
+           let originalURL = URL(string: original),
+           originalURL.host?.lowercased().hasSuffix("qpic.cn") == true {
+            var parts = URLComponents(
+                url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/image-proxy"),
+                resolvingAgainstBaseURL: false
+            )
+            parts?.queryItems = [
+                .init(name: "url", value: originalURL.absoluteString),
+                .init(name: "soft", value: "1"),
+                .init(name: "context", value: "ios-feed")
+            ]
+            return parts?.url
+        }
+        return resolved(decoded, proxy: "image-proxy", hosts: imageHostSuffixes)
+    }
     static func directVideo(_ raw: String) -> URL? {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
