@@ -133,8 +133,16 @@ final class CompanyResearchStore: ObservableObject {
 
 @MainActor
 struct CompanyResearchView: View {
+    private enum Section: String, CaseIterable {
+        case overview = "概览"
+        case financial = "财务"
+        case events = "事件"
+        case sources = "资料"
+    }
+
     @StateObject private var store: CompanyResearchStore
     @State private var selectedCompanyID: String?
+    @State private var selectedSection: Section = .overview
 
     init() {
         _store = StateObject(wrappedValue: CompanyResearchStore())
@@ -168,40 +176,60 @@ struct CompanyResearchView: View {
     }
 
     private func companyPage(_ company: CompanyResearchProfile) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 28) {
-                pageHeader(company)
-                hero(company)
-                financialSection(company)
-                eventSection(company)
-                thesisCard(company)
-                researchSection(company)
-                sourcesSection(company)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    pageHeader(company)
+                    hero(company)
+                        .id(Section.overview)
+                    sectionTabs(company, proxy: proxy)
+                    financialSection(company)
+                        .id(Section.financial)
+                    eventSection(company)
+                        .id(Section.events)
+                    thesisCard(company)
+                    researchSection(company)
+                    sourcesSection(company)
+                        .id(Section.sources)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 48)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 48)
+            .refreshable { await store.load(force: true) }
         }
-        .refreshable { await store.load(force: true) }
     }
 
     private func pageHeader(_ company: CompanyResearchProfile) -> some View {
         HStack {
-            Text("公司研究")
-                .font(.largeTitle.bold())
+            HStack(spacing: 7) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(companyAccent(company))
+                Text("研究")
+                    .foregroundStyle(.secondary)
+                Text("/")
+                    .foregroundStyle(.tertiary)
+                Text(company.shortName)
+                    .fontWeight(.semibold)
+            }
+            .font(.subheadline)
             Spacer()
-            if store.companies.count > 1 { companyPicker }
+            companyPicker
         }
     }
 
     private var companyPicker: some View {
         Menu {
             ForEach(store.companies) { company in
-                Button(company.name) { selectedCompanyID = company.id }
+                Button(company.name) {
+                    selectedCompanyID = company.id
+                    selectedSection = .overview
+                }
             }
         } label: {
             HStack(spacing: 6) {
-                Text(selectedCompany?.shortName ?? "选择公司")
+                Text("公司切换")
                 Image(systemName: "chevron.down")
                     .font(.caption2.bold())
             }
@@ -209,34 +237,38 @@ struct CompanyResearchView: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.secondary.opacity(0.08), in: Capsule())
+            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .overlay { Capsule().stroke(Color.secondary.opacity(0.14), lineWidth: 0.5) }
         }
     }
 
     private func hero(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack(alignment: .top, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center, spacing: 14) {
                 companyLogo(company)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(company.name).font(.title2.bold())
+                    Text(company.shortName).font(.title2.bold())
                     Text("\(company.ticker) · \(company.exchange)")
-                        .font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.72))
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(company.industry)
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9).padding(.vertical, 6)
-                    .background(.white.opacity(0.13), in: Capsule())
+                    .foregroundStyle(companyAccent(company))
+                    .background(companyAccent(company).opacity(0.09), in: Capsule())
             }
 
-            VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(marketPrice(company.market))
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                HStack(spacing: 8) {
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(marketChange(company.market))
                         .font(.subheadline.bold())
+                        .foregroundStyle(marketChangeColor(company.market))
                     Text(company.market?.status ?? "行情暂不可用")
-                        .font(.caption).foregroundStyle(.white.opacity(0.68))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
@@ -246,12 +278,34 @@ struct CompanyResearchView: View {
                 marketMetric("最新 ROE", latestROE(company))
             }
         }
-        .foregroundStyle(.white)
         .padding(20)
-        .background(
-            LinearGradient(colors: [companyAccent(company), companyAccent(company).opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 26)
-        )
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+        .overlay { RoundedRectangle(cornerRadius: 22).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+    }
+
+    private func sectionTabs(_ company: CompanyResearchProfile, proxy: ScrollViewProxy) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Section.allCases, id: \.self) { section in
+                Button {
+                    selectedSection = section
+                    withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(section, anchor: .top) }
+                } label: {
+                    compactTab(section.rawValue, selected: selectedSection == section, color: companyAccent(company))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func compactTab(_ title: String, selected: Bool, color: Color) -> some View {
+        Text(title)
+            .font(.subheadline.weight(selected ? .semibold : .medium))
+            .foregroundStyle(selected ? color : .secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(selected ? color.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func thesisCard(_ company: CompanyResearchProfile) -> some View {
@@ -420,26 +474,30 @@ struct CompanyResearchView: View {
             } else {
                 Text(String(company.shortName.prefix(1)))
                     .font(.system(size: 24, weight: .bold, design: .serif))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(companyAccent(company))
             }
         }
-        .frame(width: 62, height: 44)
-        .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+        .frame(width: 58, height: 46)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 0.5)
         }
     }
 
     private func companyAccent(_ company: CompanyResearchProfile) -> Color {
-        company.id == "wuliangye"
-            ? Color(red: 0.08, green: 0.25, blue: 0.52)
-            : Color(red: 0.52, green: 0.07, blue: 0.09)
+        switch company.id {
+        case "wuliangye": Color(red: 0.08, green: 0.25, blue: 0.52)
+        case "pdd-holdings": Color(red: 0.83, green: 0.11, blue: 0.16)
+        case "nvidia": Color(red: 0.20, green: 0.49, blue: 0.08)
+        case "alphabet": Color(red: 0.10, green: 0.38, blue: 0.84)
+        default: Color(red: 0.52, green: 0.07, blue: 0.09)
+        }
     }
 
     private func marketMetric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.65))
+            Text(label).font(.caption2).foregroundStyle(.secondary)
             Text(value).font(.subheadline.bold()).lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -455,8 +513,15 @@ struct CompanyResearchView: View {
 
     private func marketPrice(_ market: CompanyResearchMarket?) -> String {
         guard let price = market?.price else { return "--" }
-        let symbol = market?.currency == "CNY" ? "¥" : ""
+        let symbol = market?.currency == "CNY" ? "¥" : market?.currency == "USD" ? "$" : ""
         return String(format: "%@%.2f", symbol, price)
+    }
+
+    private func marketChangeColor(_ market: CompanyResearchMarket?) -> Color {
+        guard let change = market?.changePercent else { return .secondary }
+        if change.hasPrefix("-") { return .red }
+        if change == "0" || change.hasPrefix("0.0") { return .secondary }
+        return .green
     }
 
     private func marketChange(_ market: CompanyResearchMarket?) -> String {
