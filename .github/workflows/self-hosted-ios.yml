@@ -27,7 +27,6 @@ jobs:
       - ARM64
       - office-builder
     timeout-minutes: 30
-
     steps:
       - name: Check out latest commit
         uses: actions/checkout@v7
@@ -43,16 +42,19 @@ jobs:
       - name: Run tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
         run: |
           set -o pipefail
-          ./ci/with-ios-simulator-lock.sh \
-            --label "manual install tests $GITHUB_RUN_ID" \
-            -- xcodebuild test \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -destination 'platform=iOS Simulator,name=iPhone 16e' \
-            -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestData" \
-            CODE_SIGNING_ALLOWED=NO
+          mkdir -p "$IOS_BUILD_CACHE_ROOT"
+          ./ci/run-timed-step.sh "Complete iOS tests" \
+            ./ci/with-ios-simulator-lock.sh \
+              --label "manual install tests $GITHUB_RUN_ID" \
+              -- xcodebuild test \
+              -project AIServerClient.xcodeproj \
+              -scheme AIServerClient \
+              -destination 'platform=iOS Simulator,name=iPhone 16e' \
+              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/manual-install-simulator" \
+              CODE_SIGNING_ALLOWED=NO
 
       - name: Report tests completed
         continue-on-error: true
@@ -63,18 +65,21 @@ jobs:
       - name: Build unsigned device app
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
         run: |
           set -o pipefail
-          xcodebuild build \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -configuration Debug \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/AIServerClient-DeviceData" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
+          mkdir -p "$IOS_BUILD_CACHE_ROOT"
+          ./ci/run-timed-step.sh "Unsigned device build" \
+            xcodebuild build \
+              -project AIServerClient.xcodeproj \
+              -scheme AIServerClient \
+              -configuration Debug \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/manual-install-device" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO
 
-          app_path="$RUNNER_TEMP/AIServerClient-DeviceData/Build/Products/Debug-iphoneos/AIServerClient.app"
+          app_path="$IOS_BUILD_CACHE_ROOT/manual-install-device/Build/Products/Debug-iphoneos/AIServerClient.app"
           test -d "$app_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
@@ -93,7 +98,8 @@ jobs:
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/sign-and-install-ios.sh
+          IOS_SIGNING_DERIVED_DATA_PATH: ${{ runner.tool_cache }}/ai-server-ios/manual-install-signing
+        run: ./ci/run-timed-step.sh "Sign and install on iPhone" ./ci/sign-and-install-ios.sh
 
       - name: Report direct installation completed
         continue-on-error: true
