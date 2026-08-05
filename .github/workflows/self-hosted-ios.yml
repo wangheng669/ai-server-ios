@@ -40,6 +40,7 @@ jobs:
         run: ./ci/report-ios-deployment.sh running 0.08 testing
 
       - name: Run tests
+        id: ios_tests
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
@@ -64,6 +65,7 @@ jobs:
         run: ./ci/report-ios-deployment.sh running 0.35 building
 
       - name: Build unsigned device app
+        id: device_build
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
@@ -91,6 +93,7 @@ jobs:
         run: ./ci/report-ios-deployment.sh running 0.82 signing
 
       - name: Sign and install directly on office Mac mini
+        id: local_install
         env:
           APP_ARCHIVE: ${{ runner.temp }}/AIServerClient.app.zip
           APP_PATH: ${{ runner.temp }}/signed-app/AIServerClient.app
@@ -106,6 +109,10 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          IOS_MERGE_SECONDS: ${{ steps.ios_tests.outputs.duration_seconds }}
+          IOS_WORKFLOW_STARTED_EPOCH: ${{ steps.ios_tests.outputs.started_epoch }}
+          IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
+          IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed
 
       - name: Report build failure

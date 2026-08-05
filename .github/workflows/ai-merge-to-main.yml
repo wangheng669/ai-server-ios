@@ -20,6 +20,9 @@ jobs:
       - X64
       - mac-x-preflight
     timeout-minutes: 10
+    outputs:
+      duration_seconds: ${{ steps.preflight_check.outputs.duration_seconds }}
+      started_epoch: ${{ steps.preflight_check.outputs.started_epoch }}
 
     steps:
       - name: Check out preflight paths
@@ -34,11 +37,12 @@ jobs:
             AIServerClient.xcodeproj
 
       - name: Run repository preflight checks
+        id: preflight_check
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: |
           ./ci/report-ios-deployment.sh running 0.01 linux-preflight || true
-          ./ci/linux-preflight.sh origin/main
+          ./ci/run-timed-step.sh "Linux preflight" ./ci/linux-preflight.sh origin/main
 
   merge:
     name: Safely integrate on selected central Mac
@@ -64,7 +68,9 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ./ci/report-ios-deployment.sh running 0.02 merging
+        run: |
+          echo "IOS_MERGE_STARTED_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+          ./ci/report-ios-deployment.sh running 0.02 merging
 
       - name: Merge task into latest main
         id: merge
@@ -168,6 +174,7 @@ jobs:
           git commit -m "Merge $SOURCE_BRANCH into main"
 
       - name: Run complete iOS test suite
+        id: ios_tests
         if: steps.merge.outputs.already_merged == 'false'
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -210,6 +217,12 @@ jobs:
             fi
             sleep $((attempt * 3))
           done
+
+      - name: Record merge and verification duration
+        if: steps.merge.outputs.already_merged == 'false'
+        run: |
+          now_epoch=$(date +%s)
+          echo "IOS_MERGE_SECONDS=$((now_epoch - IOS_MERGE_STARTED_EPOCH))" >> "$GITHUB_ENV"
           test "$(git rev-parse origin/main)" = "$(git rev-parse HEAD^1)"
           for attempt in 1 2 3 4 5; do
             if git push origin HEAD:main; then
@@ -236,6 +249,7 @@ jobs:
             origin ":refs/heads/$SOURCE_BRANCH"
 
       - name: Build app for local iPhone installation
+        id: device_build
         if: steps.merge.outputs.already_merged == 'false'
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -279,6 +293,10 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          IOS_PREFLIGHT_SECONDS: ${{ needs.preflight.outputs.duration_seconds }}
+          IOS_WORKFLOW_STARTED_EPOCH: ${{ needs.preflight.outputs.started_epoch }}
+          IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
+          IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
       - name: Schedule a fresh installation retry on office Mac mini
