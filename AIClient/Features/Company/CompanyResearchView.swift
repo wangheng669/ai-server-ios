@@ -39,7 +39,18 @@ struct CompanyResearchFinancials: Decodable, Hashable {
     let unit: String
     let years: [CompanyResearchFinancialYear]
     let quarters: [CompanyResearchFinancialPeriod]?
+    let forecasts: [CompanyResearchFinancialForecast]?
     let source: CompanyResearchSource
+}
+
+struct CompanyResearchFinancialForecast: Decodable, Hashable, Identifiable {
+    let period: String
+    let range: String
+    let revenue: Double?
+    let netProfit: Double?
+    let note: String?
+
+    var id: String { "\(range)-\(period)" }
 }
 
 struct CompanyResearchFinancialPeriod: Decodable, Hashable, Identifiable {
@@ -416,19 +427,23 @@ struct CompanyResearchView: View {
 
             Chart {
                 ForEach(displayedFinancialPeriods(company)) { item in
-                BarMark(x: .value("周期", item.period), y: .value("金额", item.revenue))
-                    .foregroundStyle(companyAccent(company).opacity(0.18))
-                    .cornerRadius(5)
-                    .position(by: .value("指标", "营业收入"))
-                    .annotation(position: .top, spacing: 4) {
-                        chartValueLabel(item.revenue, color: .secondary)
+                    if let revenue = item.revenue {
+                        BarMark(x: .value("周期", item.period), y: .value("金额", revenue))
+                            .foregroundStyle(item.isForecast ? Color.orange.opacity(0.28) : companyAccent(company).opacity(0.18))
+                            .cornerRadius(5)
+                            .position(by: .value("指标", "营业收入"))
+                            .annotation(position: .top, spacing: 4) {
+                                chartValueLabel(revenue, color: item.isForecast ? .orange : .secondary)
+                            }
                     }
-                BarMark(x: .value("周期", item.period), y: .value("金额", item.netProfit))
-                    .foregroundStyle(companyAccent(company))
-                    .cornerRadius(5)
-                    .position(by: .value("指标", "归母净利润"))
-                    .annotation(position: .top, spacing: 4) {
-                        chartValueLabel(item.netProfit, color: companyAccent(company))
+                    if let netProfit = item.netProfit {
+                        BarMark(x: .value("周期", item.period), y: .value("金额", netProfit))
+                            .foregroundStyle(item.isForecast ? Color.orange : companyAccent(company))
+                            .cornerRadius(5)
+                            .position(by: .value("指标", "归母净利润"))
+                            .annotation(position: .top, spacing: 4) {
+                                chartValueLabel(netProfit, color: item.isForecast ? .orange : companyAccent(company))
+                            }
                     }
                 }
             }
@@ -443,6 +458,10 @@ struct CompanyResearchView: View {
                     .foregroundStyle(companyAccent(company).opacity(0.38))
                 Label("归母净利润", systemImage: "square.fill")
                     .foregroundStyle(companyAccent(company))
+                if hasForecast(company) {
+                    Label("预测", systemImage: "square.fill")
+                        .foregroundStyle(.orange)
+                }
                 Spacer()
             }
             .font(.caption)
@@ -500,13 +519,33 @@ struct CompanyResearchView: View {
         .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
     }
 
-    private func displayedFinancialPeriods(_ company: CompanyResearchProfile) -> [CompanyResearchFinancialPeriod] {
+    private struct CompanyResearchChartPeriod: Identifiable {
+        let period: String
+        let revenue: Double?
+        let netProfit: Double?
+        let isForecast: Bool
+
+        var id: String { "\(isForecast ? "forecast" : "actual")-\(period)" }
+    }
+
+    private func displayedFinancialPeriods(_ company: CompanyResearchProfile) -> [CompanyResearchChartPeriod] {
+        let range = financialRange == .quarterly ? "quarterly" : "annual"
+        let forecasts = (company.financials.forecasts ?? [])
+            .filter { $0.range == range }
+            .map { CompanyResearchChartPeriod(period: "\($0.period)E", revenue: $0.revenue, netProfit: $0.netProfit, isForecast: true) }
         if financialRange == .quarterly, let quarters = company.financials.quarters, !quarters.isEmpty {
-            return quarters
+            return quarters.map {
+                CompanyResearchChartPeriod(period: $0.period, revenue: $0.revenue, netProfit: $0.netProfit, isForecast: false)
+            } + forecasts
         }
         return company.financials.years.map {
-            CompanyResearchFinancialPeriod(period: $0.year, revenue: $0.revenue, netProfit: $0.netProfit, note: nil)
-        }
+            CompanyResearchChartPeriod(period: $0.year, revenue: $0.revenue, netProfit: $0.netProfit, isForecast: false)
+        } + forecasts
+    }
+
+    private func hasForecast(_ company: CompanyResearchProfile) -> Bool {
+        let range = financialRange == .quarterly ? "quarterly" : "annual"
+        return company.financials.forecasts?.contains { $0.range == range } == true
     }
 
     private func quarterlyFinancialTable(_ company: CompanyResearchProfile) -> some View {
