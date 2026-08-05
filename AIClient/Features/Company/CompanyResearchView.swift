@@ -46,6 +46,7 @@ struct CompanyResearchFinancialPeriod: Decodable, Hashable, Identifiable {
     let period: String
     let revenue: Double
     let netProfit: Double
+    let note: String?
 
     var id: String { period }
 }
@@ -457,6 +458,12 @@ struct CompanyResearchView: View {
                     changeMetric("营收", latest.revenue, growth: growth(latest.revenue, previous.revenue), color: companyAccent(company), changeLabel: "环比")
                     changeMetric("净利润", latest.netProfit, growth: growth(latest.netProfit, previous.netProfit), color: companyAccent(company), changeLabel: "环比")
                 }
+                if let note = latest.note, !note.isEmpty {
+                    Label(note, systemImage: "info.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else if let latest = company.financials.years.last,
                       let previous = company.financials.years.dropLast().last {
                 Divider()
@@ -498,7 +505,7 @@ struct CompanyResearchView: View {
             return quarters
         }
         return company.financials.years.map {
-            CompanyResearchFinancialPeriod(period: $0.year, revenue: $0.revenue, netProfit: $0.netProfit)
+            CompanyResearchFinancialPeriod(period: $0.year, revenue: $0.revenue, netProfit: $0.netProfit, note: nil)
         }
     }
 
