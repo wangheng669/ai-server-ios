@@ -3,7 +3,7 @@ set -euo pipefail
 
 base_ref="${1:-origin/main}"
 
-git fetch --no-tags origin main
+git fetch --no-tags origin main:refs/remotes/origin/main
 merge_base="$(git merge-base "$base_ref" HEAD)"
 
 echo "Checking task changes since $merge_base"

@@ -12,40 +12,8 @@ permissions:
   contents: write
 
 jobs:
-  preflight:
-    name: Linux preflight on mac-x
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - mac-x-preflight
-    timeout-minutes: 10
-    outputs:
-      duration_seconds: ${{ steps.preflight_check.outputs.duration_seconds }}
-      started_epoch: ${{ steps.preflight_check.outputs.started_epoch }}
-
-    steps:
-      - name: Check out preflight paths
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 50
-          filter: blob:none
-          sparse-checkout: |
-            .github
-            ci
-            AIServerClient.xcodeproj
-
-      - name: Run repository preflight checks
-        id: preflight_check
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: |
-          ./ci/report-ios-deployment.sh running 0.01 linux-preflight || true
-          ./ci/run-timed-step.sh "Linux preflight" ./ci/linux-preflight.sh origin/main
-
   prepare:
-    name: Prepare selected central Mac in parallel
+    name: Run preflight and warm caches in parallel
     runs-on:
       - self-hosted
       - macOS
@@ -54,6 +22,8 @@ jobs:
     timeout-minutes: 15
     outputs:
       duration_seconds: ${{ steps.central_prepare.outputs.duration_seconds }}
+      preflight_duration_seconds: ${{ steps.central_prepare.outputs.preflight_duration_seconds }}
+      started_epoch: ${{ steps.central_prepare.outputs.started_epoch }}
     steps:
       - name: Check out task commit for cache warming
         uses: actions/checkout@v7
@@ -61,7 +31,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
-      - name: Resolve dependencies and warm device build cache
+      - name: Run preflight and warm device build cache
         id: central_prepare
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
@@ -69,12 +39,11 @@ jobs:
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
         run: |
           ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
-          ./ci/run-timed-step.sh "Central Mac preparation" ./ci/prepare-central-runner.sh
+          ./ci/prepare-central-runner-parallel.sh
 
   merge:
     name: Safely integrate on selected central Mac
     needs:
-      - preflight
       - prepare
     concurrency:
       group: ai-merge-to-main
@@ -85,6 +54,10 @@ jobs:
       - ARM64
       - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
     timeout-minutes: 45
+    env:
+      IOS_PREFLIGHT_SECONDS: ${{ needs.prepare.outputs.preflight_duration_seconds }}
+      IOS_PREPARE_SECONDS: ${{ needs.prepare.outputs.duration_seconds }}
+      IOS_WORKFLOW_STARTED_EPOCH: ${{ needs.prepare.outputs.started_epoch }}
     steps:
       - name: Check out task commit with full history
         uses: actions/checkout@v7
@@ -121,6 +94,15 @@ jobs:
             sleep $((attempt * 3))
           done
           git switch --force-create ai-merge origin/main
+
+          app_changed=false
+          while IFS= read -r changed_path; do
+            case "$changed_path" in
+              .github/*|ci/*|*.md) ;;
+              *) app_changed=true; break ;;
+            esac
+          done < <(git diff --name-only origin/main..."$SOURCE_SHA")
+          echo "app_changed=$app_changed" >> "$GITHUB_OUTPUT"
 
           if git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
             echo "already_merged=true" >> "$GITHUB_OUTPUT"
@@ -204,7 +186,7 @@ jobs:
 
       - name: Run complete iOS test suite
         id: ios_tests
-        if: steps.merge.outputs.already_merged == 'false'
+        if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -225,7 +207,7 @@ jobs:
               CODE_SIGNING_ALLOWED=NO
 
       - name: Report merge verification completed
-        if: steps.merge.outputs.already_merged == 'false'
+        if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -279,7 +261,7 @@ jobs:
 
       - name: Build app for local iPhone installation
         id: device_build
-        if: steps.merge.outputs.already_merged == 'false'
+        if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -304,7 +286,7 @@ jobs:
 
       - name: Install directly from selected central Mac
         id: local_install
-        if: steps.merge.outputs.already_merged == 'false'
+        if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         continue-on-error: true
         env:
           APP_ARCHIVE: ${{ runner.temp }}/AIServerClient.app.zip
@@ -322,12 +304,18 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_PREFLIGHT_SECONDS: ${{ needs.preflight.outputs.duration_seconds }}
-          IOS_PREPARE_SECONDS: ${{ needs.prepare.outputs.duration_seconds }}
-          IOS_WORKFLOW_STARTED_EPOCH: ${{ needs.preflight.outputs.started_epoch }}
           IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
+
+      - name: Report configuration-only delivery completed
+        if: always() && steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'false' && !failure()
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          IOS_BUILD_SECONDS: 0
+          IOS_INSTALL_SECONDS: 0
+        run: ./ci/report-ios-deployment.sh succeeded 1 published-no-app-change
 
       - name: Schedule a fresh installation retry on office Mac mini
         if: always() && steps.local_install.outcome == 'failure' && (vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder') == 'office-builder'
