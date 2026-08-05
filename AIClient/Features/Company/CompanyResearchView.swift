@@ -38,7 +38,16 @@ struct CompanyResearchProfile: Decodable, Identifiable, Hashable {
 struct CompanyResearchFinancials: Decodable, Hashable {
     let unit: String
     let years: [CompanyResearchFinancialYear]
+    let quarters: [CompanyResearchFinancialPeriod]?
     let source: CompanyResearchSource
+}
+
+struct CompanyResearchFinancialPeriod: Decodable, Hashable, Identifiable {
+    let period: String
+    let revenue: Double
+    let netProfit: Double
+
+    var id: String { period }
 }
 
 struct CompanyResearchFinancialYear: Decodable, Hashable, Identifiable {
@@ -149,6 +158,11 @@ final class CompanyResearchStore: ObservableObject {
 
 @MainActor
 struct CompanyResearchView: View {
+    private enum FinancialRange: String, CaseIterable {
+        case quarterly = "季度"
+        case annual = "年度"
+    }
+
     private enum Section: String, CaseIterable {
         case overview = "概览"
         case financial = "财务"
@@ -160,6 +174,7 @@ struct CompanyResearchView: View {
     @StateObject private var store: CompanyResearchStore
     @State private var selectedCompanyID: String?
     @State private var selectedSection: Section = .overview
+    @State private var financialRange: FinancialRange = .quarterly
 
     init() {
         _store = StateObject(wrappedValue: CompanyResearchStore())
@@ -390,16 +405,24 @@ struct CompanyResearchView: View {
                     .background(Color.secondary.opacity(0.08), in: Capsule())
             }
 
+            Picker("财报周期", selection: $financialRange) {
+                ForEach(FinancialRange.allCases, id: \.self) { range in
+                    Text(range.rawValue).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled((company.financials.quarters ?? []).isEmpty)
+
             Chart {
-                ForEach(company.financials.years) { item in
-                BarMark(x: .value("年度", item.year), y: .value("金额", item.revenue))
+                ForEach(displayedFinancialPeriods(company)) { item in
+                BarMark(x: .value("周期", item.period), y: .value("金额", item.revenue))
                     .foregroundStyle(companyAccent(company).opacity(0.18))
                     .cornerRadius(5)
                     .position(by: .value("指标", "营业收入"))
                     .annotation(position: .top, spacing: 4) {
                         chartValueLabel(item.revenue, color: .secondary)
                     }
-                BarMark(x: .value("年度", item.year), y: .value("金额", item.netProfit))
+                BarMark(x: .value("周期", item.period), y: .value("金额", item.netProfit))
                     .foregroundStyle(companyAccent(company))
                     .cornerRadius(5)
                     .position(by: .value("指标", "归母净利润"))
@@ -423,8 +446,19 @@ struct CompanyResearchView: View {
             }
             .font(.caption)
 
-            if let latest = company.financials.years.last,
-               let previous = company.financials.years.dropLast().last {
+            if financialRange == .quarterly,
+               let latest = company.financials.quarters?.last,
+               let previous = company.financials.quarters?.dropLast().last {
+                Divider()
+                Text("最新季度 · \(latest.period)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    changeMetric("营收", latest.revenue, growth: growth(latest.revenue, previous.revenue), color: companyAccent(company), changeLabel: "环比")
+                    changeMetric("净利润", latest.netProfit, growth: growth(latest.netProfit, previous.netProfit), color: companyAccent(company), changeLabel: "环比")
+                }
+            } else if let latest = company.financials.years.last,
+                      let previous = company.financials.years.dropLast().last {
                 Divider()
                 Text("最新年度 · \(latest.year)")
                     .font(.caption.weight(.semibold))
@@ -437,7 +471,11 @@ struct CompanyResearchView: View {
             }
 
             Divider()
-            financialTable(company)
+            if financialRange == .quarterly, !(company.financials.quarters ?? []).isEmpty {
+                quarterlyFinancialTable(company)
+            } else {
+                financialTable(company)
+            }
 
             Link(destination: company.financials.source.url) {
                 HStack {
@@ -453,6 +491,42 @@ struct CompanyResearchView: View {
         .padding(18)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
         .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
+    }
+
+    private func displayedFinancialPeriods(_ company: CompanyResearchProfile) -> [CompanyResearchFinancialPeriod] {
+        if financialRange == .quarterly, let quarters = company.financials.quarters, !quarters.isEmpty {
+            return quarters
+        }
+        return company.financials.years.map {
+            CompanyResearchFinancialPeriod(period: $0.year, revenue: $0.revenue, netProfit: $0.netProfit)
+        }
+    }
+
+    private func quarterlyFinancialTable(_ company: CompanyResearchProfile) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                tableCell("季度", alignment: .leading, weight: .semibold)
+                tableCell("营收", alignment: .trailing, weight: .semibold)
+                tableCell("净利润", alignment: .trailing, weight: .semibold)
+                tableCell("净利率", alignment: .trailing, weight: .semibold)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 8)
+
+            ForEach(Array((company.financials.quarters ?? []).enumerated()), id: \.element.id) { index, item in
+                if index > 0 { Divider() }
+                HStack(spacing: 4) {
+                    tableCell(item.period, alignment: .leading, weight: .medium)
+                    tableCell(compactNumber(item.revenue), alignment: .trailing, weight: .regular)
+                    tableCell(compactNumber(item.netProfit), alignment: .trailing, weight: .regular)
+                    tableCell(percent(item.netProfit / item.revenue * 100), alignment: .trailing, weight: .regular)
+                }
+                .padding(.vertical, 9)
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .padding(12)
+        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func financialTable(_ company: CompanyResearchProfile) -> some View {
@@ -492,12 +566,12 @@ struct CompanyResearchView: View {
             .frame(maxWidth: .infinity, alignment: alignment)
     }
 
-    private func changeMetric(_ label: String, _ value: Double, growth: Double, color: Color, isPercent: Bool = false) -> some View {
+    private func changeMetric(_ label: String, _ value: Double, growth: Double, color: Color, isPercent: Bool = false, changeLabel: String = "同比") -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label).font(.caption2).foregroundStyle(.secondary)
             Text(isPercent ? percent(value) : compactNumber(value))
                 .font(.subheadline.bold()).monospacedDigit()
-            Text(isPercent ? "同比 \(signedPercentPoint(growth))" : "同比 \(signedPercent(growth))")
+            Text(isPercent ? "\(changeLabel) \(signedPercentPoint(growth))" : "\(changeLabel) \(signedPercent(growth))")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(growth >= 0 ? color : .red)
         }
