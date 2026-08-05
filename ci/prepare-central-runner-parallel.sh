@@ -5,7 +5,6 @@ set -euo pipefail
 
 workflow_started_epoch=$(date +%s)
 preflight_started_epoch=$workflow_started_epoch
-preflight_log=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight.XXXXXX")
 preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finished.XXXXXX")
 
 (
@@ -14,7 +13,7 @@ preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finis
   status=$?
   date +%s > "$preflight_finished_epoch_file"
   exit "$status"
-) >"$preflight_log" 2>&1 &
+) &
 preflight_pid=$!
 
 prepare_started_epoch=$(date +%s)
@@ -25,7 +24,6 @@ set +e
 wait "$preflight_pid"
 preflight_status=$?
 set -e
-cat "$preflight_log"
 preflight_finished_epoch=$(cat "$preflight_finished_epoch_file")
 preflight_duration_seconds=$((preflight_finished_epoch - preflight_started_epoch))
 
