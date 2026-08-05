@@ -142,6 +142,14 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertFalse(marketChartCanUseCache(response.data))
     }
 
+    func test52WeekLowUsesValidCandleLows() throws {
+        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","market":"US","tradingDate":"2026-08-04","timezone":"America/New_York","session":"closed","interval":"1d","quality":{"status":"complete","expected":3,"actual":3,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"price":220,"previousClose":219,"change":1,"changePercent":0.46,"providerTimestamp":null,"receivedTimestamp":null,"source":"yahoo"},"candles":[{"timestamp":1,"open":210,"high":215,"low":205,"close":212,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"},{"timestamp":2,"open":200,"high":210,"low":180,"close":205,"volume":1,"state":"invalid","source":"yahoo","session":"regular"},{"timestamp":3,"open":190,"high":220,"low":185.5,"close":220,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"}]}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
+
+        XCTAssertEqual(market52WeekLow(response.data), 185.5)
+    }
+
     func testCryptoDisplayCodeUsesTradingPair() throws {
         let data = Data(#"{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":64000}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)

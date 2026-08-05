@@ -983,6 +983,13 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
     }
 }
 
+func market52WeekLow(_ chart: MarketChart?) -> Double? {
+    chart?.candles
+        .filter { $0.state != "invalid" && $0.low.isFinite && $0.low > 0 }
+        .map(\.low)
+        .min()
+}
+
 func marketChartVolumeCeiling(_ points: [MarketChartPoint]) -> Double {
     let values = points.compactMap(\.volume).filter { $0 > 0 && $0.isFinite }.sorted()
     guard !values.isEmpty else { return 1 }
