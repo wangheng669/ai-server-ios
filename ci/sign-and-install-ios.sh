@@ -71,12 +71,13 @@ install_app_with_connectivity_retry() {
 xcode_refreshed_app=""
 
 refresh_signing_with_xcode() {
-  local refreshed_derived_data="$RUNNER_TEMP/AIServerClient-RefreshedSigning"
+  local refreshed_derived_data="${IOS_SIGNING_DERIVED_DATA_PATH:-$RUNNER_TEMP/AIServerClient-RefreshedSigning}"
   local build_log
   local max_attempts=${IOS_XCODE_DESTINATION_ATTEMPTS:-12}
   local retry_seconds=${IOS_XCODE_DESTINATION_RETRY_SECONDS:-5}
   local destination_timeout=${IOS_XCODE_DESTINATION_TIMEOUT_SECONDS:-30}
   build_log=$(mktemp "$RUNNER_TEMP/xcode-signing-refresh.XXXXXX")
+  mkdir -p "$refreshed_derived_data"
 
   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
     echo "Waiting for Xcode to finish preparing iPhone $DEVICE_UDID (attempt $attempt/$max_attempts, timeout ${destination_timeout}s)."
