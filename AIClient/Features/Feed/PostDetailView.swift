@@ -3568,21 +3568,36 @@ private extension NSString {
 private struct WeChatArticleImage: View {
     let url: URL
     @State private var aspectRatio: CGFloat = 1.5
+    @State private var isCompactAsset = false
+
+    private var availableWidth: CGFloat {
+        max(UIScreen.main.bounds.width - 36, 240)
+    }
+
+    private var displayWidth: CGFloat {
+        isCompactAsset ? min(140, availableWidth) : availableWidth
+    }
+
+    private var displayHeight: CGFloat {
+        max(isCompactAsset ? 44 : 120, displayWidth / aspectRatio)
+    }
 
     var body: some View {
-        GeometryReader { proxy in
-            RemoteImage(
-                url: url,
-                height: max(120, proxy.size.width / aspectRatio),
-                contentMode: .fit,
-                onImageLoaded: { image in
-                    guard image.size.width > 0, image.size.height > 0 else { return }
-                    aspectRatio = image.size.width / image.size.height
-                }
-            )
-        }
-        .frame(height: max(120, (UIScreen.main.bounds.width - 36) / aspectRatio))
-        .frame(maxWidth: .infinity)
+        RemoteImage(
+            url: url,
+            height: displayHeight,
+            contentMode: .fit,
+            onImageLoaded: { image in
+                guard image.size.width > 0, image.size.height > 0 else { return }
+                aspectRatio = image.size.width / image.size.height
+                let pixelWidth = CGFloat(image.cgImage?.width ?? Int(image.size.width * image.scale))
+                let pixelHeight = CGFloat(image.cgImage?.height ?? Int(image.size.height * image.scale))
+                let ratio = pixelWidth / max(pixelHeight, 1)
+                isCompactAsset = max(pixelWidth, pixelHeight) <= 480 && (0.55...1.8).contains(ratio)
+            }
+        )
+        .frame(width: displayWidth, height: displayHeight, alignment: .leading)
+        .animation(.easeOut(duration: 0.16), value: isCompactAsset)
     }
 }
 
