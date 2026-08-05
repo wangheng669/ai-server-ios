@@ -152,8 +152,14 @@ struct CompanyResearchView: View {
         _store = StateObject(wrappedValue: store)
     }
 
-    private var selectedCompany: CompanyResearchProfile? {
-        store.companies.first { $0.id == selectedCompanyID } ?? store.companies.first
+    private var selectedCompanyBinding: Binding<String> {
+        Binding(
+            get: { selectedCompanyID ?? store.companies.first?.id ?? "" },
+            set: {
+                selectedCompanyID = $0
+                selectedSection = .overview
+            }
+        )
     }
 
     var body: some View {
@@ -161,8 +167,14 @@ struct CompanyResearchView: View {
             Group {
                 if store.isLoading && store.companies.isEmpty {
                     ProgressView("正在读取研究档案")
-                } else if let company = selectedCompany {
-                    companyPage(company)
+                } else if !store.companies.isEmpty {
+                    TabView(selection: selectedCompanyBinding) {
+                        ForEach(store.companies) { company in
+                            companyPage(company)
+                                .tag(company.id)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                 } else if let errorMessage = store.errorMessage {
                     ContentUnavailableView(errorMessage, systemImage: "building.2.crop.circle", description: Text("下拉或点击重试"))
                 } else {
@@ -179,41 +191,29 @@ struct CompanyResearchView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    pageHeader(company)
+                    topControls
                     hero(company)
                         .id(Section.overview)
                     sectionTabs(company, proxy: proxy)
                     financialSection(company)
                         .id(Section.financial)
+                    thesisCard(company)
                     eventSection(company)
                         .id(Section.events)
-                    thesisCard(company)
                     researchSection(company)
                     sourcesSection(company)
                         .id(Section.sources)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 8)
+                .padding(.top, 10)
                 .padding(.bottom, 48)
             }
             .refreshable { await store.load(force: true) }
         }
     }
 
-    private func pageHeader(_ company: CompanyResearchProfile) -> some View {
+    private var topControls: some View {
         HStack {
-            HStack(spacing: 7) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(companyAccent(company))
-                Text("研究")
-                    .foregroundStyle(.secondary)
-                Text("/")
-                    .foregroundStyle(.tertiary)
-                Text(company.shortName)
-                    .fontWeight(.semibold)
-            }
-            .font(.subheadline)
             Spacer()
             companyPicker
         }
@@ -243,7 +243,7 @@ struct CompanyResearchView: View {
     }
 
     private func hero(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .center, spacing: 14) {
                 companyLogo(company)
                 VStack(alignment: .leading, spacing: 5) {
@@ -277,10 +277,23 @@ struct CompanyResearchView: View {
                 marketMetric("市盈率", formattedMultiple(company.market?.pe))
                 marketMetric("最新 ROE", latestROE(company))
             }
+
+            pageIndicator(company)
         }
-        .padding(20)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
-        .overlay { RoundedRectangle(cornerRadius: 22).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+        .padding(.vertical, 4)
+    }
+
+    private func pageIndicator(_ company: CompanyResearchProfile) -> some View {
+        HStack(spacing: 5) {
+            ForEach(store.companies) { item in
+                Capsule()
+                    .fill(item.id == company.id ? companyAccent(company) : Color.secondary.opacity(0.18))
+                    .frame(width: item.id == company.id ? 18 : 5, height: 5)
+                    .animation(.easeInOut(duration: 0.2), value: company.id)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("第 \((store.companies.firstIndex(of: company) ?? 0) + 1) 页，共 \(store.companies.count) 页")
     }
 
     private func sectionTabs(_ company: CompanyResearchProfile, proxy: ScrollViewProxy) -> some View {
@@ -309,16 +322,32 @@ struct CompanyResearchView: View {
     }
 
     private func thesisCard(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionEyebrow("核心判断")
-            Text(company.thesis)
-                .font(.title3.weight(.semibold))
-                .lineSpacing(6)
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "scope")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(companyAccent(company))
+                .frame(width: 38, height: 38)
+                .background(companyAccent(company).opacity(0.1), in: RoundedRectangle(cornerRadius: 11))
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Text("核心判断").font(.headline)
+                    Spacer()
+                    Text("持续跟踪")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(companyAccent(company))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(companyAccent(company).opacity(0.08), in: Capsule())
+                }
+                Text(company.thesis)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+            }
         }
-        .padding(.leading, 16)
-        .overlay(alignment: .leading) {
-            Capsule().fill(companyAccent(company)).frame(width: 4)
-        }
+        .padding(18)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
     }
 
     private func financialSection(_ company: CompanyResearchProfile) -> some View {
@@ -360,6 +389,9 @@ struct CompanyResearchView: View {
                 }
             }
         }
+        .padding(18)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
     }
 
     private func eventSection(_ company: CompanyResearchProfile) -> some View {
@@ -388,7 +420,8 @@ struct CompanyResearchView: View {
             }
         }
         .padding(18)
-        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 20))
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
     }
 
     private func eventRow(color: Color, icon: String, eyebrow: String, title: String, detail: String) -> some View {
@@ -417,6 +450,9 @@ struct CompanyResearchView: View {
             Divider().padding(.leading, 38)
             researchGroup("跟踪", icon: "checklist", items: company.questions)
         }
+        .padding(18)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
     }
 
     private func researchGroup(_ title: String, icon: String, items: [String]) -> some View {
