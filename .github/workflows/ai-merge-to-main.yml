@@ -318,7 +318,7 @@ jobs:
         run: ./ci/run-timed-step.sh "Sign and install on iPhone" ./ci/sign-and-install-ios.sh
 
       - name: Report local installation completed
-        if: steps.local_install.outcome == 'success'
+        if: always() && steps.local_install.outcome == 'success'
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -330,7 +330,7 @@ jobs:
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
       - name: Schedule a fresh installation retry on office Mac mini
-        if: steps.local_install.outcome == 'failure' && (vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder') == 'office-builder'
+        if: always() && steps.local_install.outcome == 'failure' && (vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder') == 'office-builder'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
