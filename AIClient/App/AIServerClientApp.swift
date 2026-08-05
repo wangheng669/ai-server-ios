@@ -150,6 +150,7 @@ private struct EditorialRootView: View {
     @State private var selectedTab: EditorialTab = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--today-world-preview") { return .world }
+        if ProcessInfo.processInfo.arguments.contains("--feed-preview") { return .observation }
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
             ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
