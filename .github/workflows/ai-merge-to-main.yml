@@ -184,6 +184,7 @@ jobs:
               -project AIServerClient.xcodeproj \
               -scheme AIServerClient \
               -destination 'platform=iOS Simulator,name=iPhone 16e' \
+              -collect-test-diagnostics never \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
               CODE_SIGNING_ALLOWED=NO
 
