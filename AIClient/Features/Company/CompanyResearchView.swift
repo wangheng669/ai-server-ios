@@ -396,15 +396,23 @@ struct CompanyResearchView: View {
                     .foregroundStyle(companyAccent(company).opacity(0.18))
                     .cornerRadius(5)
                     .position(by: .value("指标", "营业收入"))
+                    .annotation(position: .top, spacing: 4) {
+                        chartValueLabel(item.revenue, color: .secondary)
+                    }
                 BarMark(x: .value("年度", item.year), y: .value("金额", item.netProfit))
                     .foregroundStyle(companyAccent(company))
                     .cornerRadius(5)
                     .position(by: .value("指标", "归母净利润"))
+                    .annotation(position: .top, spacing: 4) {
+                        chartValueLabel(item.netProfit, color: companyAccent(company))
+                    }
                 }
             }
             .chartYAxis(.hidden)
             .chartXAxis { AxisMarks { AxisValueLabel().font(.caption) } }
-            .frame(height: 136)
+            .chartYScale(domain: .automatic(includesZero: true))
+            .chartYScale(range: .plotDimension(padding: 18))
+            .frame(height: 168)
 
             HStack(spacing: 18) {
                 Label("营业收入", systemImage: "square.fill")
@@ -506,6 +514,15 @@ struct CompanyResearchView: View {
     private func compactNumber(_ value: Double) -> String {
         if abs(value) >= 1_000 { return String(format: "%.0f", value) }
         return String(format: "%.1f", value)
+    }
+
+    private func chartValueLabel(_ value: Double, color: Color) -> some View {
+        Text(compactNumber(value))
+            .font(.system(size: 9, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
     }
 
     private func percent(_ value: Double) -> String { String(format: "%.1f%%", value) }
