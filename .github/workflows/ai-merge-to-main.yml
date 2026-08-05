@@ -44,9 +44,38 @@ jobs:
           ./ci/report-ios-deployment.sh running 0.01 linux-preflight || true
           ./ci/run-timed-step.sh "Linux preflight" ./ci/linux-preflight.sh origin/main
 
+  prepare:
+    name: Prepare selected central Mac in parallel
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
+    timeout-minutes: 15
+    outputs:
+      duration_seconds: ${{ steps.central_prepare.outputs.duration_seconds }}
+    steps:
+      - name: Check out task commit with full history
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Resolve dependencies and warm device build cache
+        id: central_prepare
+        env:
+          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
+        run: |
+          ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
+          ./ci/run-timed-step.sh "Central Mac preparation" ./ci/prepare-central-runner.sh
+
   merge:
     name: Safely integrate on selected central Mac
-    needs: preflight
+    needs:
+      - preflight
+      - prepare
     concurrency:
       group: ai-merge-to-main
       cancel-in-progress: false
@@ -294,6 +323,7 @@ jobs:
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_PREFLIGHT_SECONDS: ${{ needs.preflight.outputs.duration_seconds }}
+          IOS_PREPARE_SECONDS: ${{ needs.prepare.outputs.duration_seconds }}
           IOS_WORKFLOW_STARTED_EPOCH: ${{ needs.preflight.outputs.started_epoch }}
           IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
