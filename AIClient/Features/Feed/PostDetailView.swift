@@ -77,6 +77,7 @@ struct PostDetailView: View {
 
     private var usesCustomDismissControl: Bool {
         post.isNewYorkTimes
+            || isWeChatArticle
             || ["知乎", "Truth", "雪球"].contains(post.sourceName)
             || post.isYouTube
             || post.isWeiboRSS
@@ -93,6 +94,7 @@ struct PostDetailView: View {
     var body: some View {
         Group {
             if post.isNewYorkTimes { newYorkTimesDetail }
+            else if isWeChatArticle { weChatDetail }
             else if post.sourceName == "X" { xDetail }
             else if post.isBilibili { bilibiliDetail }
             else if post.isYouTube { youtubeDetail }
@@ -103,10 +105,10 @@ struct PostDetailView: View {
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
-        .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) ? "" : "详情")))))
+        .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) || isWeChatArticle ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar((post.isNewYorkTimes || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
-        .navigationBarBackButtonHidden(post.isNewYorkTimes || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
+        .toolbar((post.isNewYorkTimes || isWeChatArticle || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(post.isNewYorkTimes || isWeChatArticle || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
@@ -144,7 +146,7 @@ struct PostDetailView: View {
                         Image(systemName: "ellipsis")
                     }
                 }
-            } else if post.isRSS && !post.isNewYorkTimes {
+            } else if post.isRSS && !post.isNewYorkTimes && !isWeChatArticle {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isRSSBookmarked.toggle()
@@ -400,6 +402,160 @@ struct PostDetailView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var isWeChatArticle: Bool {
+        guard let source = post.source, source.hasPrefix("rss:"),
+              let feedID = Int(source.dropFirst(4)) else { return false }
+        return APIClient.weChatFeedIDs.contains(feedID)
+    }
+
+    private var weChatDetail: some View {
+        VStack(spacing: 0) {
+            weChatDetailHeader
+            Divider().opacity(0.55)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 12) {
+                        AvatarView(url: post.avatarURL, name: post.sourceName, size: 44)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(post.sourceName)
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("微信公众号")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Color(red: 0.03, green: 0.72, blue: 0.36))
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 17))
+                            .foregroundStyle(Color(red: 0.03, green: 0.72, blue: 0.36))
+                            .accessibilityLabel("已收录公众号")
+                    }
+                    .padding(.bottom, 22)
+
+                    Text(post.displayTitle)
+                        .font(.system(size: 28, weight: .bold))
+                        .tracking(-0.5)
+                        .lineSpacing(5)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 7) {
+                        Text(post.authorName == "RSS" ? post.sourceName : post.authorName)
+                            .foregroundStyle(Color(red: 0.03, green: 0.62, blue: 0.32))
+                        if let time = post.formattedTime { Text(time) }
+                        Text("原创")
+                    }
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 13)
+                    .padding(.bottom, 22)
+
+                    if let cover = rssContentImageURLs.first {
+                        RemoteImage(url: cover, height: 230, cornerRadius: 8)
+                            .padding(.bottom, 24)
+                    }
+
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        ForEach(Array(weChatParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .font(.system(size: 17))
+                                .foregroundStyle(.primary.opacity(0.92))
+                                .lineSpacing(8)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                        Text("内容由服务端同步")
+                    }
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 30)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 30)
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .safeAreaInset(edge: .bottom, spacing: 0) { weChatBottomBar }
+        .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var weChatDetailHeader: some View {
+        HStack(spacing: 10) {
+            Button { dismiss() } label: {
+                Image(systemName: dismissIconName)
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(dismissAccessibilityLabel)
+
+            Spacer(minLength: 0)
+            Text("公众号文章")
+                .font(.system(size: 16, weight: .semibold))
+            Spacer(minLength: 0)
+
+            Button { openOriginal() } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("打开微信原文")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 8)
+        .frame(height: 52)
+        .background(.background)
+    }
+
+    private var weChatBottomBar: some View {
+        HStack(spacing: 0) {
+            Button {
+                isRSSBookmarked.toggle()
+                RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
+            } label: {
+                Label(isRSSBookmarked ? "已收藏" : "收藏", systemImage: isRSSBookmarked ? "bookmark.fill" : "bookmark")
+                    .frame(maxWidth: .infinity)
+            }
+
+            Divider().frame(height: 26)
+
+            if let link = post.linkURL {
+                ShareLink(item: link) {
+                    Label("分享", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+            } else {
+                Label("分享", systemImage: "square.and.arrow.up")
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+            }
+
+            Divider().frame(height: 26)
+
+            Button { openOriginal() } label: {
+                Label("微信原文", systemImage: "arrow.up.right.square")
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(post.linkURL == nil)
+        }
+        .font(.system(size: 13.5, weight: .medium))
+        .foregroundStyle(.primary)
+        .frame(height: 56)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider().opacity(0.65) }
+    }
+
+    private var weChatParagraphs: [String] {
+        let paragraphs = post.displayContent
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return paragraphs.isEmpty ? [post.displayContent] : paragraphs
     }
 
     private var weiboDetail: some View {
