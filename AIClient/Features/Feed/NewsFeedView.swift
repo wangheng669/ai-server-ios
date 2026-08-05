@@ -577,6 +577,7 @@ struct NewsFeedView: View {
                         let displayPost = model.postForDisplay(post)
                         NewsCardView(
                             post: displayPost,
+                            usesWeChatStyle: source == .wechat,
                             isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
                             isExpandedFlash: expandedFlashIDs.contains(post.id),
                             onOpen: { openPost(displayPost) }
@@ -622,6 +623,8 @@ struct NewsFeedView: View {
                             }
                         if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
+                        } else if source == .wechat {
+                            Color.clear.frame(height: 10)
                         } else {
                             Divider().opacity(source == .flash ? 0.42 : 0.6)
                                 .padding(.leading, source == .flash ? 84 : 0)
@@ -806,36 +809,110 @@ struct NewsFeedView: View {
     }
 
     private var weChatAccountBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 14) {
-                sourceAvatarButton(
-                    id: nil,
-                    name: "全部",
-                    avatarURL: nil,
-                    isSelected: model.selectedWeChatFeedID == nil
-                ) {
-                    Task { await model.selectWeChatFeed(nil) }
-                }
-
-                ForEach(weChatAccounts) { account in
-                    let feed = model.rssFeeds.first { $0.id == account.id }
-                    sourceAvatarButton(
-                        id: account.id,
-                        name: account.name,
-                        avatarURL: feed?.preferredAvatarURL,
-                        isSelected: model.selectedWeChatFeedID == account.id,
-                        rejectsUpscaledImages: true
-                    ) {
-                        Task { await model.selectWeChatFeed(account.id) }
-                    }
-                }
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 7) {
+                Image("WeChatMark")
+                    .resizable()
+                    .renderingMode(.original)
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                Text("公众号")
+                    .font(.system(size: 20, weight: .bold))
+                Text("精选订阅")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 9) {
+                    weChatAccountChip(
+                        id: nil,
+                        name: "全部文章",
+                        avatarURL: nil,
+                        isSelected: model.selectedWeChatFeedID == nil
+                    ) {
+                        Task { await model.selectWeChatFeed(nil) }
+                    }
+
+                    ForEach(weChatAccounts) { account in
+                        let feed = model.rssFeeds.first { $0.id == account.id }
+                        weChatAccountChip(
+                            id: account.id,
+                            name: account.name,
+                            avatarURL: feed?.preferredAvatarURL,
+                            isSelected: model.selectedWeChatFeedID == account.id
+                        ) {
+                            Task { await model.selectWeChatFeed(account.id) }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
         }
+        .padding(.top, 15)
+        .padding(.bottom, 13)
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.selection, trigger: model.selectedWeChatFeedID)
         .accessibilityLabel("微信公众号")
+    }
+
+    private func weChatAccountChip(
+        id: Int?,
+        name: String,
+        avatarURL: URL?,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if let id {
+                    AvatarView(
+                        url: avatarURL,
+                        name: name,
+                        size: 28,
+                        rejectsUpscaledImages: true
+                    )
+                    .id(id)
+                } else {
+                    Image(systemName: "square.grid.2x2.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isSelected ? .white : Color.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            isSelected ? Color.white.opacity(0.18) : Color(uiColor: .tertiarySystemFill),
+                            in: Circle()
+                        )
+                }
+
+                Text(name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                }
+            }
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .padding(.leading, 7)
+            .padding(.trailing, 12)
+            .frame(height: 42)
+            .background(
+                isSelected ? Color(red: 0.03, green: 0.69, blue: 0.35) : Color(uiColor: .secondarySystemBackground),
+                in: Capsule()
+            )
+            .overlay {
+                if !isSelected {
+                    Capsule().stroke(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("筛选来源：\(name)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var rssSourceFilterBar: some View {
@@ -2428,6 +2505,7 @@ private struct NewsCardView: View {
         return cache
     }()
     let post: Post
+    var usesWeChatStyle = false
     var isFeaturedBilibili = false
     var isExpandedFlash = false
     var onOpen: (() -> Void)?
@@ -2438,6 +2516,7 @@ private struct NewsCardView: View {
         else if post.isNewYorkTimes { newYorkTimesCard }
         else if post.isYouTube { youtubeCard }
         else if post.isXueqiu { xueqiuCard }
+        else if usesWeChatStyle { weChatCard }
         else if post.isRSS { rssCard }
         else if post.sourceName == "知乎" { zhihuCard }
         else if post.sourceName == "Truth" { truthCard }
@@ -3290,6 +3369,49 @@ private struct NewsCardView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .contentShape(Rectangle())
+    }
+
+    private var weChatCard: some View {
+        HStack(alignment: .top, spacing: 13) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 7) {
+                    AvatarView(url: post.avatarURL, name: post.authorName, size: 25)
+                    Text(post.authorName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if let time = post.formattedTime {
+                        Text("· \(time)")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                            .lineLimit(1)
+                    }
+                }
+
+                Text(post.displayTitle)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineSpacing(3)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let previewURL = post.previewURL {
+                RemoteImage(url: previewURL, height: 86, cornerRadius: 10)
+                    .frame(width: 98, height: 86)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.top, 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private var newYorkTimesCard: some View {
