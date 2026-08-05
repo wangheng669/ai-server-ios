@@ -152,6 +152,7 @@ struct CompanyResearchView: View {
     private enum Section: String, CaseIterable {
         case overview = "概览"
         case financial = "财务"
+        case consensus = "预期"
         case events = "事件"
         case sources = "资料"
     }
@@ -204,40 +205,27 @@ struct CompanyResearchView: View {
     }
 
     private func companyPage(_ company: CompanyResearchProfile) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    hero(company)
-                        .id(Section.overview)
-                    sectionTabs(company, proxy: proxy)
-                    financialSection(company)
-                        .id(Section.financial)
-                    if let consensus = company.consensus {
-                        consensusSection(consensus, company: company)
-                    }
-                    thesisCard(company)
-                    eventSection(company)
-                        .id(Section.events)
-                    researchSection(company)
-                    sourcesSection(company)
-                        .id(Section.sources)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 56)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                hero(company)
+                sectionTabs(company)
+                selectedSectionContent(company)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .refreshable { await store.load(force: true) }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 44)
         }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .refreshable { await store.load(force: true) }
     }
 
     private func hero(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
                 companyLogo(company)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(company.shortName)
-                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                     Text("\(company.ticker) · \(company.exchange)")
                         .font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.68))
                 }
@@ -249,20 +237,18 @@ struct CompanyResearchView: View {
                     .background(.white.opacity(0.15), in: Capsule())
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(company.tagline)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.76))
-                    .lineSpacing(3)
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(marketPrice(company.market))
-                        .font(.system(size: 38, weight: .bold, design: .rounded))
-                    Text(marketChange(company.market))
-                        .font(.subheadline.bold())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.black.opacity(0.14), in: Capsule())
-                }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(marketPrice(company.market))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                Text(marketChange(company.market))
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.black.opacity(0.14), in: Capsule())
+                Spacer()
+                Text(company.market?.status ?? "行情暂无")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
             }
 
             HStack(spacing: 8) {
@@ -274,7 +260,7 @@ struct CompanyResearchView: View {
             pageIndicator(company)
         }
         .foregroundStyle(.white)
-        .padding(20)
+        .padding(16)
         .background {
             ZStack(alignment: .topTrailing) {
                 LinearGradient(
@@ -305,12 +291,11 @@ struct CompanyResearchView: View {
         .accessibilityLabel("第 \((store.companies.firstIndex(of: company) ?? 0) + 1) 页，共 \(store.companies.count) 页")
     }
 
-    private func sectionTabs(_ company: CompanyResearchProfile, proxy: ScrollViewProxy) -> some View {
+    private func sectionTabs(_ company: CompanyResearchProfile) -> some View {
         HStack(spacing: 0) {
             ForEach(Section.allCases, id: \.self) { section in
                 Button {
-                    selectedSection = section
-                    withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(section, anchor: .top) }
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedSection = section }
                 } label: {
                     compactTab(section.rawValue, selected: selectedSection == section, color: companyAccent(company))
                 }
@@ -331,27 +316,64 @@ struct CompanyResearchView: View {
             .background(selected ? color.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func thesisCard(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack {
-                Label("核心判断", systemImage: "scope")
-                    .font(.headline)
-                    .foregroundStyle(companyAccent(company))
-                Spacer()
-                Text("INVESTMENT THESIS")
-                    .font(.system(size: 9, weight: .bold))
-                    .tracking(1.2)
-                    .foregroundStyle(.tertiary)
+    @ViewBuilder
+    private func selectedSectionContent(_ company: CompanyResearchProfile) -> some View {
+        switch selectedSection {
+        case .overview:
+            overviewSection(company)
+        case .financial:
+            financialSection(company)
+        case .consensus:
+            if let consensus = company.consensus {
+                consensusSection(consensus, company: company)
+            } else {
+                emptySection("暂无一致预期", icon: "chart.line.uptrend.xyaxis", detail: "服务端尚未收录这家公司的机构一致预期")
             }
-            Text(company.thesis)
-                .font(.system(.body, design: .rounded, weight: .medium))
-                .lineSpacing(5)
+        case .events:
+            eventSection(company)
+        case .sources:
+            sourcesSection(company)
         }
-        .padding(20)
-        .background(companyAccent(company).opacity(0.075), in: RoundedRectangle(cornerRadius: 22))
-        .overlay(alignment: .leading) {
-            Capsule().fill(companyAccent(company)).frame(width: 4).padding(.vertical, 18)
+    }
+
+    private func overviewSection(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack {
+                Text("公司资料").font(.title3.bold())
+                Spacer()
+                Label("客观数据", systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(companyAccent(company))
+            }
+            factRow("股票代码", company.ticker, icon: "number")
+            Divider()
+            factRow("上市市场", company.exchange, icon: "building.columns")
+            Divider()
+            factRow("所属行业", company.industry, icon: "square.grid.2x2")
+            Divider()
+            factRow("公司所在地", company.location, icon: "mappin.and.ellipse")
+            Divider()
+            factRow("数据更新时间", company.updatedAt.formatted(
+                .dateTime.locale(Locale(identifier: "zh_CN")).month().day().hour().minute()
+            ), icon: "clock")
         }
+        .padding(18)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+    }
+
+    private func factRow(_ label: String, _ value: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 22)
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.weight(.semibold)).multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func emptySection(_ title: String, icon: String, detail: String) -> some View {
+        ContentUnavailableView(title, systemImage: icon, description: Text(detail))
+            .frame(maxWidth: .infinity, minHeight: 230)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
     }
 
     private func financialSection(_ company: CompanyResearchProfile) -> some View {
@@ -512,52 +534,6 @@ struct CompanyResearchView: View {
                 Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-    }
-
-    private func researchSection(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("研究框架").font(.title3.bold())
-                Spacer()
-                Text("四维跟踪")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(companyAccent(company))
-            }
-            .padding(.bottom, 8)
-            researchGroup("看点", icon: "scope", color: companyAccent(company), items: company.highlights)
-            Divider().padding(.leading, 38)
-            researchGroup("壁垒", icon: "shield", color: .blue, items: company.moats)
-            Divider().padding(.leading, 38)
-            researchGroup("风险", icon: "exclamationmark.triangle", color: .orange, items: company.risks)
-            Divider().padding(.leading, 38)
-            researchGroup("跟踪", icon: "checklist", color: .purple, items: company.questions)
-        }
-        .padding(20)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
-        .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
-    }
-
-    private func researchGroup(_ title: String, icon: String, color: Color, items: [String]) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(color)
-                .frame(width: 28, height: 28)
-                .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title).font(.headline)
-                ForEach(items, id: \.self) { item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Circle().fill(color.opacity(0.65)).frame(width: 5, height: 5)
-                        Text(item)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(3)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 18)
     }
 
     private func sourcesSection(_ company: CompanyResearchProfile) -> some View {
