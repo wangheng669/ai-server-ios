@@ -29,6 +29,7 @@ struct CompanyResearchProfile: Decodable, Identifiable, Hashable {
     let sources: [CompanyResearchSource]
     let buyback: CompanyResearchBuyback
     let nextReport: CompanyResearchReport
+    let consensus: CompanyResearchConsensus?
     let financials: CompanyResearchFinancials
     let market: CompanyResearchMarket?
     let updatedAt: Date
@@ -89,6 +90,21 @@ struct CompanyResearchReport: Decodable, Hashable {
     let dateStatus: String
     let note: String
     let source: CompanyResearchSource
+}
+
+struct CompanyResearchConsensus: Decodable, Hashable {
+    let period: String
+    let asOfDate: String
+    let status: String
+    let metrics: [CompanyResearchConsensusMetric]
+    let note: String
+    let source: CompanyResearchSource
+}
+
+struct CompanyResearchConsensusMetric: Decodable, Hashable {
+    let label: String
+    let value: String
+    let note: String
 }
 
 struct CompanyResearchService {
@@ -196,6 +212,9 @@ struct CompanyResearchView: View {
                     sectionTabs(company, proxy: proxy)
                     financialSection(company)
                         .id(Section.financial)
+                    if let consensus = company.consensus {
+                        consensusSection(consensus, company: company)
+                    }
                     thesisCard(company)
                     eventSection(company)
                         .id(Section.events)
@@ -384,6 +403,52 @@ struct CompanyResearchView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Link("查看公告 ↗", destination: company.buyback.source.url)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(companyAccent(company))
+            }
+        }
+        .padding(18)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+    }
+
+    private func consensusSection(_ consensus: CompanyResearchConsensus, company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("市场一致预期").font(.title3.bold())
+                Spacer()
+                Text(consensus.status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(companyAccent(company))
+            }
+
+            Text(consensus.period)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            ForEach(consensus.metrics, id: \.label) { metric in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(metric.label).font(.subheadline.weight(.medium))
+                        Text(metric.note).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(metric.value)
+                        .font(.headline.monospacedDigit())
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+
+            Divider()
+            Text(consensus.note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+            HStack {
+                Text("截至 \(consensus.asOfDate)")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                Link("数据来源 ↗", destination: consensus.source.url)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(companyAccent(company))
             }

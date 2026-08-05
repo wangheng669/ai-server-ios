@@ -2,6 +2,17 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesServerBackedCompanyConsensusExpectation() throws {
+        let data = Data(#"{"data":{"companies":[{"id":"nvidia","name":"NVIDIA Corporation","shortName":"英伟达","logoUrl":"/img/company-logos/nvidia.png","ticker":"NVDA","exchange":"纳斯达克证券交易所","industry":"半导体","location":"美国","tagline":"AI","thesis":"持续跟踪","metrics":[],"highlights":[],"moats":[],"risks":[],"questions":[],"sources":[],"buyback":{"status":"持续执行","asOfDate":"2026-01-25","shares":"--","amount":"--","percentage":"--","priceRange":"--","purpose":"--","progressNote":"--","source":{"title":"公告","url":"https://example.com"}},"nextReport":{"reportType":"季度业绩","expectedDate":"2026-08-26","dateStatus":"预计窗口","note":"--","source":{"title":"日历","url":"https://example.com"}},"consensus":{"period":"2027财年第二季度","asOfDate":"2026-08-05","status":"财报前更新","metrics":[{"label":"营业收入","value":"910亿美元","note":"分析师平均值"}],"note":"不同数据商的样本可能不同。","source":{"title":"市场一致预期","url":"https://example.com"}},"financials":{"unit":"亿美元","years":[],"source":{"title":"年报","url":"https://example.com"}},"updatedAt":"2026-08-05T00:00:00Z"}],"updatedAt":"2026-08-05T00:00:00Z"}}"#.utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let response = try decoder.decode(CompanyResearchResponse.self, from: data)
+
+        XCTAssertEqual(response.data.companies.first?.consensus?.period, "2027财年第二季度")
+        XCTAssertEqual(response.data.companies.first?.consensus?.metrics.first?.value, "910亿美元")
+    }
+
     func testDecodesCompanyNetIncomeTTM() throws {
         let data = Data(#"{"success":true,"data":{"symbol":"AAPL","netIncomeTTM":122575000000,"currency":"USD","period":"TTM","fiscalYear":"2025","dataSource":"TradingView Scanner"}}"#.utf8)
 
