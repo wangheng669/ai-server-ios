@@ -3,7 +3,9 @@ set -euo pipefail
 
 base_ref="${1:-origin/main}"
 
-git fetch --no-tags origin main:refs/remotes/origin/main
+if [[ "${IOS_PREFLIGHT_SKIP_FETCH:-false}" != true ]]; then
+  git fetch --no-tags origin main:refs/remotes/origin/main
+fi
 merge_base="$(git merge-base "$base_ref" HEAD)"
 
 echo "Checking task changes since $merge_base"

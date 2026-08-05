@@ -4,12 +4,13 @@ set -euo pipefail
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
 workflow_started_epoch=$(date +%s)
+git fetch --no-tags origin main:refs/remotes/origin/main
 preflight_started_epoch=$workflow_started_epoch
 preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finished.XXXXXX")
 
 (
   set +e
-  ./ci/linux-preflight.sh origin/main
+  IOS_PREFLIGHT_SKIP_FETCH=true ./ci/linux-preflight.sh origin/main
   status=$?
   date +%s > "$preflight_finished_epoch_file"
   exit "$status"
