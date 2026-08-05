@@ -259,29 +259,33 @@ jobs:
             --force-with-lease="refs/heads/$SOURCE_BRANCH:$SOURCE_SHA" \
             origin ":refs/heads/$SOURCE_BRANCH"
 
-      - name: Build app for local iPhone installation
+      - name: Build signed app for local iPhone installation
         id: device_build
         if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         env:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
         run: |
           set -euo pipefail
           ./ci/report-ios-deployment.sh running 0.72 building-device-app || true
           mkdir -p "$IOS_BUILD_CACHE_ROOT"
-          ./ci/run-timed-step.sh "Unsigned device build" \
+          ./ci/run-timed-step.sh "Signed device build" \
             xcodebuild build \
               -project AIServerClient.xcodeproj \
               -scheme AIServerClient \
               -configuration Debug \
               -destination 'generic/platform=iOS' \
-              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-device" \
-              CODE_SIGNING_ALLOWED=NO \
-              CODE_SIGNING_REQUIRED=NO
+              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-signing" \
+              -allowProvisioningUpdates \
+              -allowProvisioningDeviceRegistration \
+              DEVELOPMENT_TEAM="$TEAM_ID" \
+              CODE_SIGN_STYLE=Automatic
 
-          app_path="$IOS_BUILD_CACHE_ROOT/central-merge-device/Build/Products/Debug-iphoneos/AIServerClient.app"
+          app_path="$IOS_BUILD_CACHE_ROOT/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
           test -d "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
       - name: Install directly from selected central Mac

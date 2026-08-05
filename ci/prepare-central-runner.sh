@@ -15,7 +15,7 @@ xcodebuild build \
   -scheme AIServerClient \
   -configuration Debug \
   -destination 'generic/platform=iOS' \
-  -derivedDataPath "$cache_root/central-merge-device" \
+  -derivedDataPath "$cache_root/central-merge-signing" \
   -clonedSourcePackagesDirPath "$cache_root/source-packages" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO

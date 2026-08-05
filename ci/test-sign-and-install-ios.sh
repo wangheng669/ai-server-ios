@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+sandbox=$(mktemp -d "${TMPDIR:-/tmp}/ios-sign-install-test.XXXXXX")
+trap 'rm -rf "$sandbox"' EXIT
+mock_bin="$sandbox/bin"
+mkdir -p "$mock_bin" "$sandbox/runner" "$sandbox/signed-app"
+
+cat >"$mock_bin/security" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat >"$mock_bin/ditto" <<'EOF'
+#!/usr/bin/env bash
+destination=${@: -1}
+mkdir -p "$destination/AIServerClient.app/PlugIns/TestExtension.appex"
+EOF
+cat >"$mock_bin/codesign" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat >"$mock_bin/xcrun" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$IOS_TEST_CALLS"
+exit 0
+EOF
+cat >"$mock_bin/xcodebuild" <<'EOF'
+#!/usr/bin/env bash
+echo "xcodebuild must not run for a valid prepared signature" >&2
+exit 99
+EOF
+chmod +x "$mock_bin"/*
+touch "$sandbox/app.zip"
+
+output=$(
+  PATH="$mock_bin:$PATH" \
+  RUNNER_TEMP="$sandbox/runner" \
+  IOS_TEST_CALLS="$sandbox/calls" \
+  APP_ARCHIVE="$sandbox/app.zip" \
+  APP_PATH="$sandbox/signed-app/AIServerClient.app" \
+  BUNDLE_ID="com.example.app" \
+  TEAM_ID="TEAM" \
+  DEVICE_UDID="DEVICE" \
+  bash ./ci/sign-and-install-ios.sh
+)
+
+grep -Fq "using the prepared signed build" <<<"$output"
+grep -Fq "device info details" "$sandbox/calls"
+grep -Fq "device install app" "$sandbox/calls"
+echo "Prepared signed app fast path passed."
