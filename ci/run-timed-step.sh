@@ -27,5 +27,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   fi
   printf '| %s | %dm %ds | %s |\n' "$label" "$minutes" "$seconds" "$result" >> "$GITHUB_STEP_SUMMARY"
 fi
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  printf 'started_epoch=%s\nduration_seconds=%s\n' "$started_at" "$duration" >> "$GITHUB_OUTPUT"
+fi
 
 exit "$status"
