@@ -472,7 +472,7 @@ struct CompanyResearchView: View {
     private func companyLogo(_ company: CompanyResearchProfile) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
-                .fill(logoBackground(company))
+                .fill(Color(uiColor: .systemBackground))
             companyLogoContent(company)
         }
         .frame(width: 58, height: 46)
@@ -486,41 +486,24 @@ struct CompanyResearchView: View {
 
     @ViewBuilder
     private func companyLogoContent(_ company: CompanyResearchProfile) -> some View {
-        switch company.id {
-        case "pdd-holdings":
-            Text("PDD")
-                .font(.system(size: 14, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-        case "nvidia":
-            Text("N")
-                .font(.system(size: 25, weight: .black, design: .rounded))
-                .foregroundStyle(Color(red: 0.46, green: 0.72, blue: 0.12))
-        case "alphabet":
-            Text("G")
-                .font(.system(size: 25, weight: .bold, design: .rounded))
-                .foregroundStyle(Color(red: 0.10, green: 0.38, blue: 0.84))
-        default:
-            AsyncImage(url: company.logoUrl) { phase in
-                if case let .success(image) = phase {
-                    image
-                        .resizable()
-                        .scaledToFit()
-                        .padding(6)
-                } else {
-                    Text(String(company.shortName.prefix(1)))
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(companyAccent(company))
-                }
+        AsyncImage(url: resolvedCompanyLogoURL(company)) { phase in
+            if case let .success(image) = phase {
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .padding(6)
+            } else {
+                Text(String(company.shortName.prefix(1)))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(companyAccent(company))
             }
         }
     }
 
-    private func logoBackground(_ company: CompanyResearchProfile) -> Color {
-        switch company.id {
-        case "pdd-holdings": Color(red: 0.83, green: 0.11, blue: 0.16)
-        case "nvidia": Color(red: 0.08, green: 0.09, blue: 0.08)
-        default: Color(uiColor: .systemBackground)
-        }
+    private func resolvedCompanyLogoURL(_ company: CompanyResearchProfile) -> URL {
+        guard company.logoUrl.scheme == nil else { return company.logoUrl }
+        let path = company.logoUrl.relativeString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return ServerConfiguration.currentURL.appending(path: path)
     }
 
     private func companyAccent(_ company: CompanyResearchProfile) -> Color {
