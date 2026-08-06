@@ -450,11 +450,6 @@ struct PostDetailView: View {
                         }
                     }
 
-                    Text("阅读原文")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color(red: 0.34, green: 0.48, blue: 0.62))
-                        .padding(.top, 34)
-                        .onTapGesture { openOriginal() }
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 24)
@@ -516,13 +511,6 @@ struct PostDetailView: View {
                     .frame(maxWidth: .infinity)
             }
 
-            Divider().frame(height: 26)
-
-            Button { openOriginal() } label: {
-                Label("微信原文", systemImage: "arrow.up.right.square")
-                    .frame(maxWidth: .infinity)
-            }
-            .disabled(post.linkURL == nil)
         }
         .font(.system(size: 13.5, weight: .medium))
         .foregroundStyle(.primary)
