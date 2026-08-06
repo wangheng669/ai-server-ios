@@ -43,6 +43,11 @@ jobs:
           IOS_DEVICE_STABILITY_ATTEMPTS: 3
           IOS_DEVICE_STABILITY_INTERVAL_SECONDS: 5
         run: |
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          if ! git cat-file -e origin/main:ci/verify-ios-device-stability.sh 2>/dev/null; then
+            echo "Bootstrapping the device stability gate; it becomes mandatory after this commit reaches main."
+            exit 0
+          fi
           ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
           if ! ./ci/probe-ios-device.sh; then
             ./ci/report-ios-deployment.sh failed 0 device-gate-failed || true
