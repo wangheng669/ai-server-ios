@@ -71,11 +71,6 @@ enum FeedSourceTransitionPolicy {
     }
 }
 
-private struct WeChatAccount: Identifiable {
-    let id: Int
-    let name: String
-}
-
 private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
     let videoID: String
 
@@ -548,20 +543,6 @@ struct NewsFeedView: View {
                             .padding(.vertical, 22)
                         }
                     }
-                    if source == .wechat {
-                        weChatAccountBar
-                        Divider().opacity(0.55)
-                        if model.isLoadingWeChatSelection {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("正在加载该来源")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 22)
-                        }
-                    }
                     if source == .flash {
                         flashFeedHeader
                         if visiblePosts.isEmpty, !posts.isEmpty {
@@ -800,120 +781,6 @@ struct NewsFeedView: View {
     }
 
     private var rssQualityThreshold: Double { 6.0 }
-
-    private var weChatAccounts: [WeChatAccount] {
-        [
-            .init(id: 57, name: "猫笔刀"),
-            .init(id: 2373, name: "小互 AI")
-        ]
-    }
-
-    private var weChatAccountBar: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 7) {
-                Image("WeChatMark")
-                    .resizable()
-                    .renderingMode(.original)
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-                Text("公众号")
-                    .font(.system(size: 20, weight: .bold))
-                Text("精选订阅")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 9) {
-                    weChatAccountChip(
-                        id: nil,
-                        name: "全部文章",
-                        avatarURL: nil,
-                        isSelected: model.selectedWeChatFeedID == nil
-                    ) {
-                        Task { await model.selectWeChatFeed(nil) }
-                    }
-
-                    ForEach(weChatAccounts) { account in
-                        let feed = model.rssFeeds.first { $0.id == account.id }
-                        weChatAccountChip(
-                            id: account.id,
-                            name: account.name,
-                            avatarURL: feed?.preferredAvatarURL,
-                            isSelected: model.selectedWeChatFeedID == account.id
-                        ) {
-                            Task { await model.selectWeChatFeed(account.id) }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
-        .padding(.top, 15)
-        .padding(.bottom, 13)
-        .background(Color(uiColor: .systemBackground))
-        .sensoryFeedback(.selection, trigger: model.selectedWeChatFeedID)
-        .accessibilityLabel("微信公众号")
-    }
-
-    private func weChatAccountChip(
-        id: Int?,
-        name: String,
-        avatarURL: URL?,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if let id {
-                    AvatarView(
-                        url: avatarURL,
-                        name: name,
-                        size: 28,
-                        rejectsUpscaledImages: true
-                    )
-                    .id(id)
-                } else {
-                    Image(systemName: "square.grid.2x2.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isSelected ? .white : Color.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            isSelected ? Color.white.opacity(0.18) : Color(uiColor: .tertiarySystemFill),
-                            in: Circle()
-                        )
-                }
-
-                Text(name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                }
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .padding(.leading, 7)
-            .padding(.trailing, 12)
-            .frame(height: 42)
-            .background(
-                isSelected ? Color(red: 0.03, green: 0.69, blue: 0.35) : Color(uiColor: .secondarySystemBackground),
-                in: Capsule()
-            )
-            .overlay {
-                if !isSelected {
-                    Capsule().stroke(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5)
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("筛选来源：\(name)")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
 
     private var rssSourceFilterBar: some View {
         rssSourcePickerTrigger

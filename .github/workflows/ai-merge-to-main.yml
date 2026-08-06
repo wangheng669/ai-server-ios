@@ -95,11 +95,11 @@ jobs:
       IOS_DEVICE_WARM_SECONDS: ${{ needs.prepare.outputs.device_warm_duration_seconds }}
       IOS_WORKFLOW_STARTED_EPOCH: ${{ needs.prepare.outputs.started_epoch }}
     steps:
-      - name: Check out task commit with full history
+      - name: Check out task commit with bounded history
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 64
           token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
 
       - name: Report merge started
@@ -113,6 +113,7 @@ jobs:
       - name: Merge task into latest main
         id: merge
         env:
+          SOURCE_BRANCH: ${{ github.ref_name }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -120,7 +121,7 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git config http.version HTTP/1.1
           for attempt in 1 2 3 4 5; do
-            if git fetch --no-tags origin main; then
+            if git fetch --no-tags --depth=64 origin main:refs/remotes/origin/main; then
               break
             fi
             if [[ "$attempt" == 5 ]]; then
@@ -129,6 +130,17 @@ jobs:
             fi
             sleep $((attempt * 3))
           done
+          for deepen_by in 128 256 512; do
+            if git merge-base "$SOURCE_SHA" origin/main >/dev/null 2>&1; then
+              break
+            fi
+            echo "Merge base is outside the shallow history; deepening by $deepen_by commits."
+            git fetch --no-tags --deepen="$deepen_by" origin main "$SOURCE_BRANCH"
+          done
+          if ! git merge-base "$SOURCE_SHA" origin/main >/dev/null 2>&1; then
+            echo "Merge base is still unavailable; falling back to the complete history."
+            git fetch --no-tags --unshallow origin main "$SOURCE_BRANCH"
+          fi
           ./ci/classify-ios-test-scope.sh \
             < <(git diff --name-only origin/main..."$SOURCE_SHA") \
             >> "$GITHUB_OUTPUT"
