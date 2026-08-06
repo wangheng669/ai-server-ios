@@ -631,14 +631,19 @@ private struct TodayWorldLeaderSystem: Identifiable {
                 accounts[key, default: []].append(accountName)
             }
         }
-        return ["altman", "pichai", "musk", "zuckerberg"].compactMap { key in
+        return names.keys.sorted { lhs, rhs in
+            let leftIndex = payload.sections.firstIndex { $0.entity?.companyKey == lhs } ?? .max
+            let rightIndex = payload.sections.firstIndex { $0.entity?.companyKey == rhs } ?? .max
+            return leftIndex < rightIndex
+        }.compactMap { key in
             guard let name = names[key] else { return nil }
             let systemGroups = groups.filter { $0.companyKey == key }
             let leaderSection = payload.sections.first {
-                $0.entity?.companyKey == key && $0.entity?.xHandle?.lowercased() == leaderHandle(for: key)
+                $0.entity?.companyKey == key && $0.id.hasPrefix("leader:")
             }
             let leader = systemGroups.first {
-                $0.handle?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@")) == leaderHandle(for: key)
+                $0.authorKey.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+                    == leaderSection?.entity?.xHandle?.lowercased()
             }
             return TodayWorldLeaderSystem(
                 key: key,
@@ -647,18 +652,10 @@ private struct TodayWorldLeaderSystem: Identifiable {
                 groups: systemGroups,
                 postCount: systemGroups.reduce(0) { $0 + $1.posts.count },
                 hasMore: payload.sections.contains { $0.entity?.companyKey == key && $0.hasMore },
-                leaderName: leaderSection?.entity?.name ?? leader?.authorName ?? fallbackLeaderName(for: key),
+                leaderName: leaderSection?.entity?.name ?? leader?.authorName ?? name,
                 leaderAvatarURL: leaderSection?.entity?.avatarURL.flatMap(URL.init(string:)) ?? leader?.avatarURL
             )
         }
-    }
-
-    private static func leaderHandle(for key: String) -> String {
-        ["altman": "sama", "pichai": "sundarpichai", "musk": "elonmusk", "zuckerberg": "finkd"][key] ?? ""
-    }
-
-    private static func fallbackLeaderName(for key: String) -> String {
-        ["altman": "Sam Altman", "pichai": "Sundar Pichai", "musk": "Elon Musk", "zuckerberg": "Mark Zuckerberg"][key] ?? ""
     }
 }
 
