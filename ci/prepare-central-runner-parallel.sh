@@ -33,12 +33,15 @@ fi
 device_warm_pid=$!
 
 prepare_started_epoch=$(date +%s)
+prepare_metrics_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-prepare-metrics.XXXXXX")
+export IOS_PREPARE_METRICS_FILE="$prepare_metrics_file"
 ./ci/prepare-central-runner.sh
 
 wait "$device_warm_pid" || true
 prepare_duration_seconds=$(($(date +%s) - prepare_started_epoch))
 device_warm_finished_epoch=$(cat "$device_warm_finished_epoch_file")
 device_warm_duration_seconds=$((device_warm_finished_epoch - device_warm_started_epoch))
+source "$prepare_metrics_file"
 
 set +e
 wait "$preflight_pid"
@@ -52,7 +55,23 @@ preflight_duration_seconds=$((preflight_finished_epoch - preflight_started_epoch
   echo "preflight_duration_seconds=$preflight_duration_seconds"
   echo "duration_seconds=$prepare_duration_seconds"
   echo "device_warm_duration_seconds=$device_warm_duration_seconds"
+  echo "dependency_duration_seconds=$dependency_seconds"
+  echo "device_build_warm_duration_seconds=$device_build_warm_seconds"
+  echo "simulator_warm_duration_seconds=$simulator_warm_seconds"
 } >> "$GITHUB_OUTPUT"
+
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  {
+    echo "### Central Mac cache warm"
+    echo
+    echo "| Work | Duration |"
+    echo "| --- | ---: |"
+    echo "| Dependency resolution | ${dependency_seconds}s |"
+    echo "| Device build cache (parallel) | ${device_build_warm_seconds}s |"
+    echo "| Simulator boot + test build cache (parallel) | ${simulator_warm_seconds}s |"
+    echo "| Wall-clock cache preparation | ${prepare_duration_seconds}s |"
+  } >> "$GITHUB_STEP_SUMMARY"
+fi
 
 if ((preflight_status != 0)); then
   echo "Repository preflight failed with exit code $preflight_status." >&2
