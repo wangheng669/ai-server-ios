@@ -7,17 +7,18 @@ usage() {
 Usage:
   ./ci/local-central-merge.sh \
     --source codex/task-branch \
-    --failed-run GITHUB_RUN_ID \
+    --run GITHUB_RUN_ID \
     --confirm-infrastructure-failure
 
 Emergency central-Mac fallback for a GitHub Actions infrastructure outage.
-The source branch must be pushed, and its matching Actions run must have failed
-or been cancelled after infrastructure prevented it from starting.
+The source branch must be pushed. Its matching Actions run must either have
+failed/cancelled because of infrastructure, or have remained queued for at
+least five minutes while GitHub officially reports an Actions outage.
 EOF
 }
 
 source_branch=""
-failed_run_id=""
+run_id=""
 confirmed=false
 while (($#)); do
   case "$1" in
@@ -25,8 +26,8 @@ while (($#)); do
       source_branch=${2:-}
       shift 2
       ;;
-    --failed-run)
-      failed_run_id=${2:-}
+    --run|--failed-run)
+      run_id=${2:-}
       shift 2
       ;;
     --confirm-infrastructure-failure)
@@ -49,8 +50,8 @@ if [[ ! "$source_branch" =~ ^codex/[A-Za-z0-9._/-]+$ ]]; then
   echo "--source must name a pushed codex/* task branch." >&2
   exit 2
 fi
-if [[ ! "$failed_run_id" =~ ^[0-9]+$ ]]; then
-  echo "--failed-run must be a numeric GitHub Actions run id." >&2
+if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
+  echo "--run must be a numeric GitHub Actions run id." >&2
   exit 2
 fi
 if [[ "$confirmed" != true ]]; then
@@ -58,7 +59,7 @@ if [[ "$confirmed" != true ]]; then
   exit 2
 fi
 
-for command in git gh xcodebuild xcrun jq; do
+for command in curl git gh xcodebuild xcrun jq; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Required command is unavailable: $command" >&2
     exit 1
@@ -72,17 +73,52 @@ if [[ -n "$(git status --short)" ]]; then
   exit 1
 fi
 
-run_json=$(gh run view "$failed_run_id" --json conclusion,headBranch,headSha,url)
+run_json=$(gh run view "$run_id" --json conclusion,createdAt,headBranch,headSha,status,url)
 run_conclusion=$(jq -r .conclusion <<<"$run_json")
+run_status=$(jq -r .status <<<"$run_json")
+run_created_at=$(jq -r .createdAt <<<"$run_json")
 run_branch=$(jq -r .headBranch <<<"$run_json")
 run_sha=$(jq -r .headSha <<<"$run_json")
 run_url=$(jq -r .url <<<"$run_json")
-if [[ "$run_conclusion" != failure && "$run_conclusion" != cancelled ]] \
-  || [[ "$run_branch" != "$source_branch" ]]; then
-  echo "Run $failed_run_id is not a failed or cancelled run for $source_branch." >&2
+if [[ "$run_branch" != "$source_branch" ]]; then
+  echo "Run $run_id belongs to $run_branch, not $source_branch." >&2
   exit 1
 fi
-echo "Validated failed Actions run: $run_url"
+
+if [[ "$run_conclusion" == failure || "$run_conclusion" == cancelled ]]; then
+  echo "Validated failed Actions run: $run_url"
+elif [[ "$run_status" == queued ]]; then
+  minimum_queue_seconds=${IOS_ACTIONS_OUTAGE_QUEUE_SECONDS:-300}
+  created_epoch=$(date -j -f '%Y-%m-%dT%H:%M:%SZ' "$run_created_at" +%s 2>/dev/null \
+    || date -d "$run_created_at" +%s 2>/dev/null \
+    || true)
+  now_epoch=$(date +%s)
+  if [[ ! "$created_epoch" =~ ^[0-9]+$ ]] || ((now_epoch - created_epoch < minimum_queue_seconds)); then
+    echo "Run $run_id has not been queued for the required ${minimum_queue_seconds}s." >&2
+    exit 1
+  fi
+  actions_status=$(curl --fail --silent --show-error \
+    https://www.githubstatus.com/api/v2/components.json \
+    | jq -r '.components[] | select(.name == "Actions") | .status')
+  if [[ "$actions_status" != partial_outage && "$actions_status" != major_outage ]]; then
+    echo "GitHub officially reports Actions as $actions_status; refusing outage fallback." >&2
+    exit 1
+  fi
+  echo "Validated queued Actions outage run: $run_url (${actions_status})"
+  gh run cancel "$run_id"
+  for _ in {1..15}; do
+    run_conclusion=$(gh run view "$run_id" --json conclusion --jq .conclusion 2>/dev/null || true)
+    [[ "$run_conclusion" == cancelled ]] && break
+    sleep 2
+  done
+  if [[ "$run_conclusion" != cancelled ]]; then
+    echo "Run $run_id could not be cancelled; refusing a duplicate local execution." >&2
+    exit 1
+  fi
+else
+  echo "Run $run_id is neither infrastructure-failed nor queued during an official Actions outage." >&2
+  exit 1
+fi
 
 git config http.version HTTP/1.1
 git fetch --no-tags origin \
@@ -90,7 +126,7 @@ git fetch --no-tags origin \
   "$source_branch:refs/remotes/origin/$source_branch"
 source_sha=$(git rev-parse "origin/$source_branch")
 if [[ "$source_sha" != "$run_sha" ]]; then
-  echo "The task branch changed after failed run $failed_run_id; refusing stale approval." >&2
+  echo "The task branch changed after run $run_id; refusing stale approval." >&2
   exit 1
 fi
 if git merge-base --is-ancestor "$source_sha" origin/main; then
@@ -146,7 +182,7 @@ if [[ "$app_changed" == true ]]; then
   ./ci/verify-ios-device-stability.sh
   mkdir -p "$IOS_BUILD_CACHE_ROOT" "$RUNNER_TEMP"
   ./ci/with-ios-simulator-lock.sh \
-    --label "local central merge $failed_run_id" \
+    --label "local central merge $run_id" \
     -- xcodebuild test \
       -project AIServerClient.xcodeproj \
       -scheme AIServerClient \

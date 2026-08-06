@@ -45,6 +45,10 @@ if git diff --name-only "$merge_base"...HEAD -- ci/verify-ios-device-stability.s
   bash ci/test-verify-ios-device-stability.sh
 fi
 
+if git diff --name-only "$merge_base"...HEAD -- ci/local-central-merge.sh ci/actions-outage-fallback-watch.sh | grep -q .; then
+  bash ci/test-actions-outage-fallback-watch.sh
+fi
+
 if python3 -c 'import yaml' >/dev/null 2>&1; then
   python3 - <<'PY'
 from pathlib import Path
