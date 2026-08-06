@@ -741,6 +741,13 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.authorHandle, "雪球 · 大道无形我有型")
     }
 
+    func testXueqiuImageUsesOriginalAssetInsteadOfCustomThumbnail() throws {
+        let json = #"{"id":17,"source":"rss:14","images":[{"url":"https://xqimg.imedao.com/example.jpeg!custom.jpg"}]}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertEqual(post.imageURLs.first?.absoluteString, "https://xqimg.imedao.com/example.jpeg")
+    }
+
     func testConfirmedServerIdentityIsShownButUnconfirmedClaimIsIgnored() throws {
         let confirmedJSON = #"{"data":[{"id":15,"source":"weibo","user":{"user_id":"weibo:123","user_name":"平台昵称","canonical_name":"真实人物","platform_display_name":"平台昵称","platform":"微博","identity_status":"verified"}}]}"#.data(using: .utf8)!
         let unconfirmedJSON = #"{"data":[{"id":16,"source":"weibo","user":{"user_id":"weibo:456","user_name":"另一个昵称","canonical_name":"不应展示的人物","identity_status":"unconfirmed"}}]}"#.data(using: .utf8)!

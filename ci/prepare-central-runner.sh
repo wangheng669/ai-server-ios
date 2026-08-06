@@ -72,3 +72,7 @@ fi
 if ((simulator_status != 0)); then
   exit "$simulator_status"
 fi
+
+# The merge job may reuse this exact build-for-testing output when the merged
+# tree is byte-for-byte identical to the task commit that produced it.
+git rev-parse HEAD > "$cache_root/central-merge-simulator/prewarmed-source-sha"

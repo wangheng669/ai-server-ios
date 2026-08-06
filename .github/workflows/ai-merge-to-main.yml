@@ -231,13 +231,24 @@ jobs:
             test_stage=targeted-testing
             test_arguments=(-only-testing:AIClientTests/FeedAdapterTests)
           fi
+          test_action=test
+          prewarmed_sha_file="$IOS_BUILD_CACHE_ROOT/central-merge-simulator/prewarmed-source-sha"
+          if [[ -f "$prewarmed_sha_file" ]] \
+            && [[ "$(cat "$prewarmed_sha_file")" == "${{ github.sha }}" ]] \
+            && git diff --quiet "${{ github.sha }}" HEAD -- .; then
+            test_action=test-without-building
+            test_label="$test_label (reuse prebuilt app)"
+            echo "Reusing build-for-testing output for unchanged merged tree ${{ github.sha }}."
+          else
+            echo "Merged tree or cache identity changed; rebuilding before tests."
+          fi
           ./ci/report-ios-deployment.sh running 0.04 "$test_stage" || true
           set -o pipefail
           mkdir -p "$IOS_BUILD_CACHE_ROOT"
           ./ci/run-timed-step.sh "$test_label" \
             ./ci/with-ios-simulator-lock.sh \
               --label "central merge tests $GITHUB_RUN_ID" \
-              -- xcodebuild test \
+              -- xcodebuild "$test_action" \
               -project AIServerClient.xcodeproj \
               -scheme AIServerClient \
               -destination 'platform=iOS Simulator,name=iPhone 16e' \
