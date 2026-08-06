@@ -921,6 +921,16 @@ struct PostDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
+                    if !post.xueqiuBodyImageURLs.isEmpty {
+                        PostMediaGrid(
+                            post: post,
+                            imageURLs: post.xueqiuBodyImageURLs,
+                            singleImageMaxHeight: 620,
+                            availableWidth: UIScreen.main.bounds.width - 32,
+                            cornerRadius: 8
+                        )
+                    }
+
                     if post.xueqiuQuoteBody != nil {
                         HStack(spacing: 9) {
                             Image(systemName: "bubble.left.and.bubble.right")
@@ -941,6 +951,16 @@ struct PostDetailView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
+                            if !post.xueqiuQuoteImageURLs.isEmpty {
+                                PostMediaGrid(
+                                    post: post,
+                                    imageURLs: post.xueqiuQuoteImageURLs,
+                                    singleImageMaxHeight: 520,
+                                    availableWidth: UIScreen.main.bounds.width - 60,
+                                    cornerRadius: 7
+                                )
+                            }
+
                             HStack(spacing: 4) {
                                 Text("相关讨论")
                                 if let replies = post.meta?.metrics?.replies, replies > 0 {
@@ -956,7 +976,7 @@ struct PostDetailView: View {
                         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
                     }
 
-                    if post.hasXueqiuFeedMedia {
+                    if !post.videoURLs.isEmpty || !post.xueqiuUnplacedImageURLs.isEmpty {
                         xMedia
                     }
 
@@ -2500,6 +2520,7 @@ struct PostDetailView: View {
         } else {
             PostMediaGrid(
                 post: post,
+                imageURLs: post.isXueqiu ? post.xueqiuUnplacedImageURLs : nil,
                 singleImageHeight: detailImageHeight,
                 availableWidth: UIScreen.main.bounds.width - 16,
                 cornerRadius: 6

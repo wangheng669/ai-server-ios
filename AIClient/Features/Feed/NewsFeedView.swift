@@ -2715,9 +2715,10 @@ private struct NewsCardView: View {
         VStack(alignment: .leading, spacing: 14) {
             xueqiuTextContent
 
-            if post.hasXueqiuFeedMedia {
+            if !post.videoURLs.isEmpty || !post.xueqiuUnplacedImageURLs.isEmpty {
                 PostMediaGrid(
                     post: post,
+                    imageURLs: post.xueqiuUnplacedImageURLs,
                     singleImageMaxHeight: 220,
                     singleImageContentMode: .fit,
                     multiImageHeight: 148,
@@ -2779,6 +2780,16 @@ private struct NewsCardView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if !post.xueqiuBodyImageURLs.isEmpty {
+                PostMediaGrid(
+                    post: post,
+                    imageURLs: post.xueqiuBodyImageURLs,
+                    singleImageMaxHeight: 260,
+                    availableWidth: max(UIScreen.main.bounds.width - 32, 240),
+                    cornerRadius: 8
+                )
+            }
+
             if let quoteBody = post.xueqiuQuoteBody {
                 VStack(alignment: .leading, spacing: 12) {
                     (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
@@ -2788,6 +2799,16 @@ private struct NewsCardView: View {
                         .lineLimit(5)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !post.xueqiuQuoteImageURLs.isEmpty {
+                        PostMediaGrid(
+                            post: post,
+                            imageURLs: post.xueqiuQuoteImageURLs,
+                            singleImageMaxHeight: 240,
+                            availableWidth: max(UIScreen.main.bounds.width - 58, 220),
+                            cornerRadius: 7
+                        )
+                    }
 
                     HStack(spacing: 4) {
                         Text("相关讨论")

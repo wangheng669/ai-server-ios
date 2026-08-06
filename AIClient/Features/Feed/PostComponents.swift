@@ -340,6 +340,7 @@ actor ImageDiskCache {
 
 struct PostMediaGrid: View {
     let post: Post
+    var imageURLs: [URL]? = nil
     var singleImageHeight: CGFloat? = nil
     var singleImageMaxHeight: CGFloat? = nil
     var singleImageContentMode: ContentMode = .fit
@@ -360,7 +361,8 @@ struct PostMediaGrid: View {
     }
 
     private var allContentImageURLs: [URL] {
-        post.imageURLs.filter { !knownCompactImageURLs.contains($0) && !compactImageURLs.contains($0) }
+        (imageURLs ?? post.imageURLs)
+            .filter { !knownCompactImageURLs.contains($0) && !compactImageURLs.contains($0) }
     }
 
     private var contentImageURLs: [URL] {
