@@ -514,6 +514,14 @@ struct Post: Decodable, Identifiable, Hashable {
         return xueqiuText(String(raw[quoteStart.lowerBound...]))
     }
     var xueqiuBodyInlineEmojis: [WeiboInlineEmoji] {
+        let serverEmojis = (images ?? []).compactMap { image -> WeiboInlineEmoji? in
+            guard image.isKnownInlineAsset,
+                  let token = clean(image.altText),
+                  let url = MediaURL.image(image.url) else { return nil }
+            return .init(token: token, url: url)
+        }
+        if !serverEmojis.isEmpty { return serverEmojis }
+
         guard let raw = clean(content) else { return [] }
         let body = raw.range(of: "<blockquote", options: .caseInsensitive)
             .map { String(raw[..<$0.lowerBound]) } ?? raw
@@ -1491,7 +1499,7 @@ struct PostVideo: Decodable, Hashable {
 }
 
 enum MediaURL {
-    private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com", "qpic.cn"]
+    private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com", "qpic.cn", "assets.imedao.com"]
 
     static func image(_ raw: String) -> URL? {
         let decoded = highResolutionXueqiuImageURL(
