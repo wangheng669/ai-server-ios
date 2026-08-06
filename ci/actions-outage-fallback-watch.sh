@@ -23,16 +23,35 @@ queued_runs=$(gh run list \
   --workflow 'AI merge task branch into main' \
   --status queued \
   --limit 20 \
-  --json databaseId,createdAt,headBranch \
+  --json databaseId,createdAt,headBranch,headSha \
   2>/dev/null || true)
 
-candidate=$(jq -c --argjson now "$now_epoch" --argjson minimum "$minimum_queue_seconds" '
+eligible_runs=$(jq -c --argjson now "$now_epoch" --argjson minimum "$minimum_queue_seconds" '
   map(select(.headBranch | startswith("codex/")))
   | map(. + {createdEpoch: (.createdAt | fromdateiso8601)})
   | map(select(($now - .createdEpoch) >= $minimum))
+  | group_by(.headBranch)
+  | map(max_by(.createdEpoch))
   | sort_by(.createdEpoch)
-  | first // empty
+  | .[]
 ' <<<"${queued_runs:-[]}")
+
+git fetch --no-tags origin main:refs/remotes/origin/main
+candidate=""
+while IFS= read -r run; do
+  [[ -n "$run" ]] || continue
+  branch=$(jq -r .headBranch <<<"$run")
+  run_sha=$(jq -r .headSha <<<"$run")
+  if ! git fetch --no-tags origin "$branch:refs/remotes/origin/$branch"; then
+    continue
+  fi
+  branch_sha=$(git rev-parse "origin/$branch")
+  if [[ "$branch_sha" != "$run_sha" ]] || git merge-base --is-ancestor "$run_sha" origin/main; then
+    continue
+  fi
+  candidate=$run
+  break
+done <<<"$eligible_runs"
 [[ -n "$candidate" ]] || exit 0
 
 run_id=$(jq -r .databaseId <<<"$candidate")
