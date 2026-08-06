@@ -525,6 +525,21 @@ struct Post: Decodable, Identifiable, Hashable {
         let body = quote[quote.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
         return body.isEmpty ? nil : body
     }
+    var xueqiuBodyImageURLs: [URL] {
+        guard let raw = clean(content) else { return [] }
+        let body = raw.range(of: "<blockquote", options: .caseInsensitive)
+            .map { String(raw[..<$0.lowerBound]) } ?? raw
+        return xueqiuImageURLs(in: body)
+    }
+    var xueqiuQuoteImageURLs: [URL] {
+        guard let raw = clean(content),
+              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return [] }
+        return xueqiuImageURLs(in: String(raw[quoteStart.lowerBound...]))
+    }
+    var xueqiuUnplacedImageURLs: [URL] {
+        let placed = Set(xueqiuBodyImageURLs + xueqiuQuoteImageURLs)
+        return imageURLs.filter { !placed.contains($0) }
+    }
     var xueqiuStockTag: String? {
         let text = displayContent as NSString
         guard let match = try? NSRegularExpression(pattern: #"\$[^$\n]{2,40}\$"#)
@@ -544,6 +559,16 @@ struct Post: Decodable, Identifiable, Hashable {
         (images ?? [])
             .filter { !$0.isKnownInlineAsset }
             .compactMap { MediaURL.image($0.url) }
+    }
+
+    private func xueqiuImageURLs(in html: String) -> [URL] {
+        var seen = Set<URL>()
+        return htmlImageTags(in: html).compactMap { tag in
+            guard let rawURL = htmlAttribute("src", in: tag),
+                  let url = MediaURL.image(rawURL),
+                  seen.insert(url).inserted else { return nil }
+            return url
+        }
     }
     var weChatArticleBlocks: [WeChatArticleBlock] {
         guard let content, !content.isEmpty,

@@ -221,7 +221,9 @@ jobs:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
         run: |
+          set -euo pipefail
           test_scope='${{ steps.merge.outputs.test_scope }}'
           test_label="Complete iOS tests"
           test_stage=full-testing
@@ -243,8 +245,38 @@ jobs:
             echo "Merged tree or cache identity changed; rebuilding before tests."
           fi
           ./ci/report-ios-deployment.sh running 0.04 "$test_stage" || true
-          set -o pipefail
           mkdir -p "$IOS_BUILD_CACHE_ROOT"
+
+          build_log=$(mktemp "$RUNNER_TEMP/signed-device-build.XXXXXX")
+          build_result=$(mktemp "$RUNNER_TEMP/signed-device-result.XXXXXX")
+          (
+            set +e
+            build_started_epoch=$(date +%s)
+            xcodebuild build \
+              -project AIServerClient.xcodeproj \
+              -scheme AIServerClient \
+              -configuration Debug \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-signing" \
+              -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
+              -allowProvisioningUpdates \
+              -allowProvisioningDeviceRegistration \
+              DEVELOPMENT_TEAM="$TEAM_ID" \
+              CODE_SIGN_STYLE=Automatic > "$build_log" 2>&1
+            build_status=$?
+            if ((build_status == 0)); then
+              app_path="$IOS_BUILD_CACHE_ROOT/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
+              test -d "$app_path" \
+                && codesign --verify --deep --strict --verbose=2 "$app_path" \
+                && ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
+              build_status=$?
+            fi
+            printf '%s %s\n' "$build_status" "$(($(date +%s) - build_started_epoch))" > "$build_result"
+            exit "$build_status"
+          ) &
+          build_pid=$!
+
+          set +e
           ./ci/run-timed-step.sh "$test_label" \
             ./ci/with-ios-simulator-lock.sh \
               --label "central merge tests $GITHUB_RUN_ID" \
@@ -257,6 +289,21 @@ jobs:
               -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
               "${test_arguments[@]}" \
               CODE_SIGNING_ALLOWED=NO
+          test_status=$?
+          wait "$build_pid"
+          wait_status=$?
+          set -e
+
+          cat "$build_log"
+          read -r build_status build_duration_seconds < "$build_result"
+          echo "device_build_duration_seconds=$build_duration_seconds" >> "$GITHUB_OUTPUT"
+          echo "Signed device build completed in ${build_duration_seconds}s (exit $build_status)."
+          if ((test_status != 0)); then
+            exit "$test_status"
+          fi
+          if ((wait_status != 0 || build_status != 0)); then
+            exit "${build_status:-$wait_status}"
+          fi
 
       - name: Report merge verification completed
         if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
@@ -311,36 +358,6 @@ jobs:
             --force-with-lease="refs/heads/$SOURCE_BRANCH:$SOURCE_SHA" \
             origin ":refs/heads/$SOURCE_BRANCH"
 
-      - name: Build signed app for local iPhone installation
-        id: device_build
-        if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
-        env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
-          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          ./ci/report-ios-deployment.sh running 0.72 building-device-app || true
-          mkdir -p "$IOS_BUILD_CACHE_ROOT"
-          ./ci/run-timed-step.sh "Signed device build" \
-            xcodebuild build \
-              -project AIServerClient.xcodeproj \
-              -scheme AIServerClient \
-              -configuration Debug \
-              -destination 'generic/platform=iOS' \
-              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-signing" \
-              -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-              -allowProvisioningUpdates \
-              -allowProvisioningDeviceRegistration \
-              DEVELOPMENT_TEAM="$TEAM_ID" \
-              CODE_SIGN_STYLE=Automatic
-
-          app_path="$IOS_BUILD_CACHE_ROOT/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
-          test -d "$app_path"
-          codesign --verify --deep --strict --verbose=2 "$app_path"
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
-
       - name: Install directly from selected central Mac
         id: local_install
         if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
@@ -361,7 +378,7 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
+          IOS_BUILD_SECONDS: ${{ steps.ios_tests.outputs.device_build_duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
           IOS_DEVICE_WAIT_DURATION_SECONDS: ${{ steps.local_install.outputs.device_wait_seconds }}
           IOS_DIRECT_INSTALL_SECONDS: ${{ steps.local_install.outputs.direct_install_seconds }}
@@ -398,7 +415,7 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
+          IOS_BUILD_SECONDS: ${{ steps.ios_tests.outputs.device_build_duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
           IOS_DEVICE_WAIT_DURATION_SECONDS: ${{ steps.local_install.outputs.device_wait_seconds }}
           IOS_DIRECT_INSTALL_SECONDS: ${{ steps.local_install.outputs.direct_install_seconds }}

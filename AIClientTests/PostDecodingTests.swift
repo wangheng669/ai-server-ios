@@ -748,6 +748,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.imageURLs.first?.absoluteString, "https://xqimg.imedao.com/example.jpeg")
     }
 
+    func testXueqiuImagesKeepTheirBodyAndReplyPlacement() throws {
+        let json = #"{"id":18,"source":"rss:14","content":"正文<br/><img src=\"https://xqimg.imedao.com/body.jpg!custom.jpg\"/><blockquote>回复者: 回复内容<br/><img src=\"https://xqimg.imedao.com/reply.jpg!custom.jpg\"/></blockquote>","images":[{"url":"https://xqimg.imedao.com/body.jpg!custom.jpg"},{"url":"https://xqimg.imedao.com/reply.jpg!custom.jpg"},{"url":"https://xqimg.imedao.com/unplaced.jpg!custom.jpg"}]}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertEqual(post.xueqiuBodyImageURLs.map(\.lastPathComponent), ["body.jpg"])
+        XCTAssertEqual(post.xueqiuQuoteImageURLs.map(\.lastPathComponent), ["reply.jpg"])
+        XCTAssertEqual(post.xueqiuUnplacedImageURLs.map(\.lastPathComponent), ["unplaced.jpg"])
+    }
+
     func testConfirmedServerIdentityIsShownButUnconfirmedClaimIsIgnored() throws {
         let confirmedJSON = #"{"data":[{"id":15,"source":"weibo","user":{"user_id":"weibo:123","user_name":"平台昵称","canonical_name":"真实人物","platform_display_name":"平台昵称","platform":"微博","identity_status":"verified"}}]}"#.data(using: .utf8)!
         let unconfirmedJSON = #"{"data":[{"id":16,"source":"weibo","user":{"user_id":"weibo:456","user_name":"另一个昵称","canonical_name":"不应展示的人物","identity_status":"unconfirmed"}}]}"#.data(using: .utf8)!
