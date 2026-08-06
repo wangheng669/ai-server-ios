@@ -9,7 +9,7 @@ mkdir -p "$test_root/bin"
 cat > "$test_root/bin/xcrun" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "$*" == *"info details"* ]]; then
+if [[ "$*" == *"device info details"* ]]; then
   output=''
   while (($#)); do
     if [[ "$1" == --json-output ]]; then output=$2; break; fi
@@ -18,7 +18,12 @@ if [[ "$*" == *"info details"* ]]; then
   printf '{"result":{"deviceProperties":{"name":"Test iPhone"}}}' > "$output"
   exit 0
 fi
-[[ "${MOCK_PROCESS_READY:-true}" == true ]]
+if [[ "$*" == *"device info processes"* ]]; then
+  [[ "${MOCK_PROCESS_READY:-true}" == true ]]
+  exit
+fi
+echo "Unexpected xcrun command: $*" >&2
+exit 64
 SH
 cat > "$test_root/bin/xcodebuild" <<'SH'
 #!/usr/bin/env bash
