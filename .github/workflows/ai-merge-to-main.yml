@@ -35,7 +35,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
-      - name: Require a stable wired and unlocked iPhone
+      - name: Require a stable connected and unlocked iPhone
         env:
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
