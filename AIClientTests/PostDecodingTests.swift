@@ -757,6 +757,16 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.xueqiuUnplacedImageURLs.map(\.lastPathComponent), ["unplaced.jpg"])
     }
 
+    func testXueqiuEmojiOnlyBodyDoesNotDuplicateQuotedPost() throws {
+        let json = #"{"id":19,"source":"rss:14","content":"<img src=\"//assets.imedao.com/ugc/images/face/emoji_13_coldsweat.png?v=1\" title=\"[滴汗]\" alt=\"[滴汗]\" height=\"24\" /><blockquote>大道无形逍遥游:&nbsp;<a href=\"https://xueqiu.com/n/大道无形我有型\" target=\"_blank\">@大道无形我有型</a> 大道你好，很好奇你对美债的看法。</blockquote>"}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertEqual(post.xueqiuBodyContent, "[滴汗]")
+        XCTAssertEqual(post.xueqiuQuoteAuthor, "大道无形逍遥游")
+        XCTAssertEqual(post.xueqiuQuoteBody, "@大道无形我有型 大道你好，很好奇你对美债的看法。")
+        XCTAssertFalse(post.xueqiuBodyContent.contains("大道你好"))
+    }
+
     func testConfirmedServerIdentityIsShownButUnconfirmedClaimIsIgnored() throws {
         let confirmedJSON = #"{"data":[{"id":15,"source":"weibo","user":{"user_id":"weibo:123","user_name":"平台昵称","canonical_name":"真实人物","platform_display_name":"平台昵称","platform":"微博","identity_status":"verified"}}]}"#.data(using: .utf8)!
         let unconfirmedJSON = #"{"data":[{"id":16,"source":"weibo","user":{"user_id":"weibo:456","user_name":"另一个昵称","canonical_name":"不应展示的人物","identity_status":"unconfirmed"}}]}"#.data(using: .utf8)!

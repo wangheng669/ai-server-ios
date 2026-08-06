@@ -313,7 +313,7 @@ jobs:
               -collect-test-diagnostics never \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
               -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-              "${test_arguments[@]}" \
+              ${test_arguments[@]+"${test_arguments[@]}"} \
               CODE_SIGNING_ALLOWED=NO
           test_status=$?
           wait "$build_pid"
