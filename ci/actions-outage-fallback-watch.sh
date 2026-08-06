@@ -18,23 +18,27 @@ if [[ "$actions_status" != partial_outage && "$actions_status" != major_outage ]
 fi
 
 minimum_queue_seconds=${IOS_ACTIONS_OUTAGE_QUEUE_SECONDS:-300}
+completed_lookback_seconds=${IOS_ACTIONS_OUTAGE_COMPLETED_LOOKBACK_SECONDS:-21600}
 now_epoch=$(date +%s)
-queued_runs=$(gh run list \
+recent_runs=$(gh run list \
   --workflow 'AI merge task branch into main' \
-  --status queued \
-  --limit 20 \
-  --json databaseId,createdAt,headBranch,headSha \
+  --limit 40 \
+  --json databaseId,createdAt,headBranch,headSha,status,conclusion \
   2>/dev/null || true)
 
-eligible_runs=$(jq -c --argjson now "$now_epoch" --argjson minimum "$minimum_queue_seconds" '
+candidate_runs=$(jq -c --argjson now "$now_epoch" --argjson minimum "$minimum_queue_seconds" --argjson lookback "$completed_lookback_seconds" '
   map(select(.headBranch | startswith("codex/")))
   | map(. + {createdEpoch: (.createdAt | fromdateiso8601)})
-  | map(select(($now - .createdEpoch) >= $minimum))
   | group_by(.headBranch)
   | map(max_by(.createdEpoch))
+  | map(select(
+      (.status == "queued" and (($now - .createdEpoch) >= $minimum))
+      or
+      (.status == "completed" and (.conclusion == "failure" or .conclusion == "cancelled") and (($now - .createdEpoch) <= $lookback))
+    ))
   | sort_by(.createdEpoch)
   | .[]
-' <<<"${queued_runs:-[]}")
+' <<<"${recent_runs:-[]}")
 
 git fetch --no-tags origin main:refs/remotes/origin/main
 candidate=""
@@ -42,6 +46,17 @@ while IFS= read -r run; do
   [[ -n "$run" ]] || continue
   branch=$(jq -r .headBranch <<<"$run")
   run_sha=$(jq -r .headSha <<<"$run")
+  run_status=$(jq -r .status <<<"$run")
+  if [[ "$run_status" == completed ]]; then
+    jobs=$(gh run view "$(jq -r .databaseId <<<"$run")" --json jobs 2>/dev/null || true)
+    if [[ -z "$jobs" ]] || ! jq -e '
+      [.jobs[].conclusion] as $conclusions
+      | ($conclusions | any(. == "cancelled"))
+        and ($conclusions | all(. != "failure"))
+    ' >/dev/null <<<"$jobs"; then
+      continue
+    fi
+  fi
   if ! git fetch --no-tags origin "$branch:refs/remotes/origin/$branch"; then
     continue
   fi
@@ -51,12 +66,12 @@ while IFS= read -r run; do
   fi
   candidate=$run
   break
-done <<<"$eligible_runs"
+done <<<"$candidate_runs"
 [[ -n "$candidate" ]] || exit 0
 
 run_id=$(jq -r .databaseId <<<"$candidate")
 source_branch=$(jq -r .headBranch <<<"$candidate")
-echo "Taking over queued outage run $run_id for $source_branch."
+echo "Taking over Actions outage run $run_id for $source_branch."
 exec ./ci/local-central-merge.sh \
   --source "$source_branch" \
   --run "$run_id" \
