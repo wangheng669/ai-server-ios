@@ -375,26 +375,16 @@ struct NewsFeedView: View {
             set: { selectSource($0) }
         )) {
             ForEach(FeedSource.allCases) { source in
-                Group {
-                    if activeSources.contains(source) {
-                        sourcePage(source)
-                    } else {
-                        Color.clear
-                    }
-                }
-                .tag(source)
+                // Keep every page mounted. Replacing distant pages with empty views
+                // changes the page controller's contents while an interactive swipe
+                // is settling, which causes abrupt snapping and unreliable jumps when
+                // the user selects a source that is more than one page away.
+                sourcePage(source)
+                    .tag(source)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var activeSources: [FeedSource] {
-        let sources = FeedSource.allCases
-        guard let index = sources.firstIndex(of: model.source) else { return [model.source] }
-        let lower = max(sources.startIndex, index - 1)
-        let upper = min(sources.index(before: sources.endIndex), index + 1)
-        return Array(sources[lower...upper])
     }
 
     @ViewBuilder
