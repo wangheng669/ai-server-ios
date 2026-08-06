@@ -96,11 +96,11 @@ jobs:
             fi
             sleep $((attempt * 3))
           done
-          git switch --force-create ai-merge origin/main
-
           ./ci/classify-ios-test-scope.sh \
             < <(git diff --name-only origin/main..."$SOURCE_SHA") \
             >> "$GITHUB_OUTPUT"
+
+          git switch --force-create ai-merge origin/main
 
           if git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
             echo "already_merged=true" >> "$GITHUB_OUTPUT"
