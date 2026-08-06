@@ -2,6 +2,15 @@ import XCTest
 @testable import AIServerClient
 
 final class FeedAdapterTests: XCTestCase {
+    func testFeedSourceTransitionAnimatesOnlyAdjacentTabs() {
+        let sources = FeedSource.allCases
+        XCTAssertGreaterThanOrEqual(sources.count, 3)
+        XCTAssertTrue(FeedSourceTransitionPolicy.animatesTap(from: sources[0], to: sources[1]))
+        XCTAssertTrue(FeedSourceTransitionPolicy.animatesTap(from: sources[1], to: sources[0]))
+        XCTAssertFalse(FeedSourceTransitionPolicy.animatesTap(from: sources[0], to: sources[2]))
+        XCTAssertFalse(FeedSourceTransitionPolicy.animatesTap(from: sources[0], to: sources[0]))
+    }
+
     @MainActor
     func testNewYorkTimesSourceDoesNotPublishCardsUntilFullBodiesAreReady() async throws {
         let feedPosts = try (1...5).map { id in
