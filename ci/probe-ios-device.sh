@@ -28,7 +28,7 @@ if ! xcrun devicectl device info details --device "$DEVICE_UDID" --json-output "
   exit 1
 fi
 
-device_name=$(jq -r '.. | .name? // empty' "$details" | head -1)
+device_name=$(jq -r '.result.deviceProperties.name // .result.hardwareProperties.marketingName // empty' "$details")
 report running checking-xcode "CoreDevice 已发现手机，正在确认 Xcode 可用性" "$device_name" >/dev/null
 if ! xcodebuild -project AIServerClient.xcodeproj -scheme AIServerClient -showdestinations 2>/dev/null \
   | grep -Fq "id:$DEVICE_UDID"; then
