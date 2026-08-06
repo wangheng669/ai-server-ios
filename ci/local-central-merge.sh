@@ -11,7 +11,8 @@ Usage:
     --confirm-infrastructure-failure
 
 Emergency central-Mac fallback for a GitHub Actions infrastructure outage.
-The source branch must be pushed, and the matching Actions run must be failed.
+The source branch must be pushed, and its matching Actions run must have failed
+or been cancelled after infrastructure prevented it from starting.
 EOF
 }
 
@@ -76,8 +77,9 @@ run_conclusion=$(jq -r .conclusion <<<"$run_json")
 run_branch=$(jq -r .headBranch <<<"$run_json")
 run_sha=$(jq -r .headSha <<<"$run_json")
 run_url=$(jq -r .url <<<"$run_json")
-if [[ "$run_conclusion" != failure || "$run_branch" != "$source_branch" ]]; then
-  echo "Run $failed_run_id is not a failed run for $source_branch." >&2
+if [[ "$run_conclusion" != failure && "$run_conclusion" != cancelled ]] \
+  || [[ "$run_branch" != "$source_branch" ]]; then
+  echo "Run $failed_run_id is not a failed or cancelled run for $source_branch." >&2
   exit 1
 fi
 echo "Validated failed Actions run: $run_url"
