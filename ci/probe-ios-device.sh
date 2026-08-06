@@ -21,19 +21,19 @@ report() {
       --data-binary @- "$report_url"
 }
 
-report running checking-coredevice "中央 Mac 正在检查 CoreDevice 连接" >/dev/null
+report running checking-stability "中央 Mac 正在连续检查有线连接、解锁状态与 Xcode 可用性" >/dev/null
 details=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-probe.XXXXXX")
 if ! xcrun devicectl device info details --device "$DEVICE_UDID" --json-output "$details" >/dev/null 2>&1; then
-  report unavailable device-not-found "中央 Mac 未发现目标 iPhone；请确认手机已解锁并连接 USB 或无线调试" >/dev/null
+  report unavailable device-not-found "中央 Mac 未发现目标 iPhone；请确认手机已解锁并连接 USB" >/dev/null
   exit 1
 fi
 
 device_name=$(jq -r '.result.deviceProperties.name // .result.hardwareProperties.marketingName // empty' "$details")
-report running checking-xcode "CoreDevice 已发现手机，正在确认 Xcode 可用性" "$device_name" >/dev/null
-if ! xcodebuild -project AIServerClient.xcodeproj -scheme AIServerClient -showdestinations 2>/dev/null \
-  | grep -Fq "id:$DEVICE_UDID"; then
-  report unavailable xcode-unavailable "手机已连接，但 Xcode 暂时不能用于构建或安装" "$device_name" >/dev/null
+probe_log=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-probe-log.XXXXXX")
+if ! ./ci/verify-ios-device-stability.sh > >(tee "$probe_log") 2>&1; then
+  message=$(tail -1 "$probe_log")
+  report unavailable stability-failed "${message:-真机连接不稳定，已阻止后续交付}" "$device_name" >/dev/null
   exit 1
 fi
 
-report ready device-ready "真机在线，CoreDevice 与 Xcode 均可用于部署" "$device_name" >/dev/null
+report ready device-ready "连续检测通过：真机保持 USB 有线连接、已解锁，CoreDevice 与 Xcode 均可部署" "$device_name" >/dev/null
