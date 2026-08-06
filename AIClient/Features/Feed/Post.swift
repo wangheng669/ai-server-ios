@@ -1445,7 +1445,9 @@ enum MediaURL {
     private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com", "qpic.cn"]
 
     static func image(_ raw: String) -> URL? {
-        let decoded = raw.replacingOccurrences(of: "&amp;", with: "&")
+        let decoded = highResolutionXueqiuImageURL(
+            raw.replacingOccurrences(of: "&amp;", with: "&")
+        )
         if let proxyURL = URL(string: decoded),
            proxyURL.host?.lowercased() == "wechat2rss.xlab.app",
            proxyURL.path.hasSuffix("/img-proxy"),
@@ -1465,6 +1467,18 @@ enum MediaURL {
             return parts?.url
         }
         return resolved(decoded, proxy: "image-proxy", hosts: imageHostSuffixes)
+    }
+
+    private static func highResolutionXueqiuImageURL(_ raw: String) -> String {
+        guard var components = URLComponents(string: raw),
+              components.host?.lowercased() == "xqimg.imedao.com" else { return raw }
+
+        let suffixes = ["!custom.jpg", "!custom.jpeg", "!custom.png", "!custom.webp"]
+        guard let suffix = suffixes.first(where: { components.path.lowercased().hasSuffix($0) }) else {
+            return raw
+        }
+        components.path.removeLast(suffix.count)
+        return components.string ?? raw
     }
     static func directVideo(_ raw: String) -> URL? {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
