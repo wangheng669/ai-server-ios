@@ -62,6 +62,8 @@ enum FeedPaginationLayout {
 }
 
 enum FeedSourceTransitionPolicy {
+    static let adjacentAnimationDuration = 0.28
+
     static func animatesTap(from current: FeedSource, to next: FeedSource) -> Bool {
         guard let currentIndex = FeedSource.allCases.firstIndex(of: current),
               let nextIndex = FeedSource.allCases.firstIndex(of: next) else { return false }
@@ -1185,7 +1187,7 @@ struct NewsFeedView: View {
     private func selectSourceFromTap(_ source: FeedSource) {
         guard source != model.source else { return }
         if FeedSourceTransitionPolicy.animatesTap(from: model.source, to: source) {
-            withAnimation(.snappy(duration: 0.28)) {
+            withAnimation(.snappy(duration: FeedSourceTransitionPolicy.adjacentAnimationDuration)) {
                 selectSource(source)
             }
         } else {
