@@ -25,6 +25,9 @@ jobs:
       preflight_duration_seconds: ${{ steps.central_prepare.outputs.preflight_duration_seconds }}
       started_epoch: ${{ steps.central_prepare.outputs.started_epoch }}
       device_warm_duration_seconds: ${{ steps.central_prepare.outputs.device_warm_duration_seconds }}
+      dependency_duration_seconds: ${{ steps.central_prepare.outputs.dependency_duration_seconds }}
+      device_build_warm_duration_seconds: ${{ steps.central_prepare.outputs.device_build_warm_duration_seconds }}
+      simulator_warm_duration_seconds: ${{ steps.central_prepare.outputs.simulator_warm_duration_seconds }}
     steps:
       - name: Check out task commit for cache warming
         uses: actions/checkout@v7
@@ -211,6 +214,7 @@ jobs:
               -destination 'platform=iOS Simulator,name=iPhone 16e' \
               -collect-test-diagnostics never \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
+              -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
               "${test_arguments[@]}" \
               CODE_SIGNING_ALLOWED=NO
 
@@ -286,6 +290,7 @@ jobs:
               -configuration Debug \
               -destination 'generic/platform=iOS' \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-signing" \
+              -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
               -allowProvisioningUpdates \
               -allowProvisioningDeviceRegistration \
               DEVELOPMENT_TEAM="$TEAM_ID" \
