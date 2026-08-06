@@ -24,9 +24,14 @@ json_seconds() {
 
 preflight_seconds=$(json_seconds "${IOS_PREFLIGHT_SECONDS:-}")
 prepare_seconds=$(json_seconds "${IOS_PREPARE_SECONDS:-}")
+device_warm_seconds=$(json_seconds "${IOS_DEVICE_WARM_SECONDS:-}")
 merge_seconds=$(json_seconds "${IOS_MERGE_SECONDS:-}")
 build_seconds=$(json_seconds "${IOS_BUILD_SECONDS:-}")
 install_seconds=$(json_seconds "${IOS_INSTALL_SECONDS:-}")
+device_wait_seconds=$(json_seconds "${IOS_DEVICE_WAIT_DURATION_SECONDS:-}")
+direct_install_seconds=$(json_seconds "${IOS_DIRECT_INSTALL_SECONDS:-}")
+xcode_recovery_seconds=$(json_seconds "${IOS_XCODE_RECOVERY_SECONDS:-}")
+final_install_seconds=$(json_seconds "${IOS_FINAL_INSTALL_SECONDS:-}")
 workflow_started=$(json_seconds "${IOS_WORKFLOW_STARTED_EPOCH:-}")
 device_delivery_seconds=null
 if [[ "$build_seconds" != null && "$install_seconds" != null ]]; then
@@ -52,12 +57,20 @@ payload=$(jq -cn \
   --arg runId "${GITHUB_RUN_ID:-}" \
   --argjson preflight "$preflight_seconds" \
   --argjson prepare "$prepare_seconds" \
+  --argjson deviceWarm "$device_warm_seconds" \
   --argjson merge "$merge_seconds" \
+  --argjson build "$build_seconds" \
+  --argjson deviceWait "$device_wait_seconds" \
+  --argjson directInstall "$direct_install_seconds" \
+  --argjson xcodeRecovery "$xcode_recovery_seconds" \
+  --argjson finalInstall "$final_install_seconds" \
   --argjson install "$device_delivery_seconds" \
   --argjson total "$total_seconds" \
   '{phase:$phase, progress:$progress, stage:$stage, commit:$commit, commitMessage:$commitMessage,
     sourceBranch:$sourceBranch, runId:$runId,
-    timings:{preflight:$preflight, prepare:$prepare, merge:$merge, install:$install, queue:null, total:$total}}')
+    timings:{preflight:$preflight, prepare:$prepare, deviceWarm:$deviceWarm, merge:$merge, build:$build,
+      deviceWait:$deviceWait, directInstall:$directInstall, xcodeRecovery:$xcodeRecovery,
+      finalInstall:$finalInstall, install:$install, queue:null, total:$total}}')
 
 for path in "$preferred_path" /api/v1/system/ios-deployment; do
   status=$(curl --silent --show-error \

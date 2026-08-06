@@ -24,6 +24,7 @@ jobs:
       duration_seconds: ${{ steps.central_prepare.outputs.duration_seconds }}
       preflight_duration_seconds: ${{ steps.central_prepare.outputs.preflight_duration_seconds }}
       started_epoch: ${{ steps.central_prepare.outputs.started_epoch }}
+      device_warm_duration_seconds: ${{ steps.central_prepare.outputs.device_warm_duration_seconds }}
     steps:
       - name: Check out task commit for cache warming
         uses: actions/checkout@v7
@@ -37,6 +38,7 @@ jobs:
           DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
+          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
         run: |
           ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
           ./ci/prepare-central-runner-parallel.sh
@@ -57,6 +59,7 @@ jobs:
     env:
       IOS_PREFLIGHT_SECONDS: ${{ needs.prepare.outputs.preflight_duration_seconds }}
       IOS_PREPARE_SECONDS: ${{ needs.prepare.outputs.duration_seconds }}
+      IOS_DEVICE_WARM_SECONDS: ${{ needs.prepare.outputs.device_warm_duration_seconds }}
       IOS_WORKFLOW_STARTED_EPOCH: ${{ needs.prepare.outputs.started_epoch }}
     steps:
       - name: Check out task commit with full history
@@ -310,6 +313,10 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
+          IOS_DEVICE_WAIT_DURATION_SECONDS: ${{ steps.local_install.outputs.device_wait_seconds }}
+          IOS_DIRECT_INSTALL_SECONDS: ${{ steps.local_install.outputs.direct_install_seconds }}
+          IOS_XCODE_RECOVERY_SECONDS: ${{ steps.local_install.outputs.xcode_recovery_seconds }}
+          IOS_FINAL_INSTALL_SECONDS: ${{ steps.local_install.outputs.final_install_seconds }}
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
       - name: Report configuration-only delivery completed

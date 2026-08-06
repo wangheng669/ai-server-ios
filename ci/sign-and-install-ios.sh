@@ -8,6 +8,27 @@ set -euo pipefail
 : "${TEAM_ID:?TEAM_ID is required}"
 : "${DEVICE_UDID:?DEVICE_UDID is required}"
 
+device_wait_duration_seconds=0
+direct_install_seconds=0
+xcode_recovery_seconds=0
+final_install_seconds=0
+
+sync_metrics_env() {
+  export IOS_DEVICE_WAIT_DURATION_SECONDS="$device_wait_duration_seconds"
+  export IOS_DIRECT_INSTALL_SECONDS="$direct_install_seconds"
+  export IOS_XCODE_RECOVERY_SECONDS="$xcode_recovery_seconds"
+  export IOS_FINAL_INSTALL_SECONDS="$final_install_seconds"
+}
+
+write_metrics() {
+  sync_metrics_env
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'device_wait_seconds=%s\ndirect_install_seconds=%s\nxcode_recovery_seconds=%s\nfinal_install_seconds=%s\n' \
+      "$device_wait_duration_seconds" "$direct_install_seconds" "$xcode_recovery_seconds" "$final_install_seconds" >> "$GITHUB_OUTPUT"
+  fi
+}
+trap write_metrics EXIT
+
 # Self-hosted runners do not always inherit the interactive login session's
 # unlocked keychain state. The office installer uses an empty local keychain
 # password, so unlock it explicitly before accessing the signing private key.
@@ -18,6 +39,11 @@ security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" \
 device_attempts=${IOS_DEVICE_WAIT_ATTEMPTS:-12}
 device_wait_seconds=${IOS_DEVICE_WAIT_SECONDS:-5}
 device_available=false
+device_wait_started_epoch=$(date +%s)
+
+if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+  ./ci/report-ios-deployment.sh running 0.82 checking-device || true
+fi
 
 for ((attempt = 1; attempt <= device_attempts; attempt++)); do
   if xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1; then
@@ -34,6 +60,8 @@ for ((attempt = 1; attempt <= device_attempts; attempt++)); do
     sleep "$device_wait_seconds"
   fi
 done
+device_wait_duration_seconds=$(($(date +%s) - device_wait_started_epoch))
+sync_metrics_env
 
 if [[ "$device_available" != true ]]; then
   echo "The configured iPhone did not become available after $device_attempts attempts: $DEVICE_UDID" >&2
@@ -49,7 +77,7 @@ install_log=$(mktemp "$RUNNER_TEMP/device-install.XXXXXX")
 
 install_app_with_connectivity_retry() {
   local candidate_app=$1
-  local max_attempts=${IOS_INSTALL_ATTEMPTS:-6}
+  local max_attempts=${IOS_INSTALL_ATTEMPTS:-2}
   local retry_seconds=${IOS_INSTALL_RETRY_SECONDS:-5}
   : > "$install_log"
 
@@ -66,6 +94,36 @@ install_app_with_connectivity_retry() {
     fi
   done
   return 1
+}
+
+run_direct_install() {
+  local started status
+  started=$(date +%s)
+  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+    ./ci/report-ios-deployment.sh running 0.88 installing-direct || true
+  fi
+  set +e
+  install_app_with_connectivity_retry "$1"
+  status=$?
+  set -e
+  direct_install_seconds=$((direct_install_seconds + $(date +%s) - started))
+  sync_metrics_env
+  return "$status"
+}
+
+run_final_install() {
+  local started status
+  started=$(date +%s)
+  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+    ./ci/report-ios-deployment.sh running 0.96 installing-final || true
+  fi
+  set +e
+  install_app_with_connectivity_retry "$1"
+  status=$?
+  set -e
+  final_install_seconds=$((final_install_seconds + $(date +%s) - started))
+  sync_metrics_env
+  return "$status"
 }
 
 xcode_refreshed_app=""
@@ -117,13 +175,28 @@ refresh_signing_with_xcode() {
   return 1
 }
 
+run_xcode_recovery() {
+  local started status
+  started=$(date +%s)
+  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+    ./ci/report-ios-deployment.sh running 0.92 recovering-xcode || true
+  fi
+  set +e
+  refresh_signing_with_xcode
+  status=$?
+  set -e
+  xcode_recovery_seconds=$((xcode_recovery_seconds + $(date +%s) - started))
+  sync_metrics_env
+  return "$status"
+}
+
 if find "$APP_PATH" -type d -name '*.appex' -print -quit | grep -q .; then
   if codesign --verify --deep --strict --verbose=2 "$APP_PATH"; then
     echo "App and embedded extensions are already signed; installing the prepared build directly."
     if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
-      ./ci/report-ios-deployment.sh running 0.92 installing || true
+      ./ci/report-ios-deployment.sh running 0.88 installing-direct || true
     fi
-    if install_app_with_connectivity_retry "$APP_PATH"; then
+    if run_direct_install "$APP_PATH"; then
       echo "Installed $BUNDLE_ID on $DEVICE_UDID using the prepared signed build."
       exit 0
     fi
@@ -132,11 +205,8 @@ if find "$APP_PATH" -type d -name '*.appex' -print -quit | grep -q .; then
     echo "Prepared app signature is incomplete; refreshing signing with Xcode."
   fi
   echo "App extensions detected; using Xcode automatic signing fallback for the app and every extension."
-  refresh_signing_with_xcode
-  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
-    ./ci/report-ios-deployment.sh running 0.92 installing || true
-  fi
-  install_app_with_connectivity_retry "$xcode_refreshed_app"
+  run_xcode_recovery
+  run_final_install "$xcode_refreshed_app"
   echo "Installed $BUNDLE_ID on $DEVICE_UDID using Xcode automatic signing for embedded extensions."
   exit 0
 fi
@@ -193,11 +263,8 @@ done < <(find "${profile_roots[@]}" -type f -name '*.mobileprovision' -print 2>/
 
 if [[ -z "$selected_profile" ]]; then
   echo "No cached provisioning profile matches this iPhone; asking Xcode to refresh automatic signing."
-  refresh_signing_with_xcode
-  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
-    ./ci/report-ios-deployment.sh running 0.92 installing || true
-  fi
-  install_app_with_connectivity_retry "$xcode_refreshed_app"
+  run_xcode_recovery
+  run_final_install "$xcode_refreshed_app"
   echo "Installed $BUNDLE_ID on $DEVICE_UDID using Xcode-refreshed automatic signing."
   exit 0
 fi
@@ -237,18 +304,18 @@ codesign \
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
-  ./ci/report-ios-deployment.sh running 0.92 installing || true
+  ./ci/report-ios-deployment.sh running 0.88 installing-direct || true
 fi
 installation_description="profile valid until $selected_expiration"
 
-if ! install_app_with_connectivity_retry "$APP_PATH"; then
+if ! run_direct_install "$APP_PATH"; then
   if ! grep -Fq "identity used to sign the executable is no longer valid" "$install_log"; then
     exit 1
   fi
 
   echo "The device rejected the cached signing identity; refreshing signing assets with Xcode."
-  refresh_signing_with_xcode
-  install_app_with_connectivity_retry "$xcode_refreshed_app"
+  run_xcode_recovery
+  run_final_install "$xcode_refreshed_app"
   installation_description="Xcode-refreshed automatic signing"
 fi
 
