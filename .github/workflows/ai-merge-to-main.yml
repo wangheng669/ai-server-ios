@@ -96,17 +96,11 @@ jobs:
             fi
             sleep $((attempt * 3))
           done
-          git switch --force-create ai-merge origin/main
+          ./ci/classify-ios-test-scope.sh \
+            < <(git diff --name-only origin/main..."$SOURCE_SHA") \
+            >> "$GITHUB_OUTPUT"
 
-          app_changed=false
-          while IFS= read -r changed_path; do
-            case "$changed_path" in
-              ci/sign-and-install-ios.sh|ci/prepare-central-runner-parallel.sh|ci/report-ios-deployment.sh) app_changed=true; break ;;
-              .github/*|ci/*|*.md) ;;
-              *) app_changed=true; break ;;
-            esac
-          done < <(git diff --name-only origin/main..."$SOURCE_SHA")
-          echo "app_changed=$app_changed" >> "$GITHUB_OUTPUT"
+          git switch --force-create ai-merge origin/main
 
           if git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
             echo "already_merged=true" >> "$GITHUB_OUTPUT"
@@ -188,7 +182,7 @@ jobs:
           git add -A
           git commit -m "Merge $SOURCE_BRANCH into main"
 
-      - name: Run complete iOS test suite
+      - name: Run change-aware iOS tests
         id: ios_tests
         if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         env:
@@ -196,10 +190,19 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
         run: |
-          ./ci/report-ios-deployment.sh running 0.04 merge-testing || true
+          test_scope='${{ steps.merge.outputs.test_scope }}'
+          test_label="Complete iOS tests"
+          test_stage=full-testing
+          test_arguments=()
+          if [[ "$test_scope" == feed ]]; then
+            test_label="Feed-focused iOS tests"
+            test_stage=targeted-testing
+            test_arguments=(-only-testing:AIClientTests/FeedAdapterTests)
+          fi
+          ./ci/report-ios-deployment.sh running 0.04 "$test_stage" || true
           set -o pipefail
           mkdir -p "$IOS_BUILD_CACHE_ROOT"
-          ./ci/run-timed-step.sh "Complete iOS tests" \
+          ./ci/run-timed-step.sh "$test_label" \
             ./ci/with-ios-simulator-lock.sh \
               --label "central merge tests $GITHUB_RUN_ID" \
               -- xcodebuild test \
@@ -208,6 +211,7 @@ jobs:
               -destination 'platform=iOS Simulator,name=iPhone 16e' \
               -collect-test-diagnostics never \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
+              "${test_arguments[@]}" \
               CODE_SIGNING_ALLOWED=NO
 
       - name: Report merge verification completed
