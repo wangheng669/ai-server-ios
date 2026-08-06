@@ -504,14 +504,14 @@ struct Post: Decodable, Identifiable, Hashable {
     var xueqiuBodyContent: String {
         guard let raw = clean(content),
               let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else {
-            return displayContent
+            return xueqiuText(content) ?? displayContent
         }
-        return htmlText(String(raw[..<quoteStart.lowerBound])) ?? displayContent
+        return xueqiuText(String(raw[..<quoteStart.lowerBound])) ?? ""
     }
     var xueqiuQuoteContent: String? {
         guard let raw = clean(content),
               let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return nil }
-        return htmlText(String(raw[quoteStart.lowerBound...]))
+        return xueqiuText(String(raw[quoteStart.lowerBound...]))
     }
     var xueqiuQuoteAuthor: String? {
         guard let quote = xueqiuQuoteContent,
@@ -936,7 +936,15 @@ struct Post: Decodable, Identifiable, Hashable {
     }
 
     private func weiboText(_ value: String?) -> String? {
-        guard var value = clean(value) else { return nil }
+        htmlTextPreservingInlineImages(value)
+    }
+
+    private func xueqiuText(_ value: String?) -> String? {
+        htmlTextPreservingInlineImages(value)
+    }
+
+    private func htmlTextPreservingInlineImages(_ input: String?) -> String? {
+        guard var value = clean(input) else { return nil }
         let source = value as NSString
         guard let regex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
             return htmlText(value) ?? value
