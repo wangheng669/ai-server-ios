@@ -131,7 +131,7 @@ xcode_refreshed_app=""
 refresh_signing_with_xcode() {
   local refreshed_derived_data="${IOS_SIGNING_DERIVED_DATA_PATH:-$RUNNER_TEMP/AIServerClient-RefreshedSigning}"
   local build_log
-  local max_attempts=${IOS_XCODE_DESTINATION_ATTEMPTS:-12}
+  local max_attempts=${IOS_XCODE_DESTINATION_ATTEMPTS:-3}
   local retry_seconds=${IOS_XCODE_DESTINATION_RETRY_SECONDS:-5}
   local destination_timeout=${IOS_XCODE_DESTINATION_TIMEOUT_SECONDS:-30}
   build_log=$(mktemp "$RUNNER_TEMP/xcode-signing-refresh.XXXXXX")
@@ -166,7 +166,7 @@ refresh_signing_with_xcode() {
     if [[ "$attempt" -lt "$max_attempts" ]]; then
       echo "Xcode is still preparing iPhone $DEVICE_UDID; retrying signing refresh after ${retry_seconds}s."
       if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
-        ./ci/report-ios-deployment.sh running 0.88 waiting-for-device || true
+        ./ci/report-ios-deployment.sh running 0.92 recovering-xcode || true
       fi
       sleep "$retry_seconds"
     fi

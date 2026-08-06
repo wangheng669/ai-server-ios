@@ -344,8 +344,27 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/self-hosted-ios.yml/dispatches" \
             --data '{"ref":"main","inputs":{"git_ref":"main"}}'
 
+      - name: Report local installation failed
+        if: always() && steps.local_install.outcome == 'failure'
+        continue-on-error: true
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
+          IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
+          IOS_DEVICE_WAIT_DURATION_SECONDS: ${{ steps.local_install.outputs.device_wait_seconds }}
+          IOS_DIRECT_INSTALL_SECONDS: ${{ steps.local_install.outputs.direct_install_seconds }}
+          IOS_XCODE_RECOVERY_SECONDS: ${{ steps.local_install.outputs.xcode_recovery_seconds }}
+          IOS_FINAL_INSTALL_SECONDS: ${{ steps.local_install.outputs.final_install_seconds }}
+        run: ./ci/report-ios-deployment.sh failed 1 installation-failed
+
+      - name: Fail delivery when local installation failed
+        if: always() && steps.local_install.outcome == 'failure'
+        run: |
+          echo "The app was merged and built, but installation on the configured iPhone failed." >&2
+          exit 1
+
       - name: Report merge failure
-        if: ${{ failure() }}
+        if: ${{ failure() && steps.local_install.outcome != 'failure' }}
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
