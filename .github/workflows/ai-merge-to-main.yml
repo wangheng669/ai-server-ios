@@ -35,6 +35,21 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
+      - name: Require a stable wired and unlocked iPhone
+        env:
+          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          DEPLOYMENT_STATUS_BASE_URL: https://api.wanghengai.xin
+          IOS_DEVICE_STABILITY_ATTEMPTS: 3
+          IOS_DEVICE_STABILITY_INTERVAL_SECONDS: 5
+        run: |
+          ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
+          if ! ./ci/probe-ios-device.sh; then
+            ./ci/report-ios-deployment.sh failed 0 device-gate-failed || true
+            exit 1
+          fi
+          ./ci/report-ios-deployment.sh running 0.01 device-gate-ready || true
+
       - name: Run preflight and warm device build cache
         id: central_prepare
         env:
