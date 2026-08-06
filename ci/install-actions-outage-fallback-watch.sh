@@ -33,7 +33,7 @@ cat >"$plist_path" <<EOF
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd '$automation_repo' &amp;&amp; ./ci/actions-outage-fallback-watch.sh</string>
+    <string>cd '$automation_repo' &amp;&amp; /bin/bash ./ci/actions-outage-fallback-watch.sh</string>
   </array>
   <key>StartInterval</key><integer>60</integer>
   <key>RunAtLoad</key><true/>
