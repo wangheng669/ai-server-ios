@@ -61,6 +61,14 @@ enum FeedPaginationLayout {
     }
 }
 
+enum FeedSourceTransitionPolicy {
+    static func animatesTap(from current: FeedSource, to next: FeedSource) -> Bool {
+        guard let currentIndex = FeedSource.allCases.firstIndex(of: current),
+              let nextIndex = FeedSource.allCases.firstIndex(of: next) else { return false }
+        return abs(currentIndex - nextIndex) == 1
+    }
+}
+
 private struct WeChatAccount: Identifiable {
     let id: Int
     let name: String
@@ -280,7 +288,7 @@ struct NewsFeedView: View {
     private func sourceButton(_ source: FeedSource) -> some View {
         let isSelected = model.source == source
         return Button {
-            withAnimation(.snappy(duration: 0.32)) { selectSource(source) }
+            selectSourceFromTap(source)
         } label: {
             VStack(spacing: 4) {
                 if isSelected && source == .zhihu {
@@ -1172,6 +1180,21 @@ struct NewsFeedView: View {
         sourceChromeStates[model.source] = isFeedChromeHidden
         isFeedChromeHidden = sourceChromeStates[source] ?? false
         model.select(source)
+    }
+
+    private func selectSourceFromTap(_ source: FeedSource) {
+        guard source != model.source else { return }
+        if FeedSourceTransitionPolicy.animatesTap(from: model.source, to: source) {
+            withAnimation(.snappy(duration: 0.28)) {
+                selectSource(source)
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                selectSource(source)
+            }
+        }
     }
 
     private func open(_ path: String) {
