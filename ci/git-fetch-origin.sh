@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-timeout_seconds="${GIT_FETCH_TIMEOUT_SECONDS:-45}"
+timeout_seconds="${GIT_FETCH_TIMEOUT_SECONDS:-30}"
 max_attempts="${GIT_FETCH_MAX_ATTEMPTS:-3}"
 
 for ((attempt = 1; attempt <= max_attempts; attempt++)); do

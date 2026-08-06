@@ -3,10 +3,27 @@ set -euo pipefail
 
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workflow_started_epoch=$(date +%s)
-git fetch --no-tags --deepen=50 origin \
-  "${GITHUB_SHA:-HEAD}" \
-  main:refs/remotes/origin/main
+source_sha=${GITHUB_SHA:-HEAD}
+if ! git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
+  for deepen_by in 64 128 256; do
+    echo "Preflight merge base is unavailable; deepening by $deepen_by commits."
+    "$script_dir/git-fetch-origin.sh" \
+      --no-tags \
+      --deepen="$deepen_by" \
+      origin \
+      "$source_sha" \
+      main:refs/remotes/origin/main
+    if git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
+      break
+    fi
+  done
+fi
+if ! git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
+  echo "Preflight merge base remains unavailable after bounded deepening." >&2
+  exit 1
+fi
 preflight_started_epoch=$workflow_started_epoch
 preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finished.XXXXXX")
 

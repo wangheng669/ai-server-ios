@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 1
+          fetch-depth: 64
 
       - name: Require a stable connected and unlocked iPhone
         env:
@@ -43,7 +43,11 @@ jobs:
           IOS_DEVICE_STABILITY_ATTEMPTS: 3
           IOS_DEVICE_STABILITY_INTERVAL_SECONDS: 5
         run: |
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          ./ci/git-fetch-origin.sh \
+            --no-tags \
+            --depth=64 \
+            origin \
+            main:refs/remotes/origin/main
           if ! git cat-file -e origin/main:ci/verify-ios-device-stability.sh 2>/dev/null; then
             echo "Bootstrapping the device stability gate; it becomes mandatory after this commit reaches main."
             exit 0
@@ -120,26 +124,31 @@ jobs:
           git config user.name "AI Merge Bot"
           git config user.email "actions@users.noreply.github.com"
           git config http.version HTTP/1.1
-          for attempt in 1 2 3 4 5; do
-            if git fetch --no-tags --depth=64 origin main:refs/remotes/origin/main; then
-              break
-            fi
-            if [[ "$attempt" == 5 ]]; then
-              echo "Unable to fetch main after $attempt attempts." >&2
-              exit 1
-            fi
-            sleep $((attempt * 3))
-          done
+          ./ci/git-fetch-origin.sh \
+            --no-tags \
+            --depth=64 \
+            origin \
+            main:refs/remotes/origin/main
           for deepen_by in 128 256 512; do
             if git merge-base "$SOURCE_SHA" origin/main >/dev/null 2>&1; then
               break
             fi
             echo "Merge base is outside the shallow history; deepening by $deepen_by commits."
-            git fetch --no-tags --deepen="$deepen_by" origin main "$SOURCE_BRANCH"
+            ./ci/git-fetch-origin.sh \
+              --no-tags \
+              --deepen="$deepen_by" \
+              origin \
+              main \
+              "$SOURCE_BRANCH"
           done
           if ! git merge-base "$SOURCE_SHA" origin/main >/dev/null 2>&1; then
             echo "Merge base is still unavailable; falling back to the complete history."
-            git fetch --no-tags --unshallow origin main "$SOURCE_BRANCH"
+            ./ci/git-fetch-origin.sh \
+              --no-tags \
+              --unshallow \
+              origin \
+              main \
+              "$SOURCE_BRANCH"
           fi
           ./ci/classify-ios-test-scope.sh \
             < <(git diff --name-only origin/main..."$SOURCE_SHA") \
@@ -343,16 +352,7 @@ jobs:
         run: |
           set -euo pipefail
           git config http.version HTTP/1.1
-          for attempt in 1 2 3 4 5; do
-            if git fetch --no-tags origin main; then
-              break
-            fi
-            if [[ "$attempt" == 5 ]]; then
-              echo "Unable to verify main after $attempt attempts." >&2
-              exit 1
-            fi
-            sleep $((attempt * 3))
-          done
+          ./ci/git-fetch-origin.sh --no-tags origin main
 
       - name: Record merge and verification duration
         if: steps.merge.outputs.already_merged == 'false'
@@ -378,7 +378,7 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main "$SOURCE_BRANCH"
+          ./ci/git-fetch-origin.sh --no-tags origin main "$SOURCE_BRANCH"
           git merge-base --is-ancestor "$SOURCE_SHA" origin/main
           git push \
             --force-with-lease="refs/heads/$SOURCE_BRANCH:$SOURCE_SHA" \
