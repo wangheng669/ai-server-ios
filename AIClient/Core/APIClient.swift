@@ -359,7 +359,11 @@ struct APIClient {
             url: baseURL.appending(path: "api/ios/v1/bilibili/interpretation"),
             resolvingAgainstBaseURL: false
         )
-        components?.queryItems = [.init(name: "bvid", value: bvid), .init(name: "title", value: title)]
+        components?.queryItems = [
+            .init(name: "bvid", value: bvid),
+            .init(name: "title", value: title),
+            .init(name: "async", value: "1")
+        ]
         guard let url = components?.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = method
