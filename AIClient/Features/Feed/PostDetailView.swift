@@ -914,12 +914,22 @@ struct PostDetailView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     xueqiuDetailAuthor
 
-                    xueqiuRichText(post.xueqiuBodyContent)
-                        .font(.system(size: 20))
-                        .lineSpacing(10)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if post.xueqiuBodyInlineEmojis.isEmpty {
+                        xueqiuRichText(post.xueqiuBodyContent)
+                            .font(.system(size: 20))
+                            .lineSpacing(10)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        WeiboRichText(
+                            text: post.xueqiuBodyContent,
+                            emojis: post.xueqiuBodyInlineEmojis,
+                            fontSize: 20,
+                            lineSpacing: 10
+                        )
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
                     if !post.xueqiuBodyImageURLs.isEmpty {
                         PostMediaGrid(
@@ -3494,10 +3504,18 @@ private enum RSSBookmarkStore {
 private struct WeiboRichText: View {
     let text: String
     let emojis: [WeiboInlineEmoji]
+    var fontSize: CGFloat = 17
+    var lineSpacing: CGFloat = 5
     @State private var images: [URL: UIImage] = [:]
 
     var body: some View {
-        WeiboRichTextView(text: text, emojis: emojis, images: images)
+        WeiboRichTextView(
+            text: text,
+            emojis: emojis,
+            images: images,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing
+        )
             .task(id: emojis) {
                 let urls = Set(emojis.map(\.url))
                 var loaded: [URL: UIImage] = [:]
@@ -3520,6 +3538,8 @@ private struct WeiboRichTextView: UIViewRepresentable {
     let text: String
     let emojis: [WeiboInlineEmoji]
     let images: [URL: UIImage]
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -3544,9 +3564,9 @@ private struct WeiboRichTextView: UIViewRepresentable {
     }
 
     private var attributedText: NSAttributedString {
-        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17))
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: fontSize))
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 5
+        paragraph.lineSpacing = lineSpacing
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: UIColor.label,
