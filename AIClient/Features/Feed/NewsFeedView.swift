@@ -2792,6 +2792,15 @@ private struct NewsCardView: View {
             if let emoji = post.xueqiuStandaloneInlineEmoji {
                 InlineEmojiImage(emoji: emoji)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if !post.xueqiuBodyInlineEmojis.isEmpty {
+                InlineEmojiText(
+                    text: post.xueqiuBodyContent,
+                    emojis: post.xueqiuBodyInlineEmojis,
+                    fontSize: 17,
+                    lineSpacing: 8,
+                    maximumNumberOfLines: post.hasXueqiuFeedMedia ? 5 : 8
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 xueqiuRichText(post.xueqiuBodyContent)
                     .font(.system(size: 17))
