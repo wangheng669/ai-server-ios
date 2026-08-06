@@ -28,6 +28,9 @@ device_pid=$!
 
 simulator_started_epoch=$(date +%s)
 (
+  # The inner script intentionally expands its positional parameters in the
+  # child shell rather than in this parent process.
+  # shellcheck disable=SC2016
   ./ci/with-ios-simulator-lock.sh \
     --label "central cache warm ${GITHUB_RUN_ID:-local}" \
     -- bash -c '
