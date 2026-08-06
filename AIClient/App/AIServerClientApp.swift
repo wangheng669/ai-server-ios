@@ -743,12 +743,28 @@ private struct TodayWorldSelectedSystemView: View {
             Divider().opacity(0.5)
 
             if system.groups.allSatisfy({ $0.posts.isEmpty }) {
-                ContentUnavailableView(
-                    "今天暂无动态",
-                    systemImage: "clock.badge.questionmark",
-                    description: Text("已关注 \(system.accountSummary)，有新内容时会自动出现在这里。")
-                )
-                .frame(minHeight: 190)
+                HStack(spacing: 12) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(InvestmentDesign.accent)
+                        .frame(width: 38, height: 38)
+                        .background(InvestmentDesign.accent.opacity(0.09), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("等待今天的第一条动态")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("已关注 \(system.accountNames.count) 个账号，有更新会自动出现在这里")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 18)
+                .accessibilityElement(children: .combine)
             } else {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(system.groups.filter { !$0.posts.isEmpty }) { group in
