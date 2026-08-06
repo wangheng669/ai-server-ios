@@ -19,9 +19,26 @@ preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finis
 ) &
 preflight_pid=$!
 
+device_warm_started_epoch=$(date +%s)
+device_warm_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-warm-finished.XXXXXX")
+if [[ -n "${DEVICE_UDID:-}" && -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+  ./ci/report-ios-deployment.sh running 0.01 warming-device-connection || true
+fi
+(
+  if [[ -n "${DEVICE_UDID:-}" ]]; then
+    xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1 || true
+  fi
+  date +%s > "$device_warm_finished_epoch_file"
+) &
+device_warm_pid=$!
+
 prepare_started_epoch=$(date +%s)
 ./ci/prepare-central-runner.sh
+
+wait "$device_warm_pid" || true
 prepare_duration_seconds=$(($(date +%s) - prepare_started_epoch))
+device_warm_finished_epoch=$(cat "$device_warm_finished_epoch_file")
+device_warm_duration_seconds=$((device_warm_finished_epoch - device_warm_started_epoch))
 
 set +e
 wait "$preflight_pid"
@@ -34,6 +51,7 @@ preflight_duration_seconds=$((preflight_finished_epoch - preflight_started_epoch
   echo "started_epoch=$workflow_started_epoch"
   echo "preflight_duration_seconds=$preflight_duration_seconds"
   echo "duration_seconds=$prepare_duration_seconds"
+  echo "device_warm_duration_seconds=$device_warm_duration_seconds"
 } >> "$GITHUB_OUTPUT"
 
 if ((preflight_status != 0)); then
