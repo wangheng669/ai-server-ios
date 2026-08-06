@@ -763,6 +763,7 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertEqual(post.xueqiuBodyContent, "[滴汗]")
         XCTAssertEqual(post.xueqiuBodyInlineEmojis.map(\.token), ["[滴汗]"])
+        XCTAssertEqual(post.xueqiuStandaloneInlineEmoji?.token, "[滴汗]")
         XCTAssertEqual(post.xueqiuQuoteAuthor, "大道无形逍遥游")
         XCTAssertEqual(post.xueqiuQuoteBody, "@大道无形我有型 大道你好，很好奇你对美债的看法。")
         XCTAssertFalse(post.xueqiuBodyContent.contains("大道你好"))
@@ -778,6 +779,14 @@ final class PostDecodingTests: XCTestCase {
         let sourceURL = URLComponents(url: emoji.url, resolvingAgainstBaseURL: false)?
             .queryItems?.first(where: { $0.name == "url" })?.value
         XCTAssertEqual(sourceURL, "https://assets.imedao.com/ugc/images/face/emoji_13_coldsweat.png?v=1")
+        XCTAssertEqual(post.xueqiuStandaloneInlineEmoji, emoji)
+    }
+
+    func testXueqiuDoesNotTreatMixedTextAsStandaloneEmoji() throws {
+        let json = #"{"id":21,"source":"rss:14","content":"你好[滴汗]","images":[{"url":"https://assets.imedao.com/ugc/images/face/emoji_13_coldsweat.png?v=1","alt_text":"[滴汗]","kind":"inline_emoji"}]}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertNil(post.xueqiuStandaloneInlineEmoji)
     }
 
     func testConfirmedServerIdentityIsShownButUnconfirmedClaimIsIgnored() throws {

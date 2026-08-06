@@ -914,7 +914,10 @@ struct PostDetailView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     xueqiuDetailAuthor
 
-                    if post.xueqiuBodyInlineEmojis.isEmpty {
+                    if let emoji = post.xueqiuStandaloneInlineEmoji {
+                        XueqiuStandaloneEmoji(emoji: emoji)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if post.xueqiuBodyInlineEmojis.isEmpty {
                         xueqiuRichText(post.xueqiuBodyContent)
                             .font(.system(size: 20))
                             .lineSpacing(10)
@@ -3531,6 +3534,37 @@ private struct WeiboRichText: View {
                 }
                 images = loaded
             }
+    }
+}
+
+private struct XueqiuStandaloneEmoji: View {
+    let emoji: WeiboInlineEmoji
+    @State private var image: UIImage?
+    @State private var finished = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else if finished {
+                Text(emoji.token)
+                    .font(.system(size: 20))
+            } else {
+                ProgressView()
+            }
+        }
+        .frame(width: 28, height: 28, alignment: .leading)
+        .accessibilityLabel(emoji.token)
+        .task(id: emoji.url) {
+            finished = false
+            image = await ImageLoader.load(
+                emoji.url,
+                targetSize: CGSize(width: 28, height: 28)
+            )
+            finished = true
+        }
     }
 }
 
