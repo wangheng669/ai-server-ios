@@ -23,7 +23,7 @@ GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停�
 可用改动通过相关验证后，除非用户明确要求仅保留本地，否则必须：
 
 1. 检查改动并提交任务工作区的全部内容，包括未跟踪文件；禁止直接提交或推送 `main`。
-2. 推送 `codex/*` 任务分支，等待 `AI merge task branch into main` 完成。中央流程必须语义化解决冲突并通过完整测试后才能更新 `main`。
+2. 推送 `codex/*` 任务分支，等待 `AI merge task branch into main` 完成。中央流程必须语义化解决冲突并通过完整测试后才能更新 `main`。只有对应 GitHub Actions 已因基础设施故障失败、用户明确授权应急合并、当前中央 Mac 能识别目标 iPhone 时，才可在该中央 Mac 运行 `./ci/local-central-merge.sh --source codex/<任务> --failed-run <run-id> --confirm-infrastructure-failure`；该脚本的完整测试、签名构建、`origin/main` 并发保护和真机安装均不得跳过。
 3. 确认任务提交已进入 `origin/main`；失败时停止并说明冲突或测试错误。
 4. 判断其他 worktree 或 `codex/*` 分支是否仍为活跃任务时，必须同时检查工作区状态、提交是否已进入 `origin/main`，以及对应 PR/中央合并流程是否已完成；不得仅凭 worktree 或分支存在就认定仍在修改或存在冲突。工作区干净、提交已进入 `origin/main` 且合并流程已完成的任务视为待清理遗留项，不作为活跃冲突阻塞新任务；但仍在验收或等待用户回复时不得由其他任务擅自清理。
 5. 任务创建者完成合并、部署和验收并准备最终回复时，除非用户明确要求保留本地任务环境，否则必须删除对应任务 worktree 和本地分支，并运行远端引用清理，避免后续 AI 误判。主项目或另一台电脑存在未提交改动时，不得为清理任务而强制同步、切换、重置或覆盖，只清理已确认合并且工作区干净的独立任务 worktree。
@@ -55,5 +55,5 @@ GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停�
 ## 安全边界
 
 - 禁止强制推送、`git reset --hard`、覆盖其他任务，或用整段 ours/theirs、删功能、跳过测试来规避冲突。
-- 只有中央 AI 流程可以更新 `main`；`main` 更新会触发真机安装。
+- 只有中央 AI 流程可以更新 `main`；GitHub Actions 是默认入口，满足上述严格门禁时本机中央应急脚本是唯一回退入口。`main` 更新后必须完成真机安装。
 - 被 `IOS_CENTRAL_RUNNER_LABEL` 选中的 Runner 必须由已登录 Codex 的本地用户运行；未登录时工作流应安全失败且不得更新 `main`。
