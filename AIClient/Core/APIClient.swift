@@ -69,18 +69,48 @@ struct APIClient {
 
     func fetchRSSFeeds() async throws -> [RSSFeedSource] {
         let pageSize = 20
-        var feeds: [RSSFeedSource] = []
-        for page in 1...10 {
+        func fetchPage(_ page: Int) async throws -> RSSFeedsResponse {
             var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/rss/feeds"), resolvingAgainstBaseURL: false)
             parts?.queryItems = [
                 .init(name: "page", value: String(page)),
                 .init(name: "exclude_social", value: "true")
             ]
             guard let url = parts?.url else { throw APIError.invalidURL }
-            let response: RSSFeedsResponse = try await get(url)
-            feeds += response.data.feeds.filter(\.isEnabled)
-            if response.data.feeds.count < pageSize { break }
+            return try await get(url)
         }
+
+        let firstPage = try await fetchPage(1)
+        var pages: [(number: Int, feeds: [RSSFeedSource])] = [(1, firstPage.data.feeds)]
+        if let pagination = firstPage.meta?.pagination {
+            let totalPages = min(10, max(1, Int(ceil(Double(pagination.total) / Double(max(pagination.size, 1))))))
+            if totalPages > 1 {
+                let remaining = try await withThrowingTaskGroup(
+                    of: (Int, [RSSFeedSource]).self,
+                    returning: [(Int, [RSSFeedSource])].self
+                ) { group in
+                    for page in 2...totalPages {
+                        group.addTask {
+                            let response = try await fetchPage(page)
+                            return (page, response.data.feeds)
+                        }
+                    }
+                    var result: [(Int, [RSSFeedSource])] = []
+                    for try await page in group { result.append(page) }
+                    return result
+                }
+                pages += remaining
+            }
+        } else if firstPage.data.feeds.count == pageSize {
+            for page in 2...10 {
+                let response = try await fetchPage(page)
+                pages.append((page, response.data.feeds))
+                if response.data.feeds.count < pageSize { break }
+            }
+        }
+
+        let feeds = pages.sorted { $0.number < $1.number }
+            .flatMap(\.feeds)
+            .filter(\.isEnabled)
         var seen = Set<Int>()
         return feeds.filter { seen.insert($0.id).inserted }
     }

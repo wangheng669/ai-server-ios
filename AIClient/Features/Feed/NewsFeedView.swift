@@ -3423,8 +3423,8 @@ private struct NewsCardView: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
 
-            if post.displayContent != post.displayTitle {
-                Text(post.displayContent)
+            if post.rssListContent != post.displayTitle {
+                Text(post.rssListContent)
                     .font(.system(size: 14.5, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)

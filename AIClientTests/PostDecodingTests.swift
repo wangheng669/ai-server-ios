@@ -686,6 +686,16 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(image.isLikelyInlineEmoji)
     }
 
+    func testRSSFeedsResponseDecodesPaginationMetadata() throws {
+        let data = #"{"data":{"feeds":[]},"meta":{"pagination":{"page":1,"size":20,"total":125}}}"#
+            .data(using: .utf8)!
+        let response = try JSONDecoder().decode(RSSFeedsResponse.self, from: data)
+
+        XCTAssertEqual(response.meta?.pagination?.page, 1)
+        XCTAssertEqual(response.meta?.pagination?.size, 20)
+        XCTAssertEqual(response.meta?.pagination?.total, 125)
+    }
+
     func testArticleImageIsNotTreatedAsInlineEmoji() throws {
         let data = #"{"url":"https://example.com/photo.jpg","width":1080,"height":1080}"#.data(using: .utf8)!
         let image = try JSONDecoder().decode(PostImage.self, from: data)
