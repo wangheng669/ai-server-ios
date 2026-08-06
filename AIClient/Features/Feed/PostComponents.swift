@@ -117,10 +117,23 @@ struct RemoteImage: View {
 }
 
 struct InlineEmojiImage: View {
-    let emoji: WeiboInlineEmoji
+    let url: URL
+    let accessibilityText: String
     var size: CGFloat = 28
     @State private var image: UIImage?
     @State private var finished = false
+
+    init(emoji: WeiboInlineEmoji, size: CGFloat = 28) {
+        url = emoji.url
+        accessibilityText = emoji.token
+        self.size = size
+    }
+
+    init(url: URL, accessibilityText: String = "表情", size: CGFloat = 24) {
+        self.url = url
+        self.accessibilityText = accessibilityText
+        self.size = size
+    }
 
     var body: some View {
         Group {
@@ -129,18 +142,18 @@ struct InlineEmojiImage: View {
                     .resizable()
                     .scaledToFit()
             } else if finished {
-                Text(emoji.token)
+                Text(accessibilityText)
                     .font(.system(size: size * 0.72))
             } else {
                 ProgressView()
             }
         }
         .frame(width: size, height: size, alignment: .leading)
-        .accessibilityLabel(emoji.token)
-        .task(id: emoji.url) {
+        .accessibilityLabel(accessibilityText)
+        .task(id: url) {
             finished = false
             image = await ImageLoader.load(
-                emoji.url,
+                url,
                 targetSize: CGSize(width: size, height: size)
             )
             finished = true

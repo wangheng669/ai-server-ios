@@ -863,6 +863,25 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.weChatArticleBlocks[2], .text("第二段正文。"))
     }
 
+    func testWeChatArticleKeepsEmojiAtInlineSizeInsteadOfArticleImageSize() throws {
+        let html = """
+        <p>正文</p><img class="rich_pages wxw-img" data-ratio="1" data-w="20" style="display:inline-block;width:20px;vertical-align:middle" src="https://wechat2rss.xlab.app/img-proxy/?k=1&amp;u=https%3A%2F%2Fres.wx.qq.com%2Ft%2Fwx_fed%2Fwe-emoji%2Fres%2Fassets%2FExpression%2FExpression_94%402x.png"/>
+        """
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 58,
+            "source": "rss:57",
+            "content": html
+        ])
+        let post = try JSONDecoder().decode(Post.self, from: payload)
+
+        XCTAssertEqual(post.weChatArticleBlocks.count, 2)
+        XCTAssertEqual(post.weChatArticleBlocks[0], .text("正文"))
+        guard case .inlineEmoji(let url) = post.weChatArticleBlocks[1] else {
+            return XCTFail("Expected WeChat emoji to use inline rendering")
+        }
+        XCTAssertNotNil(url.host())
+    }
+
     func testNewYorkTimesArticleUsesServerPreviewEndpoint() throws {
         let article = try XCTUnwrap(URL(string: "https://www.nytimes.com/2026/07/19/example.html"))
         let base = try XCTUnwrap(URL(string: "https://api.wanghengai.xin"))

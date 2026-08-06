@@ -444,6 +444,8 @@ struct PostDetailView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             case .image(let url):
                                 WeChatArticleImage(url: url)
+                            case .inlineEmoji(let url):
+                                InlineEmojiImage(url: url, size: 24)
                             }
                         }
                     }
