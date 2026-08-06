@@ -513,6 +513,12 @@ struct Post: Decodable, Identifiable, Hashable {
               let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return nil }
         return xueqiuText(String(raw[quoteStart.lowerBound...]))
     }
+    var xueqiuBodyInlineEmojis: [WeiboInlineEmoji] {
+        guard let raw = clean(content) else { return [] }
+        let body = raw.range(of: "<blockquote", options: .caseInsensitive)
+            .map { String(raw[..<$0.lowerBound]) } ?? raw
+        return inlineEmojis(in: [body])
+    }
     var xueqiuQuoteAuthor: String? {
         guard let quote = xueqiuQuoteContent,
               let separator = quote.firstIndex(where: { $0 == ":" || $0 == "：" }) else { return nil }
@@ -665,14 +671,9 @@ struct Post: Decodable, Identifiable, Hashable {
             result.append(.init(token: token, url: url))
         }
 
-        for rawHTML in [contentZH, content].compactMap({ $0 }) {
-            for tag in htmlImageTags(in: rawHTML) {
-                guard let token = htmlAttribute("alt", in: tag) ?? htmlAttribute("title", in: tag),
-                      let rawURL = htmlAttribute("src", in: tag),
-                      let url = MediaURL.image(rawURL),
-                      seenTokens.insert(token).inserted else { continue }
-                result.append(.init(token: token, url: url))
-            }
+        for emoji in inlineEmojis(in: [contentZH, content].compactMap { $0 })
+        where seenTokens.insert(emoji.token).inserted {
+            result.append(emoji)
         }
         return result
     }
@@ -956,6 +957,21 @@ struct Post: Decodable, Identifiable, Hashable {
             value.replaceSubrange(range, with: replacement)
         }
         return htmlText(value) ?? clean(value)
+    }
+
+    private func inlineEmojis(in values: [String]) -> [WeiboInlineEmoji] {
+        var result: [WeiboInlineEmoji] = []
+        var seenTokens = Set<String>()
+        for value in values {
+            for tag in htmlImageTags(in: value) {
+                guard let token = htmlAttribute("alt", in: tag) ?? htmlAttribute("title", in: tag),
+                      let rawURL = htmlAttribute("src", in: tag),
+                      let url = MediaURL.image(rawURL),
+                      seenTokens.insert(token).inserted else { continue }
+                result.append(.init(token: token, url: url))
+            }
+        }
+        return result
     }
 
     private func htmlImageTags(in value: String) -> [String] {

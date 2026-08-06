@@ -762,6 +762,11 @@ final class PostDecodingTests: XCTestCase {
         let post = try JSONDecoder().decode(Post.self, from: json)
 
         XCTAssertEqual(post.xueqiuBodyContent, "[滴汗]")
+        XCTAssertEqual(post.xueqiuBodyInlineEmojis.map(\.token), ["[滴汗]"])
+        XCTAssertEqual(
+            post.xueqiuBodyInlineEmojis.first?.url.absoluteString,
+            "https://assets.imedao.com/ugc/images/face/emoji_13_coldsweat.png?v=1"
+        )
         XCTAssertEqual(post.xueqiuQuoteAuthor, "大道无形逍遥游")
         XCTAssertEqual(post.xueqiuQuoteBody, "@大道无形我有型 大道你好，很好奇你对美债的看法。")
         XCTAssertFalse(post.xueqiuBodyContent.contains("大道你好"))
