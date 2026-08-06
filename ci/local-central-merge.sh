@@ -105,15 +105,8 @@ elif [[ "$run_status" == queued ]]; then
     exit 1
   fi
   echo "Validated queued Actions outage run: $run_url (${actions_status})"
-  gh run cancel "$run_id"
-  for _ in {1..15}; do
-    run_conclusion=$(gh run view "$run_id" --json conclusion --jq .conclusion 2>/dev/null || true)
-    [[ "$run_conclusion" == cancelled ]] && break
-    sleep 2
-  done
-  if [[ "$run_conclusion" != cancelled ]]; then
-    echo "Run $run_id could not be cancelled; refusing a duplicate local execution." >&2
-    exit 1
+  if ! gh run cancel "$run_id"; then
+    echo "Warning: GitHub could not cancel queued run $run_id; continuing because the central workflow skips sources already merged into main." >&2
   fi
 else
   echo "Run $run_id is neither infrastructure-failed nor queued during an official Actions outage." >&2

@@ -14,6 +14,6 @@ grep -Fq 'major_outage' <<<"$watch_source"
 grep -Fq 'IOS_ACTIONS_OUTAGE_QUEUE_SECONDS:-300' <<<"$watch_source"
 grep -Fq 'sort_by(.createdEpoch)' <<<"$watch_source"
 grep -Fq 'gh run cancel "$run_id"' <<<"$merge_source"
-grep -Fq 'refusing a duplicate local execution' <<<"$merge_source"
+grep -Fq 'skips sources already merged into main' <<<"$merge_source"
 
 echo "Actions outage fallback safety checks passed."
