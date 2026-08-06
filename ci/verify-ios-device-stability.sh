@@ -18,8 +18,10 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   fi
 
   device_name=$(jq -r '.result.deviceProperties.name // .result.hardwareProperties.marketingName // empty' "$details")
-  if ! xcrun devicectl device process list --device "$DEVICE_UDID" >/dev/null 2>&1; then
-    echo "检测 $attempt/$attempts 失败：${device_name:-目标 iPhone} 当前锁定，或可信开发连接尚未就绪。" >&2
+  process_log=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-processes.XXXXXX")
+  if ! xcrun devicectl device info processes --device "$DEVICE_UDID" >"$process_log" 2>&1; then
+    echo "检测 $attempt/$attempts 失败：${device_name:-目标 iPhone} 已被发现，但 CoreDevice 开发服务连接尚未就绪；这不一定表示手机锁定。" >&2
+    tail -3 "$process_log" >&2
     exit 1
   fi
 
