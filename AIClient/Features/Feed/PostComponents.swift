@@ -116,6 +116,38 @@ struct RemoteImage: View {
 
 }
 
+struct InlineEmojiImage: View {
+    let emoji: WeiboInlineEmoji
+    var size: CGFloat = 28
+    @State private var image: UIImage?
+    @State private var finished = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else if finished {
+                Text(emoji.token)
+                    .font(.system(size: size * 0.72))
+            } else {
+                ProgressView()
+            }
+        }
+        .frame(width: size, height: size, alignment: .leading)
+        .accessibilityLabel(emoji.token)
+        .task(id: emoji.url) {
+            finished = false
+            image = await ImageLoader.load(
+                emoji.url,
+                targetSize: CGSize(width: size, height: size)
+            )
+            finished = true
+        }
+    }
+}
+
 actor ImageLoader {
     static let shared = ImageLoader()
 

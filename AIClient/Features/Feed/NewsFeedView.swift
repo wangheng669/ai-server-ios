@@ -2789,13 +2789,18 @@ private struct NewsCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            xueqiuRichText(post.xueqiuBodyContent)
-                .font(.system(size: 17))
-                .lineSpacing(8)
-                .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let emoji = post.xueqiuStandaloneInlineEmoji {
+                InlineEmojiImage(emoji: emoji)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                xueqiuRichText(post.xueqiuBodyContent)
+                    .font(.system(size: 17))
+                    .lineSpacing(8)
+                    .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if !post.xueqiuBodyImageURLs.isEmpty {
                 PostMediaGrid(
