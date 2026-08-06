@@ -1,0 +1,32 @@
+name: Probe central Mac iPhone connection
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Central Mac runner label
+        required: false
+        default: office-builder
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Check iPhone availability without building
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - ${{ inputs.runner_label || 'office-builder' }}
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Probe and report device
+        env:
+          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          DEPLOYMENT_STATUS_BASE_URL: https://api.wanghengai.xin
+        run: ./ci/probe-ios-device.sh
