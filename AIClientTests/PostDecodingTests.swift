@@ -855,9 +855,19 @@ final class PostDecodingTests: XCTestCase {
         let json = #"{"success":true,"bvid":"BV1Pxgy68Ek9","status":"ready","interpretation":{"overview":"画面通过收益曲线展示不同策略。","visual_findings":["曲线在中段出现明显分化"],"timeline":[{"time":"01:20","title":"结果公布","detail":"表格展示最终排名"}],"creator_notes":["数据图承担主要证据作用"]},"provider":"bigmodel","model":"glm-4.6v","cached":false,"estimated_cost_cny":0.18,"pricing_note":"按标准价估算"}"#.data(using: .utf8)!
         let payload = try JSONDecoder().decode(BilibiliInterpretationResponse.self, from: json)
 
-        XCTAssertEqual(payload.interpretation.timeline.first?.time, "01:20")
+        XCTAssertEqual(payload.interpretation?.timeline.first?.time, "01:20")
         XCTAssertEqual(payload.estimatedCostCNY, 0.18)
         XCTAssertEqual(payload.model, "glm-4.6v")
+    }
+
+    func testDecodesQueuedBilibiliVideoInterpretationJob() throws {
+        let json = #"{"success":true,"bvid":"BV1Pxgy68Ek9","status":"running","job_id":"job-1","step":"download","step_label":"下载 B 站视频","progress":12,"detail":"后台处理中"}"#.data(using: .utf8)!
+        let payload = try JSONDecoder().decode(BilibiliInterpretationResponse.self, from: json)
+
+        XCTAssertNil(payload.interpretation)
+        XCTAssertEqual(payload.jobID, "job-1")
+        XCTAssertEqual(payload.progress, 12)
+        XCTAssertEqual(payload.stepLabel, "下载 B 站视频")
     }
 
     func testTruthFeedUsesOnlyTranslatedContentAndRelevance() throws {

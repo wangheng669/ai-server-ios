@@ -27,6 +27,10 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretationCached = false
     @State private var bilibiliInterpretationStatus = "idle"
     @State private var bilibiliInterpretationError: String?
+    @State private var bilibiliInterpretationProgress = 0
+    @State private var bilibiliInterpretationStepLabel: String?
+    @State private var bilibiliInterpretationDetail: String?
+    @State private var bilibiliInterpretationTask: Task<Void, Never>?
     @State private var youtubePlaybackState: YouTubePlaybackState = .idle
     @State private var isYouTubeVideoReady = false
     @State private var youtubePlaybackLabel: String?
@@ -199,6 +203,7 @@ struct PostDetailView: View {
             player?.pause()
             speechPlayer?.pause()
             bilibiliPlaybackRetryTask?.cancel()
+            bilibiliInterpretationTask?.cancel()
         }
         .alert("朗读失败", isPresented: Binding(
             get: { speechErrorMessage != nil },
@@ -1795,17 +1800,21 @@ struct PostDetailView: View {
                     .font(.system(size: 15)).foregroundStyle(.secondary).lineSpacing(3)
                 Text("按官方标准价约 2 元/百万 Token；实际费用随视频时长变化，生成后显示本次估算。同一视频 30 天内读取缓存不重复收费。")
                     .font(.caption).foregroundStyle(.secondary)
-                Button { Task { await loadBilibiliInterpretation() } } label: {
+                Button { startBilibiliInterpretation() } label: {
                     Label("开始视频解读", systemImage: "play.rectangle.on.rectangle")
                 }
                 .buttonStyle(.borderedProminent).tint(.blue)
             } else if bilibiliInterpretationStatus == "loading" {
-                ProgressView("GLM-4.6V 正在观看并解读视频…")
-                Text("需要先准备视频并完成视觉推理，首次通常需要几分钟。")
+                ProgressView(value: Double(bilibiliInterpretationProgress), total: 100) {
+                    Text(bilibiliInterpretationStepLabel ?? "服务器正在处理视频…")
+                } currentValueLabel: {
+                    Text("\(bilibiliInterpretationProgress)%")
+                }
+                Text(bilibiliInterpretationDetail ?? "任务已交给服务器，退出当前页面后仍会继续。")
                     .font(.caption).foregroundStyle(.secondary)
             } else if let bilibiliInterpretationError {
                 ContentUnavailableView("视频解读暂不可用", systemImage: "eye.slash", description: Text(bilibiliInterpretationError))
-                Button("重试") { Task { await loadBilibiliInterpretation() } }.buttonStyle(.bordered).tint(.blue)
+                Button("重试") { startBilibiliInterpretation() }.buttonStyle(.bordered).tint(.blue)
             } else if let interpretation = bilibiliInterpretation {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(interpretation.overview).font(.system(size: 16)).lineSpacing(5).textSelection(.enabled)
@@ -2052,19 +2061,38 @@ struct PostDetailView: View {
         }
     }
 
+    private func startBilibiliInterpretation() {
+        bilibiliInterpretationTask?.cancel()
+        bilibiliInterpretationTask = Task { await loadBilibiliInterpretation() }
+    }
+
     private func loadBilibiliInterpretation() async {
         guard let bilibiliBVID else { return }
         bilibiliInterpretationStatus = "loading"
         bilibiliInterpretationError = nil
         do {
-            let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .interpretBilibiliVideo(bvid: bilibiliBVID, title: post.bilibiliTitle)
-            guard !Task.isCancelled else { return }
-            bilibiliInterpretation = payload.interpretation
-            bilibiliInterpretationModel = payload.model
-            bilibiliInterpretationCost = payload.estimatedCostCNY
-            bilibiliInterpretationCached = payload.cached
-            bilibiliInterpretationStatus = payload.status
+            let client = APIClient(baseURL: ServerConfiguration.currentURL)
+            var payload = try await client.interpretBilibiliVideo(bvid: bilibiliBVID, title: post.bilibiliTitle)
+            while !Task.isCancelled {
+                bilibiliInterpretationProgress = payload.progress ?? (payload.status == "ready" ? 100 : 2)
+                bilibiliInterpretationStepLabel = payload.stepLabel
+                bilibiliInterpretationDetail = payload.detail
+                if payload.status == "ready", let interpretation = payload.interpretation {
+                    bilibiliInterpretation = interpretation
+                    bilibiliInterpretationModel = payload.model
+                    bilibiliInterpretationCost = payload.estimatedCostCNY
+                    bilibiliInterpretationCached = payload.cached
+                    bilibiliInterpretationStatus = "ready"
+                    return
+                }
+                if payload.status == "failed" {
+                    bilibiliInterpretationStatus = "failed"
+                    bilibiliInterpretationError = payload.error ?? payload.detail ?? "服务器处理失败"
+                    return
+                }
+                try await Task.sleep(for: .seconds(3))
+                payload = try await client.fetchBilibiliInterpretationStatus(bvid: bilibiliBVID, title: post.bilibiliTitle)
+            }
         } catch is CancellationError {
             return
         } catch {
