@@ -475,12 +475,9 @@ struct PostDetailView: View {
                 .font(.system(size: 16, weight: .medium))
             Spacer(minLength: 0)
 
-            Button { openOriginal() } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel("打开微信原文")
+            Color.clear
+                .frame(width: 44, height: 44)
+                .accessibilityHidden(true)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 8)
