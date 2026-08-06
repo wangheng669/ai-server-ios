@@ -144,6 +144,7 @@ private enum EditorialTab: Hashable {
 
 private struct EditorialRootView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var deploymentStore = DeploymentStatusStore()
     @StateObject private var personPushNavigation = PersonPushNavigationStore.shared
     @State private var peopleStore = PeopleStore()
@@ -306,14 +307,21 @@ private struct EditorialRootView: View {
         content()
             .environment(\.rootTabIsActive, selectedTab == tab)
             .opacity(selectedTab == tab ? 1 : 0)
+            .scaleEffect(selectedTab == tab || reduceMotion ? 1 : 0.992)
             .allowsHitTesting(selectedTab == tab)
             .accessibilityHidden(selectedTab != tab)
             .zIndex(selectedTab == tab ? 1 : 0)
+            .animation(
+                reduceMotion ? nil : .smooth(duration: 0.2, extraBounce: 0),
+                value: selectedTab
+            )
     }
 }
 
 private struct RootNavigationBar: View {
     @Binding var selection: EditorialTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var selectionAnimation
 
     var body: some View {
         HStack(spacing: 0) {
@@ -339,7 +347,9 @@ private struct RootNavigationBar: View {
 
     private func item(_ tab: EditorialTab, title: String, icon: String) -> some View {
         Button {
-            withAnimation(.easeOut(duration: 0.16)) { selection = tab }
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.24, extraBounce: 0.04)) {
+                selection = tab
+            }
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: icon)
@@ -357,6 +367,15 @@ private struct RootNavigationBar: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
+            .background {
+                if selection == tab {
+                    Capsule()
+                        .fill(InvestmentDesign.accent.opacity(0.1))
+                        .matchedGeometryEffect(id: "root-tab-selection", in: selectionAnimation)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 3)
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)

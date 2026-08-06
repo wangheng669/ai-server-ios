@@ -14,6 +14,9 @@ dependency_seconds=$(($(date +%s) - dependency_started_epoch))
 
 device_started_epoch=$(date +%s)
 (
+  prebuilt_dir="$cache_root/central-merge-signing/prewarmed"
+  mkdir -p "$prebuilt_dir"
+  rm -f "$prebuilt_dir/AIServerClient.app.zip" "$prebuilt_dir/source-sha"
   xcodebuild build \
     -project AIServerClient.xcodeproj \
     -scheme AIServerClient \
@@ -21,8 +24,15 @@ device_started_epoch=$(date +%s)
     -destination 'generic/platform=iOS' \
     -derivedDataPath "$cache_root/central-merge-signing" \
     -clonedSourcePackagesDirPath "$cache_root/source-packages" \
-    CODE_SIGNING_ALLOWED=NO \
-    CODE_SIGNING_REQUIRED=NO
+    -allowProvisioningUpdates \
+    -allowProvisioningDeviceRegistration \
+    DEVELOPMENT_TEAM="${TEAM_ID:?TEAM_ID is required}" \
+    CODE_SIGN_STYLE=Automatic
+  app_path="$cache_root/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
+  codesign --verify --deep --strict --verbose=2 "$app_path"
+  ditto -c -k --sequesterRsrc --keepParent \
+    "$app_path" "$prebuilt_dir/AIServerClient.app.zip"
+  git rev-parse HEAD > "$prebuilt_dir/source-sha"
 ) &
 device_pid=$!
 
