@@ -80,6 +80,7 @@ struct WeiboInlineEmoji: Hashable {
 enum WeChatArticleBlock: Hashable {
     case text(String)
     case image(URL)
+    case inlineEmoji(URL)
 }
 
 struct XCommentsResponse: Decodable {
@@ -621,13 +622,18 @@ struct Post: Decodable, Identifiable, Hashable {
             let tag = source.substring(with: match.range)
             if let rawURL = htmlAttribute("src", in: tag),
                let url = MediaURL.image(rawURL.replacingOccurrences(of: "&amp;", with: "&")) {
-                blocks.append(.image(url))
+                blocks.append(isWeChatEmojiURL(rawURL) ? .inlineEmoji(url) : .image(url))
             }
             cursor = NSMaxRange(match.range)
         }
         appendText(NSRange(location: cursor, length: source.length - cursor))
 
         return blocks.isEmpty ? [.text(displayContent)] : blocks
+    }
+
+    private func isWeChatEmojiURL(_ rawURL: String) -> Bool {
+        let value = (rawURL.removingPercentEncoding ?? rawURL).lowercased()
+        return value.contains("res.wx.qq.com") && value.contains("/we-emoji/")
     }
     var weiboFollowingImageURLs: [URL] {
         imageURLs.filter { url in
