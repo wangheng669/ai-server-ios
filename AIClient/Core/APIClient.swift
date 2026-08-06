@@ -377,6 +377,14 @@ struct APIClient {
     }
 
     func interpretBilibiliVideo(bvid: String, title: String) async throws -> BilibiliInterpretationResponse {
+        try await requestBilibiliInterpretation(bvid: bvid, title: title, method: "POST")
+    }
+
+    func fetchBilibiliInterpretationStatus(bvid: String, title: String) async throws -> BilibiliInterpretationResponse {
+        try await requestBilibiliInterpretation(bvid: bvid, title: title, method: "GET")
+    }
+
+    private func requestBilibiliInterpretation(bvid: String, title: String, method: String) async throws -> BilibiliInterpretationResponse {
         var components = URLComponents(
             url: baseURL.appending(path: "api/ios/v1/bilibili/interpretation"),
             resolvingAgainstBaseURL: false
@@ -384,8 +392,8 @@ struct APIClient {
         components?.queryItems = [.init(name: "bvid", value: bvid), .init(name: "title", value: title)]
         guard let url = components?.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 620
+        request.httpMethod = method
+        request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }

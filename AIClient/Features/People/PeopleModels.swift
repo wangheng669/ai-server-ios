@@ -533,17 +533,44 @@ struct BilibiliInterpretationResponse: Decodable {
     let success: Bool
     let bvid: String
     let status: String
-    let interpretation: BilibiliVideoInterpretation
-    let provider: String
-    let model: String
+    let interpretation: BilibiliVideoInterpretation?
+    let provider: String?
+    let model: String?
     let cached: Bool
-    let estimatedCostCNY: Double
-    let pricingNote: String
+    let estimatedCostCNY: Double?
+    let pricingNote: String?
+    let jobID: String?
+    let step: String?
+    let stepLabel: String?
+    let progress: Int?
+    let detail: String?
+    let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case success, bvid, status, interpretation, provider, model, cached
+        case success, bvid, status, interpretation, provider, model, cached, step, progress, detail, error
         case estimatedCostCNY = "estimated_cost_cny"
         case pricingNote = "pricing_note"
+        case jobID = "job_id"
+        case stepLabel = "step_label"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        success = try values.decodeIfPresent(Bool.self, forKey: .success) ?? false
+        bvid = try values.decodeIfPresent(String.self, forKey: .bvid) ?? ""
+        status = try values.decodeIfPresent(String.self, forKey: .status) ?? "failed"
+        interpretation = try values.decodeIfPresent(BilibiliVideoInterpretation.self, forKey: .interpretation)
+        provider = try values.decodeIfPresent(String.self, forKey: .provider)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        cached = try values.decodeIfPresent(Bool.self, forKey: .cached) ?? false
+        estimatedCostCNY = try values.decodeIfPresent(Double.self, forKey: .estimatedCostCNY)
+        pricingNote = try values.decodeIfPresent(String.self, forKey: .pricingNote)
+        jobID = try values.decodeIfPresent(String.self, forKey: .jobID)
+        step = try values.decodeIfPresent(String.self, forKey: .step)
+        stepLabel = try values.decodeIfPresent(String.self, forKey: .stepLabel)
+        progress = try values.decodeIfPresent(Int.self, forKey: .progress)
+        detail = try values.decodeIfPresent(String.self, forKey: .detail)
+        error = try values.decodeIfPresent(String.self, forKey: .error)
     }
 }
 
