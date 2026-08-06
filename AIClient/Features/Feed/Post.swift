@@ -527,6 +527,15 @@ struct Post: Decodable, Identifiable, Hashable {
             .map { String(raw[..<$0.lowerBound]) } ?? raw
         return inlineEmojis(in: [body])
     }
+    var xueqiuStandaloneInlineEmoji: WeiboInlineEmoji? {
+        let emojis = xueqiuBodyInlineEmojis
+        guard emojis.count == 1,
+              let emoji = emojis.first,
+              xueqiuBodyContent.trimmingCharacters(in: .whitespacesAndNewlines) == emoji.token else {
+            return nil
+        }
+        return emoji
+    }
     var xueqiuQuoteAuthor: String? {
         guard let quote = xueqiuQuoteContent,
               let separator = quote.firstIndex(where: { $0 == ":" || $0 == "：" }) else { return nil }
