@@ -71,6 +71,7 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
         run: |
           ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
           ./ci/prepare-central-runner-parallel.sh
@@ -252,7 +253,18 @@ jobs:
           (
             set +e
             build_started_epoch=$(date +%s)
-            xcodebuild build \
+            prebuilt_archive="$IOS_BUILD_CACHE_ROOT/central-merge-signing/prewarmed/AIServerClient.app.zip"
+            prebuilt_sha_file="$IOS_BUILD_CACHE_ROOT/central-merge-signing/prewarmed/source-sha"
+            if [[ -f "$prebuilt_archive" ]] \
+              && [[ -f "$prebuilt_sha_file" ]] \
+              && [[ "$(cat "$prebuilt_sha_file")" == "${{ github.sha }}" ]] \
+              && git diff --quiet "${{ github.sha }}" HEAD -- .; then
+              cp "$prebuilt_archive" "$RUNNER_TEMP/AIServerClient.app.zip"
+              echo "Reusing signed device app prepared for unchanged tree ${{ github.sha }}." > "$build_log"
+              build_status=0
+              build_duration_seconds='${{ needs.prepare.outputs.device_build_warm_duration_seconds }}'
+            else
+              xcodebuild build \
               -project AIServerClient.xcodeproj \
               -scheme AIServerClient \
               -configuration Debug \
@@ -263,15 +275,17 @@ jobs:
               -allowProvisioningDeviceRegistration \
               DEVELOPMENT_TEAM="$TEAM_ID" \
               CODE_SIGN_STYLE=Automatic > "$build_log" 2>&1
-            build_status=$?
-            if ((build_status == 0)); then
-              app_path="$IOS_BUILD_CACHE_ROOT/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
-              test -d "$app_path" \
-                && codesign --verify --deep --strict --verbose=2 "$app_path" \
-                && ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
               build_status=$?
+              if ((build_status == 0)); then
+                app_path="$IOS_BUILD_CACHE_ROOT/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
+                test -d "$app_path" \
+                  && codesign --verify --deep --strict --verbose=2 "$app_path" \
+                  && ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
+                build_status=$?
+              fi
             fi
-            printf '%s %s\n' "$build_status" "$(($(date +%s) - build_started_epoch))" > "$build_result"
+            build_duration_seconds=${build_duration_seconds:-$(($(date +%s) - build_started_epoch))}
+            printf '%s %s\n' "$build_status" "$build_duration_seconds" > "$build_result"
             exit "$build_status"
           ) &
           build_pid=$!

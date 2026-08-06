@@ -1197,33 +1197,15 @@ struct NewsFeedView: View {
 
 private struct FeedTimelineLoadingView: View {
     let topInset: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shimmerOffset: CGFloat = -1
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 Color.clear.frame(height: topInset)
                 ForEach(0..<3, id: \.self) { index in
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 10) {
-                            Circle().frame(width: 42, height: 42)
-                            VStack(alignment: .leading, spacing: 7) {
-                                RoundedRectangle(cornerRadius: 5).frame(width: 132, height: 14)
-                                RoundedRectangle(cornerRadius: 4).frame(width: 84, height: 11)
-                            }
-                        }
-                        RoundedRectangle(cornerRadius: 5).frame(height: 13)
-                        RoundedRectangle(cornerRadius: 5).frame(width: 245, height: 13)
-                        if index == 0 {
-                            RoundedRectangle(cornerRadius: 14).frame(height: 190)
-                        }
-                        HStack(spacing: 36) {
-                            ForEach(0..<4, id: \.self) { _ in
-                                Circle().frame(width: 17, height: 17)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
+                    loadingCard(index: index)
                     Divider().padding(.leading, 68)
                 }
             }
@@ -1231,8 +1213,61 @@ private struct FeedTimelineLoadingView: View {
         .scrollDisabled(true)
         .foregroundStyle(Color.secondary.opacity(0.14))
         .redacted(reason: .placeholder)
+        .overlay {
+            if !reduceMotion {
+                GeometryReader { proxy in
+                    LinearGradient(
+                        colors: [.clear, .white.opacity(0.48), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(width: proxy.size.width * 0.7)
+                    .rotationEffect(.degrees(18))
+                    .offset(x: shimmerOffset * proxy.size.width * 1.7)
+                }
+                .mask {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            Color.clear.frame(height: topInset)
+                            ForEach(0..<3, id: \.self) { index in
+                                loadingCard(index: index)
+                            }
+                        }
+                    }
+                    .scrollDisabled(true)
+                }
+                .allowsHitTesting(false)
+            }
+        }
+        .task {
+            guard !reduceMotion else { return }
+            shimmerOffset = -1
+            withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+                shimmerOffset = 1
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("正在加载内容")
+    }
+
+    private func loadingCard(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Circle().frame(width: 42, height: 42)
+                VStack(alignment: .leading, spacing: 7) {
+                    RoundedRectangle(cornerRadius: 5).frame(width: 132, height: 14)
+                    RoundedRectangle(cornerRadius: 4).frame(width: 84, height: 11)
+                }
+            }
+            RoundedRectangle(cornerRadius: 5).frame(height: 13)
+            RoundedRectangle(cornerRadius: 5).frame(width: 245, height: 13)
+            if index == 0 { RoundedRectangle(cornerRadius: 14).frame(height: 190) }
+            HStack(spacing: 36) {
+                ForEach(0..<4, id: \.self) { _ in Circle().frame(width: 17, height: 17) }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 }
 
