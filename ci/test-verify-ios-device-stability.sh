@@ -20,10 +20,6 @@ if [[ "$*" == *"info details"* ]]; then
 fi
 [[ "${MOCK_PROCESS_READY:-true}" == true ]]
 SH
-cat > "$test_root/bin/ioreg" <<'SH'
-#!/usr/bin/env bash
-[[ "${MOCK_USB_READY:-true}" == true ]] && echo 'USB Serial Number 00008110-TEST'
-SH
 cat > "$test_root/bin/xcodebuild" <<'SH'
 #!/usr/bin/env bash
 [[ "${MOCK_XCODE_READY:-true}" == true ]] && echo 'platform:iOS, id:00008110-TEST, name:Test iPhone'
@@ -43,10 +39,6 @@ run_gate() {
 output=$(run_gate)
 grep -Fq '连续 3 次检测正常' <<< "$output"
 
-if MOCK_USB_READY=false run_gate >/dev/null 2>&1; then
-  echo 'The gate must reject a device without USB.' >&2
-  exit 1
-fi
 if MOCK_PROCESS_READY=false run_gate >/dev/null 2>&1; then
   echo 'The gate must reject a locked or unusable device.' >&2
   exit 1

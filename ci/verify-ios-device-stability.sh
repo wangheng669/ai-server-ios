@@ -18,11 +18,6 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   fi
 
   device_name=$(jq -r '.result.deviceProperties.name // .result.hardwareProperties.marketingName // empty' "$details")
-  if ! ioreg -p IOUSB -l -w 0 | grep -Fq "$DEVICE_UDID"; then
-    echo "检测 $attempt/$attempts 失败：${device_name:-目标 iPhone} 未通过 USB 有线连接。" >&2
-    exit 1
-  fi
-
   if ! xcrun devicectl device process list --device "$DEVICE_UDID" >/dev/null 2>&1; then
     echo "检测 $attempt/$attempts 失败：${device_name:-目标 iPhone} 当前锁定，或可信开发连接尚未就绪。" >&2
     exit 1
@@ -34,7 +29,7 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
     exit 1
   fi
 
-  echo "真机稳定性检测 $attempt/$attempts 通过：${device_name:-$DEVICE_UDID} 已有线连接、解锁且可供 Xcode 使用。"
+  echo "真机稳定性检测 $attempt/$attempts 通过：${device_name:-$DEVICE_UDID} 连接稳定、已解锁且可供 Xcode 使用。"
   if [[ "$attempt" -lt "$attempts" ]]; then
     sleep "$interval_seconds"
   fi

@@ -21,10 +21,10 @@ report() {
       --data-binary @- "$report_url"
 }
 
-report running checking-stability "中央 Mac 正在连续检查有线连接、解锁状态与 Xcode 可用性" >/dev/null
+report running checking-stability "中央 Mac 正在连续检查设备连接、解锁状态与 Xcode 可用性" >/dev/null
 details=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-probe.XXXXXX")
 if ! xcrun devicectl device info details --device "$DEVICE_UDID" --json-output "$details" >/dev/null 2>&1; then
-  report unavailable device-not-found "中央 Mac 未发现目标 iPhone；请确认手机已解锁并连接 USB" >/dev/null
+  report unavailable device-not-found "中央 Mac 未发现目标 iPhone；请确认手机已解锁，并通过 USB 或已配对的无线调试连接" >/dev/null
   exit 1
 fi
 
@@ -36,4 +36,4 @@ if ! ./ci/verify-ios-device-stability.sh > >(tee "$probe_log") 2>&1; then
   exit 1
 fi
 
-report ready device-ready "连续检测通过：真机保持 USB 有线连接、已解锁，CoreDevice 与 Xcode 均可部署" "$device_name" >/dev/null
+report ready device-ready "连续检测通过：真机连接稳定且已解锁，CoreDevice 与 Xcode 均可部署" "$device_name" >/dev/null

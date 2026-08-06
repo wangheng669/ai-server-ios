@@ -35,7 +35,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
-      - name: Require a stable wired and unlocked iPhone
+      - name: Require a stable connected and unlocked iPhone
         env:
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -46,6 +46,15 @@ jobs:
           git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
           if ! git cat-file -e origin/main:ci/verify-ios-device-stability.sh 2>/dev/null; then
             echo "Bootstrapping the device stability gate; it becomes mandatory after this commit reaches main."
+            exit 0
+          fi
+          app_changed=$(
+            ./ci/classify-ios-test-scope.sh \
+              < <(git diff --name-only origin/main "$GITHUB_SHA") \
+              | awk -F= '$1 == "app_changed" { print $2 }'
+          )
+          if [[ "$app_changed" != true ]]; then
+            echo "No App change requires a device build; skipping the iPhone stability gate."
             exit 0
           fi
           ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
