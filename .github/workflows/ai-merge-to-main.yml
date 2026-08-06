@@ -48,6 +48,15 @@ jobs:
             echo "Bootstrapping the device stability gate; it becomes mandatory after this commit reaches main."
             exit 0
           fi
+          app_changed=$(
+            ./ci/classify-ios-test-scope.sh \
+              < <(git diff --name-only origin/main "$GITHUB_SHA") \
+              | awk -F= '$1 == "app_changed" { print $2 }'
+          )
+          if [[ "$app_changed" != true ]]; then
+            echo "No App change requires a device build; skipping the iPhone stability gate."
+            exit 0
+          fi
           ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
           if ! ./ci/probe-ios-device.sh; then
             ./ci/report-ios-deployment.sh failed 0 device-gate-failed || true
