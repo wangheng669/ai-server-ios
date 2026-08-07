@@ -608,7 +608,7 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     func testDecodesAndMapsBaiduHotTopic() throws {
-        let json = #"{"success":true,"data":{"topics":[{"id":19,"keyword":"百度测试热搜","latest_rank":1,"latest_heat":7654321,"search_link":"https://www.baidu.com/s?wd=test"}]}}"#.data(using: .utf8)!
+        let json = #"{"success":true,"data":{"topics":[{"id":19,"keyword":"百度测试热搜","latest_rank":1,"latest_heat":7654321,"meta":{"last_payload":{"heat":7654321}},"search_link":"https://www.baidu.com/s?wd=test"}]}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
         let post = Post.hotTopic(try XCTUnwrap(response.data.topics.first), source: .baidu)
 

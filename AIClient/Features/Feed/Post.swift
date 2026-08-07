@@ -287,6 +287,18 @@ struct HotTopic: Decodable {
         let heat: String?
         let hotValue: Double?
         enum CodingKeys: String, CodingKey { case heat; case hotValue = "hot_value" }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if let text = try? container.decodeIfPresent(String.self, forKey: .heat) {
+                heat = text
+            } else if let number = try? container.decode(Double.self, forKey: .heat) {
+                heat = String(Int(number))
+            } else {
+                heat = nil
+            }
+            hotValue = try? container.decodeIfPresent(Double.self, forKey: .hotValue)
+        }
     }
     enum CodingKeys: String, CodingKey {
         case id, keyword, summary, reason, meta
