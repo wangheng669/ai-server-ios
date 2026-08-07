@@ -12,61 +12,24 @@ permissions:
   contents: write
 
 jobs:
-  prepare:
-    name: Run preflight and warm caches in parallel
+  merge:
+    name: Prepare, integrate, test, and install on selected central Mac
+    concurrency:
+      group: ai-merge-to-main
+      cancel-in-progress: false
     runs-on:
       - self-hosted
       - macOS
       - ARM64
       - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
-    timeout-minutes: 15
-    outputs:
-      duration_seconds: ${{ steps.central_prepare.outputs.duration_seconds }}
-      preflight_duration_seconds: ${{ steps.central_prepare.outputs.preflight_duration_seconds }}
-      started_epoch: ${{ steps.central_prepare.outputs.started_epoch }}
-      device_warm_duration_seconds: ${{ steps.central_prepare.outputs.device_warm_duration_seconds }}
-      dependency_duration_seconds: ${{ steps.central_prepare.outputs.dependency_duration_seconds }}
-      device_build_warm_duration_seconds: ${{ steps.central_prepare.outputs.device_build_warm_duration_seconds }}
-      simulator_warm_duration_seconds: ${{ steps.central_prepare.outputs.simulator_warm_duration_seconds }}
+    timeout-minutes: 60
     steps:
-      - name: Check out task commit for cache warming
+      - name: Check out task commit with bounded history
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 64
-
-      - name: Require a stable connected and unlocked iPhone
-        env:
-          DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          DEPLOYMENT_STATUS_BASE_URL: https://api.wanghengai.xin
-          IOS_DEVICE_STABILITY_ATTEMPTS: 3
-          IOS_DEVICE_STABILITY_INTERVAL_SECONDS: 5
-        run: |
-          ./ci/git-fetch-origin.sh \
-            --no-tags \
-            --depth=64 \
-            origin \
-            main:refs/remotes/origin/main
-          if ! git cat-file -e origin/main:ci/verify-ios-device-stability.sh 2>/dev/null; then
-            echo "Bootstrapping the device stability gate; it becomes mandatory after this commit reaches main."
-            exit 0
-          fi
-          app_changed=$(
-            ./ci/classify-ios-test-scope.sh \
-              < <(git diff --name-only origin/main "$GITHUB_SHA") \
-              | awk -F= '$1 == "app_changed" { print $2 }'
-          )
-          if [[ "$app_changed" != true ]]; then
-            echo "No App change requires a device build; skipping the iPhone stability gate."
-            exit 0
-          fi
-          ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
-          if ! ./ci/probe-ios-device.sh; then
-            ./ci/report-ios-deployment.sh failed 0 device-gate-failed || true
-            exit 1
-          fi
-          ./ci/report-ios-deployment.sh running 0.01 device-gate-ready || true
+          token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
 
       - name: Run preflight and warm device build cache
         id: central_prepare
@@ -76,35 +39,11 @@ jobs:
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          IOS_DEVICE_STABILITY_ATTEMPTS: 3
+          IOS_DEVICE_STABILITY_INTERVAL_SECONDS: 5
         run: |
           ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
           ./ci/prepare-central-runner-parallel.sh
-
-  merge:
-    name: Safely integrate on selected central Mac
-    needs:
-      - prepare
-    concurrency:
-      group: ai-merge-to-main
-      cancel-in-progress: false
-    runs-on:
-      - self-hosted
-      - macOS
-      - ARM64
-      - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
-    timeout-minutes: 45
-    env:
-      IOS_PREFLIGHT_SECONDS: ${{ needs.prepare.outputs.preflight_duration_seconds }}
-      IOS_PREPARE_SECONDS: ${{ needs.prepare.outputs.duration_seconds }}
-      IOS_DEVICE_WARM_SECONDS: ${{ needs.prepare.outputs.device_warm_duration_seconds }}
-      IOS_WORKFLOW_STARTED_EPOCH: ${{ needs.prepare.outputs.started_epoch }}
-    steps:
-      - name: Check out task commit with bounded history
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 64
-          token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
 
       - name: Report merge started
         continue-on-error: true
@@ -255,12 +194,12 @@ jobs:
             test_stage=targeted-testing
             test_arguments=(-only-testing:AIClientTests/FeedAdapterTests)
           fi
-          test_action=test
+          test_action='test'
           prewarmed_sha_file="$IOS_BUILD_CACHE_ROOT/central-merge-simulator/prewarmed-source-sha"
           if [[ -f "$prewarmed_sha_file" ]] \
             && [[ "$(cat "$prewarmed_sha_file")" == "${{ github.sha }}" ]] \
             && git diff --quiet "${{ github.sha }}" HEAD -- .; then
-            test_action=test-without-building
+            test_action='test-without-building'
             test_label="$test_label (reuse prebuilt app)"
             echo "Reusing build-for-testing output for unchanged merged tree ${{ github.sha }}."
           else
@@ -283,7 +222,7 @@ jobs:
               cp "$prebuilt_archive" "$RUNNER_TEMP/AIServerClient.app.zip"
               echo "Reusing signed device app prepared for unchanged tree ${{ github.sha }}." > "$build_log"
               build_status=0
-              build_duration_seconds='${{ needs.prepare.outputs.device_build_warm_duration_seconds }}'
+              build_duration_seconds='${{ steps.central_prepare.outputs.device_build_warm_duration_seconds }}'
             else
               xcodebuild build \
               -project AIServerClient.xcodeproj \
@@ -378,8 +317,7 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ./ci/git-fetch-origin.sh --no-tags origin main "$SOURCE_BRANCH"
-          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
           git push \
             --force-with-lease="refs/heads/$SOURCE_BRANCH:$SOURCE_SHA" \
             origin ":refs/heads/$SOURCE_BRANCH"
