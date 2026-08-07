@@ -607,6 +607,18 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(post.isSynthetic)
     }
 
+    func testDecodesAndMapsBaiduHotTopic() throws {
+        let json = #"{"success":true,"data":{"topics":[{"id":19,"keyword":"百度测试热搜","latest_rank":1,"latest_heat":7654321,"search_link":"https://www.baidu.com/s?wd=test"}]}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
+        let post = Post.hotTopic(try XCTUnwrap(response.data.topics.first), source: .baidu)
+
+        XCTAssertEqual(post.displayTitle, "百度测试热搜")
+        XCTAssertEqual(post.feedRank, 1)
+        XCTAssertEqual(post.formattedTime, "第 1 名 · 热度 7654321")
+        XCTAssertEqual(post.source, "baidu")
+        XCTAssertTrue(post.isSynthetic)
+    }
+
     func testHotTopicDisplayRepairsDuplicateRanksAndTieOrdering() throws {
         let json = #"{"success":true,"data":{"topics":[{"id":1,"keyword":"低热度插入项","latest_rank":6,"meta":{"last_payload":{"heat":"543815"}}},{"id":2,"keyword":"高热度正常项","latest_rank":6,"meta":{"last_payload":{"heat":"545903"}}},{"id":3,"keyword":"下一项","latest_rank":7,"meta":{"last_payload":{"heat":"540000"}}}]}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)

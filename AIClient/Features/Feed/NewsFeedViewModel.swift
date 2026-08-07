@@ -422,7 +422,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func pageSize(for source: FeedSource) -> Int {
         switch source {
-        case .wechat, .weibo, .douyin, .truth: 20
+        case .wechat, .weibo, .douyin, .baidu, .truth: 20
         case .flash: 20
         case .x: 10
         default: defaultPageSize
@@ -594,7 +594,7 @@ final class NewsFeedViewModel: ObservableObject {
             guard post.isFlash else { return false }
             guard let selectedFlashCategory else { return true }
             return post.meta?.flashCategory == selectedFlashCategory
-        case .weibo, .douyin: return false
+        case .weibo, .douyin, .baidu: return false
         }
     }
 
@@ -604,6 +604,7 @@ final class NewsFeedViewModel: ObservableObject {
         case .x: return name == "x" || name == "x_home" || name == "x_home_following"
         case .weibo: return name == "weibo_hot"
         case .douyin: return name == "douyin_hot"
+        case .baidu: return false
         case .bilibili: return name == "bilibili"
         case .zhihu: return name == "zhihu"
         case .truth: return name == "truth"

@@ -922,7 +922,7 @@ struct Post: Decodable, Identifiable, Hashable {
         }
     }
     var isNewYorkTimes: Bool { source == FeedSource.newYorkTimes.rawValue }
-    var isHotTopic: Bool { source == "weibo" || source == "douyin-hot" }
+    var isHotTopic: Bool { source == "weibo" || source == "douyin-hot" || source == "baidu" }
     var isFlash: Bool { source == "flash" }
     var isSynthetic: Bool { isHotTopic || isFlash }
     var isSocial: Bool { !isRSS && !isBilibili }
@@ -1622,7 +1622,7 @@ extension Int {
 enum FeedSource: String, CaseIterable, Identifiable {
     case newYorkTimes = "rss:47"
     case wechat = "rss:57"
-    case x, weibo
+    case x, weibo, baidu
     case douyin = "douyin-hot"
     case bilibili, zhihu, xueqiu, truth, rss, laozhong, youtube, flash
 
@@ -1634,6 +1634,7 @@ enum FeedSource: String, CaseIterable, Identifiable {
         case .x: "X"
         case .weibo: "微博"
         case .douyin: "抖音"
+        case .baidu: "百度"
         case .bilibili: "B站"
         case .zhihu: "知乎"
         case .xueqiu: "雪球"
