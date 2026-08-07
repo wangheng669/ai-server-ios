@@ -4,6 +4,12 @@ set -euo pipefail
 cache_root=${IOS_BUILD_CACHE_ROOT:-${RUNNER_TOOL_CACHE:-/tmp}/ai-server-ios}
 mkdir -p "$cache_root"
 
+# LaunchAgent runners do not inherit the interactive user's unlocked keychain
+# state. Unlock before the prewarmed signed build so codesign can access the
+# selected Apple Development identity.
+security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" \
+  "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true
+
 xcodebuild -version
 dependency_started_epoch=$(date +%s)
 xcodebuild -resolvePackageDependencies \
