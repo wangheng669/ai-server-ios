@@ -1378,12 +1378,7 @@ private struct EmbeddedWebPage: View {
             }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
-                    Image(source.hotTopicMarkAssetName)
-                        .resizable()
-                        .renderingMode(.template)
-                        .scaledToFit()
-                        .foregroundStyle(source == .weibo ? Color.red : source == .baidu ? Color.blue : Color.primary)
-                        .frame(width: 19, height: 19)
+                    hotTopicMark
                     Text(source.hotTopicPageTitle)
                         .font(.system(size: 16, weight: .semibold))
                 }
@@ -1412,6 +1407,25 @@ private struct EmbeddedWebPage: View {
             if let displayName = model.weiboDisplayName {
                 Text("当前账号：\(displayName)")
             }
+        }
+    }
+
+    @ViewBuilder private var hotTopicMark: some View {
+        if source == .baidu {
+            Image("BaiduMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 21, height: 21)
+                .accessibilityHidden(true)
+        } else {
+            Image(source.hotTopicMarkAssetName)
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .foregroundStyle(source == .weibo ? Color.red : Color.primary)
+                .frame(width: 19, height: 19)
+                .accessibilityHidden(true)
         }
     }
 
