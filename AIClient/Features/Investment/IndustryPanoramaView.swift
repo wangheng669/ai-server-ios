@@ -38,6 +38,33 @@ struct IndustryPayload: Decodable, Identifiable {
         }
     }
 
+    struct AutoSales: Decodable {
+        struct Month: Decodable, Identifiable {
+            let period: String
+            let totalSales: Double
+            let nevSales: Double
+            let totalYoY: Double
+            let nevYoY: Double
+            let nevPenetrationRate: Double
+
+            var id: String { period }
+
+            enum CodingKeys: String, CodingKey {
+                case period
+                case totalSales = "total_sales"
+                case nevSales = "nev_sales"
+                case totalYoY = "total_yoy"
+                case nevYoY = "nev_yoy"
+                case nevPenetrationRate = "nev_penetration_rate"
+            }
+        }
+
+        let period: String
+        let unit: String
+        let source: Scale.Source
+        let monthly: [Month]
+    }
+
     struct Company: Decodable, Identifiable {
         let id: String
         let name: String
@@ -71,11 +98,24 @@ struct IndustryPayload: Decodable, Identifiable {
     let icon: String
     let scale: Scale
     let history: [HistoryPoint]?
+    let autoSales: AutoSales?
     let anchors: [String]
     let chain: [ChainGroup]
     let companies: [Company]
     let insights: [Insight]
     let provenance: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, subtitle, icon, scale, history, anchors, chain, companies, insights, provenance
+        case autoSales = "auto_sales"
+    }
+}
+
+private enum AutoSalesMetric: String, CaseIterable, Identifiable {
+    case total = "全部汽车"
+    case nev = "新能源汽车"
+
+    var id: Self { self }
 }
 
 private struct IndustryPanoramaService {
@@ -109,6 +149,7 @@ struct IndustryPanoramaView: View {
     @State private var selectedStageID: String?
     @State private var isLoading = true
     @State private var loadError = false
+    @State private var autoSalesMetric: AutoSalesMetric = .nev
 
     private var selectedIndustry: IndustryPayload? {
         industries.first(where: { $0.id == selectedID }) ?? industries.first
@@ -203,6 +244,9 @@ struct IndustryPanoramaView: View {
         VStack(alignment: .leading, spacing: 22) {
             industryIntroduction(industry)
             scaleSection(industry)
+            if let sales = industry.autoSales, !sales.monthly.isEmpty {
+                autoSalesSection(sales)
+            }
             chainSection(industry)
             companySection(industry)
             if !industry.insights.isEmpty {
@@ -379,8 +423,121 @@ struct IndustryPanoramaView: View {
         }
     }
 
+    private func autoSalesSection(_ sales: IndustryPayload.AutoSales) -> some View {
+        let latest = sales.monthly.last
+        let previous = sales.monthly.dropLast().last
+        let latestValue = latest.map { autoSalesMetric == .nev ? $0.nevSales : $0.totalSales } ?? 0
+        let previousValue = previous.map { autoSalesMetric == .nev ? $0.nevSales : $0.totalSales }
+        let yoy = latest.map { autoSalesMetric == .nev ? $0.nevYoY : $0.totalYoY } ?? 0
+        let mom = previousValue.map { latestValue / $0 * 100 - 100 }
+
+        return sectionContainer(number: "02", title: "汽车市场月报") {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text(sales.period)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    sourceLink(sales.source)
+                }
+
+                Picker("销量口径", selection: $autoSalesMetric) {
+                    ForEach(AutoSalesMetric.allCases) { metric in
+                        Text(metric.rawValue).tag(metric)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                HStack(spacing: 8) {
+                    autoSalesStat(title: "最新月销量", value: "\(latestValue.formatted(.number.precision(.fractionLength(1))))\(sales.unit)", tint: InvestmentDesign.accent)
+                    autoSalesStat(title: "同比", value: signedPercent(yoy), tint: yoy >= 0 ? HoldingsPalette.green : .red)
+                    autoSalesStat(title: "环比", value: mom.map(signedPercent) ?? "—", tint: (mom ?? 0) >= 0 ? HoldingsPalette.green : .red)
+                }
+
+                Chart(sales.monthly) { point in
+                    let value = autoSalesMetric == .nev ? point.nevSales : point.totalSales
+                    AreaMark(
+                        x: .value("月份", point.period),
+                        y: .value("销量", value)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [InvestmentDesign.accent.opacity(0.2), InvestmentDesign.accent.opacity(0.01)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    LineMark(
+                        x: .value("月份", point.period),
+                        y: .value("销量", value)
+                    )
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .lineStyle(StrokeStyle(lineWidth: 2.2))
+                }
+                .chartXAxis {
+                    AxisMarks(values: sales.monthly.enumerated().compactMap { index, item in
+                        index.isMultiple(of: 2) ? item.period : nil
+                    }) { value in
+                        AxisGridLine().foregroundStyle(HoldingsPalette.line)
+                        AxisValueLabel {
+                            if let period = value.as(String.self) {
+                                Text(String(period.suffix(2)) + "月")
+                            }
+                        }
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) {
+                        AxisGridLine().foregroundStyle(HoldingsPalette.line)
+                        AxisValueLabel().font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(height: 190)
+
+                if let latest {
+                    HStack {
+                        Label("新能源渗透率", systemImage: "bolt.car.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HoldingsPalette.ink.opacity(0.72))
+                        Spacer()
+                        Text("\(latest.nevPenetrationRate.formatted(.number.precision(.fractionLength(1))))%")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(InvestmentDesign.accent)
+                    }
+                    .padding(12)
+                    .background(InvestmentDesign.accentSoft, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            .padding(16)
+            .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius).stroke(HoldingsPalette.line))
+        }
+    }
+
+    private func autoSalesStat(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .background(tint.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func signedPercent(_ value: Double) -> String {
+        String(format: "%@%.1f%%", value >= 0 ? "+" : "", value)
+    }
+
     private func chainSection(_ industry: IndustryPayload) -> some View {
-        sectionContainer(number: "02", title: "产业链全景") {
+        sectionContainer(number: "03", title: "产业链全景") {
             VStack(spacing: 12) {
                 ForEach(Array(industry.chain.enumerated()), id: \.element.id) { index, group in
                     chainStage(group, companyCount: industry.companies.filter { $0.stageID == group.id }.count, index: index)
@@ -449,7 +606,7 @@ struct IndustryPanoramaView: View {
             industry.companies.filter { $0.stageID == stageID }
         } ?? industry.companies
 
-        return sectionContainer(number: "03", title: "代表企业") {
+        return sectionContainer(number: "04", title: "代表企业") {
             VStack(alignment: .leading, spacing: 14) {
                 ScrollView(.horizontal) {
                     HStack(spacing: 18) {
@@ -551,7 +708,7 @@ struct IndustryPanoramaView: View {
     }
 
     private func insightSection(_ industry: IndustryPayload) -> some View {
-        sectionContainer(number: "04", title: "研究观察") {
+        sectionContainer(number: "05", title: "研究观察") {
             VStack(spacing: 10) {
                 ForEach(Array(industry.insights.enumerated()), id: \.element.id) { index, insight in
                     HStack(alignment: .top, spacing: 12) {
