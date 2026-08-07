@@ -24,12 +24,45 @@ jobs:
       - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
     timeout-minutes: 60
     steps:
-      - name: Check out task commit with bounded history
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 64
-          token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
+      - name: Reuse local repository and check out task commit
+        env:
+          CHECKOUT_TOKEN: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          token_file="$RUNNER_TEMP/ai-server-ios-git-token"
+          askpass_file="$RUNNER_TEMP/ai-server-ios-git-askpass.sh"
+          umask 077
+          printf '%s' "$CHECKOUT_TOKEN" > "$token_file"
+          cat > "$askpass_file" <<'ASKPASS'
+          #!/usr/bin/env bash
+          case "${1:-}" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) cat "${RUNNER_TEMP:?}/ai-server-ios-git-token" ;;
+          esac
+          ASKPASS
+          chmod 700 "$askpass_file"
+          export GIT_ASKPASS="$askpass_file"
+          export GIT_TERMINAL_PROMPT=0
+          {
+            echo "GIT_ASKPASS=$askpass_file"
+            echo "GIT_TERMINAL_PROMPT=0"
+          } >> "$GITHUB_ENV"
+
+          mkdir -p "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          if [[ ! -d .git ]]; then
+            git init
+          fi
+          if git remote get-url origin >/dev/null 2>&1; then
+            git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          else
+            git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git reset --hard HEAD 2>/dev/null || true
+          git clean -ffdx
+          git fetch --no-tags --prune --depth=64 origin "$GITHUB_SHA"
+          git checkout --detach --force "$GITHUB_SHA"
 
       - name: Run preflight and warm device build cache
         id: central_prepare
@@ -399,3 +432,10 @@ jobs:
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ./ci/report-ios-deployment.sh failed 0 merge-failed
+
+      - name: Clean up Git credentials
+        if: always()
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/ai-server-ios-git-token" \
+            "$RUNNER_TEMP/ai-server-ios-git-askpass.sh"
