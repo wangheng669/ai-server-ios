@@ -91,13 +91,6 @@ enum RSSArticleBlock: Hashable {
     case image(URL)
 }
 
-// Kept until the shared detail view is rebased after the active Bilibili task.
-enum WeChatArticleBlock: Hashable {
-    case text(String)
-    case image(URL)
-    case inlineEmoji(URL)
-}
-
 struct XCommentsResponse: Decodable {
     let success: Bool
     let data: Payload
@@ -641,7 +634,19 @@ struct Post: Decodable, Identifiable, Hashable {
                     .filter { !$0.isEmpty }
                 for paragraph in paragraphs {
                     let emojis = pendingEmojis.filter { paragraph.contains($0.token) }
-                    blocks.append(.paragraph(text: paragraph, emojis: emojis))
+                    let remainingText = emojis.reduce(paragraph) { text, emoji in
+                        text.replacingOccurrences(of: emoji.token, with: "")
+                    }.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !emojis.isEmpty,
+                       remainingText.isEmpty,
+                       case .paragraph(let previousText, let previousEmojis) = blocks.last {
+                        blocks[blocks.count - 1] = .paragraph(
+                            text: previousText + paragraph,
+                            emojis: previousEmojis + emojis
+                        )
+                    } else {
+                        blocks.append(.paragraph(text: paragraph, emojis: emojis))
+                    }
                 }
             }
             pendingHTML = ""
@@ -655,7 +660,10 @@ struct Post: Decodable, Identifiable, Hashable {
                let url = MediaURL.image(rawURL.replacingOccurrences(of: "&amp;", with: "&")) {
                 if isIgnoredRSSImageTag(tag, rawURL: rawURL) {
                     // Tracking pixels, favicons and badges are not article content.
-                } else if isInlineEmojiTag(tag, rawURL: rawURL) {
+                } else if (
+                    tag.localizedCaseInsensitiveContains("wxw-img")
+                        && tag.localizedCaseInsensitiveContains("display:inline")
+                ) || isInlineEmojiTag(tag, rawURL: rawURL) {
                     let token = htmlAttribute("alt", in: tag)
                         ?? htmlAttribute("title", in: tag)
                         ?? "[表情]"
@@ -682,24 +690,19 @@ struct Post: Decodable, Identifiable, Hashable {
     }
 
     var rssListContent: String {
-        htmlTextPreservingRSSInlineEmoji(contentZH)
+        let value = htmlTextPreservingRSSInlineEmoji(contentZH)
             ?? htmlTextPreservingRSSInlineEmoji(content)
             ?? displayContent
-    }
-
-    var weChatArticleBlocks: [WeChatArticleBlock] {
-        rssArticleBlocks.flatMap { block in
-            switch block {
-            case .paragraph(let text, let emojis):
-                return [.text(text)] + emojis.map { .inlineEmoji($0.url) }
-            case .image(let url):
-                return [.image(url)]
-            }
-        }
+        return value.replacingOccurrences(of: #"\n{2,}"#, with: "\n", options: .regularExpression)
     }
 
     private func isInlineEmojiTag(_ tag: String, rawURL: String) -> Bool {
-        let value = "\(tag) \(rawURL.removingPercentEncoding ?? rawURL)".lowercased()
+        var decodedURL = rawURL
+        for _ in 0..<2 {
+            guard let decoded = decodedURL.removingPercentEncoding, decoded != decodedURL else { break }
+            decodedURL = decoded
+        }
+        let value = "\(tag) \(decodedURL)".lowercased()
         return value.contains("wp-smiley")
             || value.contains("class=\"emoji")
             || value.contains("class='emoji")
@@ -711,6 +714,10 @@ struct Post: Decodable, Identifiable, Hashable {
             || value.contains("/twemoji/")
             || value.contains("height: 1em")
             || value.contains("height:1em")
+            || (value.contains("wxw-img") && value.contains("data-w=\"20\""))
+            || (value.contains("display:inline")
+                && (htmlNumericAttribute("data-w", in: tag).map { $0 <= 64 } == true
+                    || value.contains("width:20px")))
     }
 
     private func isIgnoredRSSImageTag(_ tag: String, rawURL: String) -> Bool {

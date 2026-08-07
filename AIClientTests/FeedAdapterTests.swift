@@ -880,7 +880,7 @@ final class FeedAdapterTests: XCTestCase {
         }
         XCTAssertEqual(text, "正文[表情]")
         XCTAssertEqual(emojis.count, 1)
-        XCTAssertNotNil(emojis[0].url.host())
+        XCTAssertNotNil(try XCTUnwrap(emojis.first).url.host())
     }
 
     func testGenericRSSKeepsWordPressAndDiscourseEmojiInline() throws {
@@ -923,7 +923,10 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(
             post.rssArticleBlocks,
-            [.paragraph(text: "正文\n结尾", emojis: [])]
+            [
+                .paragraph(text: "正文", emojis: []),
+                .paragraph(text: "结尾", emojis: [])
+            ]
         )
         XCTAssertEqual(post.rssListContent, "正文\n结尾")
     }

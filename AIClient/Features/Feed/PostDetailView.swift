@@ -392,14 +392,11 @@ struct PostDetailView: View {
 
                 rssMetadata
 
-                ForEach(rssContentImageURLs.prefix(1), id: \.self) { url in
-                    RemoteImage(url: url, height: 260, cornerRadius: 10)
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
+                        rssArticleBlock(block, isWeChat: false)
+                    }
                 }
-
-                Text(post.displayContent)
-                    .font(.system(size: 19, design: .serif))
-                    .lineSpacing(9)
-                    .textSelection(.enabled)
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
@@ -438,20 +435,8 @@ struct PostDetailView: View {
                     .padding(.bottom, 28)
 
                     LazyVStack(alignment: .leading, spacing: 20) {
-                        ForEach(Array(post.weChatArticleBlocks.enumerated()), id: \.offset) { _, block in
-                            switch block {
-                            case .text(let paragraph):
-                                Text(paragraph)
-                                    .font(.system(size: 17))
-                                    .foregroundStyle(Color(uiColor: .label).opacity(0.9))
-                                    .lineSpacing(8)
-                                    .textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            case .image(let url):
-                                WeChatArticleImage(url: url)
-                            case .inlineEmoji(let url):
-                                InlineEmojiImage(url: url, size: 24)
-                            }
+                        ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
+                            rssArticleBlock(block, isWeChat: true)
                         }
                     }
 
@@ -488,6 +473,31 @@ struct PostDetailView: View {
         .padding(.horizontal, 8)
         .frame(height: 52)
         .background(.background)
+    }
+
+    @ViewBuilder
+    private func rssArticleBlock(_ block: RSSArticleBlock, isWeChat: Bool) -> some View {
+        switch block {
+        case .paragraph(let text, let emojis):
+            if emojis.isEmpty {
+                Text(text)
+                    .font(.system(size: isWeChat ? 17 : 19, design: isWeChat ? .default : .serif))
+                    .foregroundStyle(isWeChat ? Color(uiColor: .label).opacity(0.9) : .primary)
+                    .lineSpacing(isWeChat ? 8 : 9)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                InlineEmojiText(
+                    text: text,
+                    emojis: emojis,
+                    fontSize: isWeChat ? 17 : 19,
+                    lineSpacing: isWeChat ? 8 : 9
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .image(let url):
+            WeChatArticleImage(url: url)
+        }
     }
 
     private var weChatBottomBar: some View {
@@ -894,10 +904,6 @@ struct PostDetailView: View {
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(.secondary)
-    }
-
-    private var rssContentImageURLs: [URL] {
-        post.weiboFollowingImageURLs
     }
 
     private var xueqiuDetail: some View {
