@@ -1378,13 +1378,13 @@ private struct EmbeddedWebPage: View {
             }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
-                    Image(source == .weibo ? "WeiboMark" : "TikTokMark")
+                    Image(source.hotTopicMarkAssetName)
                         .resizable()
                         .renderingMode(.template)
                         .scaledToFit()
-                        .foregroundStyle(source == .weibo ? Color.red : Color.primary)
+                        .foregroundStyle(source == .weibo ? Color.red : source == .baidu ? Color.blue : Color.primary)
                         .frame(width: 19, height: 19)
-                    Text(source == .weibo ? "微博热搜" : "抖音热榜")
+                    Text(source.hotTopicPageTitle)
                         .font(.system(size: 16, weight: .semibold))
                 }
                 .accessibilityElement(children: .combine)

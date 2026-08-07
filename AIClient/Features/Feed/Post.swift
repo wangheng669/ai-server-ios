@@ -1657,4 +1657,22 @@ enum FeedSource: String, CaseIterable, Identifiable {
         case .flash: "快讯"
         }
     }
+
+    var hotTopicPageTitle: String {
+        switch self {
+        case .weibo: "微博热搜"
+        case .douyin: "抖音热榜"
+        case .baidu: "百度热搜"
+        default: title
+        }
+    }
+
+    var hotTopicMarkAssetName: String {
+        switch self {
+        case .weibo: "WeiboMark"
+        case .douyin: "TikTokMark"
+        case .baidu: "BaiduMark"
+        default: ""
+        }
+    }
 }
