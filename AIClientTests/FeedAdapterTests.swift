@@ -875,13 +875,13 @@ final class FeedAdapterTests: XCTestCase {
         ])
         let post = try JSONDecoder().decode(Post.self, from: payload)
 
-        XCTAssertEqual(post.weChatArticleBlocks.count, 3)
-        XCTAssertEqual(post.weChatArticleBlocks[0], .text("第一段正文。"))
-        guard case .image(let url) = post.weChatArticleBlocks[1] else {
+        XCTAssertEqual(post.rssArticleBlocks.count, 3)
+        XCTAssertEqual(post.rssArticleBlocks[0], .paragraph(text: "第一段正文。", emojis: []))
+        guard case .image(let url) = post.rssArticleBlocks[1] else {
             return XCTFail("Expected inline image")
         }
         XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
-        XCTAssertEqual(post.weChatArticleBlocks[2], .text("第二段正文。"))
+        XCTAssertEqual(post.rssArticleBlocks[2], .paragraph(text: "第二段正文。", emojis: []))
     }
 
     func testWeChatArticleKeepsEmojiAtInlineSizeInsteadOfArticleImageSize() throws {
@@ -895,12 +895,61 @@ final class FeedAdapterTests: XCTestCase {
         ])
         let post = try JSONDecoder().decode(Post.self, from: payload)
 
-        XCTAssertEqual(post.weChatArticleBlocks.count, 2)
-        XCTAssertEqual(post.weChatArticleBlocks[0], .text("正文"))
-        guard case .inlineEmoji(let url) = post.weChatArticleBlocks[1] else {
-            return XCTFail("Expected WeChat emoji to use inline rendering")
+        XCTAssertEqual(post.rssArticleBlocks.count, 1)
+        guard case .paragraph(let text, let emojis) = post.rssArticleBlocks[0] else {
+            return XCTFail("Expected WeChat emoji to stay inside its paragraph")
         }
-        XCTAssertNotNil(url.host())
+        XCTAssertEqual(text, "正文[表情]")
+        XCTAssertEqual(emojis.count, 1)
+        XCTAssertNotNil(try XCTUnwrap(emojis.first).url.host())
+    }
+
+    func testGenericRSSKeepsWordPressAndDiscourseEmojiInline() throws {
+        let html = """
+        <p>机器人<img src="https://s.w.org/images/core/emoji/17.0.2/72x72/1f916.png" alt="🤖" class="wp-smiley" style="height: 1em; max-height: 1em;" />继续正文</p>
+        <p><img src="https://cdn.ldstatic.com/images/emoji/twemoji/cold_face.png" title=":cold_face:" class="emoji" alt=":cold_face:" width="20" height="20">结束</p>
+        """
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 72,
+            "source": "rss:72",
+            "content": html
+        ])
+        let post = try JSONDecoder().decode(Post.self, from: payload)
+
+        XCTAssertEqual(post.rssArticleBlocks.count, 2)
+        guard case .paragraph(let firstText, let firstEmojis) = post.rssArticleBlocks[0],
+              case .paragraph(let secondText, let secondEmojis) = post.rssArticleBlocks[1] else {
+            return XCTFail("Expected emoji paragraphs")
+        }
+        XCTAssertEqual(firstText, "机器人🤖继续正文")
+        XCTAssertEqual(firstEmojis.map(\.token), ["🤖"])
+        XCTAssertEqual(secondText, ":cold_face:结束")
+        XCTAssertEqual(secondEmojis.map(\.token), [":cold_face:"])
+        XCTAssertEqual(post.rssListContent, "机器人🤖继续正文\n:cold_face:结束")
+    }
+
+    func testGenericRSSDropsTrackingAndDecorativeImages() throws {
+        let html = """
+        <p>正文</p>
+        <img src="https://1px.example/track" width="1" height="1" aria-hidden="true" />
+        <img src="https://icons.duckduckgo.com/ip3/example.com.ico" width="24" height="24" alt="favicon" />
+        <p>结尾</p>
+        """
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 73,
+            "source": "rss:73",
+            "content": html
+        ])
+        let post = try JSONDecoder().decode(Post.self, from: payload)
+
+        XCTAssertEqual(
+            post.rssArticleBlocks,
+            [
+                .paragraph(text: "正文", emojis: []),
+                .paragraph(text: "结尾", emojis: [])
+            ]
+        )
+        XCTAssertEqual(post.rssListContent, "正文\n结尾")
     }
 
     func testNewYorkTimesArticleUsesServerPreviewEndpoint() throws {

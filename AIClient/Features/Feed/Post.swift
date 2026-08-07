@@ -7,7 +7,16 @@ struct RSSFeedPostsResponse: Decodable {
 }
 struct RSSFeedsResponse: Decodable {
     let data: Payload
+    let meta: Meta?
     struct Payload: Decodable { let feeds: [RSSFeedSource] }
+    struct Meta: Decodable {
+        let pagination: Pagination?
+        struct Pagination: Decodable {
+            let page: Int
+            let size: Int
+            let total: Int
+        }
+    }
 }
 
 struct RSSFeedSource: Decodable, Identifiable, Equatable {
@@ -77,10 +86,9 @@ struct WeiboInlineEmoji: Hashable {
     let url: URL
 }
 
-enum WeChatArticleBlock: Hashable {
-    case text(String)
+enum RSSArticleBlock: Hashable {
+    case paragraph(text: String, emojis: [WeiboInlineEmoji])
     case image(URL)
-    case inlineEmoji(URL)
 }
 
 struct XCommentsResponse: Decodable {
@@ -606,46 +614,176 @@ struct Post: Decodable, Identifiable, Hashable {
             return url
         }
     }
-    var weChatArticleBlocks: [WeChatArticleBlock] {
-        guard let content, !content.isEmpty,
+    var rssArticleBlocks: [RSSArticleBlock] {
+        let preferredContent = clean(contentZH) ?? clean(content)
+        guard let preferredContent,
               let imageRegex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
-            return [.text(displayContent)]
+            return [.paragraph(text: displayContent, emojis: [])]
         }
 
-        let source = content as NSString
-        let matches = imageRegex.matches(in: content, range: NSRange(location: 0, length: source.length))
-        var blocks: [WeChatArticleBlock] = []
+        let source = preferredContent as NSString
+        let matches = imageRegex.matches(
+            in: preferredContent,
+            range: NSRange(location: 0, length: source.length)
+        )
+        var blocks: [RSSArticleBlock] = []
+        var pendingHTML = ""
+        var pendingEmojis: [WeiboInlineEmoji] = []
         var cursor = 0
 
-        func appendText(_ range: NSRange) {
+        func appendHTML(_ range: NSRange) {
             guard range.length > 0 else { return }
-            let text = htmlText(source.substring(with: range))?
+            pendingHTML += source.substring(with: range)
+        }
+
+        func flushParagraphs() {
+            let text = htmlText(pendingHTML)?
                 .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let text, !text.isEmpty else { return }
-            for paragraph in text.components(separatedBy: "\n")
-                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !paragraph.isEmpty {
-                blocks.append(.text(paragraph))
+            if let text, !text.isEmpty {
+                let paragraphs = text.components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                for paragraph in paragraphs {
+                    let emojis = pendingEmojis.filter { paragraph.contains($0.token) }
+                    let remainingText = emojis.reduce(paragraph) { text, emoji in
+                        text.replacingOccurrences(of: emoji.token, with: "")
+                    }.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !emojis.isEmpty,
+                       remainingText.isEmpty,
+                       case .paragraph(let previousText, let previousEmojis) = blocks.last {
+                        blocks[blocks.count - 1] = .paragraph(
+                            text: previousText + paragraph,
+                            emojis: previousEmojis + emojis
+                        )
+                    } else {
+                        blocks.append(.paragraph(text: paragraph, emojis: emojis))
+                    }
+                }
             }
+            pendingHTML = ""
+            pendingEmojis = []
         }
 
         for match in matches {
-            appendText(NSRange(location: cursor, length: match.range.location - cursor))
+            appendHTML(NSRange(location: cursor, length: match.range.location - cursor))
             let tag = source.substring(with: match.range)
-            if let rawURL = htmlAttribute("src", in: tag),
+            if let rawURL = rssImageSource(in: tag),
                let url = MediaURL.image(rawURL.replacingOccurrences(of: "&amp;", with: "&")) {
-                blocks.append(isWeChatEmojiURL(rawURL) ? .inlineEmoji(url) : .image(url))
+                if isIgnoredRSSImageTag(tag, rawURL: rawURL) {
+                    // Tracking pixels, favicons and badges are not article content.
+                } else if (
+                    tag.localizedCaseInsensitiveContains("wxw-img")
+                        && tag.localizedCaseInsensitiveContains("display:inline")
+                ) || isInlineEmojiTag(tag, rawURL: rawURL) {
+                    let token = htmlAttribute("alt", in: tag)
+                        ?? htmlAttribute("title", in: tag)
+                        ?? "[表情]"
+                    pendingHTML += token
+                    pendingEmojis.append(.init(token: token, url: url))
+                } else {
+                    flushParagraphs()
+                    blocks.append(.image(url))
+                }
             }
             cursor = NSMaxRange(match.range)
         }
-        appendText(NSRange(location: cursor, length: source.length - cursor))
+        appendHTML(NSRange(location: cursor, length: source.length - cursor))
+        flushParagraphs()
 
-        return blocks.isEmpty ? [.text(displayContent)] : blocks
+        if !blocks.contains(where: { if case .image = $0 { true } else { false } }) {
+            blocks.insert(
+                contentsOf: imageURLs.map(RSSArticleBlock.image),
+                at: 0
+            )
+        }
+
+        return blocks.isEmpty ? [.paragraph(text: displayContent, emojis: [])] : blocks
     }
 
-    private func isWeChatEmojiURL(_ rawURL: String) -> Bool {
-        let value = (rawURL.removingPercentEncoding ?? rawURL).lowercased()
-        return value.contains("res.wx.qq.com") && value.contains("/we-emoji/")
+    var rssListContent: String {
+        let value = htmlTextPreservingRSSInlineEmoji(contentZH)
+            ?? htmlTextPreservingRSSInlineEmoji(content)
+            ?? displayContent
+        return value.replacingOccurrences(of: #"\n{2,}"#, with: "\n", options: .regularExpression)
+    }
+
+    private func isInlineEmojiTag(_ tag: String, rawURL: String) -> Bool {
+        var decodedURL = rawURL
+        for _ in 0..<2 {
+            guard let decoded = decodedURL.removingPercentEncoding, decoded != decodedURL else { break }
+            decodedURL = decoded
+        }
+        let value = "\(tag) \(decodedURL)".lowercased()
+        return value.contains("wp-smiley")
+            || value.contains("class=\"emoji")
+            || value.contains("class='emoji")
+            || value.contains("emoticon")
+            || value.contains("/we-emoji/")
+            || value.contains("/images/core/emoji/")
+            || value.contains("/images/emoji/")
+            || value.contains("/face/emoji_")
+            || value.contains("/twemoji/")
+            || value.contains("height: 1em")
+            || value.contains("height:1em")
+            || (value.contains("wxw-img") && value.contains("data-w=\"20\""))
+            || (value.contains("display:inline")
+                && (htmlNumericAttribute("data-w", in: tag).map { $0 <= 64 } == true
+                    || value.contains("width:20px")))
+    }
+
+    private func isIgnoredRSSImageTag(_ tag: String, rawURL: String) -> Bool {
+        let value = "\(tag) \(rawURL)".lowercased()
+        if value.contains("aria-hidden=\"true\"")
+            || value.contains("aria-hidden='true'")
+            || value.contains("rss-track")
+            || value.contains("1px.")
+            || value.contains("icons.duckduckgo.com/ip3/")
+            || value.contains("img.shields.io/") {
+            return true
+        }
+        let width = htmlNumericAttribute("width", in: tag)
+        let height = htmlNumericAttribute("height", in: tag)
+        return width.map { $0 <= 2 } == true && height.map { $0 <= 2 } == true
+    }
+
+    private func htmlNumericAttribute(_ name: String, in tag: String) -> Int? {
+        let source = tag as NSString
+        let escapedName = NSRegularExpression.escapedPattern(for: name)
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\b"# + escapedName + #"\s*=\s*[\"']?(\d+)"#,
+            options: .caseInsensitive
+        ), let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: source.length)),
+           match.numberOfRanges > 1 else { return nil }
+        return Int(source.substring(with: match.range(at: 1)))
+    }
+
+    private func htmlTextPreservingRSSInlineEmoji(_ input: String?) -> String? {
+        guard var value = clean(input) else { return nil }
+        let source = value as NSString
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<img\b[^>]*>"#,
+            options: .caseInsensitive
+        ) else { return htmlText(value) }
+        for match in regex.matches(
+            in: value,
+            range: NSRange(location: 0, length: source.length)
+        ).reversed() {
+            let tag = source.substring(with: match.range)
+            let rawURL = rssImageSource(in: tag) ?? ""
+            let replacement = isInlineEmojiTag(tag, rawURL: rawURL)
+                ? (htmlAttribute("alt", in: tag) ?? htmlAttribute("title", in: tag) ?? "[表情]")
+                : ""
+            guard let range = Range(match.range, in: value) else { continue }
+            value.replaceSubrange(range, with: replacement)
+        }
+        return htmlText(value)
+    }
+
+    private func rssImageSource(in tag: String) -> String? {
+        htmlAttribute("src", in: tag)
+            ?? htmlAttribute("data-src", in: tag)
+            ?? htmlAttribute("data-original", in: tag)
     }
     var weiboFollowingImageURLs: [URL] {
         imageURLs.filter { url in
