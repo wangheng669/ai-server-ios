@@ -25,6 +25,9 @@ json_seconds() {
 preflight_seconds=$(json_seconds "${IOS_PREFLIGHT_SECONDS:-}")
 prepare_seconds=$(json_seconds "${IOS_PREPARE_SECONDS:-}")
 device_warm_seconds=$(json_seconds "${IOS_DEVICE_WARM_SECONDS:-}")
+dependency_seconds=$(json_seconds "${IOS_DEPENDENCY_SECONDS:-}")
+device_build_warm_seconds=$(json_seconds "${IOS_DEVICE_BUILD_WARM_SECONDS:-}")
+simulator_warm_seconds=$(json_seconds "${IOS_SIMULATOR_WARM_SECONDS:-}")
 merge_seconds=$(json_seconds "${IOS_MERGE_SECONDS:-}")
 build_seconds=$(json_seconds "${IOS_BUILD_SECONDS:-}")
 install_seconds=$(json_seconds "${IOS_INSTALL_SECONDS:-}")
@@ -58,6 +61,9 @@ payload=$(jq -cn \
   --argjson preflight "$preflight_seconds" \
   --argjson prepare "$prepare_seconds" \
   --argjson deviceWarm "$device_warm_seconds" \
+  --argjson dependency "$dependency_seconds" \
+  --argjson deviceBuildWarm "$device_build_warm_seconds" \
+  --argjson simulatorWarm "$simulator_warm_seconds" \
   --argjson merge "$merge_seconds" \
   --argjson build "$build_seconds" \
   --argjson deviceWait "$device_wait_seconds" \
@@ -68,7 +74,8 @@ payload=$(jq -cn \
   --argjson total "$total_seconds" \
   '{phase:$phase, progress:$progress, stage:$stage, commit:$commit, commitMessage:$commitMessage,
     sourceBranch:$sourceBranch, runId:$runId,
-    timings:{preflight:$preflight, prepare:$prepare, deviceWarm:$deviceWarm, merge:$merge, build:$build,
+    timings:{preflight:$preflight, prepare:$prepare, deviceWarm:$deviceWarm,
+      dependency:$dependency, deviceBuildWarm:$deviceBuildWarm, simulatorWarm:$simulatorWarm, merge:$merge, build:$build,
       deviceWait:$deviceWait, directInstall:$directInstall, xcodeRecovery:$xcodeRecovery,
       finalInstall:$finalInstall, install:$install, queue:null, total:$total}}')
 
