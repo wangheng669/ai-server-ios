@@ -339,10 +339,11 @@ struct NewsFeedView: View {
                 .foregroundStyle(.primary)
                 .frame(width: 22, height: 22)
         } else if source == .baidu {
-            Text("百")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.blue)
-                .frame(width: 22, height: 22)
+            Image("BaiduMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 23, height: 23)
         } else if source == .xueqiu {
             Image("XueqiuMark")
                 .resizable()
@@ -2345,6 +2346,7 @@ private extension FeedSource {
         switch self {
         case .weibo: "WeiboMark"
         case .douyin: "TikTokMark"
+        case .baidu: "BaiduMark"
         case .bilibili: "BilibiliMark"
         case .zhihu: "ZhihuMark"
         case .youtube: "YouTubeMark"
