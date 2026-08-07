@@ -30,6 +30,23 @@
             "published_at": "2025-01-21"
           }
         },
+        "auto_sales": {
+          "period": "2024年完整年度",
+          "unit": "万辆",
+          "source": {
+            "name": "中国汽车工业协会",
+            "url": "https://www.caam.org.cn/...",
+            "published_at": "2025-01-13"
+          },
+          "monthly": [{
+            "period": "2024-12",
+            "total_sales": 348.9,
+            "nev_sales": 159.6,
+            "total_yoy": 10.5,
+            "nev_yoy": 34.0,
+            "nev_penetration_rate": 45.7
+          }]
+        },
         "anchors": ["动力电池", "电驱系统", "整车制造", "充换电服务"],
         "chain": [
           {
@@ -76,6 +93,8 @@
 - `industries[].companies[].role`
 
 `history`、`scale.growth`、`source.url`、`source.published_at`、`company.monogram` 和 `company.ticker` 可选。`company.stage_id` 必须引用 `chain[].id`。未知字段必须允许客户端忽略，方便契约向后兼容。
+
+`auto_sales` 仅用于汽车相关产业，按中国汽车工业协会的产销口径保存月度销量。销量单位由 `unit` 明确给出；同比为协会公布值，环比由客户端基于相邻月份计算；新能源渗透率使用当月新能源汽车销量除以汽车总销量。缺少完整、可追溯来源时不得填充品牌或车型排行。
 
 ## 服务端存储建议
 

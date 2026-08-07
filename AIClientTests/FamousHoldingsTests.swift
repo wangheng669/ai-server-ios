@@ -27,6 +27,14 @@ final class FamousHoldingsTests: XCTestCase {
                   "history": [
                     {"year": 2024, "value": 1286.6}
                   ],
+                  "auto_sales": {
+                    "period": "2024年完整年度",
+                    "unit": "万辆",
+                    "source": {"name": "中国汽车工业协会", "url": "https://www.caam.org.cn/"},
+                    "monthly": [
+                      {"period": "2024-12", "total_sales": 348.9, "nev_sales": 159.6, "total_yoy": 10.5, "nev_yoy": 34.0, "nev_penetration_rate": 45.7}
+                    ]
+                  },
                   "anchors": ["动力电池", "整车制造"],
                   "chain": [
                     {"id": "upstream", "level": "上游", "title": "材料", "items": ["锂矿"]},
@@ -57,6 +65,8 @@ final class FamousHoldingsTests: XCTestCase {
         XCTAssertEqual(response.data.industries.first?.scale.metric, "新能源汽车销量")
         XCTAssertEqual(response.data.industries.first?.companies.first?.stageID, "midstream")
         XCTAssertEqual(response.data.industries.first?.chain.count, 3)
+        XCTAssertEqual(response.data.industries.first?.autoSales?.monthly.first?.nevSales, 159.6)
+        XCTAssertEqual(response.data.industries.first?.autoSales?.monthly.first?.nevPenetrationRate, 45.7)
     }
 
     func testDecodesFamousHoldingsContract() throws {
