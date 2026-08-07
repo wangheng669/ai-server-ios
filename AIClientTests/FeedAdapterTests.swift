@@ -619,6 +619,15 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(post.isSynthetic)
     }
 
+    func testHotTopicEmbeddedPageBrandingMatchesSource() {
+        XCTAssertEqual(FeedSource.weibo.hotTopicPageTitle, "微博热搜")
+        XCTAssertEqual(FeedSource.weibo.hotTopicMarkAssetName, "WeiboMark")
+        XCTAssertEqual(FeedSource.douyin.hotTopicPageTitle, "抖音热榜")
+        XCTAssertEqual(FeedSource.douyin.hotTopicMarkAssetName, "TikTokMark")
+        XCTAssertEqual(FeedSource.baidu.hotTopicPageTitle, "百度热搜")
+        XCTAssertEqual(FeedSource.baidu.hotTopicMarkAssetName, "BaiduMark")
+    }
+
     func testHotTopicDisplayRepairsDuplicateRanksAndTieOrdering() throws {
         let json = #"{"success":true,"data":{"topics":[{"id":1,"keyword":"低热度插入项","latest_rank":6,"meta":{"last_payload":{"heat":"543815"}}},{"id":2,"keyword":"高热度正常项","latest_rank":6,"meta":{"last_payload":{"heat":"545903"}}},{"id":3,"keyword":"下一项","latest_rank":7,"meta":{"last_payload":{"heat":"540000"}}}]}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(HotTopicsResponse.self, from: json)
