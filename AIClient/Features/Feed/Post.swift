@@ -295,6 +295,18 @@ struct HotTopic: Decodable {
         let heat: String?
         let hotValue: Double?
         enum CodingKeys: String, CodingKey { case heat; case hotValue = "hot_value" }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if let text = try? container.decodeIfPresent(String.self, forKey: .heat) {
+                heat = text
+            } else if let number = try? container.decode(Double.self, forKey: .heat) {
+                heat = String(Int(number))
+            } else {
+                heat = nil
+            }
+            hotValue = try? container.decodeIfPresent(Double.self, forKey: .hotValue)
+        }
     }
     enum CodingKeys: String, CodingKey {
         case id, keyword, summary, reason, meta
@@ -1060,7 +1072,7 @@ struct Post: Decodable, Identifiable, Hashable {
         }
     }
     var isNewYorkTimes: Bool { source == FeedSource.newYorkTimes.rawValue }
-    var isHotTopic: Bool { source == "weibo" || source == "douyin-hot" }
+    var isHotTopic: Bool { source == "weibo" || source == "douyin-hot" || source == "baidu" }
     var isFlash: Bool { source == "flash" }
     var isSynthetic: Bool { isHotTopic || isFlash }
     var isSocial: Bool { !isRSS && !isBilibili }
@@ -1760,7 +1772,7 @@ extension Int {
 enum FeedSource: String, CaseIterable, Identifiable {
     case newYorkTimes = "rss:47"
     case wechat = "rss:57"
-    case x, weibo
+    case x, weibo, baidu
     case douyin = "douyin-hot"
     case bilibili, zhihu, xueqiu, truth, rss, laozhong, youtube, flash
 
@@ -1772,6 +1784,7 @@ enum FeedSource: String, CaseIterable, Identifiable {
         case .x: "X"
         case .weibo: "微博"
         case .douyin: "抖音"
+        case .baidu: "百度"
         case .bilibili: "B站"
         case .zhihu: "知乎"
         case .xueqiu: "雪球"
@@ -1780,6 +1793,24 @@ enum FeedSource: String, CaseIterable, Identifiable {
         case .laozhong: "老中"
         case .youtube: "YouTube"
         case .flash: "快讯"
+        }
+    }
+
+    var hotTopicPageTitle: String {
+        switch self {
+        case .weibo: "微博热搜"
+        case .douyin: "抖音热榜"
+        case .baidu: "百度热搜"
+        default: title
+        }
+    }
+
+    var hotTopicMarkAssetName: String {
+        switch self {
+        case .weibo: "WeiboMark"
+        case .douyin: "TikTokMark"
+        case .baidu: "BaiduMark"
+        default: ""
         }
     }
 }

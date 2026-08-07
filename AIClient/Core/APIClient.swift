@@ -44,7 +44,7 @@ struct APIClient {
         flashCategory: String? = nil
     ) async throws -> [Post] {
         switch source {
-        case .weibo, .douyin:
+        case .weibo, .douyin, .baidu:
             return Self.hotTopicPostsForDisplay(
                 try await fetchHotTopics(page: page, limit: limit, source: source),
                 page: page,
@@ -256,7 +256,13 @@ struct APIClient {
     }
 
     private func fetchHotTopics(page: Int, limit: Int, source: FeedSource) async throws -> [HotTopic] {
-        let path = source == .weibo ? "api/ios/v1/weibo/hot/topics" : "api/ios/v1/douyin/hot/topics"
+        let platform = switch source {
+        case .weibo: "weibo"
+        case .douyin: "douyin"
+        case .baidu: "baidu"
+        default: source.rawValue
+        }
+        let path = "api/ios/v1/\(platform)/hot/topics"
         var parts = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "page", value: String(page)), .init(name: "size", value: String(limit)), .init(name: "sort", value: "rank")]
         guard let url = parts?.url else { throw APIError.invalidURL }
@@ -389,7 +395,11 @@ struct APIClient {
             url: baseURL.appending(path: "api/ios/v1/bilibili/interpretation"),
             resolvingAgainstBaseURL: false
         )
-        components?.queryItems = [.init(name: "bvid", value: bvid), .init(name: "title", value: title)]
+        components?.queryItems = [
+            .init(name: "bvid", value: bvid),
+            .init(name: "title", value: title),
+            .init(name: "async", value: "1")
+        ]
         guard let url = components?.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = method

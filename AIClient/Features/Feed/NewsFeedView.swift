@@ -139,7 +139,7 @@ struct NewsFeedView: View {
         .sheet(item: $selectedPost) { post in
             NavigationStack {
                 if let source = FeedSource(rawValue: post.source ?? ""),
-                   source == .weibo || source == .douyin,
+                   source == .weibo || source == .douyin || source == .baidu,
                    let link = post.linkURL {
                     EmbeddedWebPage(
                         url: link,
@@ -338,6 +338,12 @@ struct NewsFeedView: View {
                 .font(.system(size: 18, weight: .bold, design: .default))
                 .foregroundStyle(.primary)
                 .frame(width: 22, height: 22)
+        } else if source == .baidu {
+            Image("BaiduMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 23, height: 23)
         } else if source == .xueqiu {
             Image("XueqiuMark")
                 .resizable()
@@ -1372,13 +1378,8 @@ private struct EmbeddedWebPage: View {
             }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
-                    Image(source == .weibo ? "WeiboMark" : "TikTokMark")
-                        .resizable()
-                        .renderingMode(.template)
-                        .scaledToFit()
-                        .foregroundStyle(source == .weibo ? Color.red : Color.primary)
-                        .frame(width: 19, height: 19)
-                    Text(source == .weibo ? "微博热搜" : "抖音热榜")
+                    hotTopicMark
+                    Text(source.hotTopicPageTitle)
                         .font(.system(size: 16, weight: .semibold))
                 }
                 .accessibilityElement(children: .combine)
@@ -1406,6 +1407,25 @@ private struct EmbeddedWebPage: View {
             if let displayName = model.weiboDisplayName {
                 Text("当前账号：\(displayName)")
             }
+        }
+    }
+
+    @ViewBuilder private var hotTopicMark: some View {
+        if source == .baidu {
+            Image("BaiduMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 21, height: 21)
+                .accessibilityHidden(true)
+        } else {
+            Image(source.hotTopicMarkAssetName)
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .foregroundStyle(source == .weibo ? Color.red : Color.primary)
+                .frame(width: 19, height: 19)
+                .accessibilityHidden(true)
         }
     }
 
@@ -2340,6 +2360,7 @@ private extension FeedSource {
         switch self {
         case .weibo: "WeiboMark"
         case .douyin: "TikTokMark"
+        case .baidu: "BaiduMark"
         case .bilibili: "BilibiliMark"
         case .zhihu: "ZhihuMark"
         case .youtube: "YouTubeMark"
@@ -2357,6 +2378,7 @@ private extension FeedSource {
         case .rss: "dot.radiowaves.up.forward"
         case .laozhong: "person.fill"
         case .flash: "bolt.fill"
+        case .baidu: "magnifyingglass"
         default: "circle.fill"
         }
     }
@@ -2369,6 +2391,7 @@ private extension FeedSource {
         case .xueqiu: Color(red: 0.95, green: 0.32, blue: 0.12)
         case .weibo, .youtube: .red
         case .douyin: .primary
+        case .baidu: .blue
         case .bilibili: Color(red: 0.98, green: 0.45, blue: 0.62)
         case .rss: .orange
         case .laozhong: .green
