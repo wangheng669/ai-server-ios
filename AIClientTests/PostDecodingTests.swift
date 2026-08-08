@@ -767,6 +767,19 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.xueqiuUnplacedImageURLs.map(\.lastPathComponent), ["unplaced.jpg"])
     }
 
+    func testXueqiuKeepsBodyAndQuoteHyperlinksClickable() throws {
+        let json = #"{"id":22,"source":"rss:14","content":"正文，链接：<a href=\"https://example.com/story?a=1&amp;b=2\">网页链接</a><blockquote>回复者: <a href=\"/n/example\">@示例用户</a> 回复内容</blockquote>"}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: json)
+
+        XCTAssertEqual(post.xueqiuBodyContent, "正文，链接：网页链接")
+        XCTAssertEqual(post.xueqiuBodyLinks, [
+            XueqiuTextLink(label: "网页链接", url: URL(string: "https://example.com/story?a=1&b=2")!)
+        ])
+        XCTAssertEqual(post.xueqiuQuoteLinks, [
+            XueqiuTextLink(label: "@示例用户", url: URL(string: "https://xueqiu.com/n/example")!)
+        ])
+    }
+
     func testXueqiuEmojiOnlyBodyDoesNotDuplicateQuotedPost() throws {
         let json = #"{"id":19,"source":"rss:14","content":"<img src=\"//assets.imedao.com/ugc/images/face/emoji_13_coldsweat.png?v=1\" title=\"[滴汗]\" alt=\"[滴汗]\" height=\"24\" /><blockquote>大道无形逍遥游:&nbsp;<a href=\"https://xueqiu.com/n/大道无形我有型\" target=\"_blank\">@大道无形我有型</a> 大道你好，很好奇你对美债的看法。</blockquote>"}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: json)

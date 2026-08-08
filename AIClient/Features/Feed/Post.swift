@@ -1,5 +1,10 @@
 import Foundation
 
+struct XueqiuTextLink: Equatable {
+    let label: String
+    let url: URL
+}
+
 struct PostListResponse: Decodable { let data: [Post] }
 struct RSSFeedPostsResponse: Decodable {
     let data: Payload
@@ -529,10 +534,21 @@ struct Post: Decodable, Identifiable, Hashable {
         }
         return xueqiuText(String(raw[..<quoteStart.lowerBound])) ?? ""
     }
+    var xueqiuBodyLinks: [XueqiuTextLink] {
+        guard let raw = clean(content) else { return [] }
+        let body = raw.range(of: "<blockquote", options: .caseInsensitive)
+            .map { String(raw[..<$0.lowerBound]) } ?? raw
+        return xueqiuTextLinks(in: body)
+    }
     var xueqiuQuoteContent: String? {
         guard let raw = clean(content),
               let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return nil }
         return xueqiuText(String(raw[quoteStart.lowerBound...]))
+    }
+    var xueqiuQuoteLinks: [XueqiuTextLink] {
+        guard let raw = clean(content),
+              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return [] }
+        return xueqiuTextLinks(in: String(raw[quoteStart.lowerBound...]))
     }
     var xueqiuBodyInlineEmojis: [WeiboInlineEmoji] {
         let serverEmojis = (images ?? []).compactMap { image -> WeiboInlineEmoji? in
@@ -612,6 +628,25 @@ struct Post: Decodable, Identifiable, Hashable {
                   let url = MediaURL.image(rawURL),
                   seen.insert(url).inserted else { return nil }
             return url
+        }
+    }
+
+    private func xueqiuTextLinks(in html: String) -> [XueqiuTextLink] {
+        let source = html as NSString
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<a\b[^>]*\bhref\s*=\s*([\"'])(.*?)\1[^>]*>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else { return [] }
+
+        return regex.matches(in: html, range: NSRange(location: 0, length: source.length)).compactMap { match in
+            guard match.numberOfRanges == 4 else { return nil }
+            let href = source.substring(with: match.range(at: 2))
+                .replacingOccurrences(of: "&amp;", with: "&")
+            let labelHTML = source.substring(with: match.range(at: 3))
+            guard let label = xueqiuText(labelHTML),
+                  let url = URL(string: href, relativeTo: URL(string: "https://xueqiu.com"))?.absoluteURL,
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            return XueqiuTextLink(label: label, url: url)
         }
     }
     var rssArticleBlocks: [RSSArticleBlock] {

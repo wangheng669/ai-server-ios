@@ -916,7 +916,7 @@ struct PostDetailView: View {
                         InlineEmojiImage(emoji: emoji)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else if post.xueqiuBodyInlineEmojis.isEmpty {
-                        xueqiuRichText(post.xueqiuBodyContent)
+                        xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
                             .font(.system(size: 20))
                             .lineSpacing(10)
                             .textSelection(.enabled)
@@ -956,7 +956,7 @@ struct PostDetailView: View {
                     if let quoteBody = post.xueqiuQuoteBody {
                         VStack(alignment: .leading, spacing: 14) {
                             (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
-                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody))
+                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
                                 .font(.system(size: 16.5))
                                 .lineSpacing(7)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1098,23 +1098,35 @@ struct PostDetailView: View {
         }
     }
 
-    private func xueqiuRichText(_ value: String) -> Text {
+    private func xueqiuRichText(_ value: String, links: [XueqiuTextLink] = []) -> Text {
         let nsValue = value as NSString
         let matches = (try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
             .matches(in: value, range: NSRange(location: 0, length: nsValue.length))) ?? []
-        var result = Text("")
-        var location = 0
+        var attributed = AttributedString(value)
         for match in matches {
-            if match.range.location > location {
-                result = result + Text(nsValue.substring(with: NSRange(location: location, length: match.range.location - location)))
-            }
+            guard let stringRange = Range(match.range, in: value),
+                  let lower = AttributedString.Index(stringRange.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(stringRange.upperBound, within: attributed) else { continue }
             let token = nsValue.substring(with: match.range)
-            let color = token.hasPrefix("$") ? Color(red: 0.95, green: 0.28, blue: 0.10) : Color.blue
-            result = result + Text(token).foregroundColor(color)
-            location = match.range.location + match.range.length
+            attributed[lower..<upper].foregroundColor = token.hasPrefix("$")
+                ? Color(red: 0.95, green: 0.28, blue: 0.10)
+                : Color.blue
         }
-        if location < nsValue.length { result = result + Text(nsValue.substring(from: location)) }
-        return result
+
+        var searchLocation = 0
+        for link in links where !link.label.isEmpty {
+            let searchRange = NSRange(location: searchLocation, length: nsValue.length - searchLocation)
+            let range = nsValue.range(of: link.label, options: [], range: searchRange)
+            guard range.location != NSNotFound,
+                  let stringRange = Range(range, in: value),
+                  let lower = AttributedString.Index(stringRange.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(stringRange.upperBound, within: attributed) else { continue }
+            attributed[lower..<upper].foregroundColor = .blue
+            attributed[lower..<upper].underlineStyle = .single
+            attributed[lower..<upper].link = link.url
+            searchLocation = range.location + range.length
+        }
+        return Text(attributed)
     }
 
     private var youtubeDetail: some View {
