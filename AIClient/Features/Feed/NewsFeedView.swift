@@ -163,7 +163,6 @@ struct NewsFeedView: View {
         }
         .sheet(item: $presentedXueqiuLink) { destination in
             InAppBrowserSheet(url: destination.url)
-                .ignoresSafeArea()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
