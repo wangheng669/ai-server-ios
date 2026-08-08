@@ -16,6 +16,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  sync-mac-x-mirror:
+    name: Sync mac-x governance mirror
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - mac-x-preflight
+    timeout-minutes: 10
+    steps:
+      - name: Check out the latest synchronization guard
+        uses: actions/checkout@v4
+
+      - name: Safely synchronize the governance mirror
+        run: |
+          ./ci/automatic-main-sync.sh \
+            /home/wanngheng/home/ai-server-ios
+
   sync-office-mac-mini:
     name: Sync office Mac mini
     runs-on:
