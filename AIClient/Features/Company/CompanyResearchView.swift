@@ -314,7 +314,6 @@ struct CompanyResearchView: View {
                 Spacer()
                 Text("\((store.companies.firstIndex(of: company) ?? 0) + 1)/\(store.companies.count)")
                     .font(.subheadline.monospacedDigit())
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 5)
@@ -396,7 +395,175 @@ struct CompanyResearchView: View {
     }
 
     private func overviewSection(_ company: CompanyResearchProfile) -> some View {
-        dashboardOverview(company)
+        nativeOverview(company)
+    }
+
+    private func nativeOverview(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            nativeMetricStrip(company)
+            nativeFinancialTrend(company)
+            nativeOperatingSignals(company)
+            nativeNextReport(company)
+        }
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    private func nativeMetricStrip(_ company: CompanyResearchProfile) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                nativeMetricCard("最新价", marketPrice(company.market), note: marketChange(company.market), icon: "chart.line.uptrend.xyaxis", color: companyAccent(company))
+                nativeMetricCard("总市值", marketCap(company.market?.marketCap), note: "当前市值", icon: "circle.grid.2x2", color: .indigo)
+                nativeMetricCard("PE (TTM)", formattedMultiple(company.market?.pe), note: "滚动市盈率", icon: "percent", color: .blue)
+                nativeMetricCard("ROE (TTM)", latestROE(company), note: company.financials.years.last?.year ?? "最新", icon: "gauge.with.dots.needle.50percent", color: .orange)
+            }
+        }
+        .scrollIndicators(.hidden)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+    }
+
+    private func nativeMetricCard(_ label: String, _ value: String, note: String, icon: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(color.opacity(0.1), in: Circle())
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+            Text(note).font(.caption2).foregroundStyle(note.hasPrefix("-") ? Color.green : color)
+        }
+        .padding(13)
+        .frame(width: 136, height: 138, alignment: .topLeading)
+        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
+        }
+    }
+
+    private func nativeFinancialTrend(_ company: CompanyResearchProfile) -> some View {
+        let years = Array(company.financials.years.suffix(3))
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("财务趋势").font(.headline)
+                    Text("营收与净利润 · \(company.financials.unit)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                HStack(spacing: 10) {
+                    nativeLegend("营收", color: companyAccent(company))
+                    nativeLegend("净利润", color: .blue)
+                }
+            }
+
+            Chart {
+                ForEach(years) { item in
+                    BarMark(x: .value("年度", item.year), y: .value("营收", item.revenue))
+                        .position(by: .value("指标", "营收"))
+                        .foregroundStyle(companyAccent(company).gradient)
+                        .cornerRadius(4)
+                    BarMark(x: .value("年度", item.year), y: .value("净利润", item.netProfit))
+                        .position(by: .value("指标", "净利润"))
+                        .foregroundStyle(Color.blue.gradient)
+                        .cornerRadius(4)
+                }
+            }
+            .chartLegend(.hidden)
+            .chartYAxis(.hidden)
+            .chartXAxis { AxisMarks { AxisValueLabel().font(.caption2); AxisGridLine().foregroundStyle(.clear) } }
+            .frame(height: 132)
+
+            HStack(spacing: 0) {
+                ForEach(years) { item in
+                    VStack(spacing: 3) {
+                        Text(item.year).font(.caption2).foregroundStyle(.secondary)
+                        Text("ROE \(String(format: "%.2f%%", item.roe))").font(.caption.weight(.medium)).monospacedDigit()
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.vertical, 9)
+            .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .padding(16)
+        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
+        }
+    }
+
+    private func nativeLegend(_ title: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Capsule().fill(color).frame(width: 12, height: 4)
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func nativeOperatingSignals(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("经营信号").font(.headline)
+                Text("服务端最新研究状态").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 10)
+
+            ForEach(Array((company.indicators ?? []).enumerated()), id: \.element.id) { index, indicator in
+                if index > 0 { Divider().padding(.leading, 20) }
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(nativeSignalColor(indicator.status))
+                        .frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(indicator.label).font(.subheadline.weight(.medium))
+                        Text(indicator.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Text(dashboardStatus(indicator.status, value: indicator.value))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(nativeSignalColor(indicator.status))
+                }
+                .padding(.vertical, 10)
+            }
+        }
+        .padding(16)
+        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
+        }
+    }
+
+    private func nativeSignalColor(_ status: String) -> Color {
+        if status.contains("改善") || status.contains("上升") { return .green }
+        if status.contains("关注") || status.contains("观察") { return .orange }
+        return .secondary
+    }
+
+    private func nativeNextReport(_ company: CompanyResearchProfile) -> some View {
+        HStack(spacing: 13) {
+            Image(systemName: "calendar")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(companyAccent(company))
+                .frame(width: 38, height: 38)
+                .background(companyAccent(company).opacity(0.09), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text("下次财报").font(.headline)
+                Text("\(company.nextReport.reportType) · \(company.questions.count)项待验证")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(reportDate(company.nextReport.expectedDate))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(companyAccent(company))
+        }
+        .padding(16)
+        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
+        }
     }
 
     private func dashboardMetric(_ label: String, _ value: String) -> some View {
