@@ -636,6 +636,7 @@ private struct TodayWorldLeaderSystem: Identifiable {
         }.compactMap { key in
             guard let name = names[key] else { return nil }
             let systemGroups = groups.filter { $0.companyKey == key }
+            guard !systemGroups.isEmpty else { return nil }
             let leaderSection = payload.sections.first {
                 $0.entity?.companyKey == key && $0.id.hasPrefix("leader:")
             }
@@ -986,7 +987,7 @@ struct TodayWorldAuthorGroup: Identifiable {
             ))
             groupIndexByAuthor[groupingKey] = groups.count - 1
         }
-        return groups
+        return groups.filter { !$0.posts.isEmpty }
     }
 
     private static func normalizedHandle(_ value: String?) -> String? {
