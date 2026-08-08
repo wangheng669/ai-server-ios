@@ -503,6 +503,7 @@ private struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayWorldStore()
     @State private var selectedSystem: TodayWorldSystemSelection?
+    @State private var showsYesterdayReport = false
 
     var body: some View {
         NavigationStack {
@@ -527,6 +528,15 @@ private struct TodayWorldView: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
+        .sheet(isPresented: $showsYesterdayReport) {
+            if let report = store.yesterdayReport {
+                TodayWorldYesterdayReportSheet(report: report)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
+                    .presentationContentInteraction(.scrolls)
+            }
+        }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await store.load(force: true)
@@ -536,7 +546,10 @@ private struct TodayWorldView: View {
             Task { await store.load(force: true) }
         }
         .onChange(of: selectedSystem) { _, system in
-            showsDetail = system != nil
+            showsDetail = system != nil || showsYesterdayReport
+        }
+        .onChange(of: showsYesterdayReport) { _, isPresented in
+            showsDetail = isPresented || selectedSystem != nil
         }
     }
 
@@ -548,7 +561,8 @@ private struct TodayWorldView: View {
             LazyVStack(alignment: .leading, spacing: 10) {
                 TodayWorldDailyDigestView(
                     report: store.yesterdayReport,
-                    isRefreshing: store.isLoading
+                    isRefreshing: store.isLoading,
+                    onOpen: { showsYesterdayReport = true }
                 )
 
                 LazyVStack(spacing: 8) {
@@ -816,6 +830,7 @@ private struct TodayWorldSelectedSystemView: View {
 private struct TodayWorldDailyDigestView: View {
     let report: TodayWorldYesterdayReportPayload?
     let isRefreshing: Bool
+    let onOpen: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -860,16 +875,23 @@ private struct TodayWorldDailyDigestView: View {
             } else if let overview = report?.report.overview, !overview.isEmpty {
                 Text(overview)
                     .font(.system(size: 12.5))
-                    .lineLimit(4)
+                    .lineLimit(3)
 
-                ForEach(Array((report?.report.highlights ?? []).prefix(3))) { highlight in
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Circle().fill(Color.teal).frame(width: 4, height: 4)
-                        Text("\(highlight.person)：\(highlight.summary)")
-                            .font(.system(size: 12.5))
-                            .lineLimit(2)
+                Button(action: onOpen) {
+                    HStack(spacing: 8) {
+                        Text("查看完整日报")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Text("\(report?.report.highlights.count ?? 0) 条重点")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
                     }
+                    .foregroundStyle(.primary)
+                    .padding(.top, 2)
                 }
+                .buttonStyle(.plain)
             } else {
                 Text("昨日没有可展示的日报，生成状态可在治理后台查看。")
                     .font(.system(size: 13))
@@ -891,6 +913,139 @@ private struct TodayWorldDailyDigestView: View {
         parser.dateFormat = "yyyy-MM-dd"
         let value = report?.date ?? ""
         guard let date = parser.date(from: value) else { return value.isEmpty ? "昨日" : value }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 EEEE"
+        return formatter.string(from: date)
+    }
+}
+
+private struct TodayWorldYesterdayReportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let report: TodayWorldYesterdayReportPayload
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    header
+
+                    if let overview = report.report.overview, !overview.isEmpty {
+                        sectionTitle("日报概览")
+                        Text(overview)
+                            .font(.system(size: 15))
+                            .lineSpacing(6)
+                    }
+
+                    if !report.report.highlights.isEmpty {
+                        sectionTitle("全部重点动态（\(report.report.highlights.count)）")
+                        ForEach(Array(report.report.highlights.enumerated()), id: \.element.id) { index, highlight in
+                            highlightCard(index: index, highlight: highlight)
+                        }
+                    }
+
+                    if !report.report.watchList.isEmpty {
+                        sectionTitle("值得继续关注（\(report.report.watchList.count)）")
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(Array(report.report.watchList.enumerated()), id: \.offset) { index, item in
+                                HStack(alignment: .top, spacing: 10) {
+                                    Text("\(index + 1)")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.orange)
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.orange.opacity(0.12), in: Circle())
+                                    Text(item)
+                                        .font(.system(size: 14))
+                                        .lineSpacing(3)
+                                }
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Label(report.model ?? "Qwen", systemImage: "sparkles")
+                        Spacer()
+                        Text("\(report.totalTokens) Token")
+                    }
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+            .scrollIndicators(.hidden)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("昨日日报")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(displayDate, systemImage: "calendar")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.teal)
+            Text("\(report.sourceCount) 位人物 · \(report.postCount) 条动态")
+                .font(.system(size: 24, weight: .bold))
+            Text("由 Qwen 汇总昨日有更新的人物动态")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.teal.opacity(0.09), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(.secondary)
+    }
+
+    private func highlightCard(index: Int, highlight: TodayWorldYesterdayReportHighlight) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(index + 1)")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 25, height: 25)
+                .background(Color.teal, in: Circle())
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 7) {
+                    Text(highlight.person)
+                        .font(.system(size: 14, weight: .semibold))
+                    if let company = highlight.company, !company.isEmpty {
+                        Text(company)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.secondary.opacity(0.09), in: Capsule())
+                    }
+                }
+                Text(highlight.summary)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+            }
+        }
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var displayDate: String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: report.date) else { return report.date }
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
