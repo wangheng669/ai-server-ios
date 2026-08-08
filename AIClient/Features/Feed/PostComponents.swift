@@ -3,27 +3,85 @@ import UIKit
 import ImageIO
 import AVKit
 import CryptoKit
-import SafariServices
+import WebKit
 
 struct InAppBrowserDestination: Identifiable, Equatable {
     let url: URL
     var id: String { url.absoluteString }
 }
 
-struct InAppBrowserSheet: UIViewControllerRepresentable {
+struct InAppBrowserSheet: View {
     let url: URL
+    @State private var title = ""
 
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        let configuration = SFSafariViewController.Configuration()
-        configuration.entersReaderIfAvailable = false
-        configuration.barCollapsingEnabled = true
-        let controller = SFSafariViewController(url: url, configuration: configuration)
-        controller.dismissButtonStyle = .close
-        controller.preferredControlTintColor = .systemBlue
-        return controller
+    var body: some View {
+        VStack(spacing: 0) {
+            if !title.isEmpty {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                Divider().opacity(0.55)
+            }
+            MinimalInAppWebView(url: url, title: $title)
+        }
+        .background(Color(uiColor: .systemBackground))
+    }
+}
+
+private struct MinimalInAppWebView: UIViewRepresentable {
+    let url: URL
+    @Binding var title: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(title: $title) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = true
+        webView.allowsLinkPreview = false
+        webView.load(URLRequest(url: url))
+        return webView
     }
 
-    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        @Binding private var title: String
+
+        init(title: Binding<String>) { _title = title }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            updateTitle(from: webView)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            updateTitle(from: webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if let requestURL = navigationAction.request.url {
+                webView.load(URLRequest(url: requestURL))
+            }
+            return nil
+        }
+
+        private func updateTitle(from webView: WKWebView) {
+            let value = webView.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !value.isEmpty { title = value }
+        }
+    }
 }
 
 struct PostAuthorHeader: View {
