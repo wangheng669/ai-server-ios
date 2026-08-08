@@ -1,5 +1,6 @@
 import Charts
 import SwiftUI
+import UIKit
 
 struct CompanyResearchResponse: Decodable {
     let data: CompanyResearchPayload
@@ -250,14 +251,8 @@ struct CompanyResearchView: View {
         _store = StateObject(wrappedValue: store)
     }
 
-    private var selectedCompanyBinding: Binding<String> {
-        Binding(
-            get: { selectedCompanyID ?? store.companies.first?.id ?? "" },
-            set: {
-                selectedCompanyID = $0
-                selectedSection = .overview
-            }
-        )
+    private var selectedCompany: CompanyResearchProfile? {
+        store.companies.first { $0.id == selectedCompanyID } ?? store.companies.first
     }
 
     var body: some View {
@@ -265,14 +260,8 @@ struct CompanyResearchView: View {
             Group {
                 if store.isLoading && store.companies.isEmpty {
                     companyLoadingState
-                } else if !store.companies.isEmpty {
-                    TabView(selection: selectedCompanyBinding) {
-                        ForEach(store.companies) { company in
-                            companyPage(company)
-                                .tag(company.id)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
+                } else if let company = selectedCompany {
+                    companyPage(company)
                 } else if let errorMessage = store.errorMessage {
                     ContentUnavailableView(errorMessage, systemImage: "building.2.crop.circle", description: Text("请稍后重新进入公司页"))
                 } else {
@@ -298,6 +287,7 @@ struct CompanyResearchView: View {
         }
         .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemGroupedBackground))
+        .background(CompanyScrollBounceConfigurator())
     }
 
     private var companyLoadingState: some View {
@@ -325,13 +315,37 @@ struct CompanyResearchView: View {
     private func hero(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
-                companyLogo(company)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(company.shortName)
-                        .font(.system(size: 18, weight: .bold))
-                    Text("\(company.ticker) · \(company.exchange)")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                Menu {
+                    ForEach(store.companies) { item in
+                        Button {
+                            selectedCompanyID = item.id
+                            selectedSection = .overview
+                        } label: {
+                            if item.id == company.id {
+                                Label(item.shortName, systemImage: "checkmark")
+                            } else {
+                                Text(item.shortName)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(alignment: .center, spacing: 10) {
+                        companyLogo(company)
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 5) {
+                                Text(company.shortName)
+                                    .font(.system(size: 18, weight: .bold))
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Text("\(company.ticker) · \(company.exchange)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 Text("\((store.companies.firstIndex(of: company) ?? 0) + 1)/\(store.companies.count)")
                     .font(.subheadline.monospacedDigit())
@@ -1607,6 +1621,32 @@ struct CompanyResearchView: View {
         let parts = date.split(separator: "-")
         guard parts.count == 3 else { return date }
         return "\(parts[1])月\(parts[2])日"
+    }
+}
+
+private struct CompanyScrollBounceConfigurator: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        configure(from: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        configure(from: uiView)
+    }
+
+    private func configure(from view: UIView) {
+        DispatchQueue.main.async {
+            var ancestor = view.superview
+            while let current = ancestor {
+                if let scrollView = current as? UIScrollView {
+                    scrollView.bounces = false
+                    scrollView.alwaysBounceVertical = false
+                    return
+                }
+                ancestor = current.superview
+            }
+        }
     }
 }
 
