@@ -480,8 +480,7 @@ private struct TodayWorldView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayWorldStore()
-    @State private var selectedPost: Post?
-    @State private var selectedSystemKey = "musk"
+    @State private var selectedSystem: TodayWorldSystemSelection?
 
     var body: some View {
         NavigationStack {
@@ -499,10 +498,8 @@ private struct TodayWorldView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedPost) { post in
-            NavigationStack {
-                PostDetailView(post: post, presentedAsSheet: true)
-            }
+        .sheet(item: $selectedSystem) { selection in
+            TodayWorldSystemSheet(systemKey: selection.id, store: store)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
@@ -516,15 +513,14 @@ private struct TodayWorldView: View {
             guard rootTabIsActive, phase == .active else { return }
             Task { await store.load(force: true) }
         }
-        .onChange(of: selectedPost) { _, post in
-            showsDetail = post != nil
+        .onChange(of: selectedSystem) { _, system in
+            showsDetail = system != nil
         }
     }
 
     private func timeline(_ payload: TodayWorldPayload) -> some View {
         let allGroups = TodayWorldAuthorGroup.make(from: payload)
         let systems = TodayWorldLeaderSystem.make(from: payload, groups: allGroups)
-        let selectedSystem = systems.first { $0.key == selectedSystemKey } ?? systems.first
 
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
@@ -535,32 +531,14 @@ private struct TodayWorldView: View {
                     isRefreshing: store.isLoading
                 )
 
-                ScrollView(.horizontal) {
-                    HStack(spacing: 9) {
-                        ForEach(systems) { system in
-                            TodayWorldLeaderChip(
-                                system: system,
-                                isSelected: selectedSystem?.key == system.key,
-                                action: {
-                                    selectedSystemKey = system.key
-                                }
-                            )
+                LazyVStack(spacing: 8) {
+                    ForEach(systems) { system in
+                        TodayWorldLeaderRow(system: system) {
+                            selectedSystem = TodayWorldSystemSelection(id: system.key)
                         }
                     }
-                    .padding(.horizontal, 14)
                 }
-                .scrollIndicators(.hidden)
-
-                if let selectedSystem {
-                    TodayWorldSelectedSystemView(
-                        system: selectedSystem,
-                        onOpenPost: { selectedPost = $0 },
-                        onLoadMore: {
-                            await store.loadMore(systemKey: selectedSystem.key)
-                        },
-                        isLoadingMore: store.isLoadingMore
-                    )
-                }
+                .padding(.horizontal, 14)
 
                 Color.clear.frame(height: 88)
             }
@@ -606,6 +584,10 @@ private struct TodayWorldView: View {
             .buttonStyle(.borderedProminent)
         }
     }
+}
+
+private struct TodayWorldSystemSelection: Identifiable, Equatable {
+    let id: String
 }
 
 private struct TodayWorldLeaderSystem: Identifiable {
@@ -658,52 +640,87 @@ private struct TodayWorldLeaderSystem: Identifiable {
     }
 }
 
-private struct TodayWorldLeaderChip: View {
+private struct TodayWorldLeaderRow: View {
     let system: TodayWorldLeaderSystem
-    let isSelected: Bool
     let action: () -> Void
-
-    private var selectedForeground: Color {
-        .white
-    }
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    leaderAvatar
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(system.name)
-                            .font(.system(size: 14, weight: .bold))
-                        Text(system.leaderName)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(isSelected ? selectedForeground.opacity(0.72) : Color.secondary)
-                    }
+            HStack(spacing: 12) {
+                AvatarView(url: system.leaderAvatarURL, name: system.leaderName, size: 44)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(system.leaderName)
+                        .font(.system(size: 15.5, weight: .bold))
+                    Text(system.name)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(system.postCount > 0 ? Color.green : Color.secondary.opacity(0.5))
-                        .frame(width: 5, height: 5)
-                    Text(system.postCount > 0 ? "\(system.postCount) 条更新" : "暂无更新")
-                        .font(.system(size: 10.5, weight: .semibold))
-                }
+
+                Spacer(minLength: 8)
+
+                Text(system.postCount > 0 ? "\(system.postCount) 条" : "暂无更新")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(system.postCount > 0 ? Color.green : Color.secondary)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .foregroundStyle(isSelected ? selectedForeground : Color.primary)
-            .padding(10)
-            .frame(width: 142, alignment: .leading)
-            .background(isSelected ? InvestmentDesign.accent : Color.secondary.opacity(0.055))
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.055))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.07), lineWidth: 0.6)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 0.6)
             }
         }
         .buttonStyle(.plain)
+        .accessibilityHint("打开动态弹窗")
     }
+}
 
-    private var leaderAvatar: some View {
-        AvatarView(url: system.leaderAvatarURL, name: system.leaderName, size: 34)
-        .overlay { Circle().stroke(selectedForeground.opacity(isSelected ? 0.25 : 0), lineWidth: 1) }
+private struct TodayWorldSystemSheet: View {
+    let systemKey: String
+    @ObservedObject var store: TodayWorldStore
+    @State private var selectedPost: Post?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let payload = store.payload {
+                    let groups = TodayWorldAuthorGroup.make(from: payload)
+                    let systems = TodayWorldLeaderSystem.make(from: payload, groups: groups)
+                    if let system = systems.first(where: { $0.key == systemKey }) {
+                        ScrollView {
+                            TodayWorldSelectedSystemView(
+                                system: system,
+                                onOpenPost: { selectedPost = $0 },
+                                onLoadMore: { await store.loadMore(systemKey: system.key) },
+                                isLoadingMore: store.isLoadingMore
+                            )
+                            .padding(.top, 8)
+                            .padding(.bottom, 24)
+                        }
+                        .navigationTitle(system.leaderName)
+                        .navigationBarTitleDisplayMode(.inline)
+                    }
+                }
+            }
+            .background(Color(uiColor: .systemBackground))
+        }
+        .sheet(item: $selectedPost) { post in
+            NavigationStack {
+                PostDetailView(post: post, presentedAsSheet: true)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
+        }
     }
 }
 
