@@ -119,10 +119,7 @@ struct PostDetailView: View {
             WikipediaReaderView(entity: entity)
                 .wikipediaReaderPresentation()
         }
-        .sheet(item: $presentedXueqiuLink) { destination in
-            InAppBrowserSheet(url: destination.url)
-                .inAppBrowserPresentation()
-        }
+        .inAppBrowserCover(item: $presentedXueqiuLink)
         .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
         // navigation pop recognizer on this screen prevents a scrub from popping
