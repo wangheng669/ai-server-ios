@@ -241,6 +241,7 @@ struct CompanyResearchView: View {
     @StateObject private var store: CompanyResearchStore
     @State private var selectedSection: Section = .overview
     @State private var financialRange: FinancialRange = .quarterly
+    @State private var presentedCompany: CompanyResearchProfile?
 
     init() {
         _store = StateObject(wrappedValue: CompanyResearchStore())
@@ -265,11 +266,11 @@ struct CompanyResearchView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: CompanyResearchProfile.self) { company in
+            .sheet(item: $presentedCompany) { company in
                 companyPage(company)
-                    .navigationTitle(company.shortName)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar(.visible, for: .navigationBar)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
             }
         }
         .task { await store.load() }
@@ -278,25 +279,18 @@ struct CompanyResearchView: View {
     private var companyHub: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("公司研究")
-                        .font(.system(size: 28, weight: .bold))
-                    Text("先比较，再深入理解一家公司")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 4)
-                .padding(.top, 10)
-
                 ForEach(store.companies) { company in
-                    NavigationLink(value: company) {
+                    Button {
+                        selectedSection = .overview
+                        presentedCompany = company
+                    } label: {
                         companyHubCard(company)
                     }
                     .buttonStyle(.plain)
-                    .simultaneousGesture(TapGesture().onEnded { selectedSection = .overview })
                 }
             }
             .padding(.horizontal, 11)
+            .padding(.top, 8)
             .padding(.bottom, 14)
         }
         .scrollIndicators(.hidden)
