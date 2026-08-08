@@ -1173,4 +1173,10 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(groups[0].posts.count, 2)
         XCTAssertEqual(Set(groups[0].posts.map(\.id)), Set([42, 43]))
     }
+
+    func testTodayWorldTextRemovesBlankAndRepeatedLines() {
+        let text = "  第一段  \n\n第一段\n  第二段\n\n\n"
+
+        XCTAssertEqual(TodayWorldTextFormatter.compact(text), "第一段 第二段")
+    }
 }
