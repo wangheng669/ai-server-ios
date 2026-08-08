@@ -162,6 +162,7 @@ final class LearningStore {
     private(set) var isVideoLibraryLoading = false
     private(set) var errorMessage: String?
     private(set) var bookshelfErrorMessage: String?
+    private(set) var bookshelfFetchedAt: Date?
     private(set) var conceptLibraryErrorMessage: String?
     private let service: LearningService
 
@@ -182,12 +183,14 @@ final class LearningStore {
     }
 
     func loadBookshelf(force: Bool = false) async {
-        guard force || bookshelf == nil else { return }
+        let isStale = bookshelfFetchedAt.map { Date().timeIntervalSince($0) >= 300 } ?? true
+        guard force || bookshelf == nil || isStale else { return }
         isBookshelfLoading = true
         bookshelfErrorMessage = nil
         defer { isBookshelfLoading = false }
         do {
             bookshelf = try await service.fetchBookshelf()
+            bookshelfFetchedAt = .now
         } catch is CancellationError {
             return
         } catch {

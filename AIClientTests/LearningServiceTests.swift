@@ -102,6 +102,7 @@ final class LearningServiceTests: XCTestCase {
             {
               "data": {
                 "source": "微信读书",
+                "today_reading_seconds": 1560,
                 "books": [{
                   "id": "3300203616",
                   "title": "哈萨比斯：谷歌AI之脑",
@@ -112,6 +113,7 @@ final class LearningServiceTests: XCTestCase {
                   "is_finished": false,
                   "reading_progress": 42,
                   "record_reading_seconds": 7380,
+                  "estimated_remaining_seconds": 10140,
                   "read_update_time": 1785655834
                 }, {
                   "id": "907585",
@@ -130,12 +132,14 @@ final class LearningServiceTests: XCTestCase {
         )
         let response = try JSONDecoder().decode(LearningBookshelfResponse.self, from: data)
         XCTAssertEqual(response.data.source, "微信读书")
+        XCTAssertEqual(response.data.todayReadingText, "26 分钟")
         XCTAssertEqual(response.data.books.count, 2)
         XCTAssertEqual(response.data.books.first?.id, "3300203616")
         XCTAssertEqual(response.data.books.first?.coverURL?.host, "example.com")
         XCTAssertEqual(response.data.books.first?.openURL?.scheme, "weread")
         XCTAssertEqual(response.data.books.first?.displayReadingProgress, 42)
         XCTAssertEqual(response.data.books.first?.readingDurationText, "累计阅读 2 小时 3 分钟")
+        XCTAssertEqual(response.data.books.first?.estimatedRemainingText, "预计还需 2 小时 49 分钟")
         XCTAssertEqual(response.data.books.first?.readUpdateTime, 1_785_655_834)
         XCTAssertEqual(response.data.books.last?.title, "滚雪球：巴菲特和他的财富人生（套装共2册）")
     }
