@@ -649,7 +649,7 @@ private struct TodayWorldLeaderSystem: Identifiable {
                 postCount: systemGroups.reduce(0) { $0 + $1.posts.count },
                 hasMore: payload.sections.contains { $0.entity?.companyKey == key && $0.hasMore },
                 leaderName: leaderSection?.entity?.name ?? leader?.authorName ?? name,
-                leaderAvatarURL: leaderSection?.entity?.avatarURL.flatMap(URL.init(string:)) ?? leader?.avatarURL
+                leaderAvatarURL: leaderSection?.entity?.avatarURL.flatMap(MediaURL.image) ?? leader?.avatarURL
             )
         }
     }
@@ -920,7 +920,7 @@ struct TodayWorldAuthorGroup: Identifiable {
                 authorKey: authorKey,
                 authorName: authorName,
                 handle: handle,
-                avatarURL: entity.avatarURL.flatMap(URL.init(string:)),
+                avatarURL: entity.avatarURL.flatMap(MediaURL.image),
                 companyKey: companyKey,
                 companyName: entity.companyName ?? "奥特曼系",
                 roleLabel: entity.type == "company" ? "官方" : "",
@@ -970,7 +970,7 @@ struct TodayWorldAuthorGroup: Identifiable {
             }
 
             let avatarURL = entry.post.avatarURL
-                ?? entry.section.entity?.avatarURL.flatMap(URL.init(string:))
+                ?? entry.section.entity?.avatarURL.flatMap(MediaURL.image)
             groups.append(TodayWorldAuthorGroup(
                 id: "\(authorKey)-\(entry.post.id)",
                 authorKey: authorKey,
