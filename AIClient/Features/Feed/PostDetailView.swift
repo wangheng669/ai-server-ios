@@ -121,9 +121,7 @@ struct PostDetailView: View {
         }
         .sheet(item: $presentedXueqiuLink) { destination in
             InAppBrowserSheet(url: destination.url)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
+                .inAppBrowserPresentation()
         }
         .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the

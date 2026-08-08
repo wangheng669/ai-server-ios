@@ -32,6 +32,25 @@ struct InAppBrowserSheet: View {
     }
 }
 
+extension View {
+    @ViewBuilder
+    func inAppBrowserPresentation() -> some View {
+        if #available(iOS 18.0, *) {
+            self
+                .presentationDetents([.large])
+                .presentationSizing(.page)
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        } else {
+            self
+                .frame(idealWidth: 700, idealHeight: 800)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
+    }
+}
+
 private struct MinimalInAppWebView: UIViewRepresentable {
     let url: URL
     @Binding var title: String

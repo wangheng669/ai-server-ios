@@ -163,9 +163,7 @@ struct NewsFeedView: View {
         }
         .sheet(item: $presentedXueqiuLink) { destination in
             InAppBrowserSheet(url: destination.url)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
+                .inAppBrowserPresentation()
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
