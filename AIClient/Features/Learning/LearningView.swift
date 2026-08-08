@@ -320,41 +320,20 @@ struct LearningView: View {
     private var videoLessons: some View {
         if let lessons = store.videoLibrary?.lessons, !lessons.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("小Lin说")
-                        .font(.system(size: 34, weight: .semibold, design: .serif))
-                    Text("把复杂的投资概念，讲成看得懂、用得上的判断框架。")
-                        .font(.system(size: 14.5))
+                        .font(.system(size: 20, weight: .bold, design: .serif))
+                    Text("投资视频课")
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(KnowledgePagePalette.supportingText)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 8) {
-                        Label("投资视频课", systemImage: "play.circle.fill")
-                        Text("\(lessons.count) 期精选")
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(KnowledgePagePalette.accent)
-                }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    LinearGradient(
-                        colors: [KnowledgePagePalette.accent.opacity(0.18), KnowledgePagePalette.surface],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+                    Spacer()
+                    Label("\(lessons.count) 期", systemImage: "play.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(KnowledgePagePalette.accent)
                 }
                 .padding(.horizontal, 20)
-
-                Text("精选视频")
-                    .font(.system(size: 22, weight: .bold, design: .serif))
-                    .padding(.horizontal, 20)
-                    .padding(.top, 26)
-                    .padding(.bottom, 13)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
 
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 13) {
@@ -370,6 +349,7 @@ struct LearningView: View {
                     .padding(.horizontal, 20)
                 }
                 .scrollIndicators(.hidden)
+                .padding(.bottom, 18)
             }
         } else if store.isVideoLibraryLoading {
             ProgressView()
@@ -1024,7 +1004,7 @@ private struct LearningVideoLessonCard: View {
                         )
                     }
                 }
-                .frame(width: 276, height: 154)
+                .frame(width: 210, height: 112)
                 .clipped()
 
                 LinearGradient(
@@ -1043,27 +1023,22 @@ private struct LearningVideoLessonCard: View {
                 .padding(.horizontal, 10)
                 .frame(height: 27)
                 .background(.black.opacity(0.55), in: Capsule())
-                .padding(12)
+                .padding(9)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(lesson.creator)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(KnowledgePagePalette.accent)
+            VStack(alignment: .leading, spacing: 5) {
                 Text(lesson.title)
-                    .font(.system(size: 17, weight: .bold, design: .serif))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text(lesson.summary)
-                    .font(.system(size: 12.5))
+                Text(lesson.creator)
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(KnowledgePagePalette.supportingText)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
             }
-            .padding(14)
+            .padding(11)
         }
-        .frame(width: 276)
+        .frame(width: 210)
         .background(KnowledgePagePalette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .overlay {
