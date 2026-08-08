@@ -2439,24 +2439,29 @@ private struct WeiboFollowingRow: View {
                     Spacer(minLength: 0)
                 }
 
-                Text(contentParts.body)
-                    .font(.system(size: 16))
-                    .foregroundStyle(.primary)
-                    .lineSpacing(4)
-                    .lineLimit(4)
-                    .multilineTextAlignment(.leading)
+                InlineEmojiText(
+                    text: contentParts.body,
+                    emojis: post.weiboInlineEmojis,
+                    fontSize: 16,
+                    lineSpacing: 4,
+                    maximumNumberOfLines: 4
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let context = contentParts.context {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: "arrow.2.squarepath")
                             .font(.system(size: 11, weight: .medium))
-                        Text(context)
-                            .font(.system(size: 13.5))
-                            .lineLimit(2)
+                        InlineEmojiText(
+                            text: context,
+                            emojis: post.weiboInlineEmojis,
+                            fontSize: 13.5,
+                            lineSpacing: 2,
+                            maximumNumberOfLines: 2,
+                            textColor: .tertiaryLabel
+                        )
                     }
                     .foregroundStyle(.tertiary)
-                    .lineSpacing(2)
                 }
 
                 if !visibleImages.isEmpty {
