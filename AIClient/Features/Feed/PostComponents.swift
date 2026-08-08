@@ -41,6 +41,13 @@ private struct MinimalInAppWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        if Self.isWeChatURL(url) {
+            configuration.userContentController.addUserScript(WKUserScript(
+                source: Self.weChatRevealScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            ))
+        }
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
@@ -51,6 +58,40 @@ private struct MinimalInAppWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    private static func isWeChatURL(_ url: URL) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        return host == "mp.weixin.qq.com" || host.hasSuffix(".mp.weixin.qq.com")
+    }
+
+    private static let weChatRevealScript = #"""
+    (() => {
+      const reveal = () => {
+        const content = document.getElementById('js_content');
+        if (content) {
+          const style = getComputedStyle(content);
+          if (style.visibility !== 'visible') content.style.setProperty('visibility', 'visible', 'important');
+          if (style.opacity !== '1') content.style.setProperty('opacity', '1', 'important');
+          if (style.display === 'none') content.style.setProperty('display', 'block', 'important');
+        }
+        document.querySelectorAll('img[data-src]').forEach((image) => {
+          if (!image.getAttribute('src')) image.setAttribute('src', image.getAttribute('data-src'));
+        });
+        const articleTitle = document.getElementById('activity-name')?.textContent?.trim();
+        if (articleTitle && (!document.title.trim() || document.title === '微信公众平台')) {
+          document.title = articleTitle;
+        }
+      };
+      reveal();
+      new MutationObserver(reveal).observe(document.documentElement, {
+        attributes: true,
+        childList: true,
+        subtree: true
+      });
+      setTimeout(reveal, 300);
+      setTimeout(reveal, 1200);
+    })();
+    """#
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         @Binding private var title: String
@@ -79,7 +120,14 @@ private struct MinimalInAppWebView: UIViewRepresentable {
 
         private func updateTitle(from webView: WKWebView) {
             let value = webView.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !value.isEmpty { title = value }
+            if !value.isEmpty, value != "微信公众平台" {
+                title = value
+                return
+            }
+            webView.evaluateJavaScript("document.getElementById('activity-name')?.textContent?.trim() || ''") { [weak self] result, _ in
+                guard let self, let value = result as? String, !value.isEmpty else { return }
+                self.title = value
+            }
         }
     }
 }
