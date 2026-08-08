@@ -331,6 +331,7 @@ struct InlineEmojiText: View {
     var fontSize: CGFloat = 17
     var lineSpacing: CGFloat = 5
     var maximumNumberOfLines = 0
+    var textColor: UIColor = .label
     @State private var images: [URL: UIImage] = [:]
 
     var body: some View {
@@ -340,7 +341,8 @@ struct InlineEmojiText: View {
             images: images,
             fontSize: fontSize,
             lineSpacing: lineSpacing,
-            maximumNumberOfLines: maximumNumberOfLines
+            maximumNumberOfLines: maximumNumberOfLines,
+            textColor: textColor
         )
         .task(id: emojis) {
             let urls = Set(emojis.map(\.url))
@@ -367,6 +369,7 @@ private struct InlineEmojiTextView: UIViewRepresentable {
     let fontSize: CGFloat
     let lineSpacing: CGFloat
     let maximumNumberOfLines: Int
+    let textColor: UIColor
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -398,7 +401,7 @@ private struct InlineEmojiTextView: UIViewRepresentable {
         paragraph.lineSpacing = lineSpacing
         let result = NSMutableAttributedString(string: text, attributes: [
             .font: font,
-            .foregroundColor: UIColor.label,
+            .foregroundColor: textColor,
             .paragraphStyle: paragraph
         ])
 
