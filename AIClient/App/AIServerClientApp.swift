@@ -340,12 +340,12 @@ private struct RootNavigationBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            item(.observation, title: "自选", icon: "list.bullet.rectangle")
-            item(.investment, title: "行情", icon: "chart.line.uptrend.xyaxis")
-            item(.world, title: "发现", icon: "globe")
+            item(.observation, title: "观点", icon: "list.bullet.rectangle")
+            item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
+            item(.world, title: "今日世界", icon: "globe")
             item(.company, title: "公司", icon: "building.2")
-            item(.learning, title: "组合", icon: "books.vertical")
-            item(.people, title: "我的", icon: "person")
+            item(.learning, title: "知识", icon: "books.vertical")
+            item(.people, title: "人物", icon: "person")
         }
         .frame(maxWidth: 368)
         .frame(height: 54)
