@@ -78,6 +78,13 @@ struct DeploymentStatusSnapshot: Equatable {
         }
     }
 
+    var compactDetail: String {
+        switch phase {
+        case .running: runningStageTitle
+        case .succeeded, .failed: detail
+        }
+    }
+
     private var runningStageTitle: String {
         switch stage {
         case "merging": "正在合并代码"
@@ -135,7 +142,9 @@ final class DeploymentStatusStore: ObservableObject {
     private let defaults: UserDefaults
     private var realtimeClient: RealtimeFeedClient?
     private var snapshotTask: Task<Void, Never>?
+    private var dismissalTask: Task<Void, Never>?
     private static let acknowledgedCompletionKey = "iosDeploymentAcknowledgedCompletion"
+    private static let successDisplayDuration: Duration = .seconds(3)
 
     init(
         baseURL: URL = ServerConfiguration.currentURL,
@@ -164,6 +173,8 @@ final class DeploymentStatusStore: ObservableObject {
     func stop() {
         snapshotTask?.cancel()
         snapshotTask = nil
+        dismissalTask?.cancel()
+        dismissalTask = nil
         realtimeClient?.stop()
         realtimeClient = nil
     }
@@ -185,6 +196,8 @@ final class DeploymentStatusStore: ObservableObject {
     }
 
     private func apply(_ value: DeploymentStatusSnapshot) {
+        dismissalTask?.cancel()
+        dismissalTask = nil
         guard value.isVisible() else {
             snapshot = nil
             return
@@ -195,6 +208,14 @@ final class DeploymentStatusStore: ObservableObject {
                 return
             }
             defaults.set(value.completionIdentity, forKey: Self.acknowledgedCompletionKey)
+            snapshot = value
+            dismissalTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.successDisplayDuration)
+                guard !Task.isCancelled else { return }
+                self?.snapshot = nil
+                self?.dismissalTask = nil
+            }
+            return
         }
         snapshot = value
     }
@@ -210,20 +231,60 @@ struct DeploymentStatusTip: View {
     }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 7) {
-            Button {
-                withAnimation(.snappy(duration: 0.24)) { isExpanded.toggle() }
-            } label: {
-                statusIndicator
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isExpanded ? "收起自动更新状态" : "查看自动更新状态")
-
+        VStack(spacing: 8) {
             if isExpanded {
                 expandedTip
-                    .transition(.scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if case .succeeded = snapshot.phase {
+                compactTip
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(snapshot.detail)
+            } else {
+                Button {
+                    withAnimation(.snappy(duration: 0.24)) { isExpanded.toggle() }
+                } label: {
+                    compactTip
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "收起自动更新状态" : "查看自动更新状态，\(snapshot.detail)")
             }
         }
+        .frame(maxWidth: 352)
+    }
+
+    private var compactTip: some View {
+        HStack(spacing: 10) {
+            statusIndicator
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(snapshot.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(snapshot.compactDetail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if case .running = snapshot.phase {
+                Text("\(Int(snapshot.progress * 100))%")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(snapshot.tint)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 48)
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(snapshot.tint.opacity(0.22), lineWidth: 0.75)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
     }
 
     private var statusIndicator: some View {
@@ -234,20 +295,19 @@ struct DeploymentStatusTip: View {
                 .trim(from: 0, to: max(0.07, snapshot.progress))
                 .stroke(snapshot.tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            if case .succeeded = snapshot.phase {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(snapshot.tint)
-            }
-            if case .failed = snapshot.phase {
-                Image(systemName: "exclamationmark")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(snapshot.tint)
-            }
+            Image(systemName: statusSymbol)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(snapshot.tint)
         }
-        .frame(width: 18, height: 18)
-        .contentShape(Circle())
-        .frame(width: 36, height: 36)
+        .frame(width: 22, height: 22)
+    }
+
+    private var statusSymbol: String {
+        switch snapshot.phase {
+        case .running: "arrow.down"
+        case .succeeded: "checkmark"
+        case .failed: "exclamationmark"
+        }
     }
 
     private var expandedTip: some View {
@@ -282,7 +342,7 @@ struct DeploymentStatusTip: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(14)
-        .frame(width: 230, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
