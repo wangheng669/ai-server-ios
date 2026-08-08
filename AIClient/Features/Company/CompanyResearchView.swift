@@ -264,7 +264,7 @@ struct CompanyResearchView: View {
         NavigationStack {
             Group {
                 if store.isLoading && store.companies.isEmpty {
-                    ProgressView("正在读取研究档案")
+                    companyLoadingState
                 } else if !store.companies.isEmpty {
                     TabView(selection: selectedCompanyBinding) {
                         ForEach(store.companies) { company in
@@ -274,7 +274,7 @@ struct CompanyResearchView: View {
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                 } else if let errorMessage = store.errorMessage {
-                    ContentUnavailableView(errorMessage, systemImage: "building.2.crop.circle", description: Text("下拉或点击重试"))
+                    ContentUnavailableView(errorMessage, systemImage: "building.2.crop.circle", description: Text("请稍后重新进入公司页"))
                 } else {
                     ContentUnavailableView("暂无公司", systemImage: "building.2", description: Text("公司档案将在服务端持续补充"))
                 }
@@ -297,8 +297,29 @@ struct CompanyResearchView: View {
             .padding(.bottom, 10)
         }
         .scrollIndicators(.hidden)
-        .background(Color(uiColor: .systemBackground))
-        .refreshable { await store.load(force: true) }
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private var companyLoadingState: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(uiColor: .systemBackground))
+                .frame(height: 150)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(uiColor: .systemBackground))
+                .frame(height: 44)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(uiColor: .systemBackground))
+                .frame(height: 280)
+            Text("正在整理公司研究档案")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(uiColor: .systemGroupedBackground))
+        .accessibilityLabel("正在整理公司研究档案")
     }
 
     private func hero(_ company: CompanyResearchProfile) -> some View {
@@ -320,17 +341,18 @@ struct CompanyResearchView: View {
 
             Divider()
             HStack(alignment: .center, spacing: 0) {
-                Text(marketPrice(company.market))
-                    .font(.system(size: 23, weight: .bold, design: .rounded))
-                    .foregroundStyle(companyAccent(company))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(marketPrice(company.market))
+                        .font(.system(size: 21, weight: .bold, design: .rounded))
+                        .foregroundStyle(companyAccent(company))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                    Text(marketChange(company.market))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(marketChangeColor(company.market))
+                        .lineLimit(1)
+                }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(marketChange(company.market))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(marketChangeColor(company.market))
-                    .lineLimit(1)
-                    .frame(width: 58)
                 dashboardMetric("总市值", marketCap(company.market?.marketCap))
                 dashboardMetric("PE", formattedMultiple(company.market?.pe))
                 dashboardMetric("ROE", latestROE(company))
@@ -338,6 +360,14 @@ struct CompanyResearchView: View {
             .padding(.vertical, 5)
             .overlay(alignment: .bottom) { Divider() }
         }
+        .padding(10)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.primary.opacity(0.045), lineWidth: 0.5)
+        }
+        .padding(.top, 5)
+        .padding(.bottom, 10)
     }
 
     private func pageIndicator(_ company: CompanyResearchProfile) -> some View {
@@ -364,18 +394,18 @@ struct CompanyResearchView: View {
                 .buttonStyle(.plain)
             }
         }
-        .overlay(alignment: .bottom) { Divider() }
+        .padding(3)
+        .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     private func compactTab(_ title: String, selected: Bool, color: Color) -> some View {
         Text(title)
-            .font(.subheadline.weight(selected ? .semibold : .medium))
-            .foregroundStyle(selected ? color : .secondary)
+            .font(.subheadline.weight(selected ? .semibold : .regular))
+            .foregroundStyle(selected ? Color.primary : .secondary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(selected ? color : .clear).frame(height: 2)
-            }
+            .padding(.vertical, 8)
+            .background(selected ? Color(uiColor: .systemBackground) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: selected ? color.opacity(0.09) : .clear, radius: 4, y: 2)
     }
 
     @ViewBuilder
@@ -400,7 +430,6 @@ struct CompanyResearchView: View {
 
     private func nativeOverview(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            nativeMetricStrip(company)
             nativeFinancialTrend(company)
             nativeOperatingSignals(company)
             nativeNextReport(company)
@@ -487,7 +516,7 @@ struct CompanyResearchView: View {
             .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .padding(16)
-        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
@@ -528,7 +557,7 @@ struct CompanyResearchView: View {
             }
         }
         .padding(16)
-        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
@@ -559,7 +588,7 @@ struct CompanyResearchView: View {
                 .foregroundStyle(companyAccent(company))
         }
         .padding(16)
-        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
