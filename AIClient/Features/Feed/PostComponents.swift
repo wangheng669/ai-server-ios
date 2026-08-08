@@ -13,6 +13,7 @@ struct InAppBrowserDestination: Identifiable, Equatable {
 struct InAppBrowserSheet: View {
     let url: URL
     @State private var title = ""
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,30 +25,46 @@ struct InAppBrowserSheet: View {
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 20)
+                            .onEnded { value in
+                                if value.translation.height > 80 { dismiss() }
+                            }
+                    )
                 Divider().opacity(0.55)
             }
             MinimalInAppWebView(url: url, title: $title)
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .accessibilityAction(.escape) { dismiss() }
+    }
+}
+
+private struct InAppBrowserCoverModifier: ViewModifier {
+    @Binding var destination: InAppBrowserDestination?
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if horizontalSizeClass == .regular {
+            content.fullScreenCover(item: $destination) { destination in
+                InAppBrowserSheet(url: destination.url)
+            }
+        } else {
+            content.sheet(item: $destination) { destination in
+                InAppBrowserSheet(url: destination.url)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+            }
+        }
     }
 }
 
 extension View {
-    @ViewBuilder
-    func inAppBrowserPresentation() -> some View {
-        if #available(iOS 18.0, *) {
-            self
-                .presentationDetents([.large])
-                .presentationSizing(.page)
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
-        } else {
-            self
-                .frame(idealWidth: 700, idealHeight: 800)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
-        }
+    func inAppBrowserCover(item: Binding<InAppBrowserDestination?>) -> some View {
+        modifier(InAppBrowserCoverModifier(destination: item))
     }
 }
 

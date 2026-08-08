@@ -161,10 +161,7 @@ struct NewsFeedView: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
-        .sheet(item: $presentedXueqiuLink) { destination in
-            InAppBrowserSheet(url: destination.url)
-                .inAppBrowserPresentation()
-        }
+        .inAppBrowserCover(item: $presentedXueqiuLink)
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
                 model.startRealtime()
