@@ -1972,7 +1972,11 @@ struct PostDetailView: View {
                         }
                         .padding(.top, 24)
 
-                        if let replyHandle = xReplyHandle {
+                        if let reply = post.meta?.replyContext,
+                           let replyText = reply.displayText {
+                            XReplyContextCard(reply: reply, text: replyText)
+                                .padding(.top, 14)
+                        } else if let replyHandle = xReplyHandle {
                             Label("回复 \(replyHandle)", systemImage: "arrowshape.turn.up.left")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(.secondary)
@@ -2543,6 +2547,11 @@ struct PostDetailView: View {
 
     @MainActor
     private func loadXComments() async {
+        if post.meta?.metrics?.replies == 0 {
+            xComments = []
+            xCommentsError = nil
+            return
+        }
         guard let tweetID = post.xTweetID else {
             xCommentsError = "无法识别帖子 ID"
             return
@@ -2558,7 +2567,7 @@ struct PostDetailView: View {
         } catch is CancellationError {
             return
         } catch {
-            xCommentsError = error.localizedDescription
+            xCommentsError = NetworkErrorPresentation.message(for: error)
         }
     }
 
