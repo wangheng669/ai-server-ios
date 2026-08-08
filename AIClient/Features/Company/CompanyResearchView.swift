@@ -239,7 +239,6 @@ struct CompanyResearchView: View {
     }
 
     @StateObject private var store: CompanyResearchStore
-    @State private var selectedCompanyID: String?
     @State private var selectedSection: Section = .overview
     @State private var financialRange: FinancialRange = .quarterly
 
@@ -251,17 +250,13 @@ struct CompanyResearchView: View {
         _store = StateObject(wrappedValue: store)
     }
 
-    private var selectedCompany: CompanyResearchProfile? {
-        store.companies.first { $0.id == selectedCompanyID } ?? store.companies.first
-    }
-
     var body: some View {
         NavigationStack {
             Group {
                 if store.isLoading && store.companies.isEmpty {
                     companyLoadingState
-                } else if let company = selectedCompany {
-                    companyPage(company)
+                } else if !store.companies.isEmpty {
+                    companyHub
                 } else if let errorMessage = store.errorMessage {
                     ContentUnavailableView(errorMessage, systemImage: "building.2.crop.circle", description: Text("请稍后重新进入公司页"))
                 } else {
@@ -270,8 +265,95 @@ struct CompanyResearchView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: CompanyResearchProfile.self) { company in
+                companyPage(company)
+                    .navigationTitle(company.shortName)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar(.visible, for: .navigationBar)
+            }
         }
         .task { await store.load() }
+    }
+
+    private var companyHub: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("公司研究")
+                        .font(.system(size: 28, weight: .bold))
+                    Text("先比较，再深入理解一家公司")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 4)
+                .padding(.top, 10)
+
+                ForEach(store.companies) { company in
+                    NavigationLink(value: company) {
+                        companyHubCard(company)
+                    }
+                    .buttonStyle(.plain)
+                    .simultaneousGesture(TapGesture().onEnded { selectedSection = .overview })
+                }
+            }
+            .padding(.horizontal, 11)
+            .padding(.bottom, 14)
+        }
+        .scrollIndicators(.hidden)
+        .background(Color(uiColor: .systemGroupedBackground))
+        .background(CompanyScrollBounceConfigurator())
+    }
+
+    private func companyHubCard(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                companyLogo(company)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(company.shortName)
+                        .font(.headline)
+                    Text("\(company.ticker) · \(company.exchange)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(marketPrice(company.market))
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(companyAccent(company))
+                    Text(marketChange(company.market))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(marketChangeColor(company.market))
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 0) {
+                hubMetric("总市值", marketCap(company.market?.marketCap))
+                hubMetric("PE", formattedMultiple(company.market?.pe))
+                hubMetric("ROE", latestROE(company))
+            }
+        }
+        .padding(16)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.primary.opacity(0.045), lineWidth: 0.5)
+        }
+    }
+
+    private func hubMetric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func companyPage(_ company: CompanyResearchProfile) -> some View {
@@ -315,37 +397,14 @@ struct CompanyResearchView: View {
     private func hero(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
-                Menu {
-                    ForEach(store.companies) { item in
-                        Button {
-                            selectedCompanyID = item.id
-                            selectedSection = .overview
-                        } label: {
-                            if item.id == company.id {
-                                Label(item.shortName, systemImage: "checkmark")
-                            } else {
-                                Text(item.shortName)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(alignment: .center, spacing: 10) {
-                        companyLogo(company)
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(spacing: 5) {
-                                Text(company.shortName)
-                                    .font(.system(size: 18, weight: .bold))
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            Text("\(company.ticker) · \(company.exchange)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                companyLogo(company)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(company.shortName)
+                        .font(.system(size: 18, weight: .bold))
+                    Text("\(company.ticker) · \(company.exchange)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
                 Spacer()
                 Text("\((store.companies.firstIndex(of: company) ?? 0) + 1)/\(store.companies.count)")
                     .font(.subheadline.monospacedDigit())
