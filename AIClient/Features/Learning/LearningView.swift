@@ -444,10 +444,18 @@ struct LearningView: View {
     @ViewBuilder
     private var booksContent: some View {
         let books = store.bookshelf?.books ?? []
-        Text("最近阅读")
-            .font(.system(size: 24, weight: .bold, design: .serif))
+        HStack(alignment: .firstTextBaseline) {
+            Text("我的书架")
+                .font(.system(size: 24, weight: .bold, design: .serif))
+            Spacer()
+            if !books.isEmpty {
+                Text("\(books.count) 本 · \(store.bookshelf?.source ?? "微信读书")")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
         .padding(.horizontal, 20)
-        .padding(.bottom, 12)
+        .padding(.bottom, 14)
 
         if store.isBookshelfLoading && store.bookshelf == nil {
             ProgressView("正在载入书架")
@@ -489,31 +497,26 @@ struct LearningView: View {
                 .padding(.horizontal, 20)
 
                 if books.count > 1 {
-                    Text("近期书目")
-                        .font(.system(size: 18, weight: .bold, design: .serif))
-                        .padding(.horizontal, 20)
-                        .padding(.top, 28)
-                        .padding(.bottom, 12)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("书架")
+                            .font(.system(size: 17, weight: .bold, design: .serif))
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: 16) {
-                            ForEach(Array(books.dropFirst().enumerated()), id: \.element.id) { index, recentBook in
-                                Button {
-                                    if let url = recentBook.openURL {
-                                        openURL(url)
-                                    }
-                                } label: {
-                                    RecentKnowledgeBookCard(
-                                        book: recentBook,
-                                        paletteIndex: index + 1
-                                    )
+                        ForEach(Array(books.dropFirst().enumerated()), id: \.element.id) { index, recentBook in
+                            Button {
+                                if let url = recentBook.openURL {
+                                    openURL(url)
                                 }
-                                .buttonStyle(LearningPressStyle())
+                            } label: {
+                                RecentKnowledgeBookRow(
+                                    book: recentBook,
+                                    paletteIndex: index + 1
+                                )
                             }
+                            .buttonStyle(LearningPressStyle())
                         }
-                        .padding(.horizontal, 20)
                     }
-                    .contentMargins(.bottom, 8, for: .scrollContent)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 22)
                 }
             }
         }
@@ -1956,68 +1959,57 @@ private struct BookReadingDeskCard: View {
     let source: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .fill(Color(red: 0.81, green: 0.67, blue: 0.48).opacity(0.52))
-
-                Circle()
-                    .fill(Color.brown.opacity(0.25))
-                    .frame(width: 82, height: 82)
-                    .overlay {
-                        Circle()
-                            .stroke(.white.opacity(0.42), lineWidth: 7)
-                            .padding(10)
-                    }
-                    .offset(x: 142, y: -78)
-
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(red: 0.16, green: 0.12, blue: 0.09))
-                    .frame(width: 5, height: 112)
-                    .rotationEffect(.degrees(18))
-                    .offset(x: 143, y: 63)
-
+        HStack(spacing: 16) {
+            ZStack(alignment: .topLeading) {
                 KnowledgeBookCover(book: book, paletteIndex: 0)
-                    .frame(width: 126, height: 176)
-                    .shadow(color: .black.opacity(0.24), radius: 10, x: 0, y: 8)
+                    .frame(width: 92, height: 132)
+                    .shadow(color: .black.opacity(0.18), radius: 7, x: 0, y: 5)
+
+                Text("继续读")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(KnowledgePagePalette.accent, in: Capsule())
+                    .offset(x: -7, y: 8)
             }
-            .frame(height: 222)
 
-            Text(book.title)
-                .font(.system(size: 21, weight: .bold, design: .serif))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .padding(.top, 16)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("最近阅读")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(KnowledgePagePalette.accent)
 
-            Text(book.author)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.top, 5)
+                Text(book.title)
+                    .font(.system(size: 18, weight: .bold, design: .serif))
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+                    .padding(.top, 7)
 
-            BookReadingProgressView(book: book)
-                .padding(.top, 15)
+                Text(book.author)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.top, 5)
 
-            HStack(spacing: 9) {
-                Spacer()
-                Text(book.isFinished ? "再次阅读" : "继续阅读")
-                    .font(.system(size: 13, weight: .semibold))
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-            }
-            .foregroundStyle(KnowledgePagePalette.accent)
-            .padding(.top, 16)
+                Spacer(minLength: 8)
 
-            HStack(spacing: 6) {
-                if let category = book.category, !category.isEmpty {
-                    Text(category)
+                BookReadingProgressView(book: book)
+
+                HStack(spacing: 5) {
+                    Text(book.isFinished ? "再次阅读" : "继续阅读")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
                 }
-                Text("·")
-                Text(source)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(KnowledgePagePalette.accent)
+                .padding(.top, 9)
             }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .padding(.top, 12)
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(KnowledgePagePalette.accent.opacity(0.12), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)")
@@ -2115,33 +2107,39 @@ private struct KnowledgeBookCover: View {
     }
 }
 
-private struct RecentKnowledgeBookCard: View {
+private struct RecentKnowledgeBookRow: View {
     let book: KnowledgeBook
     let paletteIndex: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        HStack(spacing: 14) {
             KnowledgeBookCover(book: book, paletteIndex: paletteIndex, compact: true)
-                .frame(width: 104, height: 146)
-                .shadow(color: .black.opacity(0.14), radius: 7, x: 0, y: 5)
+                .frame(width: 62, height: 88)
+                .shadow(color: .black.opacity(0.12), radius: 5, x: 0, y: 3)
 
-            Text(book.title)
-                .font(.system(size: 14, weight: .semibold, design: .serif))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .frame(height: 38, alignment: .top)
-                .padding(.top, 10)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(book.title)
+                    .font(.system(size: 15, weight: .semibold, design: .serif))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
 
-            Text(book.author)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.top, 4)
+                Text(book.author)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.top, 5)
 
-            BookReadingProgressView(book: book, compact: true)
-                .padding(.top, 7)
+                Spacer(minLength: 7)
+
+                BookReadingProgressView(book: book, compact: true)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
         }
-        .frame(width: 104, alignment: .leading)
+        .padding(12)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.displayReadingProgress.map { "阅读进度\($0)%" } ?? (book.isFinished ? "已读完" : "阅读中"))")
         .accessibilityHint("在微信读书打开")
