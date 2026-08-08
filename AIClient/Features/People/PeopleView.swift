@@ -4517,7 +4517,7 @@ private struct PersonPostTimelineRow: View {
     }
 }
 
-private struct XReplyContextCard: View {
+struct XReplyContextCard: View {
     let reply: XReplyContext
     let text: String
 
