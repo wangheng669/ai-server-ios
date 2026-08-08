@@ -317,10 +317,10 @@ struct LearningBookshelf: Decodable, Equatable {
     private static func durationText(seconds: Int64, empty: String) -> String {
         guard seconds >= 60 else { return empty }
         let minutes = seconds / 60
-        if minutes < 60 { return "(minutes) 分钟" }
+        if minutes < 60 { return "\(minutes) 分钟" }
         let hours = minutes / 60
         let remainder = minutes % 60
-        return remainder == 0 ? "(hours) 小时" : "(hours) 小时 (remainder) 分钟"
+        return remainder == 0 ? "\(hours) 小时" : "\(hours) 小时 \(remainder) 分钟"
     }
 }
 
@@ -381,12 +381,12 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
               let seconds = estimatedRemainingSeconds,
               seconds >= 60 else { return isFinished ? "已读完" : nil }
         let minutes = seconds / 60
-        if minutes < 60 { return "预计还需 (minutes) 分钟" }
+        if minutes < 60 { return "预计还需 \(minutes) 分钟" }
         let hours = minutes / 60
         let remainder = minutes % 60
         return remainder == 0
-            ? "预计还需 (hours) 小时"
-            : "预计还需 (hours) 小时 (remainder) 分钟"
+            ? "预计还需 \(hours) 小时"
+            : "预计还需 \(hours) 小时 \(remainder) 分钟"
     }
 
     var lastReadText: String? {
