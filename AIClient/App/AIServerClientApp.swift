@@ -715,10 +715,6 @@ private struct TodayWorldSelectedSystemView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TodayWorldAccountRosterView(groups: system.groups)
-
-            Divider().opacity(0.5)
-
             if system.groups.allSatisfy({ $0.posts.isEmpty }) {
                 HStack(spacing: 12) {
                     Image(systemName: "clock.arrow.circlepath")
@@ -776,38 +772,6 @@ private struct TodayWorldSelectedSystemView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.075), lineWidth: 0.6) }
         .padding(.horizontal, 14)
-    }
-}
-
-private struct TodayWorldAccountRosterView: View {
-    let groups: [TodayWorldAuthorGroup]
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(groups) { group in
-                    HStack(spacing: 6) {
-                        AvatarView(url: group.avatarURL, name: group.authorName, size: 24)
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(group.authorName)
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .lineLimit(1)
-                            Text(group.posts.isEmpty ? "今日暂无" : "\(group.posts.count) 条")
-                                .font(.system(size: 9.5, weight: .medium))
-                                .foregroundStyle(group.posts.isEmpty ? Color.secondary : Color.green)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.06), in: Capsule())
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-        .scrollIndicators(.hidden)
-        .accessibilityLabel("旗下账号")
     }
 }
 
