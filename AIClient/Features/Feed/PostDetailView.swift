@@ -56,6 +56,7 @@ struct PostDetailView: View {
     @State private var isSpeechLoading = false
     @State private var isSpeechPlaying = false
     @State private var speechErrorMessage: String?
+    @State private var presentedXueqiuLink: InAppBrowserDestination?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -117,6 +118,13 @@ struct PostDetailView: View {
         .sheet(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
                 .wikipediaReaderPresentation()
+        }
+        .sheet(item: $presentedXueqiuLink) { destination in
+            InAppBrowserSheet(url: destination.url)
+                .ignoresSafeArea()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
         }
         .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
@@ -917,6 +925,7 @@ struct PostDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else if post.xueqiuBodyInlineEmojis.isEmpty {
                         xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
+                            .environment(\.openURL, xueqiuLinkOpenAction)
                             .font(.system(size: 20))
                             .lineSpacing(10)
                             .textSelection(.enabled)
@@ -957,6 +966,7 @@ struct PostDetailView: View {
                         VStack(alignment: .leading, spacing: 14) {
                             (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
                                 .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
+                                .environment(\.openURL, xueqiuLinkOpenAction)
                                 .font(.system(size: 16.5))
                                 .lineSpacing(7)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1127,6 +1137,13 @@ struct PostDetailView: View {
             searchLocation = range.location + range.length
         }
         return Text(attributed)
+    }
+
+    private var xueqiuLinkOpenAction: OpenURLAction {
+        OpenURLAction { url in
+            presentedXueqiuLink = InAppBrowserDestination(url: url)
+            return .handled
+        }
     }
 
     private var youtubeDetail: some View {
