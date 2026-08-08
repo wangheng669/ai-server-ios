@@ -318,6 +318,7 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
     let openURLValue: String
     let isFinished: Bool
     let readingProgress: Int?
+    let recordReadingSeconds: Int64?
     let readUpdateTime: Int64?
 
     enum CodingKeys: String, CodingKey {
@@ -326,6 +327,7 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
         case openURLValue = "open_url"
         case isFinished = "is_finished"
         case readingProgress = "reading_progress"
+        case recordReadingSeconds = "record_reading_seconds"
         case readUpdateTime = "read_update_time"
     }
 
@@ -340,6 +342,29 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
         if isFinished { return 100 }
         guard let readingProgress else { return nil }
         return min(max(readingProgress, 0), 100)
+    }
+
+    var readingDurationText: String? {
+        guard let seconds = recordReadingSeconds, seconds >= 60 else { return nil }
+        let minutes = seconds / 60
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let remainingMinutes = minutes % 60
+            return remainingMinutes == 0 ? "累计阅读 \(hours) 小时" : "累计阅读 \(hours) 小时 \(remainingMinutes) 分钟"
+        }
+        return "累计阅读 \(minutes) 分钟"
+    }
+
+    var lastReadText: String? {
+        guard let timestamp = readUpdateTime, timestamp > 0 else { return nil }
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "今天读过" }
+        if calendar.isDateInYesterday(date) { return "昨天读过" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hans_CN")
+        formatter.dateFormat = "M月d日读过"
+        return formatter.string(from: date)
     }
 }
 
