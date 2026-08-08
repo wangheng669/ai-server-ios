@@ -13,6 +13,20 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.companies.first?.consensus?.metrics.first?.value, "910亿美元")
     }
 
+    func testDecodesServerBackedCompanyResearchFramework() throws {
+        let data = Data(#"{"data":{"companies":[{"id":"kweichow-moutai","name":"贵州茅台酒股份有限公司","shortName":"贵州茅台","logoUrl":"/img/company-logos/kweichow-moutai.png","ticker":"600519.SH","exchange":"上海证券交易所","industry":"白酒","location":"中国贵州","tagline":"高端白酒龙头","thesis":"持续跟踪","metrics":[],"highlights":[],"moats":[],"risks":[],"questions":[],"sources":[],"buyback":{"status":"已完成","asOfDate":"2026-08-08","shares":"--","amount":"--","percentage":"--","priceRange":"--","purpose":"--","progressNote":"--","source":{"title":"公告","url":"https://example.com"}},"nextReport":{"reportType":"半年度报告","expectedDate":"2026-08-15","dateStatus":"已公告","note":"--","source":{"title":"公告","url":"https://example.com"}},"framework":{"businessSummary":"品牌与稀缺产能驱动","revenueModel":"茅台酒与系列酒","customers":"经销商和消费者","pricingPower":"强","competitivePosition":"行业领先","capitalAllocation":"分红与回购","financialQuality":"现金流质量较高","currentChanges":[{"label":"渠道","detail":"直营占比变化"}],"falsificationConditions":["批价长期弱于出厂价"]},"business":[{"key":"production","title":"生产","detail":"基酒酿造"}],"indicators":[{"key":"wholesale_price","label":"批价","value":"待补充","status":"待验证","trend":"待验证","note":"观察渠道景气","asOfDate":"2026-08-08"}],"updates":[{"key":"annual_report","occurredOn":"2026-04-02","category":"财报","title":"年度报告","status":"已披露","summary":"收入利润保持增长","impact":"验证经营质量"}],"financials":{"unit":"亿元","years":[],"source":{"title":"年报","url":"https://example.com"}},"updatedAt":"2026-08-08T00:00:00Z"}],"updatedAt":"2026-08-08T00:00:00Z"}}"#.utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let company = try decoder.decode(CompanyResearchResponse.self, from: data).data.companies[0]
+
+        XCTAssertEqual(company.framework?.businessSummary, "品牌与稀缺产能驱动")
+        XCTAssertEqual(company.framework?.currentChanges.first?.detail, "直营占比变化")
+        XCTAssertEqual(company.business?.first?.key, "production")
+        XCTAssertEqual(company.indicators?.first?.value, "待补充")
+        XCTAssertEqual(company.updates?.first?.category, "财报")
+    }
+
     func testDecodesCompanyNetIncomeTTM() throws {
         let data = Data(#"{"success":true,"data":{"symbol":"AAPL","netIncomeTTM":122575000000,"currency":"USD","period":"TTM","fiscalYear":"2025","dataSource":"TradingView Scanner"}}"#.utf8)
 
