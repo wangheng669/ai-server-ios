@@ -3,6 +3,28 @@ import UIKit
 import ImageIO
 import AVKit
 import CryptoKit
+import SafariServices
+
+struct InAppBrowserDestination: Identifiable, Equatable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
+
+struct InAppBrowserSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let configuration = SFSafariViewController.Configuration()
+        configuration.entersReaderIfAvailable = false
+        configuration.barCollapsingEnabled = true
+        let controller = SFSafariViewController(url: url, configuration: configuration)
+        controller.dismissButtonStyle = .close
+        controller.preferredControlTintColor = .systemBlue
+        return controller
+    }
+
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
 
 struct PostAuthorHeader: View {
     let post: Post

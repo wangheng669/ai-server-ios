@@ -104,6 +104,7 @@ struct NewsFeedView: View {
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
     @State private var preparedWebViews: [Int: WKWebView] = [:]
+    @State private var presentedXueqiuLink: InAppBrowserDestination?
     @State private var showsAllRSSSources = false
     @State private var rssSourceSearch = ""
     @Namespace private var sourceSelectionAnimation
@@ -159,6 +160,13 @@ struct NewsFeedView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
+        }
+        .sheet(item: $presentedXueqiuLink) { destination in
+            InAppBrowserSheet(url: destination.url)
+                .ignoresSafeArea()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
@@ -586,7 +594,8 @@ struct NewsFeedView: View {
                             usesWeChatStyle: source == .wechat,
                             isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
                             isExpandedFlash: expandedFlashIDs.contains(post.id),
-                            onOpen: { openPost(displayPost) }
+                            onOpen: { openPost(displayPost) },
+                            onOpenLink: { presentedXueqiuLink = InAppBrowserDestination(url: $0) }
                         )
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -2564,6 +2573,7 @@ private struct NewsCardView: View {
     var isFeaturedBilibili = false
     var isExpandedFlash = false
     var onOpen: (() -> Void)?
+    var onOpenLink: ((URL) -> Void)?
     var body: some View {
         if post.isHotTopic { hotTopicCard }
         else if post.isFlash { flashCard }
@@ -2811,6 +2821,7 @@ private struct NewsCardView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onTapGesture { onOpen?() }
 
             if let emoji = post.xueqiuStandaloneInlineEmoji {
                 InlineEmojiImage(emoji: emoji)
@@ -2825,7 +2836,8 @@ private struct NewsCardView: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                xueqiuRichText(post.xueqiuBodyContent)
+                xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
+                    .environment(\.openURL, xueqiuLinkOpenAction)
                     .font(.system(size: 17))
                     .lineSpacing(8)
                     .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
@@ -2847,7 +2859,8 @@ private struct NewsCardView: View {
             if let quoteBody = post.xueqiuQuoteBody {
                 VStack(alignment: .leading, spacing: 12) {
                     (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
-                        .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody))
+                        .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
+                        .environment(\.openURL, xueqiuLinkOpenAction)
                         .font(.system(size: 15.5))
                         .lineSpacing(6)
                         .lineLimit(5)
@@ -2881,14 +2894,9 @@ private struct NewsCardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .overlay {
-            Button { onOpen?() } label: {
-                Color.clear
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("打开雪球文章详情")
-        }
+        .modifier(ConditionalTapGestureModifier(
+            isEnabled: post.xueqiuBodyLinks.isEmpty && post.xueqiuQuoteLinks.isEmpty
+        ) { onOpen?() })
         .zIndex(1)
     }
 
@@ -2899,25 +2907,42 @@ private struct NewsCardView: View {
         }
     }
 
-    private func xueqiuRichText(_ value: String) -> Text {
+    private func xueqiuRichText(_ value: String, links: [XueqiuTextLink] = []) -> Text {
         let nsValue = value as NSString
         let matches = (try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
             .matches(in: value, range: NSRange(location: 0, length: nsValue.length))) ?? []
-        var result = Text("")
-        var location = 0
+        var attributed = AttributedString(value)
         for match in matches {
-            if match.range.location > location {
-                result = result + Text(nsValue.substring(with: NSRange(location: location, length: match.range.location - location)))
-            }
+            guard let stringRange = Range(match.range, in: value),
+                  let lower = AttributedString.Index(stringRange.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(stringRange.upperBound, within: attributed) else { continue }
             let token = nsValue.substring(with: match.range)
-            let color = token.hasPrefix("$") ? Color(red: 0.95, green: 0.28, blue: 0.10) : Color.blue
-            result = result + Text(token).foregroundColor(color)
-            location = match.range.location + match.range.length
+            attributed[lower..<upper].foregroundColor = token.hasPrefix("$")
+                ? Color(red: 0.95, green: 0.28, blue: 0.10)
+                : Color.blue
         }
-        if location < nsValue.length {
-            result = result + Text(nsValue.substring(from: location))
+
+        var searchLocation = 0
+        for link in links where !link.label.isEmpty {
+            let searchRange = NSRange(location: searchLocation, length: nsValue.length - searchLocation)
+            let range = nsValue.range(of: link.label, options: [], range: searchRange)
+            guard range.location != NSNotFound,
+                  let stringRange = Range(range, in: value),
+                  let lower = AttributedString.Index(stringRange.lowerBound, within: attributed),
+                  let upper = AttributedString.Index(stringRange.upperBound, within: attributed) else { continue }
+            attributed[lower..<upper].foregroundColor = .blue
+            attributed[lower..<upper].underlineStyle = .single
+            attributed[lower..<upper].link = link.url
+            searchLocation = range.location + range.length
         }
-        return result
+        return Text(attributed)
+    }
+
+    private var xueqiuLinkOpenAction: OpenURLAction {
+        OpenURLAction { url in
+            onOpenLink?(url)
+            return .handled
+        }
     }
 
     private var truthCard: some View {
