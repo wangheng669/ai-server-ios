@@ -618,7 +618,6 @@ private struct TodayWorldLeaderSystem: Identifiable {
     let leaderName: String
     let leaderAvatarURL: URL?
     var id: String { key }
-    var accountSummary: String { accountNames.joined(separator: " / ") }
     var latestHeadline: String? { groups.first?.posts.first?.displayContent }
 
     static func make(from payload: TodayWorldPayload, groups: [TodayWorldAuthorGroup]) -> [TodayWorldLeaderSystem] {
@@ -716,25 +715,6 @@ private struct TodayWorldSelectedSystemView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(system.name)
-                        .font(.system(size: 18, weight: .bold))
-                    Spacer()
-                    Text("\(system.postCount) 条")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                Text(system.accountSummary)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-
-            Divider().opacity(0.5)
-
             TodayWorldAccountRosterView(groups: system.groups)
 
             Divider().opacity(0.5)
@@ -885,7 +865,7 @@ private struct TodayWorldDailyDigestView: View {
                     ForEach(Array(highlights.enumerated()), id: \.offset) { _, highlight in
                         HStack(alignment: .firstTextBaseline, spacing: 7) {
                             Circle().fill(Color.teal).frame(width: 4, height: 4)
-                            Text("\(highlight.0)：\(highlight.1)")
+                            Text("\(highlight.0)：\(TodayWorldTextFormatter.compact(highlight.1))")
                                 .font(.system(size: 12.5))
                                 .lineLimit(1)
                         }
@@ -947,7 +927,7 @@ struct TodayWorldAuthorGroup: Identifiable {
                 avatarURL: entity.avatarURL.flatMap(URL.init(string:)),
                 companyKey: companyKey,
                 companyName: entity.companyName ?? "奥特曼系",
-                roleLabel: entity.type == "company" ? "\(authorName) 官方" : "\(entity.companyName ?? "体系")成员",
+                roleLabel: entity.type == "company" ? "官方" : "",
                 posts: []
             ))
             groupIndexByAuthor[groupingKey] = groups.count - 1
@@ -1003,7 +983,7 @@ struct TodayWorldAuthorGroup: Identifiable {
                 avatarURL: avatarURL,
                 companyKey: companyKey,
                 companyName: companyName,
-                roleLabel: entry.section.entity?.type == "company" ? "\(authorName) 官方" : "\(companyName) 成员",
+                roleLabel: entry.section.entity?.type == "company" ? "官方" : "",
                 posts: [entry.post]
             ))
             groupIndexByAuthor[groupingKey] = groups.count - 1
@@ -1025,6 +1005,22 @@ struct TodayWorldAuthorGroup: Identifiable {
 private struct TodayWorldPostEntry {
     let post: Post
     let section: TodayWorldSection
+}
+
+enum TodayWorldTextFormatter {
+    static func compact(_ text: String) -> String {
+        var previousLine: String?
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { line in
+                guard line != previousLine else { return false }
+                previousLine = line
+                return true
+            }
+        return lines.joined(separator: " ")
+    }
 }
 
 private struct TodayWorldAuthorGroupView: View {
@@ -1054,10 +1050,12 @@ private struct TodayWorldAuthorGroupView: View {
 
                     Spacer(minLength: 0)
 
-                    Text(group.roleLabel)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                    if !group.roleLabel.isEmpty {
+                        Text(group.roleLabel)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
 
                 ForEach(Array(group.posts.enumerated()), id: \.element.id) { index, post in
@@ -1113,7 +1111,7 @@ private struct TodayWorldGroupedPostRow: View {
                             .foregroundStyle(.tertiary)
                     }
 
-                    Text(post.displayContent)
+                    Text(TodayWorldTextFormatter.compact(post.displayContent))
                         .font(.system(size: 14))
                         .foregroundStyle(.primary)
                         .lineSpacing(1)
