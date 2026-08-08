@@ -286,7 +286,6 @@ struct NewsFeedView: View {
         .frame(height: 52)
         .background(Color.clear)
         .animation(.snappy(duration: 0.25), value: model.source)
-        .sensoryFeedback(.selection, trigger: model.source)
     }
 
     private func sourceButton(_ source: FeedSource) -> some View {
