@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import OSLog
 import AVFoundation
+import UserNotifications
 
 private let learningImageLogger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "AIServerClient",
@@ -40,6 +41,7 @@ struct LearningView: View {
         .investment
         #endif
     }()
+    @State private var readingReminder = ReadingReminderManager()
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
@@ -148,6 +150,11 @@ struct LearningView: View {
         .task(id: "\(rootTabIsActive)-\(selectedSection)") {
             guard rootTabIsActive, selectedSection == .ideology else { return }
             await peopleStore.load()
+        }
+        .task(id: "books-\(rootTabIsActive)-\(selectedSection)") {
+            guard rootTabIsActive, selectedSection == .books else { return }
+            await store.loadBookshelf()
+            await readingReminder.restore()
         }
         .task(id: conceptImagePrefetchKey) {
             guard rootTabIsActive,
@@ -482,6 +489,13 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
         } else {
+            BooksReadingSummaryCard(
+                bookshelf: store.bookshelf,
+                reminder: readingReminder
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+
             if let book = books.first {
                 Button {
                     if let url = book.openURL {
@@ -2156,7 +2170,7 @@ private struct BookMetadataLine: View {
     var compact = false
 
     private var items: [String] {
-        [book.category?.replacingOccurrences(of: "-", with: " / "), book.lastReadText, book.readingDurationText]
+        [book.category?.replacingOccurrences(of: "-", with: " / "), book.lastReadText, book.estimatedRemainingText]
             .compactMap { value in
                 guard let value, !value.isEmpty else { return nil }
                 return value
@@ -2171,6 +2185,145 @@ private struct BookMetadataLine: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
         }
+    }
+}
+
+@MainActor
+@Observable
+private final class ReadingReminderManager {
+    private static let notificationID = "learning.daily-reading-reminder"
+    private static let enabledKey = "learning.daily-reading-reminder.enabled"
+
+    private(set) var isEnabled = UserDefaults.standard.object(forKey: enabledKey) == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: enabledKey)
+    private(set) var isUpdating = false
+    private(set) var errorMessage: String?
+
+    func restore() async {
+        guard isEnabled else { return }
+        await schedule(requestPermission: true)
+    }
+
+    func setEnabled(_ enabled: Bool) async {
+        isUpdating = true
+        errorMessage = nil
+        defer { isUpdating = false }
+        if enabled {
+            await schedule(requestPermission: true)
+        } else {
+            UNUserNotificationCenter.current().removePendingNotificationRequests(
+                withIdentifiers: [Self.notificationID]
+            )
+            isEnabled = false
+            UserDefaults.standard.set(false, forKey: Self.enabledKey)
+        }
+    }
+
+    private func schedule(requestPermission: Bool) async {
+        let center = UNUserNotificationCenter.current()
+        var settings = await center.notificationSettings()
+        if requestPermission, settings.authorizationStatus == .notDetermined {
+            do {
+                _ = try await center.requestAuthorization(options: [.alert, .sound])
+                settings = await center.notificationSettings()
+            } catch {
+                errorMessage = "无法申请通知权限"
+                return
+            }
+        }
+        guard settings.authorizationStatus == .authorized ||
+                settings.authorizationStatus == .provisional else {
+            isEnabled = false
+            UserDefaults.standard.set(false, forKey: Self.enabledKey)
+            if requestPermission { errorMessage = "请先在系统设置中允许通知" }
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "该读一会儿书了"
+        content.body = "打开书架，继续今天的阅读。"
+        content.sound = .default
+        var date = DateComponents()
+        date.hour = 9
+        date.minute = 0
+        let request = UNNotificationRequest(
+            identifier: Self.notificationID,
+            content: content,
+            trigger: UNCalendarNotificationTrigger(dateMatching: date, repeats: true)
+        )
+        do {
+            try await center.add(request)
+            isEnabled = true
+            UserDefaults.standard.set(true, forKey: Self.enabledKey)
+        } catch {
+            errorMessage = "读书提醒设置失败"
+        }
+    }
+}
+
+private struct BooksReadingSummaryCard: View {
+    let bookshelf: LearningBookshelf?
+    let reminder: ReadingReminderManager
+
+    private var remainingText: String {
+        bookshelf?.books.first(where: { !$0.isFinished })?.estimatedRemainingText ?? "暂无估算"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                metric(title: "今日阅读", value: bookshelf?.todayReadingText ?? "暂无数据")
+                Divider().frame(height: 34).padding(.horizontal, 16)
+                metric(title: "当前书籍", value: remainingText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 14)
+
+            Divider()
+
+            Button {
+                Task { await reminder.setEnabled(!reminder.isEnabled) }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: reminder.isEnabled ? "bell.fill" : "bell")
+                        .foregroundStyle(KnowledgePagePalette.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("每天 09:00 读书提醒")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(reminder.errorMessage ?? (reminder.isEnabled ? "已开启" : "点击开启"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(reminder.errorMessage == nil ? Color.secondary : Color.red)
+                    }
+                    Spacer()
+                    if reminder.isUpdating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: reminder.isEnabled ? "checkmark.circle.fill" : "chevron.right")
+                            .foregroundStyle(
+                                reminder.isEnabled
+                                    ? KnowledgePagePalette.accent
+                                    : Color(uiColor: .tertiaryLabel)
+                            )
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .disabled(reminder.isUpdating)
+        }
+        .padding(.horizontal, 14)
+        .overlay(alignment: .top) { Divider() }
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func metric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 14, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

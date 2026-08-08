@@ -302,7 +302,26 @@ final class LearningProgressStore {
 
 struct LearningBookshelf: Decodable, Equatable {
     let source: String
+    let todayReadingSeconds: Int64?
     let books: [KnowledgeBook]
+
+    enum CodingKeys: String, CodingKey {
+        case source, books
+        case todayReadingSeconds = "today_reading_seconds"
+    }
+
+    var todayReadingText: String {
+        Self.durationText(seconds: todayReadingSeconds ?? 0, empty: "今天还没开始")
+    }
+
+    private static func durationText(seconds: Int64, empty: String) -> String {
+        guard seconds >= 60 else { return empty }
+        let minutes = seconds / 60
+        if minutes < 60 { return "(minutes) 分钟" }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        return remainder == 0 ? "(hours) 小时" : "(hours) 小时 (remainder) 分钟"
+    }
 }
 
 struct LearningBookshelfResponse: Decodable {
@@ -319,6 +338,7 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
     let isFinished: Bool
     let readingProgress: Int?
     let recordReadingSeconds: Int64?
+    let estimatedRemainingSeconds: Int64?
     let readUpdateTime: Int64?
 
     enum CodingKeys: String, CodingKey {
@@ -328,6 +348,7 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
         case isFinished = "is_finished"
         case readingProgress = "reading_progress"
         case recordReadingSeconds = "record_reading_seconds"
+        case estimatedRemainingSeconds = "estimated_remaining_seconds"
         case readUpdateTime = "read_update_time"
     }
 
@@ -353,6 +374,19 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
             return remainingMinutes == 0 ? "累计阅读 \(hours) 小时" : "累计阅读 \(hours) 小时 \(remainingMinutes) 分钟"
         }
         return "累计阅读 \(minutes) 分钟"
+    }
+
+    var estimatedRemainingText: String? {
+        guard !isFinished,
+              let seconds = estimatedRemainingSeconds,
+              seconds >= 60 else { return isFinished ? "已读完" : nil }
+        let minutes = seconds / 60
+        if minutes < 60 { return "预计还需 (minutes) 分钟" }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        return remainder == 0
+            ? "预计还需 (hours) 小时"
+            : "预计还需 (hours) 小时 (remainder) 分钟"
     }
 
     var lastReadText: String? {
