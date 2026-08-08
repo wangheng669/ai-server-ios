@@ -513,6 +513,11 @@ struct LearningView: View {
                                 )
                             }
                             .buttonStyle(LearningPressStyle())
+
+                            if recentBook.id != books.last?.id {
+                                Divider()
+                                    .padding(.leading, 76)
+                            }
                         }
                     }
                     .padding(.horizontal, 20)
@@ -1991,6 +1996,9 @@ private struct BookReadingDeskCard: View {
                     .lineLimit(1)
                     .padding(.top, 5)
 
+                BookMetadataLine(book: book)
+                    .padding(.top, 6)
+
                 Spacer(minLength: 8)
 
                 BookReadingProgressView(book: book)
@@ -2005,12 +2013,7 @@ private struct BookReadingDeskCard: View {
                 .padding(.top, 9)
             }
         }
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(KnowledgePagePalette.accent.opacity(0.12), lineWidth: 1)
-        }
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)")
         .accessibilityHint("在\(source)继续阅读")
@@ -2129,6 +2132,9 @@ private struct RecentKnowledgeBookRow: View {
                     .lineLimit(1)
                     .padding(.top, 5)
 
+                BookMetadataLine(book: book, compact: true)
+                    .padding(.top, 5)
+
                 Spacer(minLength: 7)
 
                 BookReadingProgressView(book: book, compact: true)
@@ -2138,11 +2144,33 @@ private struct RecentKnowledgeBookRow: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.displayReadingProgress.map { "阅读进度\($0)%" } ?? (book.isFinished ? "已读完" : "阅读中"))")
         .accessibilityHint("在微信读书打开")
+    }
+}
+
+private struct BookMetadataLine: View {
+    let book: KnowledgeBook
+    var compact = false
+
+    private var items: [String] {
+        [book.category?.replacingOccurrences(of: "-", with: " / "), book.lastReadText, book.readingDurationText]
+            .compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+    }
+
+    var body: some View {
+        if !items.isEmpty {
+            Text(items.joined(separator: " · "))
+                .font(.system(size: compact ? 10 : 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
     }
 }
 
