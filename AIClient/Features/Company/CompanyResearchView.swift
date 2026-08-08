@@ -176,10 +176,10 @@ struct CompanyResearchView: View {
     }
 
     private enum Section: String, CaseIterable {
-        case overview = "概览"
+        case overview = "研究"
         case financial = "财务"
         case consensus = "预期"
-        case events = "事件"
+        case events = "动态"
         case sources = "资料"
     }
 
@@ -278,6 +278,12 @@ struct CompanyResearchView: View {
                     .foregroundStyle(.white.opacity(0.7))
             }
 
+            Text(company.tagline)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white.opacity(0.82))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+
             HStack(spacing: 8) {
                 heroMetric("总市值", marketCap(company.market?.marketCap))
                 heroMetric("市盈率", formattedMultiple(company.market?.pe))
@@ -364,28 +370,137 @@ struct CompanyResearchView: View {
     }
 
     private func overviewSection(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                Text("公司资料").font(.title3.bold())
-                Spacer()
-                Label("客观数据", systemImage: "checkmark.seal.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(companyAccent(company))
+        VStack(alignment: .leading, spacing: 14) {
+            researchThesis(company)
+
+            if !company.metrics.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    researchHeader("研究快照", subtitle: "理解这家公司最先要知道的事", icon: "scope", color: companyAccent(company))
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(company.metrics, id: \.label) { metric in
+                            researchMetric(metric, color: companyAccent(company))
+                        }
+                    }
+                }
+                .researchCard()
             }
-            factRow("股票代码", company.ticker, icon: "number")
+
+            researchListCard(
+                title: "值得关注",
+                subtitle: "当前研究亮点",
+                icon: "sparkles",
+                items: company.highlights,
+                color: companyAccent(company)
+            )
+
+            HStack(alignment: .top, spacing: 10) {
+                researchCompactCard(title: "护城河", icon: "shield.lefthalf.filled", items: company.moats, color: .blue)
+                researchCompactCard(title: "主要风险", icon: "exclamationmark.triangle.fill", items: company.risks, color: .orange)
+            }
+
+            researchListCard(
+                title: "持续跟踪",
+                subtitle: "下一次更新需要回答",
+                icon: "checklist",
+                items: company.questions,
+                color: .purple,
+                numbered: true
+            )
+
+            companyFacts(company)
+        }
+    }
+
+    private func researchThesis(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            researchHeader("核心判断", subtitle: "这家公司最重要的研究主线", icon: "quote.opening", color: companyAccent(company))
+            Text(company.thesis)
+                .font(.system(.headline, design: .rounded, weight: .semibold))
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .researchCard(tint: companyAccent(company))
+    }
+
+    private func researchHeader(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.subheadline.bold())
+                .foregroundStyle(color)
+                .frame(width: 32, height: 32)
+                .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func researchMetric(_ metric: CompanyResearchMetric, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(metric.label).font(.caption2).foregroundStyle(.secondary)
+            Text(metric.value).font(.subheadline.bold()).lineLimit(2).minimumScaleFactor(0.72)
+            Text(metric.note).font(.caption2).foregroundStyle(color).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(color.opacity(0.065), in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    private func researchListCard(title: String, subtitle: String, icon: String, items: [String], color: Color, numbered: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            researchHeader(title, subtitle: subtitle, icon: icon, color: color)
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                researchPoint(item, marker: numbered ? "\(index + 1)" : nil, color: color)
+            }
+        }
+        .researchCard()
+    }
+
+    private func researchCompactCard(title: String, icon: String, items: [String], color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.bold())
+                .foregroundStyle(color)
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 6) {
+                    Circle().fill(color).frame(width: 5, height: 5).padding(.top, 6)
+                    Text(item).font(.caption).foregroundStyle(.primary).lineSpacing(2)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+        .overlay { RoundedRectangle(cornerRadius: 18).stroke(color.opacity(0.12), lineWidth: 0.8) }
+    }
+
+    private func researchPoint(_ text: String, marker: String?, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if let marker { Text(marker).font(.caption2.bold()) }
+                else { Image(systemName: "checkmark").font(.caption2.bold()) }
+            }
+            .foregroundStyle(color)
+            .frame(width: 23, height: 23)
+            .background(color.opacity(0.1), in: Circle())
+            Text(text).font(.subheadline).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func companyFacts(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            researchHeader("公司资料", subtitle: company.name, icon: "building.2", color: companyAccent(company))
+            factRow("上市市场", "\(company.ticker) · \(company.exchange)", icon: "building.columns")
             Divider()
-            factRow("上市市场", company.exchange, icon: "building.columns")
+            factRow("行业与地区", "\(company.industry) · \(company.location)", icon: "mappin.and.ellipse")
             Divider()
-            factRow("所属行业", company.industry, icon: "square.grid.2x2")
-            Divider()
-            factRow("公司所在地", company.location, icon: "mappin.and.ellipse")
-            Divider()
-            factRow("数据更新时间", company.updatedAt.formatted(
+            factRow("更新时间", company.updatedAt.formatted(
                 .dateTime.locale(Locale(identifier: "zh_CN")).month().day().hour().minute()
             ), icon: "clock")
         }
-        .padding(18)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+        .researchCard()
     }
 
     private func factRow(_ label: String, _ value: String, icon: String) -> some View {
@@ -897,5 +1012,30 @@ struct CompanyResearchView: View {
         let parts = date.split(separator: "-")
         guard parts.count == 3 else { return date }
         return "\(parts[1])月\(parts[2])日"
+    }
+}
+
+private extension View {
+    func researchCard(tint: Color? = nil) -> some View {
+        padding(18)
+            .background {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .overlay(alignment: .topLeading) {
+                        if let tint {
+                            LinearGradient(
+                                colors: [tint.opacity(0.1), .clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        }
+                    }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke((tint ?? .secondary).opacity(tint == nil ? 0.08 : 0.16), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(0.035), radius: 10, y: 4)
     }
 }
