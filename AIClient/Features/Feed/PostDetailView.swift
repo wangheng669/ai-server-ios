@@ -31,11 +31,6 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretationStepLabel: String?
     @State private var bilibiliInterpretationDetail: String?
     @State private var bilibiliInterpretationTask: Task<Void, Never>?
-    @State private var youtubePlaybackState: YouTubePlaybackState = .idle
-    @State private var isYouTubeVideoReady = false
-    @State private var youtubePlaybackLabel: String?
-    @State private var youtubePlayerReloadID = UUID()
-    @State private var youtubePlaybackStartedAt: ContinuousClock.Instant?
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
@@ -172,9 +167,7 @@ struct PostDetailView: View {
                 await loadDetail()
             }
             await commentsTask?.value
-            if post.isYouTube {
-                await playYouTubeVideo()
-            } else if post.isBilibili {
+            if post.isBilibili {
                 await loadBilibiliSubtitles()
                 await loadBilibiliSummary()
             }
@@ -188,13 +181,8 @@ struct PostDetailView: View {
             }
             guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
             player = nil
-            if post.isYouTube {
-                youtubePlaybackState = .failed
-                isYouTubeVideoReady = false
-            } else {
-                videoPlaybackFailed = true
-                isVideoReady = false
-            }
+            videoPlaybackFailed = true
+            isVideoReady = false
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
             guard notification.object as? AVPlayerItem === speechPlayer?.currentItem else { return }
@@ -1141,244 +1129,32 @@ struct PostDetailView: View {
     }
 
     private var youtubeDetail: some View {
-        VStack(spacing: 0) {
-            youtubePlayerSurface
+        YouTubeVideoDetailView(
+            video: YouTubeVideoDetailModel(
+                id: "post-\(post.id)",
+                videoID: post.youtubeVideoID ?? "",
+                title: post.displayTitle,
+                channelName: post.authorName,
+                publishedLabel: post.formattedTime,
+                durationLabel: nil,
+                description: youtubeDescription,
+                coverURL: post.youtubeCoverURL,
+                avatarURL: post.avatarURL,
+                originalURL: post.linkURL
+            ),
+            subtitleLoader: youtubeSubtitleLoader,
+            presentedAsSheet: presentedAsSheet,
+            startsAutomatically: true
+        )
+    }
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    youtubeMetadata
-                    Divider().opacity(0.55)
-                    youtubeChannelRow
-                    youtubeActionRow
-                    if let description = youtubeDescription {
-                        youtubeDescriptionCard(description)
-                    }
-                    Color.clear.frame(height: 32)
-                }
-            }
+    private var youtubeSubtitleLoader: YouTubeVideoDetailView.SubtitleLoader? {
+        guard let videoID = post.youtubeVideoID else { return nil }
+        return {
+            let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchYouTubeSubtitles(videoID: videoID)
+            return YouTubeSubtitleResult(status: payload.status, cues: payload.cues)
         }
-        .background(Color(uiColor: .systemBackground))
-    }
-
-    private var youtubePlayerSurface: some View {
-        ZStack {
-            Color.black
-
-            if youtubePlaybackState != .idle, let videoID = post.youtubeVideoID {
-                YouTubeEmbeddedPlayer(
-                    videoID: videoID,
-                    onPlaying: {
-                        logYouTubePlaybackReady()
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            isYouTubeVideoReady = true
-                            youtubePlaybackState = .playing
-                        }
-                    },
-                    onFailed: {
-                        youtubePlaybackState = .failed
-                        isYouTubeVideoReady = false
-                    }
-                )
-                    .id(youtubePlayerReloadID)
-                    .opacity(isYouTubeVideoReady ? 1 : 0.02)
-            }
-
-            if !isYouTubeVideoReady, let cover = post.youtubeCoverURL {
-                RemoteImage(
-                    url: cover,
-                    height: youtubePlayerHeight,
-                    cornerRadius: 0,
-                    contentMode: .fill
-                )
-            }
-
-            switch youtubePlaybackState {
-            case .idle:
-                Button { Task { await playYouTubeVideo() } } label: {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 25, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 68, height: 48)
-                        .background(Color.red, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                        .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("播放视频")
-            case .loading:
-                VStack(spacing: 10) {
-                    ProgressView().tint(.white).controlSize(.large)
-                    Text("正在准备视频")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
-                .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            case .failed:
-                VStack(spacing: 12) {
-                    Text("暂时无法播放")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                    HStack(spacing: 10) {
-                        Button("重试") { Task { await playYouTubeVideo() } }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                        Button("打开 YouTube") { openOriginal() }
-                            .buttonStyle(.bordered)
-                            .tint(.white)
-                    }
-                }
-                .padding(16)
-                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            case .playing:
-                EmptyView()
-            }
-
-        }
-        .frame(height: youtubePlayerHeight)
-        .clipped()
-        .overlay(alignment: .top) { youtubePlayerTopBar }
-    }
-
-    private var youtubePlayerTopBar: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Image(systemName: dismissIconName)
-                    .font(.system(size: 18, weight: .bold))
-                    .frame(width: 38, height: 38)
-                    .background(.black.opacity(0.45), in: Circle())
-            }
-            .accessibilityLabel(dismissAccessibilityLabel)
-
-            Spacer()
-
-            if let link = post.linkURL {
-                ShareLink(item: link) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 38, height: 38)
-                        .background(.black.opacity(0.45), in: Circle())
-                }
-                .accessibilityLabel("分享视频")
-            }
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    private var youtubeMetadata: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(post.displayTitle)
-                .font(.system(size: 20, weight: .bold))
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 5) {
-                Text(post.formattedTime ?? "刚刚")
-                if let youtubePlaybackLabel, !youtubePlaybackLabel.isEmpty {
-                    Text("·")
-                    Text(youtubePlaybackLabel)
-                }
-                Text("· YouTube")
-            }
-            .font(.system(size: 12.5))
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 15)
-    }
-
-    private var youtubeChannelRow: some View {
-        HStack(spacing: 11) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 42)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(post.authorName)
-                    .font(.system(size: 15.5, weight: .semibold))
-                    .lineLimit(1)
-                Text("频道")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("YouTube 打开") { openOriginal() }
-                .font(.system(size: 13, weight: .semibold))
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(post.linkURL == nil)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    private var youtubeActionRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 9) {
-                if let link = post.linkURL {
-                    ShareLink(item: link) {
-                        youtubeActionLabel("分享", symbol: "square.and.arrow.up")
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button { openOriginal() } label: {
-                    youtubeActionLabel("原视频", symbol: "arrow.up.right.square")
-                }
-                .buttonStyle(.plain)
-                .disabled(post.linkURL == nil)
-
-                if youtubePlaybackState == .playing {
-                    Button {
-                        Task { await playYouTubeVideo() }
-                    } label: {
-                        youtubeActionLabel("重新播放", symbol: "arrow.counterclockwise")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-        .padding(.bottom, 14)
-    }
-
-    private func youtubeActionLabel(_ title: String, symbol: String) -> some View {
-        Label(title, systemImage: symbol)
-            .font(.system(size: 13.5, weight: .semibold))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 15)
-            .frame(height: 38)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-    }
-
-    private func youtubeDescriptionCard(_ description: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 5) {
-                Text("简介").font(.system(size: 15, weight: .bold))
-                if let time = post.formattedTime {
-                    Text(time).font(.system(size: 12.5)).foregroundStyle(.secondary)
-                }
-            }
-            Text(description)
-                .font(.system(size: 14.5))
-                .lineSpacing(4)
-                .lineLimit(isDescriptionExpanded ? nil : 3)
-                .textSelection(.enabled)
-            if description.count > 90 {
-                Button(isDescriptionExpanded ? "收起" : "展开") {
-                    withAnimation(.easeInOut(duration: 0.2)) { isDescriptionExpanded.toggle() }
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(14)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .padding(.horizontal, 16)
-    }
-
-    private var youtubePlayerHeight: CGFloat {
-        max(UIScreen.main.bounds.width, 240) * 9 / 16
     }
 
     private var youtubeDescription: String? {
@@ -2628,28 +2404,6 @@ struct PostDetailView: View {
         if let link = post.linkURL { openURL(link) }
     }
 
-    @MainActor
-    private func playYouTubeVideo() async {
-        guard post.youtubeVideoID != nil else {
-            youtubePlaybackState = .failed
-            return
-        }
-        youtubePlaybackState = .loading
-        isYouTubeVideoReady = false
-        youtubePlaybackStartedAt = .now
-        youtubePlaybackLabel = "自适应画质"
-        youtubePlayerReloadID = UUID()
-    }
-
-    private func logYouTubePlaybackReady() {
-        #if DEBUG
-        if let youtubePlaybackStartedAt {
-            let total = youtubePlaybackStartedAt.duration(to: .now)
-            print("YouTube embedded playback ready in \(total.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated)))")
-        }
-        #endif
-    }
-
     private func loadDetail() async {
         guard !post.isSynthetic else { return }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
@@ -3073,10 +2827,6 @@ private struct XCommentRow: View {
             : "yyyy年M月d日"
         return display.string(from: date)
     }
-}
-
-private enum YouTubePlaybackState: Equatable {
-    case idle, loading, playing, failed
 }
 
 private final class BilibiliResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {

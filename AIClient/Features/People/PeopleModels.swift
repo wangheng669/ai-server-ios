@@ -486,6 +486,21 @@ struct PersonVideo: Decodable, Identifiable, Hashable {
             ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
             : String(format: "%d:%02d", minutes, seconds)
     }
+
+    var youtubeDetailModel: YouTubeVideoDetailModel {
+        YouTubeVideoDetailModel(
+            id: "person-video-\(id)",
+            videoID: platformVideoID,
+            title: displayTitle,
+            channelName: channelName,
+            publishedLabel: publishedDateLabel,
+            durationLabel: durationLabel,
+            description: description,
+            coverURL: coverURL,
+            avatarURL: nil,
+            originalURL: canonicalURL
+        )
+    }
 }
 
 struct PersonVideoSubtitlesResponse: Decodable {

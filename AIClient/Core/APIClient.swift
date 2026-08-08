@@ -369,6 +369,16 @@ struct APIClient {
         return try await get(url)
     }
 
+    func fetchYouTubeSubtitles(videoID: String) async throws -> YouTubeSubtitlesResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/ios/v1/youtube/subtitles"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [.init(name: "video_id", value: videoID)]
+        guard let url = components?.url else { throw APIError.invalidURL }
+        return try await get(url)
+    }
+
     func fetchBilibiliSummary(bvid: String, title: String) async throws -> BilibiliSummaryResponse {
         var components = URLComponents(
             url: baseURL.appending(path: "api/ios/v1/bilibili/summary"),

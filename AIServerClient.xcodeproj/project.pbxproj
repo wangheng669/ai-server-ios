@@ -32,6 +32,7 @@
 		681EF7E93F4BE35044B2149C /* MarketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0964D64008AE6D9891C78345 /* MarketService.swift */; };
 		6EB37888E57023644BA4E8B0 /* CountryGDPRankingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFDC2300DFD6141704CC0B16 /* CountryGDPRankingTests.swift */; };
 		70916F86F3EB28B10FB8EB3C /* PostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F7ED7E08363D8510FC627D /* PostDetailView.swift */; };
+		70A27F86F3EB28B10FB8EB3C /* YouTubeVideoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A27D7E08363D8510FC627D /* YouTubeVideoDetailView.swift */; };
 		776DA836074F7FFF481B3A5B /* FeedAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */; };
 		7C42227FAAD006BD492F3F7E /* LearningServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFA9759085824610FC53E65 /* LearningServiceTests.swift */; };
 		801D06F0246D5D96D45CA002 /* FamousHoldingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40244177985ED17E7717147A /* FamousHoldingsStore.swift */; };
@@ -121,6 +122,7 @@
 		3D5C78B11625D59970AF947C /* RetailInvestorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetailInvestorView.swift; sourceTree = "<group>"; };
 		40244177985ED17E7717147A /* FamousHoldingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsStore.swift; sourceTree = "<group>"; };
 		47F7ED7E08363D8510FC627D /* PostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDetailView.swift; sourceTree = "<group>"; };
+		47A27D7E08363D8510FC627D /* YouTubeVideoDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeVideoDetailView.swift; sourceTree = "<group>"; };
 		4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServerClientApp.swift; sourceTree = "<group>"; };
 		50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDecodingTests.swift; sourceTree = "<group>"; };
@@ -214,6 +216,7 @@
 				1A3FE9C2FF8A73D898482112 /* Post.swift */,
 				BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */,
 				47F7ED7E08363D8510FC627D /* PostDetailView.swift */,
+				47A27D7E08363D8510FC627D /* YouTubeVideoDetailView.swift */,
 				3686E2A6A6443140E186A435 /* WikipediaArticleSupport.swift */,
 			);
 			path = Feed;
@@ -554,6 +557,7 @@
 				F04A9EB700A33E5A21544148 /* Post.swift in Sources */,
 				18F1A1D11FD420E25AA227ED /* PostComponents.swift in Sources */,
 				70916F86F3EB28B10FB8EB3C /* PostDetailView.swift in Sources */,
+				70A27F86F3EB28B10FB8EB3C /* YouTubeVideoDetailView.swift in Sources */,
 				10D34066B133EC9CD153A5B9 /* RealtimeFeedClient.swift in Sources */,
 				617480D9D30D6A38B04EA755 /* RetailInvestorView.swift in Sources */,
 				EC73C344C05CAB07C8B39CFB /* ServerConfiguration.swift in Sources */,
