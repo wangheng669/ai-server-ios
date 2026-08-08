@@ -237,16 +237,31 @@ struct LearningView: View {
     }
 
     private var sectionPicker: some View {
-        HStack(alignment: .top, spacing: 20) {
-            sectionButton(.investment)
-            sectionButton(.books)
-            sectionButton(.concepts)
-            sectionButton(.ideology)
-            Spacer()
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 24) {
+                    sectionButton(.investment)
+                    sectionButton(.books)
+                    sectionButton(.concepts)
+                    sectionButton(.ideology)
+                }
+                .padding(.horizontal, 18)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: selectedSection) { _, section in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(section, anchor: .center)
+                }
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 6)
+        .background(KnowledgePagePalette.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(KnowledgePagePalette.stroke)
+                .frame(height: 0.5)
+        }
     }
 
     private func sectionButton(_ section: KnowledgeSection) -> some View {
@@ -256,21 +271,23 @@ struct LearningView: View {
                 selectedSection = section
             }
         } label: {
-            VStack(spacing: 7) {
+            VStack(spacing: 0) {
                 Text(section.title)
-                    .font(.system(size: 26, weight: .semibold, design: .serif))
+                    .font(.system(size: 14, weight: selectedSection == section ? .semibold : .regular))
                     .foregroundStyle(
                         selectedSection == section
                             ? Color.primary
                             : KnowledgePagePalette.supportingText
                     )
-                Circle()
+                    .frame(height: 42)
+                Capsule()
                     .fill(selectedSection == section ? KnowledgePagePalette.accent : .clear)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 18, height: 2.5)
                     .accessibilityHidden(true)
-                }
-                .contentShape(Rectangle())
+            }
+            .contentShape(Rectangle())
         }
+        .id(section)
         .buttonStyle(.plain)
         .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
     }
@@ -850,24 +867,12 @@ private enum LearningRoute: Hashable, Identifiable {
 }
 
 private enum KnowledgePagePalette {
-    static let accent = Color(red: 0.76, green: 0.29, blue: 0.12)
+    static let accent = InvestmentDesign.accent
     static let sage = Color(red: 0.40, green: 0.48, blue: 0.39)
-    static let canvas = Color(
-        uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor.systemBackground
-                : UIColor(red: 0.98, green: 0.965, blue: 0.94, alpha: 1)
-        }
-    )
-    static let surface = Color(
-        uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor.secondarySystemBackground
-                : UIColor(red: 0.995, green: 0.985, blue: 0.965, alpha: 1)
-        }
-    )
-    static let stroke = Color.primary.opacity(0.10)
-    static let supportingText = Color.primary.opacity(0.76)
+    static let canvas = InvestmentDesign.canvas
+    static let surface = InvestmentDesign.surface
+    static let stroke = InvestmentDesign.divider
+    static let supportingText = Color.secondary
 }
 
 enum IdeologyCamp: String, CaseIterable, Identifiable {
