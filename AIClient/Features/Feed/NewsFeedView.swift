@@ -449,32 +449,27 @@ struct NewsFeedView: View {
     }
 
     private var weiboSectionSelector: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 28) {
             ForEach(WeiboSection.allCases) { section in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) { weiboSection = section }
                 } label: {
-                    Text(section.title)
-                        .font(.system(size: 14, weight: weiboSection == section ? .semibold : .regular))
-                        .foregroundStyle(weiboSection == section ? Color.primary : Color.secondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                        .background(
-                            weiboSection == section ? Color(uiColor: .systemBackground) : Color.clear,
-                            in: Capsule()
-                        )
+                    VStack(spacing: 6) {
+                        Text(section.title)
+                            .font(.system(size: 15, weight: weiboSection == section ? .semibold : .regular))
+                            .foregroundStyle(weiboSection == section ? Color.primary : Color.secondary)
+
+                        Capsule()
+                            .fill(weiboSection == section ? InvestmentDesign.accent : .clear)
+                            .frame(width: 16, height: 2)
+                    }
+                    .frame(width: 42, height: 34)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(weiboSection == section ? .isSelected : [])
             }
         }
-        .padding(3)
-        .frame(width: 190)
-        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-        .overlay {
-            Capsule().stroke(Color.primary.opacity(0.035), lineWidth: 0.5)
-        }
-        .padding(.vertical, 9)
+        .padding(.vertical, 8)
         .sensoryFeedback(.selection, trigger: weiboSection)
     }
 
