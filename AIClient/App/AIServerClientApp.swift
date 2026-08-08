@@ -193,6 +193,12 @@ private struct EditorialRootView: View {
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--deployment-tip-success-preview") {
+            return DeploymentStatusSnapshot(phase: .succeeded, commit: "b0d5411", stage: "installed")
+        }
+        if ProcessInfo.processInfo.arguments.contains("--deployment-tip-failed-preview") {
+            return DeploymentStatusSnapshot(phase: .failed, commit: "b0d5411", stage: "install-failed")
+        }
         guard ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview") ||
             ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview") else { return nil }
         return DeploymentStatusSnapshot(phase: .running(progress: 0.75), commit: "b0d5411")
@@ -255,22 +261,31 @@ private struct EditorialRootView: View {
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !hidesRootTabBar {
-                RootNavigationBar(selection: $selectedTab)
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if let deploymentStatus, selectedTab != .investment {
-                DeploymentStatusTip(
-                    snapshot: deploymentStatus,
-                    initiallyExpanded: deploymentPreview != nil
-                        ? !ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview")
-                        : false
-                )
+            VStack(spacing: 8) {
+                if let deploymentStatus {
+                    DeploymentStatusTip(
+                        snapshot: deploymentStatus,
+                        initiallyExpanded: deploymentPreview != nil &&
+                            ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview")
+                    )
                     .id(deploymentStatus.identity)
-                    .padding(.top, 6)
-                    .padding(.trailing, 12)
+                    .padding(.horizontal, 12)
+                }
+
+                if !hidesRootTabBar {
+                    RootNavigationBar(selection: $selectedTab)
+                }
             }
+            .padding(.bottom, 8)
+            .animation(
+                reduceMotion ? nil : .smooth(duration: 0.22, extraBounce: 0),
+                value: deploymentStatus?.identity
+            )
+            .background(.clear)
+        }
+        .sensoryFeedback(.success, trigger: deploymentStatus?.identity) { _, _ in
+            if case .succeeded = deploymentStatus?.phase { return true }
+            return false
         }
         .task {
             deploymentStore.start()
