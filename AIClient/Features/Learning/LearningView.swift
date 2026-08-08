@@ -1995,10 +1995,10 @@ private struct BookReadingDeskCard: View {
                 .lineLimit(1)
                 .padding(.top, 5)
 
+            BookReadingProgressView(book: book)
+                .padding(.top, 15)
+
             HStack(spacing: 9) {
-                Text(book.isFinished ? "已读完" : "阅读中")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
                 Spacer()
                 Text(book.isFinished ? "再次阅读" : "继续阅读")
                     .font(.system(size: 13, weight: .semibold))
@@ -2138,15 +2138,42 @@ private struct RecentKnowledgeBookCard: View {
                 .lineLimit(1)
                 .padding(.top, 4)
 
-            Text(book.isFinished ? "已读完" : "阅读中")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(book.isFinished ? Color.secondary : KnowledgePagePalette.accent)
+            BookReadingProgressView(book: book, compact: true)
                 .padding(.top, 7)
         }
         .frame(width: 104, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.isFinished ? "已读完" : "阅读中")")
+        .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.displayReadingProgress.map { "阅读进度\($0)%" } ?? (book.isFinished ? "已读完" : "阅读中"))")
         .accessibilityHint("在微信读书打开")
+    }
+}
+
+private struct BookReadingProgressView: View {
+    let book: KnowledgeBook
+    var compact = false
+
+    var body: some View {
+        if let progress = book.displayReadingProgress {
+            VStack(alignment: .leading, spacing: compact ? 4 : 7) {
+                HStack(spacing: 4) {
+                    Text(book.isFinished ? "已读完" : "阅读进度")
+                    Spacer(minLength: 4)
+                    Text("\(progress)%")
+                }
+                .font(.system(size: compact ? 10 : 12, weight: .semibold))
+                .foregroundStyle(book.isFinished ? Color.secondary : KnowledgePagePalette.accent)
+
+                ProgressView(value: Double(progress), total: 100)
+                    .tint(book.isFinished ? Color.secondary : KnowledgePagePalette.accent)
+                    .scaleEffect(x: 1, y: compact ? 0.65 : 0.85, anchor: .center)
+                    .accessibilityLabel("阅读进度")
+                    .accessibilityValue("\(progress)%")
+            }
+        } else {
+            Text(book.isFinished ? "已读完" : "阅读中")
+                .font(.system(size: compact ? 10 : 12, weight: .semibold))
+                .foregroundStyle(book.isFinished ? Color.secondary : KnowledgePagePalette.accent)
+        }
     }
 }
 
