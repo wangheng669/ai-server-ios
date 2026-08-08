@@ -1176,6 +1176,15 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(groups[0].avatarURL?.path, "/api/ios/v1/today-world/avatars/openai")
     }
 
+    func testTodayWorldGroupsHidePeopleWithoutUpdates() throws {
+        let data = Data(
+            #"{"schema_version":"1","date":"2026-08-08","timezone":"Asia/Shanghai","generated_at":"2026-08-08T08:00:00Z","sections":[{"id":"leader:openai","kind":"feed","title":"OpenAI","layout":"list","entity":{"key":"openai","name":"OpenAI","type":"company","x_handle":"OpenAI","company_key":"openai","company_name":"OpenAI"},"items":[],"item_count":0,"has_more":false}]}"#.utf8
+        )
+        let payload = try JSONDecoder().decode(TodayWorldPayload.self, from: data)
+
+        XCTAssertTrue(TodayWorldAuthorGroup.make(from: payload).isEmpty)
+    }
+
     func testTodayWorldTextRemovesBlankAndRepeatedLines() {
         let text = "  第一段  \n\n第一段\n  第二段\n\n\n"
 
