@@ -110,6 +110,7 @@ final class LearningServiceTests: XCTestCase {
                   "category": "经济理财-商业",
                   "open_url": "weread://reading?bId=3300203616",
                   "is_finished": false,
+                  "reading_progress": 42,
                   "read_update_time": 1785655834
                 }, {
                   "id": "907585",
@@ -119,6 +120,7 @@ final class LearningServiceTests: XCTestCase {
                   "category": "人物传记-财经人物",
                   "open_url": "weread://reading?bId=907585",
                   "is_finished": false,
+                  "reading_progress": 18,
                   "read_update_time": 1785657041
                 }]
               }
@@ -131,6 +133,7 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.books.first?.id, "3300203616")
         XCTAssertEqual(response.data.books.first?.coverURL?.host, "example.com")
         XCTAssertEqual(response.data.books.first?.openURL?.scheme, "weread")
+        XCTAssertEqual(response.data.books.first?.displayReadingProgress, 42)
         XCTAssertEqual(response.data.books.first?.readUpdateTime, 1_785_655_834)
         XCTAssertEqual(response.data.books.last?.title, "滚雪球：巴菲特和他的财富人生（套装共2册）")
     }

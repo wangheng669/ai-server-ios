@@ -317,6 +317,7 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
     let category: String?
     let openURLValue: String
     let isFinished: Bool
+    let readingProgress: Int?
     let readUpdateTime: Int64?
 
     enum CodingKeys: String, CodingKey {
@@ -324,6 +325,7 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
         case coverURLValue = "cover_url"
         case openURLValue = "open_url"
         case isFinished = "is_finished"
+        case readingProgress = "reading_progress"
         case readUpdateTime = "read_update_time"
     }
 
@@ -333,6 +335,12 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
     }
 
     var openURL: URL? { URL(string: openURLValue) }
+
+    var displayReadingProgress: Int? {
+        if isFinished { return 100 }
+        guard let readingProgress else { return nil }
+        return min(max(readingProgress, 0), 100)
+    }
 }
 
 struct KnowledgeConceptLibrary: Decodable, Equatable {
