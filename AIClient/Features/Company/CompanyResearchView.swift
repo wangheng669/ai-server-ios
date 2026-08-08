@@ -228,11 +228,11 @@ struct CompanyResearchView: View {
     }
 
     private enum Section: String, CaseIterable {
-        case overview = "总览"
-        case business = "生意"
+        case overview = "快照"
+        case business = "经营"
         case financial = "财务"
         case valuation = "估值"
-        case research = "研究"
+        case research = "事件"
     }
 
     @StateObject private var store: CompanyResearchStore
@@ -290,54 +290,52 @@ struct CompanyResearchView: View {
                 sectionTabs(company)
                 selectedSectionContent(company)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 6)
-            .padding(.bottom, 44)
+            .padding(.horizontal, 11)
+            .padding(.top, 2)
+            .padding(.bottom, 10)
         }
+        .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemBackground))
         .refreshable { await store.load(force: true) }
     }
 
     private func hero(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
                 companyLogo(company)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(company.shortName)
-                        .font(.title2.bold())
+                        .font(.system(size: 18, weight: .bold))
                     Text("\(company.ticker) · \(company.exchange)")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("\((store.companies.firstIndex(of: company) ?? 0) + 1)/\(store.companies.count)")
                     .font(.subheadline.monospacedDigit())
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }
-            .padding(.vertical, 14)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
 
             Divider()
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .center, spacing: 0) {
                 Text(marketPrice(company.market))
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(.system(size: 23, weight: .bold, design: .rounded))
                     .foregroundStyle(companyAccent(company))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text(marketChange(company.market))
-                    .font(.subheadline.bold())
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(marketChangeColor(company.market))
                     .lineLimit(1)
-                Spacer(minLength: 0)
+                    .frame(width: 58)
+                dashboardMetric("总市值", marketCap(company.market?.marketCap))
+                dashboardMetric("PE", formattedMultiple(company.market?.pe))
+                dashboardMetric("ROE", latestROE(company))
             }
-            .padding(.top, 14)
-
-            HStack(spacing: 12) {
-                summaryMetric("总市值", marketCap(company.market?.marketCap))
-                Divider().frame(height: 38)
-                summaryMetric("PE", formattedMultiple(company.market?.pe))
-                Divider().frame(height: 38)
-                summaryMetric("ROE", latestROE(company))
-            }
-            .padding(.vertical, 12)
+            .padding(.vertical, 5)
+            .overlay(alignment: .bottom) { Divider() }
         }
     }
 
@@ -373,7 +371,7 @@ struct CompanyResearchView: View {
             .font(.subheadline.weight(selected ? .semibold : .medium))
             .foregroundStyle(selected ? color : .secondary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            .padding(.vertical, 9)
             .overlay(alignment: .bottom) {
                 Rectangle().fill(selected ? color : .clear).frame(height: 2)
             }
@@ -396,51 +394,226 @@ struct CompanyResearchView: View {
     }
 
     private func overviewSection(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            researchBlock("一句话看懂") {
-                Text(company.thesis)
-                    .font(.headline)
-                    .lineSpacing(5)
-            }
+        dashboardOverview(company)
+    }
 
-            if let business = company.business, !business.isEmpty {
-                researchBlock("生意怎么赚钱") { businessFlow(business, color: companyAccent(company)) }
-            }
+    private func dashboardMetric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 14, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.68)
+        }
+        .padding(.leading, 9)
+        .frame(width: 76, height: 34, alignment: .leading)
+        .overlay(alignment: .leading) { Divider().frame(height: 34) }
+    }
 
-            if let indicators = company.indicators, !indicators.isEmpty {
-                researchBlock("关键经营仪表") { indicatorGrid(indicators, color: companyAccent(company)) }
-            }
-
-            researchBlock("财务质量") {
-                compactFinancialTable(company)
-                if let quality = company.framework?.financialQuality, !quality.isEmpty {
-                    Text(quality).font(.caption).foregroundStyle(.secondary).lineSpacing(3)
+    private func dashboardOverview(_ company: CompanyResearchProfile) -> some View {
+        VStack(spacing: 8) {
+            VStack(spacing: 0) {
+                Text("公司仪表盘")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                Divider()
+                HStack(spacing: 0) {
+                    dashboardQuote(company)
+                    Divider()
+                    dashboardTrend(company)
                 }
+                .frame(height: 141)
+                Divider()
+                HStack(spacing: 0) {
+                    dashboardQuality(company)
+                    Divider()
+                    dashboardVariables(company)
+                }
+                .frame(height: 120)
+                Divider()
+                HStack(spacing: 0) {
+                    dashboardPeers()
+                    Divider()
+                    dashboardValuation(company)
+                }
+                .frame(height: 106)
             }
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.24), lineWidth: 0.7) }
 
-            if let changes = company.framework?.currentChanges, !changes.isEmpty {
-                researchBlock("本期变化") {
-                    ForEach(changes, id: \.label) { item in
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(item.label).font(.caption.bold()).foregroundStyle(statusColor(item.label, accent: companyAccent(company))).frame(width: 52, alignment: .leading)
-                            Text(item.detail).font(.subheadline)
+            dashboardFinancialSummary(company)
+            dashboardNextReport(company)
+        }
+        .padding(.top, 9)
+    }
+
+    private func dashboardQuote(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("行情快照").font(.system(size: 13, weight: .semibold))
+            dashboardValueRow("最新价", marketPrice(company.market), accent: true)
+            dashboardValueRow("涨跌幅", marketChange(company.market), accent: true)
+            dashboardValueRow("总市值", marketCap(company.market?.marketCap))
+            dashboardValueRow("PE (TTM)", formattedMultiple(company.market?.pe))
+            dashboardValueRow("ROE (TTM)", latestROE(company))
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func dashboardValueRow(_ label: String, _ value: String, accent: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+            Spacer(minLength: 4)
+            Text(value).monospacedDigit().foregroundStyle(accent ? Color.red : Color.primary)
+        }
+        .font(.system(size: 11))
+    }
+
+    private func dashboardTrend(_ company: CompanyResearchProfile) -> some View {
+        let years = Array(company.financials.years.suffix(3))
+        return VStack(alignment: .leading, spacing: 5) {
+            Text("财务趋势").font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 13) {
+                Label("营收 (亿元)", systemImage: "minus").foregroundStyle(Color.red)
+                Label("净利润 (亿元)", systemImage: "minus").foregroundStyle(Color.secondary)
+            }
+            .font(.system(size: 9))
+            Chart {
+                ForEach(years) { item in
+                    LineMark(x: .value("年度", item.year), y: .value("营收", item.revenue), series: .value("指标", "营收"))
+                        .foregroundStyle(Color.red)
+                        .symbol(Circle())
+                    PointMark(x: .value("年度", item.year), y: .value("营收", item.revenue))
+                        .foregroundStyle(Color.red)
+                        .annotation(position: .top, spacing: 2) {
+                            Text(String(format: "%.2f", item.revenue)).font(.system(size: 7)).foregroundStyle(.primary)
                         }
-                    }
+                    LineMark(x: .value("年度", item.year), y: .value("净利润", item.netProfit), series: .value("指标", "净利润"))
+                        .foregroundStyle(Color.secondary)
+                        .symbol(Circle())
+                    PointMark(x: .value("年度", item.year), y: .value("净利润", item.netProfit))
+                        .foregroundStyle(Color.secondary)
+                        .annotation(position: .top, spacing: 2) {
+                            Text(String(format: "%.2f", item.netProfit)).font(.system(size: 7)).foregroundStyle(.primary)
+                        }
                 }
             }
+            .chartXAxis { AxisMarks(values: years.map(\.year)) { _ in AxisValueLabel().font(.system(size: 8)); AxisGridLine().foregroundStyle(.clear) } }
+            .chartYAxis(.hidden)
+            .chartLegend(.hidden)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
 
-            researchBlock("下一验证点") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(company.nextReport.reportType).font(.headline)
-                        Text(company.nextReport.note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                    Spacer()
-                    Text(reportDate(company.nextReport.expectedDate)).font(.title3.bold()).foregroundStyle(companyAccent(company))
-                }
+    private func dashboardQuality(_ company: CompanyResearchProfile) -> some View {
+        let latest = company.financials.years.last
+        let previous = company.financials.years.dropLast().last
+        let revenueStatus = (latest?.revenue ?? 0) >= (previous?.revenue ?? 0) ? "改善" : "中性"
+        let profitStatus = (latest?.netProfit ?? 0) >= (previous?.netProfit ?? 0) ? "改善" : "中性"
+        return dashboardStatusGroup("财务质量（\(latest?.year ?? "最新")）", rows: [
+            ("增长", revenueStatus), ("盈利", profitStatus), ("现金", "待验证"), ("负债", "关注")
+        ])
+    }
+
+    private func dashboardVariables(_ company: CompanyResearchProfile) -> some View {
+        let indicators = company.indicators ?? []
+        let rows = indicators.prefix(4).map { ($0.label, dashboardStatus($0.status, value: $0.value)) }
+        return dashboardStatusGroup("经营变量（最新）", rows: rows)
+    }
+
+    private func dashboardPeers() -> some View {
+        dashboardStatusGroup("同行坐标（白酒）", rows: [
+            ("品牌力", "待补充"), ("渠道", "待补充"), ("增长", "待补充"), ("资本效率", "待补充")
+        ])
+    }
+
+    private func dashboardValuation(_ company: CompanyResearchProfile) -> some View {
+        VStack(alignment: .leading, spacing: 17) {
+            Text("估值带（PE）").font(.system(size: 13, weight: .semibold))
+            HStack { Text("当前 PE (TTM)"); Spacer(); Text(formattedMultiple(company.market?.pe)).foregroundStyle(.red).fontWeight(.semibold) }
+            HStack { Text("历史分位（近10年）"); Spacer(); dashboardBadge("待补充") }
+        }
+        .font(.system(size: 11))
+        .padding(11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func dashboardStatusGroup(_ title: String, rows: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack { Text(row.0); Spacer(); dashboardBadge(row.1) }
+                    .font(.system(size: 11))
             }
         }
-        .padding(.top, 12)
+        .padding(11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func dashboardBadge(_ value: String) -> some View {
+        let color: Color = value.contains("上升") || value.contains("改善") ? .red : value.contains("关注") || value.contains("观察") ? .orange : .secondary
+        return Text(value)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(color)
+            .frame(minWidth: 43)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
+            .overlay { RoundedRectangle(cornerRadius: 4).stroke(color.opacity(0.22), lineWidth: 0.6) }
+    }
+
+    private func dashboardStatus(_ status: String, value: String) -> String {
+        if value.contains("待补充") { return "待补充" }
+        if status.contains("改善") || status.contains("上升") { return "上升" }
+        if status.contains("关注") || status.contains("观察") { return status }
+        return "待验证"
+    }
+
+    private func dashboardFinancialSummary(_ company: CompanyResearchProfile) -> some View {
+        let years = Array(company.financials.years.suffix(3))
+        return VStack(spacing: 0) {
+            HStack { Text("财务摘要（合并报表）").fontWeight(.semibold); Spacer(); Text("单位：\(company.financials.unit)").foregroundStyle(.secondary) }
+                .padding(.horizontal, 11).frame(height: 25)
+            Divider()
+            HStack(spacing: 0) {
+                Text("").frame(maxWidth: .infinity)
+                ForEach(years) { Text($0.year).frame(maxWidth: .infinity) }
+            }.frame(height: 22)
+            Divider()
+            dashboardFinancialRow("营收", values: years.map { compactNumber($0.revenue) })
+            dashboardFinancialRow("净利润", values: years.map { compactNumber($0.netProfit) })
+            dashboardFinancialRow("ROE", values: years.map { String(format: "%.2f%%", $0.roe) })
+            Divider()
+            Text("现金流与利润质量 →").foregroundStyle(.red).fontWeight(.semibold).frame(height: 22)
+        }
+        .font(.system(size: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.24), lineWidth: 0.7) }
+    }
+
+    private func dashboardFinancialRow(_ label: String, values: [String]) -> some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 0) {
+                Text(label).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 11)
+                ForEach(Array(values.enumerated()), id: \.offset) { _, value in Text(value).monospacedDigit().frame(maxWidth: .infinity) }
+            }.frame(height: 19)
+        }
+    }
+
+    private func dashboardNextReport(_ company: CompanyResearchProfile) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar").font(.system(size: 18)).foregroundStyle(.red)
+            Text("下次财报").fontWeight(.semibold)
+            Text(reportDate(company.nextReport.expectedDate)).fontWeight(.semibold)
+            Text("·")
+            Text("\(max(company.questions.count, 1))项待验证").fontWeight(.semibold)
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 13).frame(height: 32)
+        .background(Color.red.opacity(0.035), in: RoundedRectangle(cornerRadius: 5))
+        .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.red.opacity(0.14), lineWidth: 0.7) }
     }
 
     private func researchBlock<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -1134,13 +1307,13 @@ struct CompanyResearchView: View {
 
     private func companyLogo(_ company: CompanyResearchProfile) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 5)
                 .fill(Color(uiColor: .systemBackground))
             companyLogoContent(company)
         }
-        .frame(width: 58, height: 46)
+        .frame(width: 48, height: 38)
         .overlay {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 5)
                 .stroke(Color.secondary.opacity(0.14), lineWidth: 0.5)
         }
         .accessibilityElement(children: .ignore)

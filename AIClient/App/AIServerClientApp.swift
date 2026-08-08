@@ -276,7 +276,7 @@ private struct EditorialRootView: View {
                     RootNavigationBar(selection: $selectedTab)
                 }
             }
-            .padding(.bottom, 8)
+            .padding(.bottom, -13)
             .animation(
                 reduceMotion ? nil : .smooth(duration: 0.22, extraBounce: 0),
                 value: deploymentStatus?.identity
@@ -340,24 +340,23 @@ private struct RootNavigationBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            item(.observation, title: "观点", icon: "list.bullet.rectangle")
-            item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
-            item(.world, title: "今日世界", icon: "globe")
+            item(.observation, title: "自选", icon: "list.bullet.rectangle")
+            item(.investment, title: "行情", icon: "chart.line.uptrend.xyaxis")
+            item(.world, title: "发现", icon: "globe")
             item(.company, title: "公司", icon: "building.2")
-            item(.learning, title: "知识", icon: "books.vertical")
-            item(.people, title: "人物", icon: "person")
+            item(.learning, title: "组合", icon: "books.vertical")
+            item(.people, title: "我的", icon: "person")
         }
-        .frame(maxWidth: 352)
-        .frame(height: 46)
-        .background(.regularMaterial, in: Capsule())
+        .frame(maxWidth: 368)
+        .frame(height: 54)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 14))
         .overlay {
-            Capsule()
-                .stroke(Color.primary.opacity(0.16), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.primary.opacity(0.16), lineWidth: 0.7)
         }
-        .shadow(color: Color.black.opacity(0.08), radius: 12, y: 4)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 11)
+        .padding(.bottom, 2)
     }
 
     private func item(_ tab: EditorialTab, title: String, icon: String) -> some View {
@@ -366,14 +365,17 @@ private struct RootNavigationBar: View {
                 selection = tab
             }
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 Image(systemName: icon)
-                    .font(.system(size: 19, weight: selection == tab ? .semibold : .regular))
+                    .font(.system(size: 18, weight: selection == tab ? .semibold : .regular))
                     .symbolRenderingMode(.monochrome)
+
+                Text(title)
+                    .font(.system(size: 10, weight: selection == tab ? .medium : .regular))
 
                 Circle()
                     .fill(selection == tab ? InvestmentDesign.accent : Color.clear)
-                    .frame(width: 4, height: 4)
+                    .frame(width: 3, height: 3)
             }
             .foregroundStyle(
                 selection == tab
@@ -387,8 +389,8 @@ private struct RootNavigationBar: View {
                     Capsule()
                         .fill(InvestmentDesign.accent.opacity(0.1))
                         .matchedGeometryEffect(id: "root-tab-selection", in: selectionAnimation)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
                 }
             }
         }
