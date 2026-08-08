@@ -403,6 +403,7 @@ private struct RootNavigationBar: View {
 @MainActor
 private final class TodayWorldStore: ObservableObject {
     @Published private(set) var payload: TodayWorldPayload?
+    @Published private(set) var yesterdayReport: TodayWorldYesterdayReportPayload?
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var errorMessage: String?
@@ -416,9 +417,13 @@ private final class TodayWorldStore: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let freshPayload = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchTodayWorld(limit: 3, page: 1)
+            let client = APIClient(baseURL: ServerConfiguration.currentURL)
+            async let payloadRequest = client.fetchTodayWorld(limit: 3, page: 1)
+            async let reportRequest = client.fetchTodayWorldYesterdayReport()
+            let freshPayload = try await payloadRequest
+            let freshReport = try? await reportRequest
             payload = freshPayload
+            yesterdayReport = freshReport
             resetPagination(from: freshPayload)
             errorMessage = nil
         } catch is CancellationError {
@@ -542,9 +547,7 @@ private struct TodayWorldView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
                 TodayWorldDailyDigestView(
-                    payload: payload,
-                    groups: allGroups,
-                    systemCount: systems.count,
+                    report: store.yesterdayReport,
                     isRefreshing: store.isLoading
                 )
 
@@ -811,22 +814,8 @@ private struct TodayWorldSelectedSystemView: View {
 }
 
 private struct TodayWorldDailyDigestView: View {
-    let payload: TodayWorldPayload
-    let groups: [TodayWorldAuthorGroup]
-    let systemCount: Int
+    let report: TodayWorldYesterdayReportPayload?
     let isRefreshing: Bool
-
-    private var totalCount: Int {
-        groups.reduce(0) { $0 + $1.posts.count }
-    }
-
-    private var highlights: [(String, String)] {
-        groups.compactMap { group in
-            group.posts.first.map { (group.authorName, $0.displayContent) }
-        }
-        .prefix(3)
-        .map { $0 }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -838,8 +827,10 @@ private struct TodayWorldDailyDigestView: View {
 
                 Spacer()
 
-                Text("\(systemCount) 个体系 · \(totalCount) 条")
-                    .font(.system(size: 12, weight: .medium))
+                if let report {
+                    Text("\(report.sourceCount) 人 · \(report.postCount) 条")
+                        .font(.system(size: 12, weight: .medium))
+                }
 
                 if isRefreshing {
                     ProgressView()
@@ -851,25 +842,38 @@ private struct TodayWorldDailyDigestView: View {
             HStack(spacing: 7) {
                 Image(systemName: "doc.text.fill")
                     .foregroundStyle(.teal)
-                Text("动态摘要")
+                Text("昨日日报")
                     .font(.system(size: 15, weight: .bold))
             }
 
-            if highlights.isEmpty {
-                Text("关注的体系今天暂未发布新动态。")
+            if report?.status == "running" || report?.status == "queued" {
+                HStack(spacing: 7) {
+                    ProgressView().controlSize(.small)
+                    Text("Qwen 正在整理昨日动态，退出页面不会中断。")
+                }
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+            } else if report?.status == "failed" {
+                Text("昨日日报生成失败，已在治理后台保留失败原因。")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(highlights.enumerated()), id: \.offset) { _, highlight in
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Circle().fill(Color.teal).frame(width: 4, height: 4)
-                            Text("\(highlight.0)：\(TodayWorldTextFormatter.compact(highlight.1))")
-                                .font(.system(size: 12.5))
-                                .lineLimit(1)
-                        }
+            } else if let overview = report?.report.overview, !overview.isEmpty {
+                Text(overview)
+                    .font(.system(size: 12.5))
+                    .lineLimit(4)
+
+                ForEach(Array((report?.report.highlights ?? []).prefix(3))) { highlight in
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Circle().fill(Color.teal).frame(width: 4, height: 4)
+                        Text("\(highlight.person)：\(highlight.summary)")
+                            .font(.system(size: 12.5))
+                            .lineLimit(2)
                     }
                 }
+            } else {
+                Text("昨日没有可展示的日报，生成状态可在治理后台查看。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(12)
@@ -885,7 +889,8 @@ private struct TodayWorldDailyDigestView: View {
         let parser = DateFormatter()
         parser.locale = Locale(identifier: "en_US_POSIX")
         parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: payload.date) else { return payload.date }
+        let value = report?.date ?? ""
+        guard let date = parser.date(from: value) else { return value.isEmpty ? "昨日" : value }
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")

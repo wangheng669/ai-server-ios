@@ -37,6 +37,15 @@ struct APIClient {
         return response.data
     }
 
+    func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
+        let response: TodayWorldYesterdayReportResponse = try await get(
+            baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data
+    }
+
     func fetchPosts(
         page: Int,
         limit: Int = 20,
@@ -789,6 +798,74 @@ private struct HealthResponse: Decodable { let status: String }
 struct TodayWorldResponse: Decodable {
     let success: Bool
     let data: TodayWorldPayload
+}
+
+struct TodayWorldYesterdayReportResponse: Decodable {
+    let success: Bool
+    let data: TodayWorldYesterdayReportPayload
+}
+
+struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
+    let date: String
+    let timezone: String
+    let status: String
+    let stage: String
+    let progress: Int
+    let sourceCount: Int
+    let postCount: Int
+    let report: TodayWorldYesterdayReportContent
+    let model: String?
+    let totalTokens: Int
+    let costCNY: Double
+    let completedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case date, timezone, status, stage, progress, report, model
+        case sourceCount = "source_count"
+        case postCount = "post_count"
+        case totalTokens = "total_tokens"
+        case costCNY = "cost_cny"
+        case completedAt = "completed_at"
+    }
+}
+
+struct TodayWorldYesterdayReportContent: Decodable, Equatable {
+    let overview: String?
+    let highlights: [TodayWorldYesterdayReportHighlight]
+    let watchList: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case overview, highlights
+        case watchList = "watch_list"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        overview = try container.decodeIfPresent(String.self, forKey: .overview)
+        highlights = try container.decodeIfPresent([TodayWorldYesterdayReportHighlight].self, forKey: .highlights) ?? []
+        watchList = try container.decodeIfPresent([String].self, forKey: .watchList) ?? []
+    }
+}
+
+struct TodayWorldYesterdayReportHighlight: Decodable, Equatable, Identifiable {
+    let person: String
+    let company: String?
+    let summary: String
+    let postIDs: [Int]
+    var id: String { "\(person):\(postIDs.map(String.init).joined(separator: ",")):\(summary)" }
+
+    enum CodingKeys: String, CodingKey {
+        case person, company, summary
+        case postIDs = "post_ids"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        person = try container.decodeIfPresent(String.self, forKey: .person) ?? "关注人物"
+        company = try container.decodeIfPresent(String.self, forKey: .company)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        postIDs = try container.decodeIfPresent([Int].self, forKey: .postIDs) ?? []
+    }
 }
 
 struct TodayWorldPayload: Decodable, Equatable {
