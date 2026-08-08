@@ -1163,7 +1163,7 @@ final class PostDecodingTests: XCTestCase {
 
     func testTodayWorldGroupsRemovePostsRepeatedAcrossSections() throws {
         let data = Data(
-            #"{"schema_version":"1","date":"2026-08-08","timezone":"Asia/Shanghai","generated_at":"2026-08-08T08:00:00Z","sections":[{"id":"leader:openai","kind":"feed","title":"OpenAI","layout":"list","entity":{"key":"openai","name":"OpenAI","type":"company","x_handle":"OpenAI","company_key":"openai","company_name":"OpenAI"},"items":[{"id":42,"source":"x","content":"同一条动态"}],"item_count":1,"has_more":false},{"id":"company:openai","kind":"feed","title":"OpenAI","layout":"list","entity":{"key":"openai","name":"OpenAI","type":"company","x_handle":"OpenAI","company_key":"openai","company_name":"OpenAI"},"items":[{"id":42,"source":"x","content":"同一条动态"},{"id":43,"source":"x","content":"另一条动态"}],"item_count":2,"has_more":false}]}"#.utf8
+            #"{"schema_version":"1","date":"2026-08-08","timezone":"Asia/Shanghai","generated_at":"2026-08-08T08:00:00Z","sections":[{"id":"leader:openai","kind":"feed","title":"OpenAI","layout":"list","entity":{"key":"openai","name":"OpenAI","type":"company","x_handle":"OpenAI","avatar_url":"/api/ios/v1/today-world/avatars/openai","company_key":"openai","company_name":"OpenAI"},"items":[{"id":42,"source":"x","content":"同一条动态"}],"item_count":1,"has_more":false},{"id":"company:openai","kind":"feed","title":"OpenAI","layout":"list","entity":{"key":"openai","name":"OpenAI","type":"company","x_handle":"OpenAI","company_key":"openai","company_name":"OpenAI"},"items":[{"id":42,"source":"x","content":"同一条动态"},{"id":43,"source":"x","content":"另一条动态"}],"item_count":2,"has_more":false}]}"#.utf8
         )
         let payload = try JSONDecoder().decode(TodayWorldPayload.self, from: data)
 
@@ -1172,6 +1172,8 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups[0].posts.count, 2)
         XCTAssertEqual(Set(groups[0].posts.map(\.id)), Set([42, 43]))
+        XCTAssertEqual(groups[0].avatarURL?.host, ServerConfiguration.currentURL.host)
+        XCTAssertEqual(groups[0].avatarURL?.path, "/api/ios/v1/today-world/avatars/openai")
     }
 
     func testTodayWorldTextRemovesBlankAndRepeatedLines() {
