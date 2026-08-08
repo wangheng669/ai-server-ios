@@ -915,7 +915,7 @@ private struct TodayWorldDailyDigestView: View {
     }
 }
 
-private struct TodayWorldAuthorGroup: Identifiable {
+struct TodayWorldAuthorGroup: Identifiable {
     let id: String
     let authorKey: String
     let authorName: String
@@ -961,8 +961,10 @@ private struct TodayWorldAuthorGroup: Identifiable {
         .sorted { lhs, rhs in
             postDate(lhs.post) > postDate(rhs.post)
         }
+        var seenPostIDs = Set<Int>()
 
         for entry in entries {
+            guard seenPostIDs.insert(entry.post.id).inserted else { continue }
             let handle = entry.post.authorHandle ?? normalizedHandle(entry.section.entity?.xHandle)
             let authorName = entry.post.authorName.isEmpty
                 ? (entry.section.entity?.name ?? "OpenAI")
