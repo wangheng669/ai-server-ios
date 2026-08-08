@@ -1185,6 +1185,16 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(TodayWorldAuthorGroup.make(from: payload).isEmpty)
     }
 
+    func testTodayWorldYesterdayReportDecoding() throws {
+        let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"overview":"昨日主要围绕模型发布。","highlights":[{"person":"Sam Altman","company":"OpenAI","summary":"发布新进展。","post_ids":[42]}],"watch_list":["后续发布"]},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123,"completed_at":"2026-08-08T06:16:00+08:00"}}"#.utf8)
+        let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
+
+        XCTAssertEqual(response.data.date, "2026-08-07")
+        XCTAssertEqual(response.data.sourceCount, 3)
+        XCTAssertEqual(response.data.report.highlights.first?.person, "Sam Altman")
+        XCTAssertEqual(response.data.report.watchList, ["后续发布"])
+    }
+
     func testTodayWorldTextRemovesBlankAndRepeatedLines() {
         let text = "  第一段  \n\n第一段\n  第二段\n\n\n"
 
