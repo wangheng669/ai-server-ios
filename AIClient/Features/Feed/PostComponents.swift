@@ -779,7 +779,8 @@ struct PostMediaGrid: View {
                     url: videoURL,
                     fallbackURL: post.feedPlaybackFallbackURL,
                     thumbnailURL: post.previewURL,
-                    contentMode: videoContentMode
+                    contentMode: videoContentMode,
+                    observationSurface: "feed-grid"
                 )
                     .id(videoURL)
                     .frame(width: resolvedVideoSize.width, height: resolvedVideoSize.height)
@@ -863,7 +864,8 @@ struct XFeedMediaView: View {
             XVideoPlayerView(
                 url: videoURL,
                 fallbackURL: post.feedPlaybackFallbackURL,
-                thumbnailURL: post.previewURL
+                thumbnailURL: post.previewURL,
+                observationSurface: "x-feed"
             )
                 .id(videoURL)
                 .frame(height: videoHeight)
@@ -961,6 +963,8 @@ struct XVideoPlayerView: View {
     @State private var thumbnailFailed = false
     @State private var isFullscreenPresented = false
     @State private var playbackFallbackTask: Task<Void, Never>?
+    @State private var observationSessionID: String?
+    @State private var observationStartedAt: Date?
     @AppStorage("x.video.isMuted") private var isMuted = false
     private let fallbackURL: URL?
     private let thumbnailURL: URL?
@@ -970,6 +974,7 @@ struct XVideoPlayerView: View {
     private let isPlaybackActive: Bool
     private let generatesThumbnailWhenMissing: Bool
     private let onAspectRatioResolved: ((CGFloat) -> Void)?
+    private let observationSurface: String
 
     init(
         url: URL,
@@ -980,6 +985,7 @@ struct XVideoPlayerView: View {
         chromeStyle: XVideoPlayerChromeStyle = .standard,
         isPlaybackActive: Bool = true,
         generatesThumbnailWhenMissing: Bool = true,
+        observationSurface: String = "x-video",
         onAspectRatioResolved: ((CGFloat) -> Void)? = nil
     ) {
         _playbackURL = State(initialValue: url)
@@ -990,6 +996,7 @@ struct XVideoPlayerView: View {
         self.chromeStyle = chromeStyle
         self.isPlaybackActive = isPlaybackActive
         self.generatesThumbnailWhenMissing = generatesThumbnailWhenMissing
+        self.observationSurface = observationSurface
         self.onAspectRatioResolved = onAspectRatioResolved
     }
 
@@ -1075,7 +1082,7 @@ struct XVideoPlayerView: View {
                 MinimalVideoControls(
                     player: player,
                     isMuted: $isMuted,
-                    onPause: stopPlayback,
+                    onPause: { stopPlayback() },
                     onFullscreen: presentFullscreen
                 )
                 .frame(maxHeight: .infinity, alignment: .bottom)
@@ -1178,6 +1185,11 @@ struct XVideoPlayerView: View {
 
     private func beginPlayback(with sourceURL: URL) {
         guard isPlaybackActive else { return }
+        if observationSessionID == nil, fallbackURL != nil {
+            observationSessionID = UUID().uuidString
+            observationStartedAt = Date()
+            reportPlaybackEvent("started", route: playbackRoute(for: sourceURL))
+        }
         activateAudioSession()
         let asset = preparedAsset ?? AVURLAsset(url: sourceURL)
         let item = AVPlayerItem(asset: asset)
@@ -1208,7 +1220,7 @@ struct XVideoPlayerView: View {
         }
     }
 
-    private func stopPlayback() {
+    private func stopPlayback(resetObservation: Bool = true) {
         playbackFallbackTask?.cancel()
         playbackFallbackTask = nil
         if let player {
@@ -1217,10 +1229,15 @@ struct XVideoPlayerView: View {
         self.player = nil
         isVideoReady = false
         playbackState = .idle
+        if resetObservation {
+            observationSessionID = nil
+            observationStartedAt = nil
+        }
     }
 
     private func markVideoReady() {
         guard playbackState == .preparing else { return }
+        reportPlaybackEvent("first_frame", route: playbackRoute(for: playbackURL))
         playbackFallbackTask?.cancel()
         playbackFallbackTask = nil
         withAnimation(.easeOut(duration: 0.15)) {
@@ -1231,6 +1248,7 @@ struct XVideoPlayerView: View {
 
     private func markPlaybackFailed() {
         guard playbackState == .preparing || playbackState == .playing else { return }
+        reportPlaybackEvent("failed", route: playbackRoute(for: playbackURL), message: "AVPlayer failed")
         if let fallbackURL, !hasUsedFallback, playbackURL != fallbackURL {
             switchToFallback(fallbackURL)
             return
@@ -1246,16 +1264,40 @@ struct XVideoPlayerView: View {
         playbackFallbackTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, playbackState == .preparing else { return }
+            reportPlaybackEvent("fallback_timeout", route: "direct", message: "首帧等待超过 1 秒")
             switchToFallback(fallbackURL)
         }
     }
 
     private func switchToFallback(_ fallbackURL: URL) {
-        stopPlayback()
+        stopPlayback(resetObservation: false)
         preparedAsset = nil
         hasUsedFallback = true
         playbackURL = fallbackURL
+        reportPlaybackEvent("fallback_started", route: "proxy")
         beginPlayback(with: fallbackURL)
+    }
+
+    private func playbackRoute(for url: URL) -> String {
+        url == fallbackURL ? "proxy" : "direct"
+    }
+
+    private func reportPlaybackEvent(_ phase: String, route: String, message: String? = nil) {
+        guard let sessionID = observationSessionID,
+              let startedAt = observationStartedAt else { return }
+        let event = XVideoPlaybackEvent(
+            sessionID: sessionID,
+            phase: phase,
+            surface: observationSurface,
+            route: route,
+            videoURL: playbackURL.absoluteString,
+            elapsedMS: max(0, Int(Date().timeIntervalSince(startedAt) * 1000)),
+            message: message,
+            occurredAt: ISO8601DateFormatter().string(from: Date())
+        )
+        Task {
+            try? await APIClient(baseURL: ServerConfiguration.currentURL).reportXVideoPlaybackEvent(event)
+        }
     }
 
     private func activateAudioSession() {

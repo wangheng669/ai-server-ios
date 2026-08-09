@@ -531,6 +531,17 @@ struct APIClient {
         catch { throw APIError.decoding(error) }
     }
 
+    func reportXVideoPlaybackEvent(_ event: XVideoPlaybackEvent) async throws {
+        var request = URLRequest(url: baseURL.appending(path: "api/ios/v1/x/video-playback/events"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 5
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(event)
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { throw APIError.invalidResponse }
+    }
+
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
         let response = try await fetchArticlePreview(url: url)
         if let article = NewYorkTimesArticleParser.extract(from: response.data.content) { return article }
@@ -589,6 +600,25 @@ struct APIClient {
             }
         }
         throw APIError.invalidResponse
+    }
+}
+
+struct XVideoPlaybackEvent: Encodable {
+    let sessionID: String
+    let phase: String
+    let surface: String
+    let route: String
+    let videoURL: String
+    let elapsedMS: Int
+    let message: String?
+    let occurredAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case phase, surface, route, message
+        case sessionID = "sessionId"
+        case videoURL = "videoUrl"
+        case elapsedMS = "elapsedMs"
+        case occurredAt
     }
 }
 
