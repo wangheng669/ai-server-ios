@@ -155,6 +155,7 @@ final class MarketStore {
     func loadIndexConstituents(symbol: String, force: Bool = false) async {
         if !force, indexConstituents[symbol] != nil { return }
         guard loadingConstituentSymbols.insert(symbol).inserted else { return }
+        constituentErrors[symbol] = nil
         defer { loadingConstituentSymbols.remove(symbol) }
         do {
             let value = try await service.indexConstituents(symbol: symbol, refresh: force)
@@ -166,6 +167,10 @@ final class MarketStore {
         } catch {
             constituentErrors[symbol] = error.localizedDescription
         }
+    }
+
+    func isLoadingIndexConstituents(symbol: String) -> Bool {
+        loadingConstituentSymbols.contains(symbol)
     }
 
     private func scheduleConstituentRetryIfNeeded(symbol: String, pendingSymbols: [String]) {
@@ -274,12 +279,7 @@ final class MarketStore {
 
     var healthIssues: [MarketSymbolHealth] {
         guard let dashboard else { return [] }
-        if !dashboard.symbolHealth.isEmpty {
-            return dashboard.symbolHealth.filter { $0.status == .missing || $0.status == .stale }
-        }
-        return dashboard.missingSymbols.map {
-            MarketSymbolHealth(symbol: $0, status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: "quote_unavailable")
-        }
+        return dashboard.symbolHealth.filter { $0.status == .missing || $0.status == .stale }
     }
 
     func quote(symbol: String) -> MarketQuote? {
@@ -397,8 +397,7 @@ private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {
     if !stale.isEmpty {
         return "\(stale.count) 项行情更新延迟"
     }
-    // Compatibility with servers that predate per-symbol health metadata.
-    return dashboard.missingSymbols.isEmpty ? nil : "\(dashboard.missingSymbols.count) 项行情暂未返回"
+    return nil
 }
 
 func marketHealthSummary(_ issues: [MarketSymbolHealth]) -> String? {

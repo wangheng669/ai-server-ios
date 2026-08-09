@@ -182,6 +182,7 @@ struct MarketIndexConstituent: Decodable, Identifiable {
     let rank: Int
     let weight: Double?
     let logoPath: String?
+    let detailAvailable: Bool
     var quote: MarketQuote
     var id: String { quote.symbol }
 }
@@ -247,7 +248,6 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let dataSource: String?
     let delaySeconds: Int?
     let marketSession: String?
-    let isNightSession: Bool?
     let sessionPrice: Double?
     let sessionChangePercent: Double?
     let sessionDataSource: String?
@@ -278,7 +278,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     var isUp: Bool { percentValue >= 0 }
 
     var tradingSession: MarketTradingSession {
-        MarketTradingSession(rawValue: marketSession, legacyIsNightSession: isNightSession)
+        MarketTradingSession(rawValue: marketSession)
     }
 
     var hasActiveExtendedSessionQuote: Bool {
@@ -292,7 +292,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode
         case price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
-        case dataSource, delaySeconds, marketSession, isNightSession, sessionPrice, sessionChangePercent, sessionDataSource
+        case dataSource, delaySeconds, marketSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, quality, trend, nightTrend, stale
     }
 
@@ -317,7 +317,6 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         dataSource: String?,
         delaySeconds: Int?,
         marketSession: String?,
-        isNightSession: Bool?,
         sessionPrice: Double?,
         sessionChangePercent: Double?,
         sessionDataSource: String?,
@@ -348,7 +347,6 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.dataSource = dataSource
         self.delaySeconds = delaySeconds
         self.marketSession = marketSession
-        self.isNightSession = isNightSession
         self.sessionPrice = sessionPrice
         self.sessionChangePercent = sessionChangePercent
         self.sessionDataSource = sessionDataSource
@@ -382,7 +380,6 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         dataSource = try values.decodeIfPresent(String.self, forKey: .dataSource)
         delaySeconds = try values.decodeIfPresent(Int.self, forKey: .delaySeconds)
         marketSession = try values.decodeIfPresent(String.self, forKey: .marketSession)
-        isNightSession = try values.decodeIfPresent(Bool.self, forKey: .isNightSession)
         sessionPrice = try values.decodeIfPresent(Double.self, forKey: .sessionPrice)
         sessionChangePercent = try values.decodeIfPresent(Double.self, forKey: .sessionChangePercent)
         sessionDataSource = try values.decodeIfPresent(String.self, forKey: .sessionDataSource)
@@ -398,15 +395,15 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 enum MarketTradingSession: Equatable {
     case regular, premarket, postmarket, overnight, closed, alwaysOpen, unknown
 
-    init(rawValue: String?, legacyIsNightSession: Bool? = nil) {
+    init(rawValue: String?) {
         switch rawValue?.lowercased() {
         case "regular": self = .regular
         case "pre", "premarket": self = .premarket
         case "post", "after": self = .postmarket
         case "overnight": self = .overnight
         case "always-open": self = .alwaysOpen
-        case "closed": self = legacyIsNightSession == true ? .overnight : .closed
-        default: self = legacyIsNightSession == true ? .overnight : .unknown
+        case "closed": self = .closed
+        default: self = .unknown
         }
     }
 
@@ -446,7 +443,6 @@ struct MarketQuoteUpdate: Decodable {
     let dataSource: String?
     let delaySeconds: Int?
     let marketSession: String?
-    let isNightSession: Bool?
     let sessionPrice: Double?
     let sessionChangePercent: Double?
     let sessionDataSource: String?
@@ -456,7 +452,7 @@ struct MarketQuoteUpdate: Decodable {
     func merging(into current: MarketQuote?) -> MarketQuote {
         let regularTrend = marketAppendingLiveValue(price, to: current?.trend ?? [])
         let extendedTrend: [Double]
-        if isNightSession == true, let sessionPrice {
+        if MarketTradingSession(rawValue: marketSession).isExtended, let sessionPrice {
             extendedTrend = marketAppendingLiveValue(sessionPrice, to: current?.nightTrend ?? [])
         } else {
             extendedTrend = current?.nightTrend ?? []
@@ -482,7 +478,6 @@ struct MarketQuoteUpdate: Decodable {
             dataSource: dataSource ?? current?.dataSource,
             delaySeconds: delaySeconds ?? current?.delaySeconds,
             marketSession: marketSession ?? current?.marketSession,
-            isNightSession: isNightSession ?? current?.isNightSession,
             sessionPrice: sessionPrice ?? current?.sessionPrice,
             sessionChangePercent: sessionChangePercent ?? current?.sessionChangePercent,
             sessionDataSource: sessionDataSource ?? current?.sessionDataSource,
@@ -1176,12 +1171,19 @@ extension MarketQuote {
 
     var freshnessLabel: String {
         if tradingSession == .alwaysOpen { return tradingSession.displayLabel }
-        if let delaySeconds, delaySeconds > 0 { return "延迟\(max(1, delaySeconds / 60))分钟" }
         if tradingSession == .closed {
-            return marketAsOfTimestamp.map { "截至 \(marketShortTimestamp($0))" } ?? "已收盘"
+            return quality?.tradingDate.map { "截至 \($0) 收盘" } ?? "已收盘"
         }
+        if let delaySeconds, delaySeconds > 0 { return "延迟\(max(1, delaySeconds / 60))分钟" }
         if stale == true { return "数据延迟" }
         return tradingSession.displayLabel
+    }
+
+    var marketAsOfLabel: String {
+        if tradingSession == .closed, let tradingDate = quality?.tradingDate {
+            return "\(tradingDate) 收盘行情"
+        }
+        return marketAsOfTimestamp.map { "\(marketShortTimestamp($0)) 行情" } ?? "行情更新中"
     }
 
     var marketAsOfTimestamp: Int64? {
