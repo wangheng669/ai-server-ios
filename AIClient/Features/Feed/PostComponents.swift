@@ -1025,62 +1025,24 @@ struct XVideoPlayerView: View {
 
             switch playbackState {
             case .idle:
-                if chromeStyle == .minimal {
-                    MinimalVideoIdleControls(
-                        onPlay: startPlayback,
-                        onFullscreen: presentFullscreen
-                    )
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                } else {
-                    Button(action: startPlayback) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 52, height: 40)
-                            .background(
-                                .black.opacity(0.62),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("播放视频")
-                }
+                VideoIdleControls(
+                    isRetry: false,
+                    onPlay: startPlayback,
+                    onFullscreen: presentFullscreen
+                )
             case .preparing:
-                if chromeStyle == .minimal {
-                    MinimalVideoLoadingBar()
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .accessibilityLabel("正在加载视频")
-                } else {
-                    ProgressView()
-                        .controlSize(.large)
-                        .tint(.white)
-                        .padding(14)
-                        .background(.black.opacity(0.56), in: Circle())
-                        .accessibilityLabel("正在加载视频")
-                }
+                VideoLoadingOverlay()
             case .failed:
-                if chromeStyle == .minimal {
-                    MinimalVideoIdleControls(
-                        onPlay: startPlayback,
-                        onFullscreen: presentFullscreen
-                    )
-                } else {
-                    Button(action: startPlayback) {
-                        Label("重试播放", systemImage: "arrow.clockwise")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(.black.opacity(0.68), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("重试播放视频")
-                }
+                VideoIdleControls(
+                    isRetry: true,
+                    onPlay: startPlayback,
+                    onFullscreen: presentFullscreen
+                )
             case .playing:
                 EmptyView()
             }
 
-            if chromeStyle == .minimal, playbackState == .playing, let player {
+            if playbackState == .playing, let player {
                 MinimalVideoControls(
                     player: player,
                     isMuted: $isMuted,
@@ -1088,28 +1050,6 @@ struct XVideoPlayerView: View {
                     onFullscreen: presentFullscreen
                 )
                 .frame(maxHeight: .infinity, alignment: .bottom)
-            } else if chromeStyle == .standard,
-                      playbackState == .preparing || playbackState == .playing {
-                Button {
-                    isMuted.toggle()
-                    player?.isMuted = isMuted
-                } label: {
-                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: chromeStyle == .minimal ? 12 : 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(
-                            width: chromeStyle == .minimal ? 30 : 34,
-                            height: chromeStyle == .minimal ? 30 : 30
-                        )
-                        .background(
-                            .black.opacity(chromeStyle == .minimal ? 0.38 : 0.62),
-                            in: chromeStyle == .minimal ? AnyShape(Circle()) : AnyShape(Capsule())
-                        )
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(8)
-                .accessibilityLabel(isMuted ? "打开声音" : "静音")
             }
 
             if thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
@@ -1129,19 +1069,6 @@ struct XVideoPlayerView: View {
                 .padding(.bottom, 10)
             }
 
-            if chromeStyle == .standard {
-                Button(action: presentFullscreen) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 30)
-                        .background(.black.opacity(0.62), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .padding(8)
-                .accessibilityLabel("全屏播放")
-            }
         }
         .frame(maxWidth: .infinity)
         .clipped()
@@ -1391,39 +1318,53 @@ struct XVideoPlayerView: View {
     }
 }
 
-private struct MinimalVideoLoadingBar: View {
+private struct VideoLoadingOverlay: View {
     var body: some View {
-        ProgressView()
-            .progressViewStyle(.linear)
-            .tint(.white.opacity(0.9))
-            .scaleEffect(x: 1, y: 0.55, anchor: .bottom)
+        ZStack {
+            ProgressView()
+                .controlSize(.regular)
+                .tint(.white)
+                .frame(width: 46, height: 46)
+                .background(.black.opacity(0.38), in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.12)))
+
+            ProgressView()
+                .progressViewStyle(.linear)
+                .tint(.white.opacity(0.92))
+                .scaleEffect(x: 1, y: 0.55, anchor: .bottom)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+        .accessibilityLabel("正在加载视频")
     }
 }
 
-private struct MinimalVideoIdleControls: View {
+private struct VideoIdleControls: View {
+    let isRetry: Bool
     let onPlay: () -> Void
     let onFullscreen: () -> Void
 
     var body: some View {
         ZStack {
             Button(action: onPlay) {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 38, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .offset(x: 2)
-                    .frame(width: 76, height: 76)
-                    .contentShape(Rectangle())
-                    .shadow(color: .black.opacity(0.38), radius: 7, y: 2)
+                Image(systemName: isRetry ? "arrow.clockwise" : "play.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .offset(x: isRetry ? 0 : 1)
+                    .frame(width: 58, height: 58)
+                    .background(.black.opacity(0.42), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.28), radius: 8, y: 3)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("播放视频")
+            .accessibilityLabel(isRetry ? "重试播放视频" : "播放视频")
 
             Button(action: onFullscreen) {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.94))
-                    .frame(width: 34, height: 34)
-                    .background(.black.opacity(0.34), in: Circle())
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(.black.opacity(0.38), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("全屏播放")
