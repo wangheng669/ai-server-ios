@@ -1186,13 +1186,14 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testTodayWorldYesterdayReportDecoding() throws {
-        let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"overview":"昨日主要围绕模型发布。","highlights":[{"person":"Sam Altman","company":"OpenAI","summary":"发布新进展。","post_ids":[42]}],"watch_list":["后续发布"]},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123,"completed_at":"2026-08-08T06:16:00+08:00"}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"systems":[{"system_key":"altman","system_name":"奥特曼系","accounts":[{"source_key":"sam-altman","name":"Sam Altman","source_type":"person","summary":"说明安全评估进展。","post_ids":[42]},{"source_key":"openai","name":"OpenAI","source_type":"company","summary":"发布产品更新。","post_ids":[43]}]}]},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123,"completed_at":"2026-08-08T06:16:00+08:00"}}"#.utf8)
         let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
 
         XCTAssertEqual(response.data.date, "2026-08-07")
         XCTAssertEqual(response.data.sourceCount, 3)
-        XCTAssertEqual(response.data.report.highlights.first?.person, "Sam Altman")
-        XCTAssertEqual(response.data.report.watchList, ["后续发布"])
+        XCTAssertEqual(response.data.report.systems.first?.systemName, "奥特曼系")
+        XCTAssertEqual(response.data.report.systems.first?.accounts.map(\.name), ["Sam Altman", "OpenAI"])
+        XCTAssertEqual(response.data.report.systems.first?.accounts.last?.sourceType, "company")
     }
 
     func testTodayWorldTextRemovesBlankAndRepeatedLines() {

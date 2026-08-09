@@ -830,41 +830,44 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
 }
 
 struct TodayWorldYesterdayReportContent: Decodable, Equatable {
-    let overview: String?
-    let highlights: [TodayWorldYesterdayReportHighlight]
-    let watchList: [String]
+    let systems: [TodayWorldYesterdayReportSystem]
 
     enum CodingKeys: String, CodingKey {
-        case overview, highlights
-        case watchList = "watch_list"
+        case systems
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        overview = try container.decodeIfPresent(String.self, forKey: .overview)
-        highlights = try container.decodeIfPresent([TodayWorldYesterdayReportHighlight].self, forKey: .highlights) ?? []
-        watchList = try container.decodeIfPresent([String].self, forKey: .watchList) ?? []
+        systems = try container.decodeIfPresent([TodayWorldYesterdayReportSystem].self, forKey: .systems) ?? []
     }
 }
 
-struct TodayWorldYesterdayReportHighlight: Decodable, Equatable, Identifiable {
-    let person: String
-    let company: String?
-    let summary: String
-    let postIDs: [Int]
-    var id: String { "\(person):\(postIDs.map(String.init).joined(separator: ",")):\(summary)" }
+struct TodayWorldYesterdayReportSystem: Decodable, Equatable, Identifiable {
+    let systemKey: String
+    let systemName: String
+    let accounts: [TodayWorldYesterdayReportAccount]
+    var id: String { systemKey }
 
     enum CodingKeys: String, CodingKey {
-        case person, company, summary
-        case postIDs = "post_ids"
+        case accounts
+        case systemKey = "system_key"
+        case systemName = "system_name"
     }
+}
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        person = try container.decodeIfPresent(String.self, forKey: .person) ?? "关注人物"
-        company = try container.decodeIfPresent(String.self, forKey: .company)
-        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
-        postIDs = try container.decodeIfPresent([Int].self, forKey: .postIDs) ?? []
+struct TodayWorldYesterdayReportAccount: Decodable, Equatable, Identifiable {
+    let sourceKey: String
+    let name: String
+    let sourceType: String?
+    let summary: String
+    let postIDs: [Int]
+    var id: String { sourceKey }
+
+    enum CodingKeys: String, CodingKey {
+        case name, summary
+        case sourceKey = "source_key"
+        case sourceType = "source_type"
+        case postIDs = "post_ids"
     }
 }
 
