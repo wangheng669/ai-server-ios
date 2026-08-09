@@ -2274,7 +2274,9 @@ private struct BooksReadingSummaryCard: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 metric(title: "今日阅读", value: bookshelf?.todayReadingText ?? "暂无数据")
-                Divider().frame(height: 34).padding(.horizontal, 16)
+                Divider().frame(height: 34).padding(.horizontal, 10)
+                metric(title: "昨日阅读", value: bookshelf?.yesterdayReadingText ?? "暂无数据")
+                Divider().frame(height: 34).padding(.horizontal, 10)
                 metric(title: "当前书籍", value: remainingText)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

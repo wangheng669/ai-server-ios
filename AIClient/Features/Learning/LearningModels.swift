@@ -303,15 +303,21 @@ final class LearningProgressStore {
 struct LearningBookshelf: Decodable, Equatable {
     let source: String
     let todayReadingSeconds: Int64?
+    let yesterdayReadingSeconds: Int64?
     let books: [KnowledgeBook]
 
     enum CodingKeys: String, CodingKey {
         case source, books
         case todayReadingSeconds = "today_reading_seconds"
+        case yesterdayReadingSeconds = "yesterday_reading_seconds"
     }
 
     var todayReadingText: String {
         Self.durationText(seconds: todayReadingSeconds ?? 0, empty: "今天还没开始")
+    }
+
+    var yesterdayReadingText: String {
+        Self.durationText(seconds: yesterdayReadingSeconds ?? 0, empty: "昨日未阅读")
     }
 
     private static func durationText(seconds: Int64, empty: String) -> String {
