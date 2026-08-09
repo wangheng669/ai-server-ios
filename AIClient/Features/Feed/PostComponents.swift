@@ -774,9 +774,10 @@ struct PostMediaGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
-            if let videoURL = post.videoURLs.first {
+            if let videoURL = post.feedPlaybackURL {
                 XVideoPlayerView(
                     url: videoURL,
+                    fallbackURL: post.feedPlaybackFallbackURL,
                     thumbnailURL: post.previewURL,
                     contentMode: videoContentMode
                 )
@@ -837,6 +838,17 @@ struct PostMediaGrid: View {
     }
 }
 
+private extension Post {
+    var feedPlaybackURL: URL? {
+        sourceName == "X" ? directVideoURLs.first ?? videoURLs.first : videoURLs.first
+    }
+
+    var feedPlaybackFallbackURL: URL? {
+        guard sourceName == "X", directVideoURLs.first != nil else { return nil }
+        return videoURLs.first
+    }
+}
+
 struct ImageGallerySelection: Identifiable {
     let id = UUID()
     let urls: [URL]
@@ -847,8 +859,12 @@ struct XFeedMediaView: View {
     let post: Post
 
     var body: some View {
-        if let videoURL = post.videoURLs.first {
-            XVideoPlayerView(url: videoURL, thumbnailURL: post.previewURL)
+        if let videoURL = post.feedPlaybackURL {
+            XVideoPlayerView(
+                url: videoURL,
+                fallbackURL: post.feedPlaybackFallbackURL,
+                thumbnailURL: post.previewURL
+            )
                 .id(videoURL)
                 .frame(height: videoHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
