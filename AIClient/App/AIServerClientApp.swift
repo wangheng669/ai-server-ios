@@ -843,7 +843,7 @@ private struct TodayWorldDailyDigestView: View {
                 Spacer()
 
                 if let report {
-                    Text("\(report.sourceCount) 人 · \(report.postCount) 条")
+                    Text("\(report.sourceCount) 个账号 · \(report.postCount) 条")
                         .font(.system(size: 12, weight: .medium))
                 }
 
@@ -872,8 +872,8 @@ private struct TodayWorldDailyDigestView: View {
                 Text("昨日日报生成失败，已在治理后台保留失败原因。")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-            } else if let overview = report?.report.overview, !overview.isEmpty {
-                Text(overview)
+            } else if let report, report.status == "succeeded", !report.report.systems.isEmpty {
+                Text("\(report.sourceCount) 个账号昨天有更新，按人物系查看他们分别做了什么。")
                     .font(.system(size: 12.5))
                     .lineLimit(3)
 
@@ -882,7 +882,7 @@ private struct TodayWorldDailyDigestView: View {
                         Text("查看完整日报")
                             .font(.system(size: 13, weight: .semibold))
                         Spacer()
-                        Text("\(report?.report.highlights.count ?? 0) 条重点")
+                        Text("\(report.sourceCount) 个账号")
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         Image(systemName: "chevron.right")
@@ -928,55 +928,29 @@ private struct TodayWorldYesterdayReportSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     header
 
-                    if let overview = report.report.overview, !overview.isEmpty {
-                        sectionTitle("日报概览")
-                        Text(overview)
-                            .font(.system(size: 15))
-                            .lineSpacing(6)
-                    }
-
-                    if !report.report.highlights.isEmpty {
-                        sectionTitle("全部重点动态（\(report.report.highlights.count)）")
-                        ForEach(Array(report.report.highlights.enumerated()), id: \.element.id) { index, highlight in
-                            highlightCard(index: index, highlight: highlight)
+                    ForEach(Array(report.report.systems.enumerated()), id: \.element.id) { index, system in
+                        if index > 0 {
+                            Divider()
+                                .padding(.vertical, 20)
                         }
+                        systemSection(system)
                     }
 
-                    if !report.report.watchList.isEmpty {
-                        sectionTitle("值得继续关注（\(report.report.watchList.count)）")
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(Array(report.report.watchList.enumerated()), id: \.offset) { index, item in
-                                HStack(alignment: .top, spacing: 10) {
-                                    Text("\(index + 1)")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(.orange)
-                                        .frame(width: 20, height: 20)
-                                        .background(Color.orange.opacity(0.12), in: Circle())
-                                    Text(item)
-                                        .font(.system(size: 14))
-                                        .lineSpacing(3)
-                                }
-                            }
-                        }
-                    }
-
-                    HStack(spacing: 8) {
-                        Label(report.model ?? "Qwen", systemImage: "sparkles")
-                        Spacer()
-                        Text("\(report.totalTokens) Token")
-                    }
-                    .font(.system(size: 11.5, weight: .medium))
+                    Text("以上内容汇总自 \(report.postCount) 条昨日动态")
+                    .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 28)
+                    .padding(.bottom, 12)
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 16)
             }
             .scrollIndicators(.hidden)
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(Color(uiColor: .systemBackground))
             .navigationTitle("昨日日报")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -989,56 +963,55 @@ private struct TodayWorldYesterdayReportSheet: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(displayDate, systemImage: "calendar")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.teal)
-            Text("\(report.sourceCount) 位人物 · \(report.postCount) 条动态")
-                .font(.system(size: 24, weight: .bold))
-            Text("由 Qwen 汇总昨日有更新的人物动态")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label(displayDate, systemImage: "calendar")
+                Spacer()
+                Text("\(report.sourceCount) 个账号 · \(report.postCount) 条")
+            }
+            .font(.system(size: 13.5, weight: .medium))
+            .foregroundStyle(.secondary)
+
+            Text("他们昨日都做了什么")
+                .font(.system(size: 20, weight: .bold))
+
+            Divider()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Color.teal.opacity(0.09), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.bottom, 20)
     }
 
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(.secondary)
-    }
+    @ViewBuilder
+    private func systemSection(_ system: TodayWorldYesterdayReportSystem) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(system.systemName)
+                .font(.system(size: 17, weight: .bold))
+                .padding(.bottom, 14)
 
-    private func highlightCard(index: Int, highlight: TodayWorldYesterdayReportHighlight) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(index + 1)")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 25, height: 25)
-                .background(Color.teal, in: Circle())
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 7) {
-                    Text(highlight.person)
-                        .font(.system(size: 14, weight: .semibold))
-                    if let company = highlight.company, !company.isEmpty {
-                        Text(company)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.secondary.opacity(0.09), in: Capsule())
-                    }
+            ForEach(Array(system.accounts.enumerated()), id: \.element.id) { index, account in
+                if index > 0 {
+                    Divider()
+                        .padding(.vertical, 14)
                 }
-                Text(highlight.summary)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(account.name)
+                            .font(.system(size: 15.5, weight: .semibold))
+                        if account.sourceType == "company" {
+                            Text("机构账号")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text(account.summary)
+                        .font(.system(size: 15))
+                        .lineSpacing(5)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .padding(14)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var displayDate: String {
