@@ -103,6 +103,7 @@ final class LearningServiceTests: XCTestCase {
               "data": {
                 "source": "微信读书",
                 "today_reading_seconds": 1560,
+                "yesterday_reading_seconds": 7380,
                 "books": [{
                   "id": "3300203616",
                   "title": "哈萨比斯：谷歌AI之脑",
@@ -133,6 +134,7 @@ final class LearningServiceTests: XCTestCase {
         let response = try JSONDecoder().decode(LearningBookshelfResponse.self, from: data)
         XCTAssertEqual(response.data.source, "微信读书")
         XCTAssertEqual(response.data.todayReadingText, "26 分钟")
+        XCTAssertEqual(response.data.yesterdayReadingText, "2 小时 3 分钟")
         XCTAssertEqual(response.data.books.count, 2)
         XCTAssertEqual(response.data.books.first?.id, "3300203616")
         XCTAssertEqual(response.data.books.first?.coverURL?.host, "example.com")
