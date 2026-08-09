@@ -1740,6 +1740,15 @@ enum MediaURL {
     static func directVideo(_ raw: String) -> URL? {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
+        if direct.path.hasSuffix("/media-proxy"),
+           let originalValue = URLComponents(url: direct, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "url" })?
+            .value,
+           let originalURL = URL(string: originalValue),
+           ["video.twimg.com", "truthsocial.com"].contains(originalURL.host?.lowercased() ?? "") {
+            return originalURL
+        }
         if let bvid = bilibiliBVID(from: direct) {
             return ServerConfiguration.currentURL
                 .appending(path: "api/ios/v1/bilibili/hls")

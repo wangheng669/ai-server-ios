@@ -1059,6 +1059,29 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.videos?.first?.height, 1080)
     }
 
+    func testRestoresDirectXVideoFromExistingMediaProxyURL() throws {
+        let original = "https://video.twimg.com/amplify_video/example/vid/avc1/1270x720/video.mp4?tag=29"
+        var components = URLComponents(
+            url: ServerConfiguration.defaultURL.appending(path: "api/ios/v1/media-proxy"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "url", value: original),
+            URLQueryItem(name: "soft", value: "1"),
+            URLQueryItem(name: "context", value: "ios-feed")
+        ]
+        let proxied = try XCTUnwrap(components?.url?.absoluteString)
+        let json = #"{"post":{"id":2423253,"source":"x","videos":[{"url":"\#(proxied)"}]}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
+
+        XCTAssertEqual(post.directVideoURLs.first?.absoluteString, original)
+        XCTAssertEqual(
+            URLComponents(url: try XCTUnwrap(post.videoURLs.first), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "url" })?.value,
+            original
+        )
+    }
+
     func testExtractsCompleteNewYorkTimesArticleBody() throws {
         let html = """
         <section class="article-body">

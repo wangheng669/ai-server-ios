@@ -1246,9 +1246,13 @@ struct XVideoPlayerView: View {
         }
     }
 
-    private func markPlaybackFailed() {
+    private func markPlaybackFailed(_ error: Error?) {
         guard playbackState == .preparing || playbackState == .playing else { return }
-        reportPlaybackEvent("failed", route: playbackRoute(for: playbackURL), message: "AVPlayer failed")
+        reportPlaybackEvent(
+            "failed",
+            route: playbackRoute(for: playbackURL),
+            message: Self.playbackFailureMessage(error)
+        )
         if let fallbackURL, !hasUsedFallback, playbackURL != fallbackURL {
             switchToFallback(fallbackURL)
             return
@@ -1256,6 +1260,21 @@ struct XVideoPlayerView: View {
         stopPlayback()
         isVideoReady = false
         playbackState = .failed
+    }
+
+    private static func playbackFailureMessage(_ error: Error?) -> String {
+        guard let error else { return "AVPlayer failed（未提供底层错误）" }
+        var messages: [String] = []
+        var current: NSError? = error as NSError
+        while let item = current, messages.count < 3 {
+            var message = "\(item.domain) \(item.code): \(item.localizedDescription)"
+            if let reason = item.localizedFailureReason, reason != item.localizedDescription {
+                message += "（\(reason)）"
+            }
+            messages.append(message)
+            current = item.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return messages.joined(separator: " ← ").prefix(480).description
     }
 
     private func scheduleFallbackIfNeeded(from sourceURL: URL) {
@@ -1543,7 +1562,7 @@ private struct XPlayerLayerView: UIViewRepresentable {
     let player: AVPlayer?
     let videoGravity: AVLayerVideoGravity
     let onReadyForDisplay: () -> Void
-    let onFailure: () -> Void
+    let onFailure: (Error?) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -1590,7 +1609,7 @@ private struct XPlayerLayerView: UIViewRepresentable {
 
     final class Coordinator {
         private let onReadyForDisplay: () -> Void
-        private let onFailure: () -> Void
+        private let onFailure: (Error?) -> Void
         private weak var observedPlayer: AVPlayer?
         private var readyObservation: NSKeyValueObservation?
         private var statusObservation: NSKeyValueObservation?
@@ -1598,7 +1617,7 @@ private struct XPlayerLayerView: UIViewRepresentable {
 
         init(
             onReadyForDisplay: @escaping () -> Void,
-            onFailure: @escaping () -> Void
+            onFailure: @escaping (Error?) -> Void
         ) {
             self.onReadyForDisplay = onReadyForDisplay
             self.onFailure = onFailure
@@ -1625,15 +1644,17 @@ private struct XPlayerLayerView: UIViewRepresentable {
             ) { [weak self] item, _ in
                 guard item.status == .failed else { return }
                 DispatchQueue.main.async {
-                    self?.onFailure()
+                    self?.onFailure(item.error)
                 }
             }
             failureObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemFailedToPlayToEndTime,
                 object: item,
                 queue: .main
-            ) { [weak self] _ in
-                self?.onFailure()
+            ) { [weak self] notification in
+                let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+                    ?? item.error
+                self?.onFailure(error)
             }
         }
 
