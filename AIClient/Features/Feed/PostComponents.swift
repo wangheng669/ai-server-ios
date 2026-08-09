@@ -944,6 +944,8 @@ enum XVideoPlayerChromeStyle {
 }
 
 struct XVideoPlayerView: View {
+    private static let directFirstFrameTimeout: Duration = .seconds(3)
+
     private enum PlaybackState {
         case idle
         case preparing
@@ -1281,9 +1283,9 @@ struct XVideoPlayerView: View {
         playbackFallbackTask?.cancel()
         guard let fallbackURL, !hasUsedFallback, sourceURL != fallbackURL else { return }
         playbackFallbackTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: Self.directFirstFrameTimeout)
             guard !Task.isCancelled, playbackState == .preparing else { return }
-            reportPlaybackEvent("fallback_timeout", route: "direct", message: "首帧等待超过 1 秒")
+            reportPlaybackEvent("fallback_timeout", route: "direct", message: "首帧等待超过 3 秒")
             switchToFallback(fallbackURL)
         }
     }
