@@ -2397,7 +2397,7 @@ private struct MarketIndexDetailView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(quoteTint(quote))
-                Text(quote?.marketAsOfTimestamp.map { "\(marketTimestamp($0)) 行情" } ?? "行情更新中")
+                Text(quote?.marketAsOfLabel ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if showsIndexSession, let session = indexSessionQuote {
@@ -2533,18 +2533,43 @@ private struct MarketIndexDetailView: View {
             VStack(spacing: 0) {
                 let items = store.indexConstituents[historicalSymbol]?.items ?? []
                 ForEach(items) { item in
-                    Button {
-                        onSelectSymbol(item.quote.symbol)
-                    } label: {
+                    if item.detailAvailable {
+                        Button {
+                            onSelectSymbol(item.quote.symbol)
+                        } label: {
+                            MarketConstituentRow(item: item, trend: store.trendValues(for: item.quote))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("打开行情详情")
+                    } else {
                         MarketConstituentRow(item: item, trend: store.trendValues(for: item.quote))
+                            .accessibilityHint("该本地代码仅展示当前行情")
                     }
-                    .buttonStyle(.plain)
                     if item.id != items.last?.id { Divider().padding(.leading, 52) }
                 }
-                if let error = store.constituentErrors[historicalSymbol] {
-                    Text(error).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 72)
+                if store.isLoadingIndexConstituents(symbol: historicalSymbol) {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在加载成分股")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 72)
+                } else if let error = store.constituentErrors[historicalSymbol] {
+                    VStack(spacing: 6) {
+                        Text(error).font(.footnote).foregroundStyle(.secondary)
+                        Button("重新加载") {
+                            Task { await store.loadIndexConstituents(symbol: historicalSymbol, force: true) }
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .frame(minWidth: 88, minHeight: 44)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 88)
                 } else if store.indexConstituents[historicalSymbol] == nil {
-                    ProgressView().frame(maxWidth: .infinity, minHeight: 72)
+                    Text("暂无成分股数据")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 72)
                 }
             }
             .overlay(alignment: .top) { Divider() }
@@ -2584,8 +2609,7 @@ private struct MarketIndexDetailView: View {
 
     private var shareText: String {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
-        let timestamp = quote.marketAsOfTimestamp.map(marketTimestamp) ?? "时间未知"
-        return "\(quote.presentationName)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(timestamp)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
+        return "\(quote.presentationName)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(quote.marketAsOfLabel)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
     }
 }
 
@@ -3449,10 +3473,6 @@ func marketFinancialAmount(_ value: Double, currency: String) -> String {
     }
     return "\(number) \(unit)\(currencyLabel)".trimmingCharacters(in: .whitespaces)
 }
-private func marketTimestamp(_ timestamp: Int64) -> String {
-    marketShortTimestamp(timestamp)
-}
-
 private func cryptoPriceDigits(_ price: Double, symbol: String = "BINANCE:") -> Int {
     guard symbol.hasPrefix("BINANCE:") else { return 2 }
     if price < 1 { return 5 }

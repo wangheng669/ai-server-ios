@@ -212,10 +212,10 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertFalse(marketQuoteNeedsTrendBackfill(regular))
     }
 
-    func testTradingSessionUsesExplicitSessionBeforeLegacyNightFlag() {
-        XCTAssertEqual(MarketTradingSession(rawValue: "pre", legacyIsNightSession: true), .premarket)
+    func testTradingSessionUsesExplicitSession() {
+        XCTAssertEqual(MarketTradingSession(rawValue: "pre"), .premarket)
         XCTAssertEqual(MarketTradingSession(rawValue: "after"), .postmarket)
-        XCTAssertEqual(MarketTradingSession(rawValue: nil, legacyIsNightSession: true), .overnight)
+        XCTAssertEqual(MarketTradingSession(rawValue: nil), .unknown)
         XCTAssertEqual(MarketTradingSession(rawValue: "closed"), .closed)
         XCTAssertEqual(MarketTradingSession(rawValue: "pre").displayLabel, "盘前")
     }
@@ -397,6 +397,14 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.freshnessLabel, "延迟15分钟")
     }
 
+    func testClosedQuoteUsesTradingDateInsteadOfProviderReceiptTime() throws {
+        let data = Data(#"{"symbol":"^STOXX50E","name":"欧洲STOXX 50","price":6523.87,"marketSession":"closed","delaySeconds":900,"timestamp":1786285136181,"quality":{"status":"delayed","reason":"official_close","asOfTimestamp":1786116600000,"tradingDate":"2026-08-07","fallbackUsed":false}}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.freshnessLabel, "截至 2026-08-07 收盘")
+        XCTAssertEqual(quote.marketAsOfLabel, "2026-08-07 收盘行情")
+    }
+
     func testHealthSummaryNamesMissingSymbols() {
         let issues = [
             MarketSymbolHealth(symbol: "932000.SS", status: .missing, asOf: nil, timestamp: nil, source: nil, delaySeconds: nil, reason: "quote_unavailable"),
@@ -435,26 +443,26 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testRealtimeNightQuoteDecodesAsIncrementAndAppendsNightPrice() throws {
-        let data = Data(#"{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","isNightSession":true,"sessionPrice":212.49,"sessionChangePercent":0.3257,"timestamp":1784174184396}"#.utf8)
+        let data = Data(#"{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","sessionPrice":212.49,"sessionChangePercent":0.3257,"timestamp":1784174184396}"#.utf8)
         let update = try JSONDecoder().decode(MarketQuoteUpdate.self, from: data)
         let quote = update.merging(into: nil)
 
         XCTAssertEqual(quote.symbol, "NVDA")
         XCTAssertEqual(quote.sessionPrice, 212.49)
         XCTAssertEqual(quote.nightTrend, [212.49])
-        XCTAssertTrue(quote.isNightSession == true)
+        XCTAssertEqual(quote.tradingSession, .overnight)
     }
 
     func testExtendedSessionDisplayFallsBackToMarketSession() throws {
-        let data = Data(#"{"symbol":"NVDA","name":"英伟达","price":196.51,"previousClose":206.84,"marketSession":"overnight","isNightSession":false,"sessionPrice":196.54,"sessionChangePercent":-4.98}"#.utf8)
+        let data = Data(#"{"symbol":"NVDA","name":"英伟达","price":196.51,"previousClose":206.84,"marketSession":"overnight","sessionPrice":196.54,"sessionChangePercent":-4.98}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
         XCTAssertTrue(quote.hasActiveExtendedSessionQuote)
     }
 
     func testRealtimeUpdatePreservesConstituentNightTrend() throws {
-        let responseData = Data(#"{"indexSymbol":"^NDX","label":"主要成分股","selectionBasis":"test","asOf":"2026-07-16","generatedAt":"2026-07-16T05:00:00Z","items":[{"rank":1,"weight":null,"logoPath":null,"quote":{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"isNightSession":true,"sessionPrice":212.49,"timestamp":1784174184000,"trend":[210,211],"nightTrend":[212.1,212.2,212.3]}}],"missingSymbols":[]}"#.utf8)
-        let updateData = Data(#"{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","isNightSession":true,"sessionPrice":212.49,"sessionChangePercent":0.3257,"timestamp":1784174184396}"#.utf8)
+        let responseData = Data(#"{"indexSymbol":"^NDX","label":"主要成分股","selectionBasis":"test","asOf":"2026-07-16","generatedAt":"2026-07-16T05:00:00Z","items":[{"rank":1,"weight":null,"logoPath":null,"detailAvailable":true,"quote":{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","sessionPrice":212.49,"timestamp":1784174184000,"trend":[210,211],"nightTrend":[212.1,212.2,212.3]}}],"missingSymbols":[]}"#.utf8)
+        let updateData = Data(#"{"symbol":"NVDA","name":"英伟达","price":212.5,"previousClose":211.8,"marketSession":"overnight","sessionPrice":212.49,"sessionChangePercent":0.3257,"timestamp":1784174184396}"#.utf8)
         var constituents = try JSONDecoder().decode(MarketIndexConstituents.self, from: responseData)
         let update = try JSONDecoder().decode(MarketQuoteUpdate.self, from: updateData)
 
@@ -462,6 +470,12 @@ final class MarketPresentationTests: XCTestCase {
 
         XCTAssertEqual(constituents.items[0].quote.nightTrend, [212.1, 212.2, 212.3, 212.49])
         XCTAssertEqual(constituents.items[0].quote.trend, [210, 211, 212.5])
+    }
+
+    func testConstituentContractRequiresDetailAvailability() {
+        let data = Data(#"{"indexSymbol":"^NDX","label":"主要成分股","selectionBasis":"test","asOf":"2026-08-09","generatedAt":"2026-08-09T14:00:00Z","items":[{"rank":1,"quote":{"symbol":"NVDA","name":"英伟达","price":212.5}}],"missingSymbols":[]}"#.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(MarketIndexConstituents.self, from: data))
     }
 
     func testMarketRangesUseExpectedIntervalsAndLimits() {

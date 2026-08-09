@@ -232,7 +232,7 @@ enum MarketServiceError: LocalizedError {
         case .invalidURL: "行情地址无效"
         case .invalidResponse: "行情服务响应无效"
         case .httpStatus(let status): "行情服务暂不可用（\(status)）"
-        case .decoding: "行情数据格式不兼容"
+        case .decoding: "行情数据格式异常"
         case .transport: "无法连接行情服务，请检查网络后重试"
         }
     }
