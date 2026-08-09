@@ -185,13 +185,13 @@ final class MarketStore {
             return Date(timeIntervalSince1970: Double(timestamp) / 1000)
         }
         let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.referenceIndices ?? []) + (dashboard?.metrics ?? [])
-            + (dashboard?.allRegionalComponents ?? dashboard?.components ?? []) + (dashboard?.crypto ?? [])
+            + (dashboard?.allRegionalComponents ?? []) + (dashboard?.crypto ?? [])
         guard let timestamp = quotes.compactMap(\.timestamp).max() else { return nil }
         return Date(timeIntervalSince1970: Double(timestamp) / 1000)
     }
 
     var componentsLatestQuoteDate: Date? {
-        guard let timestamp = (dashboard?.allRegionalComponents ?? dashboard?.components ?? []).compactMap(\.timestamp).max() else { return nil }
+        guard let timestamp = dashboard?.allRegionalComponents.compactMap(\.timestamp).max() else { return nil }
         return Date(timeIntervalSince1970: Double(timestamp) / 1000)
     }
 
@@ -263,7 +263,7 @@ final class MarketStore {
 
     var maximumOpenMarketDelayMinutes: Int? {
         let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.referenceIndices ?? [])
-            + (dashboard?.metrics ?? []) + (dashboard?.allRegionalComponents ?? dashboard?.components ?? [])
+            + (dashboard?.metrics ?? []) + (dashboard?.allRegionalComponents ?? [])
         let seconds = quotes
             .filter { $0.marketSession == "regular" }
             .compactMap(\.delaySeconds)

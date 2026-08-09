@@ -802,8 +802,7 @@ private struct MarketIndexTable: View {
     private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
     private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
     private var coreStocks: [MarketQuote] {
-        if let regional = store.dashboard?.componentsByRegion[region.dashboardID] { return regional }
-        return region == .unitedStates ? store.dashboard?.components ?? [] : []
+        store.dashboard?.componentsByRegion[region.dashboardID] ?? []
     }
 
     var body: some View {

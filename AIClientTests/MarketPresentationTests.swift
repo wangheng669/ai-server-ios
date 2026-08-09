@@ -223,7 +223,7 @@ final class MarketPresentationTests: XCTestCase {
     func testDashboardReplacementDoesNotFabricateSingleNightTrendPoint() throws {
         var dashboard = try JSONDecoder().decode(
             MarketDashboardResponse.self,
-            from: Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","generatedAt":"2026-08-03T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"components":[{"symbol":"NVDA","name":"英伟达","price":200,"marketSession":"pre","sessionPrice":201,"trend":[198,200],"nightTrend":[]}],"componentsByRegion":{"us":[{"symbol":"NVDA","name":"英伟达","price":200,"marketSession":"pre","sessionPrice":201,"trend":[198,200],"nightTrend":[]}]},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
+            from: Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-03T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"componentsByRegion":{"us":[{"symbol":"NVDA","name":"英伟达","price":200,"marketSession":"pre","sessionPrice":201,"trend":[198,200],"nightTrend":[]}]},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
         ).data
         let replacement = try JSONDecoder().decode(
             MarketQuote.self,
@@ -294,7 +294,7 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDashboardDecodesCryptoQuotes() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-16T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":79591.91,"previousClose":78000,"marketSession":"always-open","changePercent":"2.04%"}],"missingSymbols":[]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-07-16T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"componentsByRegion":{},"crypto":[{"symbol":"BINANCE:BTCUSDT","name":"比特币","price":79591.91,"previousClose":78000,"marketSession":"always-open","changePercent":"2.04%"}],"missingSymbols":[]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
 
@@ -303,13 +303,13 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.crypto.first?.freshnessLabel, "24小时交易")
     }
 
-    func testDashboardDecodesV3RealtimeProxyContract() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","definitionVersion":"2026-07-29.2","generatedAt":"2026-07-30T07:26:57Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理（SPY）","displayName":"标普500实时代理（SPY）","instrumentType":"realtime-proxy-etf","proxyFor":"^GSPC","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","price":729.46}],"referenceIndices":[{"symbol":"^GSPC","name":"标普500","instrumentType":"reference-index","displayMode":"historical-reference","price":7316.15}],"realtimeProxies":[{"symbol":"SPY","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","displayName":"标普500实时代理（SPY）"}],"metrics":[],"components":[],"crypto":[],"indexSessions":{},"missingSymbols":[],"expectedSymbols":["SPY","^GSPC"],"symbolHealth":[],"regions":[]}}"#.utf8)
+    func testDashboardDecodesV4RealtimeProxyContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","definitionVersion":"2026-07-29.2","generatedAt":"2026-07-30T07:26:57Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理（SPY）","displayName":"标普500实时代理（SPY）","instrumentType":"realtime-proxy-etf","proxyFor":"^GSPC","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","price":729.46}],"referenceIndices":[{"symbol":"^GSPC","name":"标普500","instrumentType":"reference-index","displayMode":"historical-reference","price":7316.15}],"realtimeProxies":[{"symbol":"SPY","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","displayName":"标普500实时代理（SPY）"}],"metrics":[],"componentsByRegion":{},"crypto":[],"indexSessions":{},"missingSymbols":[],"expectedSymbols":["SPY","^GSPC"],"symbolHealth":[],"regions":[]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
         let proxy = try XCTUnwrap(response.data.coreIndices.first)
 
-        XCTAssertEqual(response.data.dataContract, "market_dashboard_v3")
+        XCTAssertEqual(response.data.dataContract, "market_dashboard_v4")
         XCTAssertEqual(proxy.symbol, "SPY")
         XCTAssertEqual(proxy.presentationName, "标普500实时代理（SPY）")
         XCTAssertEqual(proxy.instrumentType, "realtime-proxy-etf")
@@ -320,8 +320,14 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.quote(symbol: "^GSPC")?.displayMode, "historical-reference")
     }
 
+    func testDashboardRejectsLegacyComponentsOnlyContract() {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","generatedAt":"2026-08-03T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"metrics":[],"components":[{"symbol":"NVDA","name":"英伟达","price":180}],"crypto":[]}}"#.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(MarketDashboardResponse.self, from: data))
+    }
+
     func testDashboardDecodesRegionalCoreStocksIncludingGoogle() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","definitionVersion":"2026-08-03.1","generatedAt":"2026-08-03T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"components":[{"symbol":"GOOGL","name":"谷歌","price":201}],"componentsByRegion":{"us":[{"symbol":"NVDA","name":"英伟达","price":180},{"symbol":"GOOGL","name":"谷歌","price":201}],"jp":[{"symbol":"7203.T","name":"丰田汽车","price":3200}]},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","definitionVersion":"2026-08-03.1","generatedAt":"2026-08-03T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"componentsByRegion":{"us":[{"symbol":"NVDA","name":"英伟达","price":180},{"symbol":"GOOGL","name":"谷歌","price":201}],"jp":[{"symbol":"7203.T","name":"丰田汽车","price":3200}]},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
 
         let dashboard = try JSONDecoder().decode(MarketDashboardResponse.self, from: data).data
 
@@ -331,7 +337,7 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDashboardSkipsQuotesWithNullPriceWithoutDroppingValidData() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v3","generatedAt":"2026-08-02T08:09:10Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理","price":632.08}],"referenceIndices":[],"metrics":[{"symbol":"USDJPY","name":"美元兑日元","price":null,"lastKnownPrice":157.4,"stale":true},{"symbol":"^VIX","name":"波动率指数","price":16.72}],"components":[],"crypto":[],"indexSessions":{"SPY":{"symbol":"SPY","name":"标普500盘后","price":null,"stale":true}},"missingSymbols":[],"expectedSymbols":["SPY","USDJPY","^VIX"],"symbolHealth":[{"symbol":"USDJPY","status":"stale","reason":"quote_stale"}],"regions":[]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-02T08:09:10Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理","price":632.08}],"referenceIndices":[],"metrics":[{"symbol":"USDJPY","name":"美元兑日元","price":null,"lastKnownPrice":157.4,"stale":true},{"symbol":"^VIX","name":"波动率指数","price":16.72}],"componentsByRegion":{},"crypto":[],"indexSessions":{"SPY":{"symbol":"SPY","name":"标普500盘后","price":null,"stale":true}},"missingSymbols":[],"expectedSymbols":["SPY","USDJPY","^VIX"],"symbolHealth":[{"symbol":"USDJPY","status":"stale","reason":"quote_stale"}],"regions":[]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
 
@@ -343,7 +349,7 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDashboardDecodesPerSymbolHealthAndRegions() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","definitionVersion":"2026-07-21.1","generatedAt":"2026-07-21T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":["JP10Y"],"expectedSymbols":["JP10Y","KR10Y"],"symbolHealth":[{"symbol":"JP10Y","status":"missing","reason":"quote_unavailable"},{"symbol":"KR10Y","status":"delayed","delaySeconds":15}],"regions":[{"id":"jp","metricSymbols":["USDJPY","JP10Y","^TOPX"]}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","definitionVersion":"2026-07-21.1","generatedAt":"2026-07-21T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"componentsByRegion":{},"crypto":[],"missingSymbols":["JP10Y"],"expectedSymbols":["JP10Y","KR10Y"],"symbolHealth":[{"symbol":"JP10Y","status":"missing","reason":"quote_unavailable"},{"symbol":"KR10Y","status":"delayed","delaySeconds":15}],"regions":[{"id":"jp","metricSymbols":["USDJPY","JP10Y","^TOPX"]}]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
 
@@ -354,7 +360,7 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDashboardDecodesChinaMarketStructureSignals() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":[],"marketStructure":{"dataContract":"market_structure_v2","generatedAt":"2026-07-22T09:00:00Z","etfSubscription":{"fundCode":"588000","fundName":"科创50ETF合计","fundCount":8,"fundCodes":["588000","588080"],"asOf":"2026-07-21","status":"accelerating","latestShares":45512668200,"latestNetSubscriptionShares":423000000,"latestEstimatedNetFlowCNY":861429000,"estimatedFlowFundCount":8,"netSubscriptionShares5d":900000000,"previousNetShares5d":500000000,"positiveDays5d":4,"consecutiveDirection":"inflow","consecutiveDays":2,"points":[{"date":"2026-07-21","totalShares":45512668200,"netSubscriptionShares":423000000}]},"marginBalance":{"asOf":"2026-07-21","status":"stabilizing","financingBalance":2689521390293,"securitiesBalance":20402350759,"totalBalance":2709923741052,"latestChange":1086577120,"change3d":-1200000000,"change5d":-5100000000,"positiveDays5d":2,"financingBuyAmount":267012306205,"aShareTurnover":2960321000000,"financingBuyRatio":9.02,"activityStatus":"active","points":[{"date":"2026-07-21","financingBalance":2689521390293,"securitiesBalance":20402350759,"totalBalance":2709923741052,"dailyChange":1086577120,"financingBuyAmount":267012306205}]},"combinedSignal":{"status":"allocation_support","title":"配置资金承接，杠杆仍谨慎","summary":"ETF资金保持流入，但两融余额尚未企稳。"},"sources":[{"name":"上交所","url":"https://www.sse.com.cn/"}]}}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"componentsByRegion":{},"crypto":[],"missingSymbols":[],"marketStructure":{"dataContract":"market_structure_v2","generatedAt":"2026-07-22T09:00:00Z","etfSubscription":{"fundCode":"588000","fundName":"科创50ETF合计","fundCount":8,"fundCodes":["588000","588080"],"asOf":"2026-07-21","status":"accelerating","latestShares":45512668200,"latestNetSubscriptionShares":423000000,"latestEstimatedNetFlowCNY":861429000,"estimatedFlowFundCount":8,"netSubscriptionShares5d":900000000,"previousNetShares5d":500000000,"positiveDays5d":4,"consecutiveDirection":"inflow","consecutiveDays":2,"points":[{"date":"2026-07-21","totalShares":45512668200,"netSubscriptionShares":423000000}]},"marginBalance":{"asOf":"2026-07-21","status":"stabilizing","financingBalance":2689521390293,"securitiesBalance":20402350759,"totalBalance":2709923741052,"latestChange":1086577120,"change3d":-1200000000,"change5d":-5100000000,"positiveDays5d":2,"financingBuyAmount":267012306205,"aShareTurnover":2960321000000,"financingBuyRatio":9.02,"activityStatus":"active","points":[{"date":"2026-07-21","financingBalance":2689521390293,"securitiesBalance":20402350759,"totalBalance":2709923741052,"dailyChange":1086577120,"financingBuyAmount":267012306205}]},"combinedSignal":{"status":"allocation_support","title":"配置资金承接，杠杆仍谨慎","summary":"ETF资金保持流入，但两融余额尚未企稳。"},"sources":[{"name":"上交所","url":"https://www.sse.com.cn/"}]}}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
 
@@ -376,7 +382,7 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDashboardDoesNotPresentStaleAShareBreadthAsCurrent() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v2","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"components":[],"crypto":[],"missingSymbols":[],"ashareOverview":{"breadth":{"Up":2219,"Down":3202,"Flat":94,"Total":5515},"hotSectors":[],"stale":true}}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-07-22T10:00:00Z","refreshIntervalMs":15000,"coreIndices":[],"metrics":[],"componentsByRegion":{},"crypto":[],"missingSymbols":[],"ashareOverview":{"breadth":{"Up":2219,"Down":3202,"Flat":94,"Total":5515},"hotSectors":[],"stale":true}}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
 

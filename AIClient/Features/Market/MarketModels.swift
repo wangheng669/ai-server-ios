@@ -14,7 +14,6 @@ struct MarketDashboard: Codable {
     var referenceIndices: [MarketQuote]
     let realtimeProxies: [MarketRealtimeProxyDefinition]
     var metrics: [MarketQuote]
-    var components: [MarketQuote]
     var componentsByRegion: [String: [MarketQuote]]
     var crypto: [MarketQuote]
     var indexSessions: [String: MarketQuote]?
@@ -35,7 +34,7 @@ struct MarketDashboard: Codable {
 
     enum CodingKeys: String, CodingKey {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, referenceIndices, realtimeProxies
-        case metrics, components, componentsByRegion, crypto
+        case metrics, componentsByRegion, crypto
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
         case ashareOverview, marketStructure, sentiment
     }
@@ -50,8 +49,7 @@ struct MarketDashboard: Codable {
         referenceIndices = try values.decodeLossyQuotes(forKey: .referenceIndices)
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
         metrics = try values.decodeLossyQuotes(forKey: .metrics)
-        components = try values.decodeLossyQuotes(forKey: .components)
-        componentsByRegion = try values.decodeIfPresent([String: [MarketQuote]].self, forKey: .componentsByRegion) ?? [:]
+        componentsByRegion = try values.decode([String: [MarketQuote]].self, forKey: .componentsByRegion)
         crypto = try values.decodeLossyQuotes(forKey: .crypto)
         indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
@@ -69,7 +67,6 @@ struct MarketDashboard: Codable {
         replace(quote, in: &coreIndices)
         replace(quote, in: &referenceIndices)
         replace(quote, in: &metrics)
-        replace(quote, in: &components)
         for region in Array(componentsByRegion.keys) {
             replace(quote, in: &componentsByRegion[region, default: []])
         }
@@ -85,7 +82,6 @@ struct MarketDashboard: Codable {
         coreIndices.first(where: { $0.symbol == symbol })
             ?? referenceIndices.first(where: { $0.symbol == symbol })
             ?? metrics.first(where: { $0.symbol == symbol })
-            ?? components.first(where: { $0.symbol == symbol })
             ?? componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol })
             ?? crypto.first(where: { $0.symbol == symbol })
     }
