@@ -924,6 +924,7 @@ private struct TodayWorldDailyDigestView: View {
 private struct TodayWorldYesterdayReportSheet: View {
     @Environment(\.dismiss) private var dismiss
     let report: TodayWorldYesterdayReportPayload
+    @State private var selectedAccount: TodayWorldYesterdayReportAccount?
 
     var body: some View {
         NavigationStack {
@@ -960,6 +961,13 @@ private struct TodayWorldYesterdayReportSheet: View {
                 }
             }
         }
+        .sheet(item: $selectedAccount) { account in
+            TodayWorldReportAccountPostsSheet(account: account, reportDate: report.date)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationContentInteraction(.scrolls)
+        }
     }
 
     private var header: some View {
@@ -971,9 +979,6 @@ private struct TodayWorldYesterdayReportSheet: View {
             }
             .font(.system(size: 13.5, weight: .medium))
             .foregroundStyle(.secondary)
-
-            Text("他们昨日都做了什么")
-                .font(.system(size: 20, weight: .bold))
 
             Divider()
         }
@@ -994,22 +999,37 @@ private struct TodayWorldYesterdayReportSheet: View {
                         .padding(.vertical, 14)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(account.name)
-                            .font(.system(size: 15.5, weight: .semibold))
-                        if account.sourceType == "company" {
-                            Text("机构账号")
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(.secondary)
+                Button {
+                    selectedAccount = account
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(account.name)
+                                .font(.system(size: 15.5, weight: .semibold))
+                            if account.sourceType == "company" {
+                                Text("机构账号")
+                                    .font(.system(size: 11.5, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                    }
 
-                    Text(account.summary)
-                        .font(.system(size: 15))
-                        .lineSpacing(5)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(account.summary)
+                            .font(.system(size: 15))
+                            .lineSpacing(5)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(spacing: 4) {
+                            Text("\(account.postIDs.count) 条动态")
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9.5, weight: .semibold))
+                        }
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint("查看中文翻译和原文")
             }
         }
     }
@@ -1023,6 +1043,166 @@ private struct TodayWorldYesterdayReportSheet: View {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日 EEEE"
+        return formatter.string(from: date)
+    }
+}
+
+private struct TodayWorldReportAccountPostsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let account: TodayWorldYesterdayReportAccount
+    let reportDate: String
+
+    @State private var posts: [Post] = []
+    @State private var translations: [Int: String] = [:]
+    @State private var translationFailures: Set<Int> = []
+    @State private var originalPostIDs: Set<Int> = []
+    @State private var selectedPost: Post?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("正在载入动态")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("暂时无法载入", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("重新加载") {
+                            Task { await load() }
+                        }
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            Text("\(displayDate) · \(posts.count) 条动态")
+                                .font(.system(size: 13.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.bottom, 10)
+
+                            ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                                if index > 0 {
+                                    Divider()
+                                        .padding(.vertical, 16)
+                                }
+                                postSection(post)
+                            }
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 16)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle(account.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .task(id: account.id) { await load() }
+        .sheet(item: $selectedPost) { post in
+            NavigationStack {
+                PostDetailView(post: post, presentedAsSheet: true)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
+        }
+    }
+
+    @ViewBuilder
+    private func postSection(_ post: Post) -> some View {
+        let showsOriginal = originalPostIDs.contains(post.id)
+        VStack(alignment: .leading, spacing: 9) {
+            Text(post.formattedTime ?? "")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            if showsOriginal {
+                Text(post.xStoredOriginalContent)
+                    .font(.system(size: 15))
+                    .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let translation = translations[post.id] ?? (post.hasTranslation ? post.displayContent : nil) {
+                Text(translation)
+                    .font(.system(size: 15))
+                    .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if translationFailures.contains(post.id) {
+                Text("中文翻译暂不可用")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在翻译")
+            }
+
+            HStack(spacing: 16) {
+                Button(showsOriginal ? "显示翻译" : "显示原文") {
+                    if showsOriginal {
+                        originalPostIDs.remove(post.id)
+                    } else {
+                        originalPostIDs.insert(post.id)
+                    }
+                }
+                Button("查看帖子详情") {
+                    selectedPost = post
+                }
+            }
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        posts = []
+        translations = [:]
+        translationFailures = []
+        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        do {
+            var loaded: [Post] = []
+            for postID in account.postIDs {
+                let post = try await client.fetchPost(id: postID)
+                loaded.append(post)
+                if post.needsXTranslation, let tweetID = post.xTweetID {
+                    do {
+                        translations[post.id] = try await client.fetchXTranslation(tweetID: tweetID).text
+                    } catch {
+                        translationFailures.insert(post.id)
+                    }
+                }
+            }
+            posts = loaded
+            isLoading = false
+        } catch {
+            errorMessage = NetworkErrorPresentation.message(for: error)
+            isLoading = false
+        }
+    }
+
+    private var displayDate: String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: reportDate) else { return reportDate }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
         return formatter.string(from: date)
     }
 }
