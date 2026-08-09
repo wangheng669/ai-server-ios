@@ -587,7 +587,9 @@ struct NewsFeedView: View {
                         )
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
-                            .modifier(ConditionalTapGestureModifier(isEnabled: !post.isXueqiu) {
+                            .modifier(ConditionalTapGestureModifier(
+                                isEnabled: !post.isXueqiu && !(post.sourceName == "X" && !post.videoURLs.isEmpty)
+                            ) {
                                 if post.isFlash {
                                     withAnimation(.easeInOut(duration: 0.22)) {
                                         if expandedFlashIDs.contains(post.id) {
@@ -2590,9 +2592,13 @@ private struct NewsCardView: View {
                 size: 44,
                 cornerRadius: xAvatarCornerRadius
             )
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen?() }
 
             VStack(alignment: .leading, spacing: 10) {
                 xAuthorHeader
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen?() }
 
                 VStack(alignment: .leading, spacing: 5) {
                     xRichText(xTimelineContent)
@@ -2612,6 +2618,8 @@ private struct NewsCardView: View {
                         .accessibilityLabel("查看完整帖子")
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { onOpen?() }
 
                 XFeedMediaView(post: post)
 
