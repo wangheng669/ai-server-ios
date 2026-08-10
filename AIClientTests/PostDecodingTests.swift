@@ -2,6 +2,40 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testGoogleNoiseItemBuildsXTimelinePreviewForInternalDetail() throws {
+        let data = Data(
+            """
+            {
+              "id": 189,
+              "post_id": 444590,
+              "article_id": "2086825428489040055",
+              "title": "Google update",
+              "content": "Google ships a new Gemini model.",
+              "author_name": "Google AI",
+              "author_handle": "GoogleAI",
+              "avatar_url": "https://example.com/avatar.jpg",
+              "source_url": "https://x.com/GoogleAI/status/2086825428489040055",
+              "sentiment": "positive",
+              "score": 0,
+              "company_terms": ["google", "gemini"],
+              "sentiment_terms": [],
+              "published_at": "2026-08-10T22:42:08+08:00",
+              "classified_at": "2026-08-10T23:41:47+08:00"
+            }
+            """.utf8
+        )
+
+        let item = try JSONDecoder().decode(GoogleNoiseItem.self, from: data)
+        let post = try XCTUnwrap(item.previewPost)
+
+        XCTAssertEqual(post.id, 444590)
+        XCTAssertEqual(post.sourceName, "X")
+        XCTAssertEqual(post.authorName, "Google AI")
+        XCTAssertEqual(post.authorHandle, "@GoogleAI")
+        XCTAssertEqual(post.displayContent, "Google ships a new Gemini model.")
+        XCTAssertEqual(post.xTweetID, "2086825428489040055")
+    }
+
     func testPeopleSearchRequestRetriggersAndRoutesSourcesReliably() {
         let hidden = PeopleSearchRequest(
             isPresented: false,
