@@ -495,15 +495,50 @@ final class MarketPresentationTests: XCTestCase {
         let data = Data(#"{"symbol":"^NDX","name":"纳斯达克100","price":23000,"marketSession":"regular","delaySeconds":900}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
+        XCTAssertEqual(quote.visibleDelayMinutes, 15)
         XCTAssertEqual(quote.freshnessLabel, "延迟15分钟")
+    }
+
+    func testSubminuteTransportLatencyDoesNotPresentAsOneMinuteDelay() throws {
+        let data = Data(#"{"symbol":"THS:883418","name":"微盘股","price":1000,"marketSession":"regular","delaySeconds":59}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertNil(quote.visibleDelayMinutes)
+        XCTAssertEqual(quote.freshnessLabel, "交易中")
+    }
+
+    func testOneMinuteTransportLatencyPresentsDelayIndicator() throws {
+        let data = Data(#"{"symbol":"THS:883418","name":"微盘股","price":1000,"marketSession":"regular","delaySeconds":60}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.visibleDelayMinutes, 1)
+        XCTAssertEqual(quote.freshnessLabel, "延迟1分钟")
     }
 
     func testClosedQuoteUsesTradingDateInsteadOfProviderReceiptTime() throws {
         let data = Data(#"{"symbol":"^STOXX50E","name":"欧洲STOXX 50","price":6523.87,"marketSession":"closed","delaySeconds":900,"timestamp":1786285136181,"quality":{"status":"delayed","reason":"official_close","asOfTimestamp":1786116600000,"tradingDate":"2026-08-07","fallbackUsed":false}}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
+        XCTAssertNil(quote.visibleDelayMinutes)
         XCTAssertEqual(quote.freshnessLabel, "截至 2026-08-07 收盘")
         XCTAssertEqual(quote.marketAsOfLabel, "2026-08-07 收盘行情")
+    }
+
+    func testRealtimeUpdateClearsPreviousDelayIndicator() throws {
+        let quote = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"1211.HK","name":"比亚迪股份","price":92.25,"marketSession":"regular","delaySeconds":900}"#.utf8)
+        )
+        let update = try JSONDecoder().decode(
+            MarketQuoteUpdate.self,
+            from: Data(#"{"symbol":"1211.HK","name":"比亚迪股份","price":92.6,"marketSession":"regular","delaySeconds":0}"#.utf8)
+        )
+
+        let merged = update.merging(into: quote)
+
+        XCTAssertEqual(merged.delaySeconds, 0)
+        XCTAssertNil(merged.visibleDelayMinutes)
+        XCTAssertEqual(merged.freshnessLabel, "交易中")
     }
 
     func testHealthSummaryNamesMissingSymbols() {

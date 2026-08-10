@@ -1429,8 +1429,8 @@ private struct MarketIndexTableRow: View {
     }
 
     private var statusLabel: String {
-        guard let delaySeconds = quote.delaySeconds, delaySeconds > 0 else { return sessionLabel }
-        return "\(compactSessionLabel)·延\(max(1, delaySeconds / 60))分"
+        guard let delayMinutes = quote.visibleDelayMinutes else { return sessionLabel }
+        return "\(compactSessionLabel)·延\(delayMinutes)分"
     }
 
     private var compactSessionLabel: String {

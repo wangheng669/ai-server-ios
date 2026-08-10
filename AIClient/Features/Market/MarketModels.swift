@@ -275,6 +275,11 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         MarketTradingSession(rawValue: marketSession)
     }
 
+    var visibleDelayMinutes: Int? {
+        guard tradingSession != .closed, let delaySeconds, delaySeconds >= 60 else { return nil }
+        return delaySeconds / 60
+    }
+
     var hasActiveExtendedSessionQuote: Bool {
         sessionPrice != nil && tradingSession.isExtended
     }
@@ -1200,7 +1205,7 @@ extension MarketQuote {
         if tradingSession == .closed {
             return quality?.tradingDate.map { "截至 \($0) 收盘" } ?? "已收盘"
         }
-        if let delaySeconds, delaySeconds > 0 { return "延迟\(max(1, delaySeconds / 60))分钟" }
+        if let visibleDelayMinutes { return "延迟\(visibleDelayMinutes)分钟" }
         if stale == true { return "数据延迟" }
         return tradingSession.displayLabel
     }
