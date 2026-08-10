@@ -135,6 +135,16 @@ struct MarketService {
         return MarketUSValuationHistory(pe: history.pe)
     }
 
+    func companyValuationHistory(symbol: String) async throws -> MarketCompanyValuationHistory {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/ios/v1/market/company-valuation-history"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [.init(name: "symbol", value: symbol)]
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        return try await request(url, as: MarketCompanyValuationHistoryResponse.self).data
+    }
+
     private func valuationHistory(market: String) async throws -> MarketValuationHistory {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/valuation-history"), resolvingAgainstBaseURL: false)
         components?.queryItems = [.init(name: "market", value: market)]

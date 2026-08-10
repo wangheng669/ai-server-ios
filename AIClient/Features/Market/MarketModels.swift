@@ -936,6 +936,27 @@ struct MarketValuationHistory: Decodable {
     let stale: Bool
 }
 
+struct MarketCompanyValuationHistoryResponse: Decodable {
+    let success: Bool
+    let data: MarketCompanyValuationHistory
+}
+
+struct MarketCompanyValuationHistory: Decodable {
+    let dataContract: String
+    let symbol: String
+    let peStatic: [MarketCompanyPEPoint]
+    let peTTM: [MarketCompanyPEPoint]
+    let source: String
+    let asOf: String
+}
+
+struct MarketCompanyPEPoint: Decodable, Hashable, Identifiable {
+    let date: String
+    let value: Double
+
+    var id: String { date }
+}
+
 struct MarketChartResponse: Decodable {
     let success: Bool
     let data: MarketChart

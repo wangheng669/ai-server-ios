@@ -255,6 +255,7 @@ struct CompanyResearchView: View {
     @State private var selectedSection: Section = .overview
     @State private var financialRange: FinancialRange = .quarterly
     @State private var presentedCompany: CompanyResearchProfile?
+    @State private var presentedValuation: CompanyValuationHistoryRoute?
 
     init() {
         _store = StateObject(wrappedValue: CompanyResearchStore())
@@ -300,13 +301,7 @@ struct CompanyResearchView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(store.companies) { company in
-                    Button {
-                        selectedSection = .overview
-                        presentedCompany = company
-                    } label: {
-                        companyHubCard(company)
-                    }
-                    .buttonStyle(.plain)
+                    companyHubCard(company)
                 }
             }
             .padding(.horizontal, 11)
@@ -316,37 +311,48 @@ struct CompanyResearchView: View {
         .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemGroupedBackground))
         .background(CompanyScrollBounceConfigurator())
+        .sheet(item: hubValuationBinding) { route in
+            valuationHistorySheet(route)
+        }
     }
 
     private func companyHubCard(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                companyLogo(company)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(company.shortName)
-                        .font(.headline)
-                    Text("\(company.ticker) · \(company.exchange)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(marketPrice(company.market))
-                        .font(.headline.monospacedDigit())
-                        .foregroundStyle(companyAccent(company))
-                    Text(marketChange(company.market))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(marketChangeColor(company.market))
+            Button { openCompany(company) } label: {
+                HStack(spacing: 12) {
+                    companyLogo(company)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(company.shortName)
+                            .font(.headline)
+                        Text("\(company.ticker) · \(company.exchange)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(marketPrice(company.market))
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(companyAccent(company))
+                        Text(marketChange(company.market))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(marketChangeColor(company.market))
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
             }
+            .buttonStyle(.plain)
 
             Divider()
 
             HStack(spacing: 0) {
-                hubMetric("总市值", marketCap(company.market))
-                hubMetric("PE（静）", formattedMultiple(company.market?.peStatic))
-                hubMetric("PE（TTM）", formattedMultiple(company.market?.pe))
-                hubMetric("ROE", latestROE(company))
+                Button { openCompany(company) } label: { hubMetric("总市值", marketCap(company.market)) }
+                    .buttonStyle(.plain)
+                hubValuationMetric(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
+                hubValuationMetric(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
+                Button { openCompany(company) } label: { hubMetric("ROE", latestROE(company)) }
+                    .buttonStyle(.plain)
             }
         }
         .padding(16)
@@ -371,6 +377,27 @@ struct CompanyResearchView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func hubValuationMetric(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
+        Button { presentValuation(company, kind: kind) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 3) {
+                    Text(kind.metricTitle.replacingOccurrences(of: "市盈率", with: "PE"))
+                    Image(systemName: "chart.xyaxis.line")
+                }
+                .font(.caption2)
+                .foregroundStyle(kind.color)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("查看历史变化曲线")
+    }
+
     private func companyPage(_ company: CompanyResearchProfile) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -385,6 +412,9 @@ struct CompanyResearchView: View {
         .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemGroupedBackground))
         .background(CompanyScrollBounceConfigurator())
+        .sheet(item: $presentedValuation) { route in
+            valuationHistorySheet(route)
+        }
     }
 
     private var companyLoadingState: some View {
@@ -442,8 +472,8 @@ struct CompanyResearchView: View {
                 }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 dashboardMetric("总市值", marketCap(company.market))
-                dashboardMetric("PE 静", formattedMultiple(company.market?.peStatic))
-                dashboardMetric("PE TTM", formattedMultiple(company.market?.pe))
+                dashboardValuationMetric(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
+                dashboardValuationMetric(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
                 dashboardMetric("ROE", latestROE(company))
             }
             .padding(.vertical, 5)
@@ -532,8 +562,8 @@ struct CompanyResearchView: View {
             HStack(spacing: 10) {
                 nativeMetricCard("最新价", marketPrice(company.market), note: marketChange(company.market), icon: "chart.line.uptrend.xyaxis", color: companyAccent(company))
                 nativeMetricCard("总市值", marketCap(company.market), note: "当前市值", icon: "circle.grid.2x2", color: .indigo)
-                nativeMetricCard("PE（静）", formattedMultiple(company.market?.peStatic), note: "静态市盈率", icon: "percent", color: .cyan)
-                nativeMetricCard("PE (TTM)", formattedMultiple(company.market?.pe), note: "滚动市盈率", icon: "percent", color: .blue)
+                nativeValuationCard(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
+                nativeValuationCard(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
                 nativeMetricCard("ROE (TTM)", latestROE(company), note: company.financials.years.last?.year ?? "最新", icon: "gauge.with.dots.needle.50percent", color: .orange)
             }
         }
@@ -559,6 +589,29 @@ struct CompanyResearchView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
         }
+    }
+
+    private func nativeValuationCard(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
+        Button { presentValuation(company, kind: kind) } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(kind.color)
+                    .frame(width: 30, height: 30)
+                    .background(kind.color.opacity(0.1), in: Circle())
+                Text(kind.metricTitle).font(.caption).foregroundStyle(.secondary)
+                Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+                Text("点击查看历史曲线").font(.caption2).foregroundStyle(kind.color)
+            }
+            .padding(13)
+            .frame(width: 136, height: 138, alignment: .topLeading)
+            .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(kind.color.opacity(0.14), lineWidth: 0.7)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func nativeFinancialTrend(_ company: CompanyResearchProfile) -> some View {
@@ -695,6 +748,24 @@ struct CompanyResearchView: View {
         .overlay(alignment: .leading) { Divider().frame(height: 34) }
     }
 
+    private func dashboardValuationMetric(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
+        Button { presentValuation(company, kind: kind) } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 3) {
+                    Text(kind == .staticPE ? "PE 静" : "PE TTM")
+                    Image(systemName: "chart.xyaxis.line").font(.system(size: 8, weight: .semibold))
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(kind.color)
+                Text(value).font(.system(size: 14, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.68)
+            }
+            .padding(.leading, 9)
+            .frame(width: 76, height: 34, alignment: .leading)
+            .overlay(alignment: .leading) { Divider().frame(height: 34) }
+        }
+        .buttonStyle(.plain)
+    }
+
     private func dashboardOverview(_ company: CompanyResearchProfile) -> some View {
         VStack(spacing: 8) {
             VStack(spacing: 0) {
@@ -740,8 +811,8 @@ struct CompanyResearchView: View {
             dashboardValueRow("最新价", marketPrice(company.market), accent: true)
             dashboardValueRow("涨跌幅", marketChange(company.market), accent: true)
             dashboardValueRow("总市值", marketCap(company.market))
-            dashboardValueRow("PE（静）", formattedMultiple(company.market?.peStatic))
-            dashboardValueRow("PE (TTM)", formattedMultiple(company.market?.pe))
+            dashboardValuationValueRow(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
+            dashboardValuationValueRow(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
             dashboardValueRow("ROE (TTM)", latestROE(company))
         }
         .padding(11)
@@ -755,6 +826,20 @@ struct CompanyResearchView: View {
             Text(value).monospacedDigit().foregroundStyle(accent ? Color.red : Color.primary)
         }
         .font(.system(size: 11))
+    }
+
+    private func dashboardValuationValueRow(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
+        Button { presentValuation(company, kind: kind) } label: {
+            HStack(spacing: 6) {
+                Text(kind.metricTitle)
+                Spacer(minLength: 4)
+                Text(value).monospacedDigit()
+                Image(systemName: "chart.xyaxis.line").font(.system(size: 9, weight: .semibold))
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(kind.color)
+        }
+        .buttonStyle(.plain)
     }
 
     private func dashboardTrend(_ company: CompanyResearchProfile) -> some View {
@@ -819,8 +904,8 @@ struct CompanyResearchView: View {
     private func dashboardValuation(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 17) {
             Text("估值带（PE）").font(.system(size: 13, weight: .semibold))
-            HStack { Text("当前 PE（静）"); Spacer(); Text(formattedMultiple(company.market?.peStatic)).foregroundStyle(.red).fontWeight(.semibold) }
-            HStack { Text("当前 PE (TTM)"); Spacer(); Text(formattedMultiple(company.market?.pe)).foregroundStyle(.red).fontWeight(.semibold) }
+            dashboardValuationValueRow(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
+            dashboardValuationValueRow(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
             HStack { Text("历史分位（近10年）"); Spacer(); dashboardBadge("待补充") }
         }
         .font(.system(size: 11))
@@ -1110,8 +1195,8 @@ struct CompanyResearchView: View {
         VStack(alignment: .leading, spacing: 0) {
             researchBlock("当前估值") {
                 HStack {
-                    summaryMetric("市盈率（静）", formattedMultiple(company.market?.peStatic))
-                    summaryMetric("市盈率（TTM）", formattedMultiple(company.market?.pe))
+                    valuationSummaryMetric(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
+                    valuationSummaryMetric(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
                     summaryMetric("总市值", marketCap(company.market))
                     summaryMetric("历史分位", "待补充")
                 }
@@ -1659,6 +1744,49 @@ struct CompanyResearchView: View {
             Text(value).font(.subheadline.bold()).lineLimit(1).minimumScaleFactor(0.65)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func valuationSummaryMetric(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
+        Button { presentValuation(company, kind: kind) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 3) {
+                    Text(kind.metricTitle)
+                    Image(systemName: "chart.xyaxis.line").font(.caption2.weight(.semibold))
+                }
+                .font(.caption2)
+                .foregroundStyle(kind.color)
+                Text(value).font(.subheadline.bold()).lineLimit(1).minimumScaleFactor(0.65)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openCompany(_ company: CompanyResearchProfile) {
+        selectedSection = .overview
+        presentedCompany = company
+    }
+
+    private var hubValuationBinding: Binding<CompanyValuationHistoryRoute?> {
+        Binding(
+            get: { presentedCompany == nil ? presentedValuation : nil },
+            set: { presentedValuation = $0 }
+        )
+    }
+
+    private func presentValuation(_ company: CompanyResearchProfile, kind: CompanyPEKind) {
+        presentedValuation = CompanyValuationHistoryRoute(
+            symbol: company.market?.symbol ?? company.ticker,
+            name: company.shortName,
+            initialKind: kind
+        )
+    }
+
+    private func valuationHistorySheet(_ route: CompanyValuationHistoryRoute) -> some View {
+        CompanyValuationHistorySheet(route: route)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
     }
 
     private func marketPrice(_ market: CompanyResearchMarket?) -> String {

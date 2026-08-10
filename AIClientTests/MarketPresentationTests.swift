@@ -125,7 +125,7 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDecodesUnifiedCompanyFundamentalsFromMarketQuote() throws {
-        let data = Data(#"{"symbol":"AAPL","name":"Apple","price":220.1,"pe":31.2,"peStatic":32.78,"marketCap":3350000000000,"peType":"ttm","netIncomeTTM":122575000000,"week52Low":169.21,"currency":"USD","fundamentalsCurrency":"USD","fiscalYear":"2025","fundamentalsSource":"TradingView Scanner","fundamentalsAsOf":"2026-08-10T08:00:00Z","trend":[],"nightTrend":[]}"#.utf8)
+        let data = Data(#"{"symbol":"AAPL","name":"Apple","price":220.1,"pe":31.2,"peStatic":32.78,"marketCap":3350000000000,"peType":"ttm","netIncomeTTM":122575000000,"week52Low":169.21,"currency":"USD","fundamentalsCurrency":"USD","fiscalYear":"2025","fundamentalsSource":"TradingView","fundamentalsAsOf":"2026-08-10T08:00:00Z","trend":[],"nightTrend":[]}"#.utf8)
 
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
@@ -138,7 +138,7 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.week52Low, 169.21)
         XCTAssertEqual(quote.fundamentalsCurrency, "USD")
         XCTAssertEqual(quote.fiscalYear, "2025")
-        XCTAssertEqual(quote.fundamentalsSource, "TradingView Scanner")
+        XCTAssertEqual(quote.fundamentalsSource, "TradingView")
     }
 
     func testFormatsCompanyNetIncomeWithChineseUnits() {
@@ -165,6 +165,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.source, "multpl")
         XCTAssertTrue(response.data.cached)
         XCTAssertFalse(response.data.stale)
+    }
+
+    func testDecodesCompanyStaticAndTTMPEHistory() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"company_valuation_history_v1","symbol":"GOOGL","peStatic":[{"date":"2025-12-31","value":28.96},{"date":"2026-08-10","value":32.75}],"peTTM":[{"date":"2026-06-30","value":17.95},{"date":"2026-08-10","value":17.80}],"source":"TradingView","asOf":"2026-08-10T08:00:00Z"}}"#.utf8)
+
+        let response = try JSONDecoder().decode(MarketCompanyValuationHistoryResponse.self, from: data)
+
+        XCTAssertEqual(response.data.dataContract, "company_valuation_history_v1")
+        XCTAssertEqual(response.data.symbol, "GOOGL")
+        XCTAssertEqual(response.data.peStatic.last?.value, 32.75)
+        XCTAssertEqual(response.data.peTTM.last?.value, 17.80)
+        XCTAssertEqual(response.data.source, "TradingView")
     }
 
     func testParsesSP500PEHistoryTable() {
