@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 import UIKit
 
@@ -2221,6 +2222,7 @@ private struct MarketIndexDetailView: View {
     @State private var isScrollAtTop = true
     @State private var isTrackingDismissalDrag = false
     @State private var dismissalDragStartedAtTop = false
+    @State private var presentedValuation: CompanyValuationHistoryRoute?
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
     private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
@@ -2293,6 +2295,12 @@ private struct MarketIndexDetailView: View {
         .accessibilityHint("在详情内容区域向下滑动即可收起")
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
+        .sheet(item: $presentedValuation) { route in
+            CompanyValuationHistorySheet(route: route)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
         .task(id: historicalSymbol) {
             if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol) }
             if !isIndex && !isCrypto {
@@ -2301,6 +2309,12 @@ private struct MarketIndexDetailView: View {
             if let quote {
                 await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
             }
+            #if DEBUG
+            if let preview = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-pe-history-preview=") }) {
+                let value = String(preview.dropFirst("--market-pe-history-preview=".count))
+                presentedValuation = valuationRoute(kind: value == "ttm" ? .ttm : .staticPE)
+            }
+            #endif
         }
     }
 
@@ -2457,7 +2471,7 @@ private struct MarketIndexDetailView: View {
     }
 
     private var showsCompanyProfile: Bool {
-        !isIndex && (constituent != nil || quote?.marketCap != nil || quote?.pe != nil)
+        !isIndex && (constituent != nil || quote?.marketCap != nil || quote?.peStatic != nil || quote?.pe != nil)
     }
 
     private var companyProfile: some View {
@@ -2470,8 +2484,8 @@ private struct MarketIndexDetailView: View {
                     Text("股票代码  \(quote?.displayCode ?? symbol)")
                     Text("上市市场  \(companyMarketLabel(symbol))")
                     if let marketCap = quote?.marketCap { Text("总市值  \(compactNumber(marketCap))") }
-                    Text("市盈率（静）  \(quote?.peStatic.map { number($0, digits: 2) } ?? "—")")
-                    Text("市盈率（TTM）  \(quote?.pe.map { number($0, digits: 2) } ?? "—")")
+                    valuationMetric(.staticPE, value: quote?.peStatic)
+                    valuationMetric(.ttm, value: quote?.pe)
                     Text("归母净利润（TTM）  \(formattedNetIncome)")
                     if let fiscalYear = quote?.fiscalYear, !fiscalYear.isEmpty {
                         Text("财报基准  FY\(fiscalYear)")
@@ -2491,6 +2505,32 @@ private struct MarketIndexDetailView: View {
     private var formattedNetIncome: String {
         guard let quote, let netIncome = quote.netIncomeTTM else { return "—" }
         return marketFinancialAmount(netIncome, currency: quote.fundamentalsCurrency ?? quote.currency ?? "")
+    }
+
+    private func valuationMetric(_ kind: CompanyPEKind, value: Double?) -> some View {
+        Button {
+            presentedValuation = valuationRoute(kind: kind)
+        } label: {
+            HStack(spacing: 6) {
+                Text(kind.metricTitle)
+                Text(value.map { number($0, digits: 2) } ?? "—")
+                    .monospacedDigit()
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(kind.color)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("查看历史变化曲线")
+    }
+
+    private func valuationRoute(kind: CompanyPEKind) -> CompanyValuationHistoryRoute {
+        CompanyValuationHistoryRoute(
+            symbol: quote?.symbol ?? symbol,
+            name: quote?.presentationName ?? symbol,
+            initialKind: kind
+        )
     }
 
     private func metric(_ title: String, _ value: Double?, _ color: Color = .primary, compact: Bool = false, suffix: String = "") -> some View {
@@ -2638,6 +2678,242 @@ private struct MarketDetailScrollTopTracker: ViewModifier {
                 .onPreferenceChange(MarketDetailScrollTopPreferenceKey.self) { offset in
                     isAtTop = offset >= -4
                 }
+        }
+    }
+}
+
+enum CompanyPEKind: String, CaseIterable, Identifiable {
+    case staticPE
+    case ttm
+
+    var id: String { rawValue }
+    var metricTitle: String { self == .staticPE ? "市盈率（静）" : "市盈率（TTM）" }
+    var shortTitle: String { self == .staticPE ? "静态 PE" : "TTM PE" }
+    var color: Color { self == .staticPE ? .indigo : .blue }
+    var explanation: String {
+        switch self {
+        case .staticPE:
+            "历史点按各财年末市值 ÷ 当年完整年度净利润计算；最新点使用当前市值与最近完整财年净利润。"
+        case .ttm:
+            "历史点为各季度末滚动市盈率；最新点为当前市值对应的最近十二个月市盈率。"
+        }
+    }
+}
+
+struct CompanyValuationHistoryRoute: Identifiable {
+    let symbol: String
+    let name: String
+    let initialKind: CompanyPEKind
+
+    var id: String { "\(symbol)-\(initialKind.rawValue)" }
+}
+
+private struct CompanyPEChartPoint: Identifiable {
+    let date: Date
+    let value: Double
+
+    var id: Date { date }
+}
+
+struct CompanyValuationHistorySheet: View {
+    let route: CompanyValuationHistoryRoute
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedKind: CompanyPEKind
+    @State private var history: MarketCompanyValuationHistory?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    init(route: CompanyValuationHistoryRoute) {
+        self.route = route
+        _selectedKind = State(initialValue: route.initialKind)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    Picker("市盈率口径", selection: $selectedKind) {
+                        ForEach(CompanyPEKind.allCases) { kind in
+                            Text(kind.shortTitle).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    chartCard
+                    Text(selectedKind.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(3)
+
+                    if let history {
+                        Text("数据来源：\(history.source) · 更新于 \(formattedAsOf(history.asOf))")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(18)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("PE 历史变化")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .task(id: route.symbol) { await load() }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(route.name)
+                    .font(.title3.weight(.semibold))
+                Text(route.symbol)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let latest = points.last {
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(String(format: "%.2f", latest.value))
+                        .font(.title2.bold().monospacedDigit())
+                        .foregroundStyle(selectedKind.color)
+                    Text("当前 \(selectedKind.shortTitle)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chartCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if isLoading {
+                ProgressView("正在加载真实历史数据")
+                    .frame(maxWidth: .infinity, minHeight: 270)
+            } else if let errorMessage {
+                ContentUnavailableView(
+                    "暂时无法显示曲线",
+                    systemImage: "chart.xyaxis.line",
+                    description: Text(errorMessage)
+                )
+                .frame(maxWidth: .infinity, minHeight: 270)
+                Button("重新加载") { Task { await load() } }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+            } else if points.count < 2 {
+                ContentUnavailableView(
+                    "历史数据不足",
+                    systemImage: "chart.xyaxis.line",
+                    description: Text("至少需要两个真实历史点才能绘制变化曲线")
+                )
+                .frame(maxWidth: .infinity, minHeight: 270)
+            } else {
+                Chart(points) { point in
+                    LineMark(
+                        x: .value("日期", point.date),
+                        y: .value("PE", point.value)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(selectedKind.color.gradient)
+                    .lineStyle(.init(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+                    if point.id == points.last?.id {
+                        PointMark(
+                            x: .value("日期", point.date),
+                            y: .value("PE", point.value)
+                        )
+                        .foregroundStyle(selectedKind.color)
+                        .symbolSize(55)
+                    }
+                }
+                .chartYScale(domain: yDomain)
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 5)) {
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.12))
+                        AxisValueLabel(format: .dateTime.year())
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) {
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.12))
+                        AxisValueLabel()
+                    }
+                }
+                .frame(height: 270)
+
+                HStack(spacing: 0) {
+                    statistic("最低", values.min())
+                    statistic("最高", values.max())
+                    statistic("历史点", Double(points.count), suffix: " 个", digits: 0)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 0.5)
+        }
+    }
+
+    private func statistic(_ title: String, _ value: Double?, suffix: String = "", digits: Int = 2) -> some View {
+        VStack(spacing: 4) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value.map { String(format: "%.*f", digits, $0) + suffix } ?? "—")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var rawPoints: [MarketCompanyPEPoint] {
+        guard let history else { return [] }
+        return selectedKind == .staticPE ? history.peStatic : history.peTTM
+    }
+
+    private var points: [CompanyPEChartPoint] {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return rawPoints.compactMap { point in
+            guard point.value.isFinite, point.value > 0, let date = formatter.date(from: point.date) else { return nil }
+            return CompanyPEChartPoint(date: date, value: point.value)
+        }
+        .sorted { $0.date < $1.date }
+    }
+
+    private var values: [Double] { points.map(\.value) }
+
+    private var yDomain: ClosedRange<Double> {
+        guard let low = values.min(), let high = values.max() else { return 0...1 }
+        let padding = max((high - low) * 0.12, max(high * 0.04, 1))
+        return max(0, low - padding)...(high + padding)
+    }
+
+    private func formattedAsOf(_ value: String) -> String {
+        String(value.prefix(10))
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            history = try await MarketService(baseURL: ServerConfiguration.currentURL)
+                .companyValuationHistory(symbol: route.symbol)
+        } catch MarketServiceError.httpStatus(let status) where status == 404 {
+            history = nil
+            errorMessage = "这家公司暂时没有可用的 PE 历史"
+        } catch {
+            history = nil
+            errorMessage = error.localizedDescription
         }
     }
 }
