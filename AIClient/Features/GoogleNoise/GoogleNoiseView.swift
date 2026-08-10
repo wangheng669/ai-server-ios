@@ -5,26 +5,60 @@ private final class GoogleNoiseStore: ObservableObject {
     @Published private(set) var snapshot: GoogleNoiseSnapshot?
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var translations: [Int64: String] = [:]
 
     private let client = APIClient(baseURL: ServerConfiguration.currentURL)
+    private var loadingTranslationIDs: Set<Int64> = []
 
     func load(showLoading: Bool = false) async {
         if showLoading { isLoading = true }
         defer { isLoading = false }
         do {
-            snapshot = try await client.fetchGoogleNoise()
+            snapshot = try await client.fetchGoogleNoise(limit: 100)
             errorMessage = nil
         } catch {
             errorMessage = "暂时无法读取 X 信号，请稍后重试"
+        }
+    }
+
+    func post(for item: GoogleNoiseItem) -> Post? {
+        guard let post = item.previewPost,
+              let translation = translations[item.id] else { return item.previewPost }
+        return post.replacingTranslation(with: translation)
+    }
+
+    func translateIfNeeded(_ item: GoogleNoiseItem) async {
+        guard item.needsTranslation,
+              !item.articleID.isEmpty,
+              translations[item.id] == nil,
+              !loadingTranslationIDs.contains(item.id) else { return }
+        loadingTranslationIDs.insert(item.id)
+        defer { loadingTranslationIDs.remove(item.id) }
+        do {
+            let result = try await client.fetchXTranslation(tweetID: item.articleID)
+            guard !Task.isCancelled else { return }
+            let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, value != item.originalContent else { return }
+            translations[item.id] = value
+        } catch is CancellationError {
+            return
+        } catch {
+            // Translation is best-effort, matching the X feed behavior.
         }
     }
 }
 
 struct GoogleNoiseView: View {
     private enum Sentiment: String, CaseIterable, Identifiable {
-        case positive, negative
+        case positive, negative, neutral
         var id: Self { self }
-        var title: String { self == .positive ? "正面" : "负面" }
+        var title: String {
+            switch self {
+            case .positive: "正面"
+            case .negative: "负面"
+            case .neutral: "中性"
+            }
+        }
     }
 
     @StateObject private var store = GoogleNoiseStore()
@@ -91,13 +125,14 @@ struct GoogleNoiseView: View {
                         .padding(.top, 56)
                     } else {
                         ForEach(visibleItems) { item in
-                            if let post = item.previewPost {
-                                NewsCardView(post: post, onOpen: { open(post) })
+                            if let post = store.post(for: item) {
+                                NewsCardView(post: post, onOpen: { open(item) })
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .contentShape(Rectangle())
                                     .modifier(ConditionalTapGestureModifier(isEnabled: true) {
-                                        open(post)
+                                        open(item)
                                     })
+                                    .task(id: item.id) { await store.translateIfNeeded(item) }
                                 Divider().opacity(0.6)
                             }
                         }
@@ -153,7 +188,7 @@ struct GoogleNoiseView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func open(_ preview: Post) {
-        selectedPost = preview
+    private func open(_ item: GoogleNoiseItem) {
+        selectedPost = store.post(for: item)
     }
 }

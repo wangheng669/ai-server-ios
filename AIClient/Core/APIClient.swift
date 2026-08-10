@@ -52,7 +52,7 @@ struct APIClient {
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [.init(name: "limit", value: String(min(max(limit, 1), 100)))]
-        if let sentiment, sentiment == "positive" || sentiment == "negative" {
+        if let sentiment, sentiment == "positive" || sentiment == "negative" || sentiment == "neutral" {
             components?.queryItems?.append(.init(name: "sentiment", value: sentiment))
         }
         guard let url = components?.url else { throw APIError.invalidURL }
@@ -897,6 +897,9 @@ struct GoogleNoiseItem: Decodable, Equatable, Identifiable {
     let articleID: String
     let title: String
     let content: String
+    let originalContent: String
+    let contentZH: String?
+    let language: String
     let authorName: String
     let authorHandle: String
     let avatarURL: String
@@ -909,9 +912,11 @@ struct GoogleNoiseItem: Decodable, Equatable, Identifiable {
     let classifiedAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, title, content, sentiment, score
+        case id, title, content, sentiment, score, language
         case postID = "post_id"
         case articleID = "article_id"
+        case originalContent = "original_content"
+        case contentZH = "content_zh"
         case authorName = "author_name"
         case authorHandle = "author_handle"
         case avatarURL = "avatar_url"
@@ -924,13 +929,14 @@ struct GoogleNoiseItem: Decodable, Equatable, Identifiable {
 
     var previewPost: Post? {
         guard let postID = Int(exactly: postID) else { return nil }
+        let translated = contentZH?.trimmingCharacters(in: .whitespacesAndNewlines)
         return Post(
             id: postID,
             title: title,
-            text: content,
+            text: originalContent,
             summary: nil,
-            content: content,
-            contentZH: nil,
+            content: originalContent,
+            contentZH: translated?.isEmpty == false ? translated : nil,
             source: "x",
             formattedTime: publishedAt.flatMap(Self.relativeTime),
             weightReason: nil,
@@ -950,6 +956,11 @@ struct GoogleNoiseItem: Decodable, Equatable, Identifiable {
             feedRank: nil,
             meta: nil
         )
+    }
+
+    var needsTranslation: Bool {
+        contentZH?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            && !language.lowercased().hasPrefix("zh")
     }
 
     private static func relativeTime(_ value: String) -> String? {

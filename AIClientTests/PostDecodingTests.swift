@@ -10,7 +10,10 @@ final class PostDecodingTests: XCTestCase {
               "post_id": 444590,
               "article_id": "2086825428489040055",
               "title": "Google update",
-              "content": "Google ships a new Gemini model.",
+              "content": "Google 发布了新的 Gemini 模型。",
+              "original_content": "Google ships a new Gemini model.",
+              "content_zh": "Google 发布了新的 Gemini 模型。",
+              "language": "en",
               "author_name": "Google AI",
               "author_handle": "GoogleAI",
               "avatar_url": "https://example.com/avatar.jpg",
@@ -32,8 +35,41 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.sourceName, "X")
         XCTAssertEqual(post.authorName, "Google AI")
         XCTAssertEqual(post.authorHandle, "@GoogleAI")
-        XCTAssertEqual(post.displayContent, "Google ships a new Gemini model.")
+        XCTAssertEqual(post.originalDisplayContent, "Google ships a new Gemini model.")
+        XCTAssertEqual(post.displayContent, "Google 发布了新的 Gemini 模型。")
+        XCTAssertFalse(item.needsTranslation)
         XCTAssertEqual(post.xTweetID, "2086825428489040055")
+    }
+
+    func testGoogleNoiseItemRequestsTranslationWhenStoredChineseIsMissing() throws {
+        let data = Data(
+            """
+            {
+              "id": 190,
+              "post_id": 444591,
+              "article_id": "2086825428489040056",
+              "title": "Google update",
+              "content": "Google ships a new Gemini model.",
+              "original_content": "Google ships a new Gemini model.",
+              "language": "en",
+              "author_name": "Google AI",
+              "author_handle": "GoogleAI",
+              "avatar_url": "",
+              "source_url": "https://x.com/GoogleAI/status/2086825428489040056",
+              "sentiment": "neutral",
+              "score": 0,
+              "company_terms": ["google"],
+              "sentiment_terms": [],
+              "classified_at": "2026-08-10T23:41:47+08:00"
+            }
+            """.utf8
+        )
+
+        let item = try JSONDecoder().decode(GoogleNoiseItem.self, from: data)
+
+        XCTAssertTrue(item.needsTranslation)
+        XCTAssertEqual(item.previewPost?.displayContent, "Google ships a new Gemini model.")
+        XCTAssertEqual(item.sentiment, "neutral")
     }
 
     func testPeopleSearchRequestRetriggersAndRoutesSourcesReliably() {
