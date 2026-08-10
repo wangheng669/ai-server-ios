@@ -11,6 +11,7 @@
 		0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F23 /* MarketView.swift */; };
 		0C1A2B3C4D5E6F708192A3B4 /* ChinaMacroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D2E3F405162738495A6B7C8 /* ChinaMacroView.swift */; };
 		0D1E2F30415263748596A7B8 /* CompanyResearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2F30415263748596A7B8C9 /* CompanyResearchView.swift */; };
+		0E1F2A3B4C5D6E7F8091A2B3 /* InstitutionResearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3A4B5C6D7E8091A2B3C4D5 /* InstitutionResearchView.swift */; };
 		0BB9A3475C0408092697FA60 /* DeploymentStatusTip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DC0C4FF5F713E3E9A116D6 /* DeploymentStatusTip.swift */; };
 		10D34066B133EC9CD153A5B9 /* RealtimeFeedClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71E3DBE08DFCC43540E027C0 /* RealtimeFeedClient.swift */; };
 		18F1A1D11FD420E25AA227ED /* PostComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */; };
@@ -154,6 +155,7 @@
 		C41BF51CBE9570E400E536EE /* AIClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AIClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C5FF3634D4DF69CCE8DB1B32 /* InvestmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentView.swift; sourceTree = "<group>"; };
 		1D2E3F405162738495A6B7C8 /* ChinaMacroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChinaMacroView.swift; sourceTree = "<group>"; };
+		2F3A4B5C6D7E8091A2B3C4D5 /* InstitutionResearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstitutionResearchView.swift; sourceTree = "<group>"; };
 		1E2F30415263748596A7B8C9 /* CompanyResearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyResearchView.swift; sourceTree = "<group>"; };
 		D9D7B5B9A81B19337F41D31D /* FamousHoldingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsTests.swift; sourceTree = "<group>"; };
 		DEBD6D31DCEDA25975180F41 /* FamousHoldingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsView.swift; sourceTree = "<group>"; };
@@ -331,6 +333,7 @@
 			isa = PBXGroup;
 			children = (
 				1D2E3F405162738495A6B7C8 /* ChinaMacroView.swift */,
+				2F3A4B5C6D7E8091A2B3C4D5 /* InstitutionResearchView.swift */,
 				08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */,
 				5C6756677ADA82073372908E /* CountryGDPRankingView.swift */,
 				B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */,
@@ -524,6 +527,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0C1A2B3C4D5E6F708192A3B4 /* ChinaMacroView.swift in Sources */,
+				0E1F2A3B4C5D6E7F8091A2B3 /* InstitutionResearchView.swift in Sources */,
 				0D1E2F30415263748596A7B8 /* CompanyResearchView.swift in Sources */,
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
