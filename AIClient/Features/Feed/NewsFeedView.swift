@@ -2446,7 +2446,8 @@ private struct WeiboFollowingRow: View {
                     emojis: post.weiboInlineEmojis,
                     fontSize: 16,
                     lineSpacing: 4,
-                    maximumNumberOfLines: 4
+                    maximumNumberOfLines: 4,
+                    allowsTextSelection: false
                 )
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -2460,7 +2461,8 @@ private struct WeiboFollowingRow: View {
                             fontSize: 13.5,
                             lineSpacing: 2,
                             maximumNumberOfLines: 2,
-                            textColor: .tertiaryLabel
+                            textColor: .tertiaryLabel,
+                            allowsTextSelection: false
                         )
                     }
                     .foregroundStyle(.tertiary)

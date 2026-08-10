@@ -332,6 +332,7 @@ struct InlineEmojiText: View {
     var lineSpacing: CGFloat = 5
     var maximumNumberOfLines = 0
     var textColor: UIColor = .label
+    var allowsTextSelection = true
     @State private var images: [URL: UIImage] = [:]
 
     var body: some View {
@@ -342,7 +343,8 @@ struct InlineEmojiText: View {
             fontSize: fontSize,
             lineSpacing: lineSpacing,
             maximumNumberOfLines: maximumNumberOfLines,
-            textColor: textColor
+            textColor: textColor,
+            allowsTextSelection: allowsTextSelection
         )
         .task(id: emojis) {
             let urls = Set(emojis.map(\.url))
@@ -370,13 +372,15 @@ private struct InlineEmojiTextView: UIViewRepresentable {
     let lineSpacing: CGFloat
     let maximumNumberOfLines: Int
     let textColor: UIColor
+    let allowsTextSelection: Bool
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
         view.backgroundColor = .clear
         view.isEditable = false
         view.isScrollEnabled = false
-        view.isSelectable = true
+        view.isSelectable = allowsTextSelection
+        view.isUserInteractionEnabled = allowsTextSelection
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -384,6 +388,8 @@ private struct InlineEmojiTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
+        view.isSelectable = allowsTextSelection
+        view.isUserInteractionEnabled = allowsTextSelection
         view.textContainer.maximumNumberOfLines = maximumNumberOfLines
         view.textContainer.lineBreakMode = maximumNumberOfLines > 0 ? .byTruncatingTail : .byWordWrapping
         view.attributedText = attributedText

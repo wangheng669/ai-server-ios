@@ -271,6 +271,33 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.weiboFollowingImageURLs.count, 1)
     }
 
+    func testWeiboVideoDetailRemovesCoverWithoutDimensions() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":18,"source":"rss:18","post_link":"https://weibo.com/123/abc","images":[{"url":"https://tvax4.sinaimg.cn/mw2000/video-cover.jpg"}],"videos":[{"url":"https://f.video.weibocdn.com/video.mp4"}]}"#.utf8)
+        )
+
+        XCTAssertEqual(post.weiboFollowingImageURLs.count, 1)
+        XCTAssertTrue(post.weiboDetailImageURLs.isEmpty)
+    }
+
+    func testWeiboVideoDetailKeepsSizedGalleryImages() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":19,"source":"rss:19","post_link":"https://weibo.com/123/abc","images":[{"url":"https://tvax1.sinaimg.cn/mw2000/photo.jpg","width":1200,"height":800},{"url":"https://tvax4.sinaimg.cn/mw2000/video-cover.jpg"}],"videos":[{"url":"https://f.video.weibocdn.com/video.mp4"}]}"#.utf8)
+        )
+
+        let retained = try XCTUnwrap(post.weiboDetailImageURLs.first)
+        XCTAssertEqual(post.weiboDetailImageURLs.count, 1)
+        XCTAssertEqual(
+            URLComponents(url: retained, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "url" })?
+                .value,
+            "https://tvax1.sinaimg.cn/mw2000/photo.jpg"
+        )
+    }
+
     func testWeiboDetailUsesSourceImageAspectRatio() throws {
         let post = try JSONDecoder().decode(
             Post.self,

@@ -597,8 +597,8 @@ struct PostDetailView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
 
-                        if post.weiboFollowingImageURLs.count == 1,
-                           let url = post.weiboFollowingImageURLs.first {
+                        if post.weiboDetailImageURLs.count == 1,
+                           let url = post.weiboDetailImageURLs.first {
                             WeiboDetailImage(
                                 url: url,
                                 index: 0,
@@ -606,23 +606,23 @@ struct PostDetailView: View {
                                 initialAspectRatio: post.weiboImageAspectRatio(for: url)
                             ) {
                                 weiboImageSelection = ImageGallerySelection(
-                                    urls: post.weiboFollowingImageURLs,
+                                    urls: post.weiboDetailImageURLs,
                                     initialIndex: 0
                                 )
                             }
-                        } else if !post.weiboFollowingImageURLs.isEmpty {
+                        } else if !post.weiboDetailImageURLs.isEmpty {
                             LazyVGrid(columns: weiboImageColumns, spacing: 4) {
-                                ForEach(Array(post.weiboFollowingImageURLs.enumerated()), id: \.element) { index, url in
+                                ForEach(Array(post.weiboDetailImageURLs.enumerated()), id: \.element) { index, url in
                                     WeiboDetailImage(
                                         url: url,
                                         index: index,
-                                        count: post.weiboFollowingImageURLs.count,
+                                        count: post.weiboDetailImageURLs.count,
                                         isCompact: true,
                                         compactHeight: weiboGridImageHeight,
                                         initialAspectRatio: post.weiboImageAspectRatio(for: url)
                                     ) {
                                         weiboImageSelection = ImageGallerySelection(
-                                            urls: post.weiboFollowingImageURLs,
+                                            urls: post.weiboDetailImageURLs,
                                             initialIndex: index
                                         )
                                     }
@@ -746,7 +746,7 @@ struct PostDetailView: View {
     }
 
     private var weiboImageColumnCount: Int {
-        [2, 4].contains(post.weiboFollowingImageURLs.count) ? 2 : 3
+        [2, 4].contains(post.weiboDetailImageURLs.count) ? 2 : 3
     }
 
     private var weiboImageColumns: [GridItem] {
