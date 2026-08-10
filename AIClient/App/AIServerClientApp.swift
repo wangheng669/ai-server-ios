@@ -740,7 +740,7 @@ private struct TodayWorldSystemSheet: View {
                             .padding(.top, 8)
                             .padding(.bottom, 24)
                         }
-                        .navigationTitle(system.leaderName)
+                        .navigationTitle(system.name)
                         .navigationBarTitleDisplayMode(.inline)
                     }
                 }
@@ -1254,6 +1254,7 @@ struct TodayWorldAuthorGroup: Identifiable {
             postDate(lhs.post) > postDate(rhs.post)
         }
         var seenPostIDs = Set<Int>()
+        var seenMediaKeys = Set<String>()
 
         for entry in entries {
             guard seenPostIDs.insert(entry.post.id).inserted else { continue }
@@ -1265,6 +1266,10 @@ struct TodayWorldAuthorGroup: Identifiable {
             let companyKey = entry.section.entity?.companyKey ?? "altman"
             let companyName = entry.section.entity?.companyName ?? "奥特曼系"
             let groupingKey = "\(companyKey):\(authorKey)"
+            if let mediaKey = mediaDeduplicationKey(for: entry.post),
+               !seenMediaKeys.insert("\(groupingKey):\(mediaKey)").inserted {
+                continue
+            }
 
             if let index = groupIndexByAuthor[groupingKey] {
                 groups[index].posts.append(entry.post)
@@ -1312,6 +1317,18 @@ struct TodayWorldAuthorGroup: Identifiable {
         guard let value = post.articlePostAt else { return .distantPast }
         return ISO8601DateFormatter().date(from: value) ?? .distantPast
     }
+
+    private static func mediaDeduplicationKey(for post: Post) -> String? {
+        let imageURLs = (post.images ?? []).map(\.url)
+        let videoURLs = (post.videos ?? []).compactMap {
+            $0.coverURL ?? $0.previewImageURL ?? $0.preview ?? $0.playURL ?? $0.url
+        }
+        let urls = Set(imageURLs + videoURLs)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+        return urls.isEmpty ? nil : urls.joined(separator: "|")
+    }
 }
 
 private struct TodayWorldPostEntry {
@@ -1340,18 +1357,20 @@ private struct TodayWorldAuthorGroupView: View {
     let onOpenPost: (Post) -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            AvatarView(url: group.avatarURL, name: group.authorName, size: 36)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                AvatarView(url: group.avatarURL, name: group.authorName, size: 36)
 
-            LazyVStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 4) {
-                    Text(group.authorName)
-                        .font(.system(size: 15, weight: .bold))
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(group.authorName)
+                            .font(.system(size: 15, weight: .bold))
+                            .lineLimit(1)
 
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.blue)
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.blue)
+                    }
 
                     if let handle = group.handle {
                         Text(handle)
@@ -1359,17 +1378,20 @@ private struct TodayWorldAuthorGroupView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-
-                    Spacer(minLength: 0)
-
-                    if !group.roleLabel.isEmpty {
-                        Text(group.roleLabel)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
                 }
 
+                Spacer(minLength: 0)
+
+                if !group.roleLabel.isEmpty {
+                    Text(group.roleLabel)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.bottom, 4)
+
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(group.posts.enumerated()), id: \.element.id) { index, post in
                     TodayWorldGroupedPostRow(
                         post: post,
@@ -1387,9 +1409,10 @@ private struct TodayWorldAuthorGroupView: View {
                         .padding(.bottom, 10)
                 }
             }
+            .padding(.leading, 46)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .overlay(alignment: .bottom) { Divider().padding(.leading, 60) }
     }
 }
@@ -1562,28 +1585,61 @@ private struct TodayWorldGroupedPostRow: View {
             if media.isVideo {
                 if let videoURL = media.directPlaybackURL,
                    let generated = MediaURL.videoThumbnail(for: videoURL, at: 1) {
-                    return TodayWorldMediaItem(url: generated, isVideo: true)
+                    return TodayWorldMediaItem(
+                        url: generated,
+                        isVideo: true,
+                        width: media.width,
+                        height: media.height
+                    )
                 }
                 if let preview = media.previewURL {
-                    return TodayWorldMediaItem(url: preview, isVideo: true)
+                    return TodayWorldMediaItem(
+                        url: preview,
+                        isVideo: true,
+                        width: media.width,
+                        height: media.height
+                    )
                 }
             }
             guard let url = media.displayURL else { return nil }
-            return TodayWorldMediaItem(url: url, isVideo: media.isVideo)
+            return TodayWorldMediaItem(
+                url: url,
+                isVideo: media.isVideo,
+                width: media.width,
+                height: media.height
+            )
         }
     }
 
     private var ownMediaItems: [TodayWorldMediaItem] {
-        let images = post.imageURLs.map { TodayWorldMediaItem(url: $0, isVideo: false) }
+        let images = (post.images ?? []).compactMap { image -> TodayWorldMediaItem? in
+            guard let url = MediaURL.image(image.url) else { return nil }
+            return TodayWorldMediaItem(
+                url: url,
+                isVideo: false,
+                width: image.width,
+                height: image.height
+            )
+        }
         let videoPreviews = (post.videos ?? []).compactMap { video -> TodayWorldMediaItem? in
             if let rawVideoURL = video.playURL ?? video.url,
                let videoURL = MediaURL.directVideo(rawVideoURL),
                let generated = MediaURL.videoThumbnail(for: videoURL, at: 1) {
-                return TodayWorldMediaItem(url: generated, isVideo: true)
+                return TodayWorldMediaItem(
+                    url: generated,
+                    isVideo: true,
+                    width: video.width,
+                    height: video.height
+                )
             }
             guard let raw = video.coverURL ?? video.previewImageURL ?? video.preview,
                   let url = MediaURL.image(raw) else { return nil }
-            return TodayWorldMediaItem(url: url, isVideo: true)
+            return TodayWorldMediaItem(
+                url: url,
+                isVideo: true,
+                width: video.width,
+                height: video.height
+            )
         }
         return images + videoPreviews
     }
@@ -1604,14 +1660,38 @@ private struct TodayWorldGroupedPostRow: View {
 private struct TodayWorldMediaItem: Identifiable {
     let url: URL
     let isVideo: Bool
+    let aspectRatio: CGFloat?
     var id: URL { url }
+
+    init(url: URL, isVideo: Bool, width: Int? = nil, height: Int? = nil) {
+        self.url = url
+        self.isVideo = isVideo
+        if let width, let height, width > 0, height > 0 {
+            aspectRatio = CGFloat(width) / CGFloat(height)
+        } else {
+            aspectRatio = nil
+        }
+    }
 }
 
 private struct TodayWorldMediaGrid: View {
     let items: [TodayWorldMediaItem]
 
+    @ViewBuilder
     var body: some View {
-        if !items.isEmpty {
+        if let item = items.first, items.count == 1 {
+            ZStack {
+                RemoteImage(url: item.url, contentMode: .fit)
+
+                if item.isVideo {
+                    playBadge
+                }
+            }
+            .aspectRatio(fittedAspectRatio(item), contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .background(Color.secondary.opacity(0.055))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else if !items.isEmpty {
             GeometryReader { proxy in
                 let visibleItems = Array(items.prefix(4))
                 let columns = visibleItems.count == 1 ? 1 : 2
@@ -1629,11 +1709,7 @@ private struct TodayWorldMediaGrid: View {
                                 .clipped()
 
                             if item.isVideo {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 17, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 36, height: 36)
-                                    .background(.black.opacity(0.58), in: Circle())
+                                playBadge
                             }
                         }
                     }
@@ -1647,4 +1723,16 @@ private struct TodayWorldMediaGrid: View {
 
     private var itemHeight: CGFloat { items.count == 1 ? 150 : 112 }
     private var gridHeight: CGFloat { min(items.count, 4) > 2 ? itemHeight * 2 + 3 : itemHeight }
+
+    private var playBadge: some View {
+        Image(systemName: "play.fill")
+            .font(.system(size: 17, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 36, height: 36)
+            .background(.black.opacity(0.58), in: Circle())
+    }
+
+    private func fittedAspectRatio(_ item: TodayWorldMediaItem) -> CGFloat {
+        min(max(item.aspectRatio ?? 16 / 9, 0.8), 2.4)
+    }
 }

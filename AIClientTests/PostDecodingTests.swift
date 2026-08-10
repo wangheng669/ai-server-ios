@@ -1208,6 +1208,17 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(TodayWorldAuthorGroup.make(from: payload).isEmpty)
     }
 
+    func testTodayWorldGroupsCollapsePostsWithIdenticalMedia() throws {
+        let data = Data(
+            #"{"schema_version":"1","date":"2026-08-10","timezone":"Asia/Shanghai","generated_at":"2026-08-10T08:00:00Z","sections":[{"id":"person:steipete:x","kind":"feed","title":"Peter","layout":"list","entity":{"key":"steipete","name":"Peter Steinberger","type":"person","x_handle":"steipete","company_key":"altman","company_name":"奥特曼系"},"items":[{"id":102,"source":"x","content":"较新的相似动态","article_post_at":"2026-08-10T07:01:00Z","images":[{"url":"https://pbs.twimg.com/media/same.jpg","width":1342,"height":636}]},{"id":101,"source":"x","content":"较早的相似动态","article_post_at":"2026-08-10T07:00:00Z","images":[{"url":"https://pbs.twimg.com/media/same.jpg","width":1342,"height":636}]},{"id":100,"source":"x","content":"没有媒体的独立动态","article_post_at":"2026-08-10T06:00:00Z"}],"item_count":3,"has_more":false}]}"#.utf8
+        )
+        let payload = try JSONDecoder().decode(TodayWorldPayload.self, from: data)
+
+        let posts = try XCTUnwrap(TodayWorldAuthorGroup.make(from: payload).first?.posts)
+
+        XCTAssertEqual(posts.map(\.id), [102, 100])
+    }
+
     func testTodayWorldYesterdayReportDecoding() throws {
         let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"systems":[{"system_key":"altman","system_name":"奥特曼系","accounts":[{"source_key":"sam-altman","name":"Sam Altman","source_type":"person","summary":"说明安全评估进展。","post_ids":[42]},{"source_key":"openai","name":"OpenAI","source_type":"company","summary":"发布产品更新。","post_ids":[43]}]}]},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123,"completed_at":"2026-08-08T06:16:00+08:00"}}"#.utf8)
         let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
