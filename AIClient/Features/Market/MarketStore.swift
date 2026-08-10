@@ -266,12 +266,10 @@ final class MarketStore {
     var maximumOpenMarketDelayMinutes: Int? {
         let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.referenceIndices ?? [])
             + (dashboard?.metrics ?? []) + (dashboard?.allRegionalComponents ?? [])
-        let seconds = quotes
+        return quotes
             .filter { $0.marketSession == "regular" }
-            .compactMap(\.delaySeconds)
+            .compactMap(\.visibleDelayMinutes)
             .max()
-        guard let seconds, seconds > 0 else { return nil }
-        return max(1, Int(ceil(Double(seconds) / 60)))
     }
 
     var healthIssues: [MarketSymbolHealth] {
