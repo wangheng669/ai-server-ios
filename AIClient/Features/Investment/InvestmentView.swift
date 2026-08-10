@@ -19,6 +19,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
     case sentiment = "情绪"
     case chinaMacro = "国内宏观"
+    case institutionResearch = "机构研究"
     case holdings = "知名投资人"
     case industries = "产业全景"
     case gdp = "全球排行"
@@ -44,6 +45,8 @@ struct InvestmentView: View {
             _section = State(initialValue: .industries)
         } else if ProcessInfo.processInfo.arguments.contains("--china-macro-preview") {
             _section = State(initialValue: .chinaMacro)
+        } else if ProcessInfo.processInfo.arguments.contains("--institution-research-preview") {
+            _section = State(initialValue: .institutionResearch)
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
                     ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
             _section = State(initialValue: .sentiment)
@@ -77,6 +80,9 @@ struct InvestmentView: View {
 
                 ChinaMacroView()
                     .tag(InvestmentSection.chinaMacro)
+
+                InstitutionResearchView()
+                    .tag(InvestmentSection.institutionResearch)
 
                 FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
                     .tag(InvestmentSection.holdings)

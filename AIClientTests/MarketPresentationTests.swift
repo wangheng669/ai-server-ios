@@ -2,6 +2,38 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesServerBackedInstitutionResearch() throws {
+        let data = Data(#"{"data":{"institutionsCount":3,"items":[{"id":"morgan-stanley-more-stocks-join-bull-market","institution":"Morgan Stanley","institutionShortName":"MS","title":"更多股票加入牛市","originalTitle":"More Stocks Join the Bull Market","summary":"市场领导力正在扩散。","publishedOn":"2026-07-22","sourceType":"官方播客文字稿","categories":["美股","市场广度"],"metrics":[],"source":{"title":"More Stocks Join the Bull Market","url":"https://www.morganstanley.com/insights/example"},"isSystemSummary":true,"presentation":"lead"},{"id":"goldman-sp500-forecast-2026","institution":"Goldman Sachs","institutionShortName":"GS","title":"盈利增长推动美股上行","originalTitle":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","summary":"盈利预测上调。","publishedOn":"2026-05-28","sourceType":"官方研究文章","categories":["美股"],"metrics":[{"label":"2026 EPS","value":"$340"}],"targetRevision":{"label":"标普500年末目标","previousValue":"7,600","currentValue":"8,000"},"source":{"title":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","url":"https://www.goldmansachs.com/insights/example"},"isSystemSummary":true,"presentation":"revision"}],"updatedAt":"2026-08-10T00:00:00Z"}}"#.utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let payload = try decoder.decode(InstitutionResearchResponse.self, from: data).data
+
+        XCTAssertEqual(payload.institutionsCount, 3)
+        XCTAssertEqual(payload.items.first?.presentation, .lead)
+        XCTAssertEqual(payload.items.last?.targetRevision?.currentValue, "8,000")
+        XCTAssertEqual(payload.items.last?.metrics.first?.value, "$340")
+        XCTAssertTrue(payload.items.first?.isSystemSummary == true)
+    }
+
+    @MainActor
+    func testInstitutionResearchStoreForceReloadReplacesPayload() async {
+        var fetchCount = 0
+        let store = InstitutionResearchStore(fetch: {
+            fetchCount += 1
+            return InstitutionResearchPayload(institutionsCount: fetchCount, items: [], updatedAt: nil)
+        })
+
+        await store.load()
+        await store.load()
+        XCTAssertEqual(fetchCount, 1)
+        XCTAssertEqual(store.payload?.institutionsCount, 1)
+
+        await store.load(force: true)
+        XCTAssertEqual(fetchCount, 2)
+        XCTAssertEqual(store.payload?.institutionsCount, 2)
+    }
+
     func testDecodesServerBackedCompanyConsensusExpectation() throws {
         let data = Data(#"{"data":{"companies":[{"id":"nvidia","name":"NVIDIA Corporation","shortName":"英伟达","logoUrl":"/img/company-logos/nvidia.png","ticker":"NVDA","exchange":"纳斯达克证券交易所","industry":"半导体","location":"美国","tagline":"AI","thesis":"持续跟踪","metrics":[],"highlights":[],"moats":[],"risks":[],"questions":[],"sources":[],"buyback":{"status":"持续执行","asOfDate":"2026-01-25","shares":"--","amount":"--","percentage":"--","priceRange":"--","purpose":"--","progressNote":"--","source":{"title":"公告","url":"https://example.com"}},"nextReport":{"reportType":"季度业绩","expectedDate":"2026-08-26","dateStatus":"预计窗口","note":"--","source":{"title":"日历","url":"https://example.com"}},"consensus":{"period":"2027财年第二季度","asOfDate":"2026-08-05","status":"财报前更新","metrics":[{"label":"营业收入","value":"910亿美元","note":"分析师平均值"}],"note":"不同数据商的样本可能不同。","source":{"title":"市场一致预期","url":"https://example.com"}},"financials":{"unit":"亿美元","years":[],"source":{"title":"年报","url":"https://example.com"}},"updatedAt":"2026-08-05T00:00:00Z"}],"updatedAt":"2026-08-05T00:00:00Z"}}"#.utf8)
         let decoder = JSONDecoder()
