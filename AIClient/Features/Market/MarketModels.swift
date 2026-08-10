@@ -78,12 +78,19 @@ struct MarketDashboard: Codable {
         }
     }
 
+    mutating func merge(_ update: MarketQuoteUpdate) {
+        guard let current = quote(symbol: update.symbol),
+              marketRealtimeUpdateIsCurrent(update, current: current) else { return }
+        replace(update.merging(into: current))
+    }
+
     func quote(symbol: String) -> MarketQuote? {
         coreIndices.first(where: { $0.symbol == symbol })
             ?? referenceIndices.first(where: { $0.symbol == symbol })
             ?? metrics.first(where: { $0.symbol == symbol })
             ?? componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol })
             ?? crypto.first(where: { $0.symbol == symbol })
+            ?? indexSessions?.values.first(where: { $0.symbol == symbol })
     }
 
     var allRegionalComponents: [MarketQuote] {
@@ -95,11 +102,7 @@ struct MarketDashboard: Codable {
 
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {
         guard let index = quotes.firstIndex(where: { $0.symbol == quote.symbol }) else { return }
-        var next = quote
-        if next.trend.isEmpty {
-            next.trend = marketAppendingLiveValue(next.price, to: quotes[index].trend)
-        }
-        quotes[index] = next
+        quotes[index] = quote
     }
 }
 
@@ -173,7 +176,8 @@ struct MarketIndexConstituents: Decodable {
     }
 
     mutating func merge(_ update: MarketQuoteUpdate) {
-        guard let index = items.firstIndex(where: { $0.quote.symbol == update.symbol }) else { return }
+        guard let index = items.firstIndex(where: { $0.quote.symbol == update.symbol }),
+              marketRealtimeUpdateIsCurrent(update, current: items[index].quote) else { return }
         items[index].quote = update.merging(into: items[index].quote)
     }
 }
@@ -248,9 +252,11 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let sessionDataSource: String?
     let changePercent: String?
     let timestamp: Int64?
+    let receivedAt: Int64?
     let quality: MarketQuoteQuality?
     var trend: [Double]
     var nightTrend: [Double]
+    var liveTrendValue: Double?
     let stale: Bool?
 
     var percentValue: Double {
@@ -294,7 +300,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         case price, openPrice, previousClose, high, low, pe, marketCap, peStatic, peType, netIncomeTTM, week52Low
         case currency, fundamentalsCurrency, fiscalYear, fundamentalsSource, fundamentalsAsOf, volume, turnover
         case dataSource, delaySeconds, marketSession, sessionPrice, sessionChangePercent, sessionDataSource
-        case changePercent, timestamp, quality, trend, nightTrend, stale
+        case changePercent, timestamp, receivedAt, quality, trend, nightTrend, stale
     }
 
     init(
@@ -332,8 +338,10 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         sessionDataSource: String?,
         changePercent: String?,
         timestamp: Int64?,
+        receivedAt: Int64?,
         trend: [Double],
         nightTrend: [Double],
+        liveTrendValue: Double? = nil,
         stale: Bool?,
         quality: MarketQuoteQuality? = nil
     ) {
@@ -371,9 +379,11 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.sessionDataSource = sessionDataSource
         self.changePercent = changePercent
         self.timestamp = timestamp
+        self.receivedAt = receivedAt
         self.quality = quality
         self.trend = trend
         self.nightTrend = nightTrend
+        self.liveTrendValue = liveTrendValue
         self.stale = stale
     }
 
@@ -413,9 +423,11 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         sessionDataSource = try values.decodeIfPresent(String.self, forKey: .sessionDataSource)
         changePercent = try values.decodeIfPresent(String.self, forKey: .changePercent)
         timestamp = try values.decodeIfPresent(Int64.self, forKey: .timestamp)
+        receivedAt = try values.decodeIfPresent(Int64.self, forKey: .receivedAt)
         quality = try values.decodeIfPresent(MarketQuoteQuality.self, forKey: .quality)
         trend = try values.decodeIfPresent([Double].self, forKey: .trend) ?? []
         nightTrend = try values.decodeIfPresent([Double].self, forKey: .nightTrend) ?? []
+        liveTrendValue = nil
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale)
     }
 }
@@ -474,15 +486,39 @@ struct MarketQuoteUpdate: Decodable {
     let sessionDataSource: String?
     let changePercent: String?
     let timestamp: Int64?
+    let receivedAt: Int64?
 
     func merging(into current: MarketQuote?) -> MarketQuote {
-        let regularTrend = marketAppendingLiveValue(price, to: current?.trend ?? [])
-        let extendedTrend: [Double]
-        if MarketTradingSession(rawValue: marketSession).isExtended, let sessionPrice {
-            extendedTrend = marketAppendingLiveValue(sessionPrice, to: current?.nightTrend ?? [])
-        } else {
-            extendedTrend = current?.nightTrend ?? []
+        let tradingSession = MarketTradingSession(rawValue: marketSession ?? current?.marketSession)
+        let sessionChanged = current.map { $0.tradingSession != tradingSession } ?? false
+        let snapshotTrend = sessionChanged && tradingSession.isActivelyTrading ? [] : current?.trend ?? []
+        let liveTrendValue: Double?
+        switch tradingSession {
+        case .premarket, .postmarket, .overnight:
+            liveTrendValue = sessionPrice ?? (sessionChanged ? nil : current?.liveTrendValue)
+        case .regular, .alwaysOpen:
+            liveTrendValue = price
+        case .closed, .unknown:
+            liveTrendValue = nil
         }
+        let extendedTrend: [Double]
+        if tradingSession.isExtended, let sessionPrice {
+            extendedTrend = marketAppendingLiveValue(sessionPrice, to: sessionChanged ? [] : current?.nightTrend ?? [])
+        } else if tradingSession.isExtended {
+            extendedTrend = sessionChanged ? [] : current?.nightTrend ?? []
+        } else {
+            extendedTrend = []
+        }
+        let mergedSessionPrice = tradingSession.isExtended
+            ? sessionPrice ?? (sessionChanged ? nil : current?.sessionPrice)
+            : nil
+        let mergedSessionChangePercent = tradingSession.isExtended
+            ? sessionChangePercent ?? (sessionChanged ? nil : current?.sessionChangePercent)
+            : nil
+        let mergedSessionDataSource = tradingSession.isExtended
+            ? sessionDataSource ?? (sessionChanged ? nil : current?.sessionDataSource)
+            : nil
+        let mergedDelaySeconds = sessionChanged ? delaySeconds : delaySeconds ?? current?.delaySeconds
         var merged = MarketQuote(
             symbol: symbol,
             name: name,
@@ -502,16 +538,19 @@ struct MarketQuoteUpdate: Decodable {
             volume: volume ?? current?.volume,
             turnover: turnover ?? current?.turnover,
             dataSource: dataSource ?? current?.dataSource,
-            delaySeconds: delaySeconds ?? current?.delaySeconds,
+            delaySeconds: mergedDelaySeconds,
             marketSession: marketSession ?? current?.marketSession,
-            sessionPrice: sessionPrice ?? current?.sessionPrice,
-            sessionChangePercent: sessionChangePercent ?? current?.sessionChangePercent,
-            sessionDataSource: sessionDataSource ?? current?.sessionDataSource,
+            sessionPrice: mergedSessionPrice,
+            sessionChangePercent: mergedSessionChangePercent,
+            sessionDataSource: mergedSessionDataSource,
             changePercent: changePercent ?? current?.changePercent,
             timestamp: timestamp ?? current?.timestamp,
-            trend: regularTrend,
+            receivedAt: receivedAt ?? current?.receivedAt,
+            trend: snapshotTrend,
             nightTrend: extendedTrend,
-            stale: false
+            liveTrendValue: liveTrendValue,
+            stale: false,
+            quality: sessionChanged || tradingSession.isActivelyTrading ? nil : current?.quality
         )
         merged.peStatic = current?.peStatic
         merged.peType = current?.peType
@@ -524,6 +563,15 @@ struct MarketQuoteUpdate: Decodable {
         merged.fundamentalsAsOf = current?.fundamentalsAsOf
         return merged
     }
+}
+
+func marketRealtimeUpdateIsCurrent(
+    _ update: MarketQuoteUpdate,
+    current: MarketQuote?,
+    cached: MarketQuoteUpdate? = nil
+) -> Bool {
+    guard let receivedAt = update.receivedAt else { return false }
+    return receivedAt >= max(current?.receivedAt ?? 0, cached?.receivedAt ?? 0)
 }
 
 struct MarketAShareOverview: Codable {
