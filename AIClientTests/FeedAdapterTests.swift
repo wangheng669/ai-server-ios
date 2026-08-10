@@ -235,6 +235,18 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["group_similar"])
     }
 
+    func testWeiboCommentsRequestUsesDedicatedEndpointContract() throws {
+        let postURL = try XCTUnwrap(URL(string: "https://weibo.com/2397417584/RcLu9FEvg"))
+        let items = APIClient.weiboCommentsQueryItems(postURL: postURL, limit: 20)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["url"], postURL.absoluteString)
+        XCTAssertEqual(query["limit"], "20")
+        XCTAssertEqual(query["reply_limit"], "3")
+    }
+
     func testWeiboFollowingImagesExcludeSinaPlaceholderArtwork() throws {
         let post = try JSONDecoder().decode(
             Post.self,

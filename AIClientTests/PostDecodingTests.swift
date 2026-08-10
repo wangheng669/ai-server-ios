@@ -450,6 +450,16 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.items.first?.metrics?.bookmarks, 3)
     }
 
+    func testDecodesWeiboCommentsAndReplies() throws {
+        let data = #"{"success":true,"data":{"items":[{"commentId":"c1","text":"主评论","createdAt":"2026-08-10T09:56:29Z","likeCount":8,"replyCount":1,"authorName":"评论者","authorAvatar":"https://example.com/avatar.jpg","replyToAuthorName":"","replies":[{"commentId":"r1","text":"楼中楼","createdAt":null,"likeCount":0,"replyCount":0,"authorName":"回复者","authorAvatar":null,"replyToAuthorName":"评论者","replies":[]}]}],"commentCount":147}}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(WeiboCommentsResponse.self, from: data)
+
+        XCTAssertEqual(response.data.commentCount, 147)
+        XCTAssertEqual(response.data.items.first?.id, "c1")
+        XCTAssertEqual(response.data.items.first?.replies.first?.text, "楼中楼")
+        XCTAssertEqual(response.data.items.first?.replies.first?.replyToAuthorName, "评论者")
+    }
+
     func testDecodesLiveXTweetVideoForDetailFallback() throws {
         let data = #"{"success":true,"data":{"item":{"id":"2083612366155984927","text":"这是哪个国家？","media":[{"type":"video","url":"https://video.twimg.com/amplify_video/demo.mp4","thumbnail_url":"https://pbs.twimg.com/amplify_video_thumb/demo.jpg","width":720,"height":1280}]}}}"#.data(using: .utf8)!
         let item = try JSONDecoder().decode(XTweetDetailResponse.self, from: data).data.item

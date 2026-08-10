@@ -106,6 +106,36 @@ struct XCommentsResponse: Decodable {
     }
 }
 
+struct WeiboCommentsResponse: Decodable {
+    let success: Bool
+    let data: Payload
+
+    struct Payload: Decodable, Equatable {
+        let items: [WeiboComment]
+        let commentCount: Int?
+    }
+}
+
+struct WeiboComment: Decodable, Identifiable, Equatable {
+    let commentID: String
+    let text: String
+    let createdAt: String?
+    let likeCount: Int?
+    let replyCount: Int?
+    let authorName: String
+    let authorAvatar: String?
+    let replyToAuthorName: String?
+    let replies: [WeiboComment]
+
+    var id: String { commentID }
+    var avatarURL: URL? { authorAvatar.flatMap(MediaURL.image) }
+
+    enum CodingKeys: String, CodingKey {
+        case text, createdAt, likeCount, replyCount, authorName, authorAvatar, replyToAuthorName, replies
+        case commentID = "commentId"
+    }
+}
+
 struct XTweetDetailResponse: Decodable {
     let success: Bool
     let data: Payload
