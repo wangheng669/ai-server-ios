@@ -869,6 +869,17 @@ struct Post: Decodable, Identifiable, Hashable {
                 filename != "timeline_card_small_web_default.png"
         }
     }
+    var weiboDetailImageURLs: [URL] {
+        guard !videoURLs.isEmpty else { return weiboFollowingImageURLs }
+        let galleryURLs = Set((images ?? []).compactMap { image -> URL? in
+            guard let width = image.width,
+                  let height = image.height,
+                  width > 0,
+                  height > 0 else { return nil }
+            return MediaURL.image(image.url)
+        })
+        return weiboFollowingImageURLs.filter(galleryURLs.contains)
+    }
     func weiboImageAspectRatio(for url: URL) -> CGFloat? {
         guard let image = (images ?? []).first(where: { MediaURL.image($0.url) == url }),
               let width = image.width,
