@@ -196,20 +196,6 @@ struct MarketCompanyLogo: Decodable {
     let url: String
 }
 
-struct MarketCompanyFinancialsResponse: Decodable {
-    let data: MarketCompanyFinancials
-}
-
-struct MarketCompanyFinancials: Decodable {
-    let symbol: String
-    let netIncomeTTM: Double?
-    let week52Low: Double?
-    let currency: String
-    let period: String
-    let fiscalYear: String?
-    let dataSource: String
-}
-
 struct MarketDashboardFreshness: Codable {
     let latestQuoteAt: String?
     let latestTimestamp: Int64?
@@ -243,6 +229,14 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let low: Double?
     let pe: Double?
     let marketCap: Double?
+    var peType: String?
+    var netIncomeTTM: Double?
+    var week52Low: Double?
+    var currency: String?
+    var fundamentalsCurrency: String?
+    var fiscalYear: String?
+    var fundamentalsSource: String?
+    var fundamentalsAsOf: String?
     let volume: Double?
     let turnover: Double?
     let dataSource: String?
@@ -291,7 +285,8 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode
-        case price, openPrice, previousClose, high, low, pe, marketCap, volume, turnover
+        case price, openPrice, previousClose, high, low, pe, marketCap, peType, netIncomeTTM, week52Low
+        case currency, fundamentalsCurrency, fiscalYear, fundamentalsSource, fundamentalsAsOf, volume, turnover
         case dataSource, delaySeconds, marketSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, quality, trend, nightTrend, stale
     }
@@ -312,6 +307,14 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         low: Double?,
         pe: Double?,
         marketCap: Double?,
+        peType: String? = nil,
+        netIncomeTTM: Double? = nil,
+        week52Low: Double? = nil,
+        currency: String? = nil,
+        fundamentalsCurrency: String? = nil,
+        fiscalYear: String? = nil,
+        fundamentalsSource: String? = nil,
+        fundamentalsAsOf: String? = nil,
         volume: Double?,
         turnover: Double?,
         dataSource: String?,
@@ -342,6 +345,14 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.low = low
         self.pe = pe
         self.marketCap = marketCap
+        self.peType = peType
+        self.netIncomeTTM = netIncomeTTM
+        self.week52Low = week52Low
+        self.currency = currency
+        self.fundamentalsCurrency = fundamentalsCurrency
+        self.fiscalYear = fiscalYear
+        self.fundamentalsSource = fundamentalsSource
+        self.fundamentalsAsOf = fundamentalsAsOf
         self.volume = volume
         self.turnover = turnover
         self.dataSource = dataSource
@@ -375,6 +386,14 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         low = try values.decodeIfPresent(Double.self, forKey: .low)
         pe = try values.decodeIfPresent(Double.self, forKey: .pe)
         marketCap = try values.decodeIfPresent(Double.self, forKey: .marketCap)
+        peType = try values.decodeIfPresent(String.self, forKey: .peType)
+        netIncomeTTM = try values.decodeIfPresent(Double.self, forKey: .netIncomeTTM)
+        week52Low = try values.decodeIfPresent(Double.self, forKey: .week52Low)
+        currency = try values.decodeIfPresent(String.self, forKey: .currency)
+        fundamentalsCurrency = try values.decodeIfPresent(String.self, forKey: .fundamentalsCurrency)
+        fiscalYear = try values.decodeIfPresent(String.self, forKey: .fiscalYear)
+        fundamentalsSource = try values.decodeIfPresent(String.self, forKey: .fundamentalsSource)
+        fundamentalsAsOf = try values.decodeIfPresent(String.self, forKey: .fundamentalsAsOf)
         volume = try values.decodeIfPresent(Double.self, forKey: .volume)
         turnover = try values.decodeIfPresent(Double.self, forKey: .turnover)
         dataSource = try values.decodeIfPresent(String.self, forKey: .dataSource)
@@ -436,8 +455,6 @@ struct MarketQuoteUpdate: Decodable {
     let previousClose: Double?
     let high: Double?
     let low: Double?
-    let pe: Double?
-    let marketCap: Double?
     let volume: Double?
     let turnover: Double?
     let dataSource: String?
@@ -457,7 +474,7 @@ struct MarketQuoteUpdate: Decodable {
         } else {
             extendedTrend = current?.nightTrend ?? []
         }
-        return MarketQuote(
+        var merged = MarketQuote(
             symbol: symbol,
             name: name,
             displayName: current?.displayName,
@@ -471,8 +488,8 @@ struct MarketQuoteUpdate: Decodable {
             previousClose: previousClose ?? current?.previousClose,
             high: high ?? current?.high,
             low: low ?? current?.low,
-            pe: pe ?? current?.pe,
-            marketCap: marketCap ?? current?.marketCap,
+            pe: current?.pe,
+            marketCap: current?.marketCap,
             volume: volume ?? current?.volume,
             turnover: turnover ?? current?.turnover,
             dataSource: dataSource ?? current?.dataSource,
@@ -487,6 +504,15 @@ struct MarketQuoteUpdate: Decodable {
             nightTrend: extendedTrend,
             stale: false
         )
+        merged.peType = current?.peType
+        merged.netIncomeTTM = current?.netIncomeTTM
+        merged.week52Low = current?.week52Low
+        merged.currency = current?.currency
+        merged.fundamentalsCurrency = current?.fundamentalsCurrency
+        merged.fiscalYear = current?.fiscalYear
+        merged.fundamentalsSource = current?.fundamentalsSource
+        merged.fundamentalsAsOf = current?.fundamentalsAsOf
+        return merged
     }
 }
 

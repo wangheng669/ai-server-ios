@@ -96,7 +96,9 @@ final class MarketPresentationTests: XCTestCase {
                     updates: nil,
                     market: CompanyResearchMarket(
                         symbol: "NVDA", price: 223.96, changePercent: "2.71%", marketCap: 5_419_832_162_476,
-                        pe: pe, currency: "USD", timestamp: 1_786_329_600_000, status: "complete"
+                        pe: pe, peType: "ttm", netIncomeTTM: nil, week52Low: nil, currency: "USD",
+                        fiscalYear: nil, fundamentalsSource: nil, fundamentalsAsOf: nil,
+                        timestamp: 1_786_329_600_000, status: "complete"
                     ),
                     updatedAt: Date(timeIntervalSince1970: 1_786_329_600)
                 )],
@@ -122,16 +124,20 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(store.companies.first?.market?.pe, 34.3)
     }
 
-    func testDecodesCompanyNetIncomeTTM() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","netIncomeTTM":122575000000,"currency":"USD","period":"TTM","fiscalYear":"2025","dataSource":"TradingView Scanner"}}"#.utf8)
+    func testDecodesUnifiedCompanyFundamentalsFromMarketQuote() throws {
+        let data = Data(#"{"symbol":"AAPL","name":"Apple","price":220.1,"pe":31.2,"marketCap":3350000000000,"peType":"ttm","netIncomeTTM":122575000000,"week52Low":169.21,"currency":"USD","fundamentalsCurrency":"USD","fiscalYear":"2025","fundamentalsSource":"TradingView Scanner","fundamentalsAsOf":"2026-08-10T08:00:00Z","trend":[],"nightTrend":[]}"#.utf8)
 
-        let response = try JSONDecoder().decode(MarketCompanyFinancialsResponse.self, from: data)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
-        XCTAssertEqual(response.data.symbol, "AAPL")
-        XCTAssertEqual(response.data.netIncomeTTM, 122_575_000_000)
-        XCTAssertEqual(response.data.currency, "USD")
-        XCTAssertEqual(response.data.period, "TTM")
-        XCTAssertEqual(response.data.fiscalYear, "2025")
+        XCTAssertEqual(quote.symbol, "AAPL")
+        XCTAssertEqual(quote.pe, 31.2)
+        XCTAssertEqual(quote.peType, "ttm")
+        XCTAssertEqual(quote.marketCap, 3_350_000_000_000)
+        XCTAssertEqual(quote.netIncomeTTM, 122_575_000_000)
+        XCTAssertEqual(quote.week52Low, 169.21)
+        XCTAssertEqual(quote.fundamentalsCurrency, "USD")
+        XCTAssertEqual(quote.fiscalYear, "2025")
+        XCTAssertEqual(quote.fundamentalsSource, "TradingView Scanner")
     }
 
     func testFormatsCompanyNetIncomeWithChineseUnits() {

@@ -74,13 +74,6 @@ struct MarketService {
         return logo.found && !logo.url.isEmpty ? logo.url : nil
     }
 
-    func companyFinancials(symbol: String) async throws -> MarketCompanyFinancials {
-        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/company-financials"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [.init(name: "symbol", value: symbol)]
-        guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketCompanyFinancialsResponse.self).data
-    }
-
     func famousHoldings(managerKey: String? = nil) async throws -> FamousHoldings {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/famous-holdings"), resolvingAgainstBaseURL: false)
         if let managerKey { components?.queryItems = [.init(name: "manager", value: managerKey)] }

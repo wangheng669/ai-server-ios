@@ -130,7 +130,13 @@ struct CompanyResearchMarket: Decodable, Hashable {
     let changePercent: String
     let marketCap: Double?
     let pe: Double?
+    var peType: String?
+    var netIncomeTTM: Double?
+    var week52Low: Double?
     let currency: String
+    var fiscalYear: String?
+    var fundamentalsSource: String?
+    var fundamentalsAsOf: String?
     let timestamp: Int64
     let status: String
 }

@@ -2226,7 +2226,6 @@ private struct MarketIndexDetailView: View {
     private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
-    private var financials: MarketCompanyFinancials? { store.companyFinancials[symbol] }
     private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
     private var isIndex: Bool {
         store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
@@ -2301,9 +2300,6 @@ private struct MarketIndexDetailView: View {
             }
             if let quote {
                 await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
-                if showsCompanyProfile || (!isIndex && !isCrypto) {
-                    await store.loadCompanyFinancials(symbol: quote.symbol)
-                }
             }
         }
     }
@@ -2436,7 +2432,7 @@ private struct MarketIndexDetailView: View {
                 if !isIndex && !isCrypto {
                     metric(
                         "52周最低",
-                        financials?.week52Low ?? market52WeekLow(store.chart(symbol: historicalSymbol, range: .year)),
+                        quote?.week52Low ?? market52WeekLow(store.chart(symbol: historicalSymbol, range: .year)),
                         MarketStyle.loss
                     )
                     metricDivider
@@ -2474,10 +2470,13 @@ private struct MarketIndexDetailView: View {
                     Text("股票代码  \(quote?.displayCode ?? symbol)")
                     Text("上市市场  \(companyMarketLabel(symbol))")
                     if let marketCap = quote?.marketCap { Text("总市值  \(compactNumber(marketCap))") }
-                    if let pe = quote?.pe { Text("市盈率  \(number(pe, digits: 2))") }
+                    if let pe = quote?.pe { Text("市盈率（TTM）  \(number(pe, digits: 2))") }
                     Text("归母净利润（TTM）  \(formattedNetIncome)")
-                    if let fiscalYear = financials?.fiscalYear, !fiscalYear.isEmpty {
+                    if let fiscalYear = quote?.fiscalYear, !fiscalYear.isEmpty {
                         Text("财报基准  FY\(fiscalYear)")
+                    }
+                    if let source = quote?.fundamentalsSource, !source.isEmpty {
+                        Text("基础数据  \(source)")
                     }
                 }
                 .font(.footnote).foregroundStyle(.secondary)
@@ -2489,8 +2488,8 @@ private struct MarketIndexDetailView: View {
     }
 
     private var formattedNetIncome: String {
-        guard let financials, let netIncome = financials.netIncomeTTM else { return "—" }
-        return marketFinancialAmount(netIncome, currency: financials.currency)
+        guard let quote, let netIncome = quote.netIncomeTTM else { return "—" }
+        return marketFinancialAmount(netIncome, currency: quote.fundamentalsCurrency ?? quote.currency ?? "")
     }
 
     private func metric(_ title: String, _ value: Double?, _ color: Color = .primary, compact: Bool = false, suffix: String = "") -> some View {
