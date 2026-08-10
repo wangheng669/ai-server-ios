@@ -23,7 +23,7 @@ final class MarketStore {
     private let service: MarketService
     private let realtime: MarketRealtimeClient
     private var loadedCache = false
-    private var realtimeQuotes: [String: MarketQuote] = [:]
+    private var latestRealtimeUpdates: [String: MarketQuoteUpdate] = [:]
     private var loadingTrendFallbacks: Set<String> = []
     private var pendingRealtimeUpdates: [String: MarketQuoteUpdate] = [:]
     private var realtimeFlushTask: Task<Void, Never>?
@@ -78,9 +78,8 @@ final class MarketStore {
         do {
             var value = try await service.dashboard(refresh: force)
             guard !Task.isCancelled else { return }
-            for quote in realtimeQuotes.values {
-                let serverTimestamp = value.quote(symbol: quote.symbol)?.timestamp ?? 0
-                if quote.timestamp ?? 0 >= serverTimestamp { value.replace(quote) }
+            for update in latestRealtimeUpdates.values {
+                value.merge(update)
             }
             dashboard = value
             lastSnapshotRefreshAt = Date()
@@ -205,8 +204,11 @@ final class MarketStore {
     /// 非正常交易时段服务端可能不下发日内 trend，这里用 5 日图表中最近一个交易日的数据兜底。
     func trendValues(for quote: MarketQuote?) -> [Double] {
         guard let quote else { return [] }
-        if quote.trend.count > 1 { return quote.trend }
-        return trendFallbacks[quote.symbol] ?? []
+        let snapshotValues = quote.trend.count > 1 || quote.liveTrendValue != nil
+            ? quote.trend
+            : trendFallbacks[quote.symbol] ?? []
+        guard !isShowingCachedSnapshot, let liveTrendValue = quote.liveTrendValue else { return snapshotValues }
+        return marketAppendingLiveValue(liveTrendValue, to: snapshotValues, limit: 40)
     }
 
     private func backfillMissingTrends() async {
@@ -318,6 +320,18 @@ final class MarketStore {
 
     private func enqueueRealtimeUpdate(_ update: MarketQuoteUpdate) {
         lastRealtimeMessageAt = Date()
+        guard marketRealtimeUpdateIsCurrent(
+            update,
+            current: quote(symbol: update.symbol),
+            cached: latestRealtimeUpdates[update.symbol]
+        ) else { return }
+        let incomingSession = MarketTradingSession(rawValue: update.marketSession)
+        if incomingSession != .unknown,
+           let currentSession = quote(symbol: update.symbol)?.tradingSession,
+           currentSession != incomingSession {
+            lastSnapshotRefreshAt = nil
+        }
+        latestRealtimeUpdates[update.symbol] = update
         pendingRealtimeUpdates[update.symbol] = update
         guard realtimeFlushTask == nil else { return }
         realtimeFlushTask = Task { [weak self] in
@@ -335,11 +349,10 @@ final class MarketStore {
         }
         let updates = pendingRealtimeUpdates.values
         pendingRealtimeUpdates.removeAll(keepingCapacity: true)
+        guard !isShowingCachedSnapshot else { return }
         for update in updates {
-            let quote = update.merging(into: self.quote(symbol: update.symbol))
-            dashboard.replace(quote)
+            dashboard.merge(update)
             mergeConstituent(update)
-            realtimeQuotes[quote.symbol] = quote
         }
         self.dashboard = dashboard
     }
