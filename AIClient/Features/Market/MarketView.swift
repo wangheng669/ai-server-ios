@@ -2676,9 +2676,9 @@ enum CompanyPEKind: String, CaseIterable, Identifiable {
     var explanation: String {
         switch self {
         case .staticPE:
-            "历史点按各财年末市值 ÷ 当年完整年度净利润计算；最新点使用当前市值与最近完整财年净利润。"
+            "以各财年末静态市盈率为锚点，按 TradingView 每个交易日的复权收盘价换算；最新点使用当前市值与最近完整财年净利润。"
         case .ttm:
-            "历史点为各季度末滚动市盈率；最新点为当前市值对应的最近十二个月市盈率。"
+            "以各季度末滚动市盈率为锚点，按 TradingView 每个交易日的复权收盘价换算；最新点为当前最近十二个月市盈率。"
         }
     }
 }
@@ -2691,11 +2691,40 @@ struct CompanyValuationHistoryRoute: Identifiable {
     var id: String { "\(symbol)-\(initialKind.rawValue)" }
 }
 
-private struct CompanyPEChartPoint: Identifiable {
+struct CompanyPEChartPoint: Identifiable {
     let date: Date
     let value: Double
 
     var id: Date { date }
+}
+
+func marketCompanyPEDisplayPoints(
+    _ points: [CompanyPEChartPoint],
+    maxCount: Int = 480
+) -> [CompanyPEChartPoint] {
+    guard maxCount >= 4, points.count > maxCount else { return points }
+    let interiorCount = points.count - 2
+    let bucketCount = max(1, (maxCount - 2) / 2)
+    let bucketSize = max(1, Int(ceil(Double(interiorCount) / Double(bucketCount))))
+    var result = [points[0]]
+    result.reserveCapacity(maxCount)
+
+    for start in stride(from: 1, to: points.count - 1, by: bucketSize) {
+        let end = min(start + bucketSize, points.count - 1)
+        guard start < end else { continue }
+        let bucket = points[start..<end]
+        guard let minimum = bucket.min(by: { $0.value < $1.value }),
+              let maximum = bucket.max(by: { $0.value < $1.value }) else { continue }
+        if minimum.id == maximum.id {
+            result.append(minimum)
+        } else if minimum.date < maximum.date {
+            result.append(contentsOf: [minimum, maximum])
+        } else {
+            result.append(contentsOf: [maximum, minimum])
+        }
+    }
+    result.append(points[points.count - 1])
+    return result
 }
 
 private enum CompanyPETimeRange: String, CaseIterable, Identifiable {
@@ -2829,33 +2858,27 @@ struct CompanyValuationHistorySheet: View {
             } else {
                 chartReading
 
-                Chart(points) { point in
-                    AreaMark(
-                        x: .value("日期", point.date),
-                        yStart: .value("基线", yDomain.lowerBound),
-                        yEnd: .value("PE", point.value)
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [selectedKind.color.opacity(0.2), selectedKind.color.opacity(0.015)],
-                            startPoint: .top,
-                            endPoint: .bottom
+                Chart {
+                    ForEach(chartPoints) { point in
+                        LineMark(
+                            x: .value("日期", point.date),
+                            y: .value("PE", point.value)
                         )
-                    )
+                        .foregroundStyle(selectedKind.color.gradient)
+                        .lineStyle(.init(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                    }
 
-                    LineMark(
-                        x: .value("日期", point.date),
-                        y: .value("PE", point.value)
-                    )
-                    .foregroundStyle(selectedKind.color.gradient)
-                    .lineStyle(.init(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-
-                    PointMark(
-                        x: .value("日期", point.date),
-                        y: .value("PE", point.value)
-                    )
-                    .foregroundStyle(selectedKind.color.opacity(point.id == activePoint?.id ? 1 : 0.55))
-                    .symbolSize(point.id == activePoint?.id ? 55 : 16)
+                    if let activePoint {
+                        RuleMark(x: .value("查看日期", activePoint.date))
+                            .foregroundStyle(selectedKind.color.opacity(0.28))
+                            .lineStyle(.init(lineWidth: 1, dash: [4, 4]))
+                        PointMark(
+                            x: .value("查看日期", activePoint.date),
+                            y: .value("PE", activePoint.value)
+                        )
+                        .foregroundStyle(selectedKind.color)
+                        .symbolSize(55)
+                    }
                 }
                 .chartOverlay { proxy in
                     GeometryReader { geometry in
@@ -2897,7 +2920,7 @@ struct CompanyValuationHistorySheet: View {
                 HStack(spacing: 0) {
                     statistic("中位数", median)
                     statistic("历史分位", percentile, suffix: "%", digits: 0)
-                    statistic("较上期", previousChange, suffix: "%", digits: 1, signed: true)
+                    statistic("较前日", previousChange, suffix: "%", digits: 1, signed: true)
                 }
 
                 extremaRow
@@ -2916,7 +2939,7 @@ struct CompanyValuationHistorySheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(activePoint?.id == points.last?.id ? "当前读数" : "历史读数")
-                    Text(selectedKind == .staticPE ? "年度真实点 + 当前" : "季度真实点 + 当前")
+                    Text("每日交易日 + 当前")
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(selectedKind.color.opacity(0.1), in: Capsule())
@@ -3029,6 +3052,11 @@ struct CompanyValuationHistorySheet: View {
             if let history {
                 Divider()
                 HStack {
+                    Text("频率")
+                    Spacer()
+                    Text(history.frequency == MarketCompanyValuationHistory.dailyFrequency ? "每个交易日" : history.frequency)
+                }
+                HStack {
                     Text("来源")
                     Spacer()
                     Text(history.source)
@@ -3043,8 +3071,10 @@ struct CompanyValuationHistorySheet: View {
                     Spacer()
                     Text(rangeDescription)
                 }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                Text("财务锚点按财务期末生效，用于保持 TradingView 历史口径一致；它不代表市场在该日已经获得对应财报。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineSpacing(2)
             }
         }
         .padding(16)
@@ -3073,6 +3103,10 @@ struct CompanyValuationHistorySheet: View {
         let calendar = Calendar(identifier: .gregorian)
         guard let cutoff = calendar.date(byAdding: .year, value: -years, to: lastDate) else { return allPoints }
         return allPoints.filter { $0.date >= cutoff }
+    }
+
+    private var chartPoints: [CompanyPEChartPoint] {
+        marketCompanyPEDisplayPoints(points)
     }
 
     private var values: [Double] { points.map(\.value) }
@@ -3125,11 +3159,7 @@ struct CompanyValuationHistorySheet: View {
         let year = calendar.component(.year, from: date)
         let month = calendar.component(.month, from: date)
         let day = calendar.component(.day, from: date)
-        if date == allPoints.last?.date, month != 12 || day != 31 {
-            return String(format: "%d-%02d-%02d", year, month, calendar.component(.day, from: date))
-        }
-        if selectedKind == .staticPE { return String(year) }
-        return "\(year) Q\((month - 1) / 3 + 1)"
+        return String(format: "%d-%02d-%02d", year, month, day)
     }
 
     @MainActor
