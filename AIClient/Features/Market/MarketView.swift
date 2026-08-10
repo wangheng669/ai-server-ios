@@ -2745,6 +2745,8 @@ struct CompanyValuationHistorySheet: View {
     @State private var selectedRange: CompanyPETimeRange = .all
     @State private var selectedDate: Date?
     @State private var history: MarketCompanyValuationHistory?
+    @State private var staticPoints: [CompanyPEChartPoint] = []
+    @State private var ttmPoints: [CompanyPEChartPoint] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -2850,7 +2852,6 @@ struct CompanyValuationHistorySheet: View {
                         yStart: .value("基线", yDomain.lowerBound),
                         yEnd: .value("PE", point.value)
                     )
-                    .interpolationMethod(.catmullRom)
                     .foregroundStyle(
                         LinearGradient(
                             colors: [selectedKind.color.opacity(0.2), selectedKind.color.opacity(0.015)],
@@ -2863,34 +2864,33 @@ struct CompanyValuationHistorySheet: View {
                         x: .value("日期", point.date),
                         y: .value("PE", point.value)
                     )
-                    .interpolationMethod(.catmullRom)
                     .foregroundStyle(selectedKind.color.gradient)
                     .lineStyle(.init(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
 
-                    if point.id == activePoint?.id {
-                        PointMark(
-                            x: .value("日期", point.date),
-                            y: .value("PE", point.value)
-                        )
-                        .foregroundStyle(selectedKind.color)
-                        .symbolSize(55)
-                    }
+                    PointMark(
+                        x: .value("日期", point.date),
+                        y: .value("PE", point.value)
+                    )
+                    .foregroundStyle(selectedKind.color.opacity(point.id == activePoint?.id ? 1 : 0.55))
+                    .symbolSize(point.id == activePoint?.id ? 55 : 16)
                 }
                 .chartOverlay { proxy in
                     GeometryReader { geometry in
-                        Rectangle()
-                            .fill(.clear)
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        let origin = geometry[proxy.plotFrame!].origin
-                                        let locationX = value.location.x - origin.x
-                                        guard let date: Date = proxy.value(atX: locationX) else { return }
-                                        selectedDate = date
-                                    }
-                                    .onEnded { _ in selectedDate = nil }
-                            )
+                        if let plotFrame = proxy.plotFrame {
+                            Rectangle()
+                                .fill(.clear)
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    SpatialTapGesture()
+                                        .onEnded { value in
+                                            let frame = geometry[plotFrame]
+                                            guard frame.contains(value.location) else { return }
+                                            let locationX = value.location.x - frame.origin.x
+                                            guard let date: Date = proxy.value(atX: locationX) else { return }
+                                            selectedDate = date
+                                        }
+                                )
+                        }
                     }
                 }
                 .chartYScale(domain: yDomain)
@@ -2929,18 +2929,34 @@ struct CompanyValuationHistorySheet: View {
     }
 
     private var chartReading: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(activePoint?.id == points.last?.id ? "当前读数" : "历史读数")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(activePoint?.id == points.last?.id ? "当前读数" : "历史读数")
+                    Text(selectedKind == .staticPE ? "年度真实点 + 当前" : "季度真实点 + 当前")
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(selectedKind.color.opacity(0.1), in: Capsule())
+                        .foregroundStyle(selectedKind.color)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
                 Text(activePoint.map { formattedDate($0.date) } ?? "—")
                     .font(.caption.weight(.medium))
+                Text("轻点曲线查看读数，纵向滑动可直接滚动")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             Spacer()
-            Text(activePoint.map { String(format: "%.2f", $0.value) } ?? "—")
-                .font(.title3.bold().monospacedDigit())
-                .foregroundStyle(selectedKind.color)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(activePoint.map { String(format: "%.2f", $0.value) } ?? "—")
+                    .font(.title3.bold().monospacedDigit())
+                    .foregroundStyle(selectedKind.color)
+                if selectedDate != nil {
+                    Button("返回当前") { selectedDate = nil }
+                        .font(.caption2.weight(.medium))
+                }
+            }
         }
     }
 
@@ -3052,12 +3068,11 @@ struct CompanyValuationHistorySheet: View {
         .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private var rawPoints: [MarketCompanyPEPoint] {
-        guard let history else { return [] }
-        return selectedKind == .staticPE ? history.peStatic : history.peTTM
+    private var allPoints: [CompanyPEChartPoint] {
+        selectedKind == .staticPE ? staticPoints : ttmPoints
     }
 
-    private var allPoints: [CompanyPEChartPoint] {
+    private static func parsedPoints(_ rawPoints: [MarketCompanyPEPoint]) -> [CompanyPEChartPoint] {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -3140,13 +3155,20 @@ struct CompanyValuationHistorySheet: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            history = try await MarketService(baseURL: ServerConfiguration.currentURL)
+            let loadedHistory = try await MarketService(baseURL: ServerConfiguration.currentURL)
                 .companyValuationHistory(symbol: route.symbol)
+            history = loadedHistory
+            staticPoints = Self.parsedPoints(loadedHistory.peStatic)
+            ttmPoints = Self.parsedPoints(loadedHistory.peTTM)
         } catch MarketServiceError.httpStatus(let status) where status == 404 {
             history = nil
+            staticPoints = []
+            ttmPoints = []
             errorMessage = "这家公司暂时没有可用的 PE 历史"
         } catch {
             history = nil
+            staticPoints = []
+            ttmPoints = []
             errorMessage = error.localizedDescription
         }
     }
