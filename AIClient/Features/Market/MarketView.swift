@@ -1349,8 +1349,8 @@ private struct MarketIndexTableRow: View {
             .frame(width: 64, alignment: .trailing)
 
             Group {
-                if displayedTrend.count >= 3 {
-                    Sparkline(values: displayedTrend, color: displayedTint)
+                if trend.count >= 3 {
+                    Sparkline(values: trend, color: displayedTint)
                 } else {
                     Text("—").font(.caption).foregroundStyle(.tertiary)
                 }
@@ -1414,11 +1414,6 @@ private struct MarketIndexTableRow: View {
         return overnightQuote?.changeValue ?? quote.changeValue
     }
 
-    private var displayedTrend: [Double] {
-        if overnightQuote != nil { return trend }
-        return marketExtendedSessionTrend(for: quote, fallback: trend)
-    }
-
     private var displayedTint: Color {
         displayedPercentValue >= 0 ? MarketStyle.gain : MarketStyle.loss
     }
@@ -1452,18 +1447,6 @@ private struct MarketIndexTableRow: View {
             ? MarketStyle.accent
             : .secondary
     }
-}
-
-func marketExtendedSessionTrend(for quote: MarketQuote, fallback: [Double]) -> [Double] {
-    if quote.hasActiveExtendedSessionQuote {
-        // Never join a regular-session line to a pre/post-market price. The discontinuity can
-        // visually contradict the extended-session change shown in the same row.
-        return quote.nightTrend.count > 1 ? quote.nightTrend : []
-    }
-    if fallback.count > 1 {
-        return fallback
-    }
-    return fallback
 }
 
 private struct MarketWorldMap: View {
