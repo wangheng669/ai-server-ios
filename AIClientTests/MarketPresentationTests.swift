@@ -96,7 +96,7 @@ final class MarketPresentationTests: XCTestCase {
                     updates: nil,
                     market: CompanyResearchMarket(
                         symbol: "NVDA", price: 223.96, changePercent: "2.71%", marketCap: 5_419_832_162_476,
-                        pe: pe, peType: "ttm", netIncomeTTM: nil, week52Low: nil, currency: "USD",
+                        pe: pe, peStatic: nil, peType: "ttm", netIncomeTTM: nil, week52Low: nil, currency: "USD",
                         fiscalYear: nil, fundamentalsSource: nil, fundamentalsAsOf: nil,
                         timestamp: 1_786_329_600_000, status: "complete"
                     ),
@@ -125,12 +125,13 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDecodesUnifiedCompanyFundamentalsFromMarketQuote() throws {
-        let data = Data(#"{"symbol":"AAPL","name":"Apple","price":220.1,"pe":31.2,"marketCap":3350000000000,"peType":"ttm","netIncomeTTM":122575000000,"week52Low":169.21,"currency":"USD","fundamentalsCurrency":"USD","fiscalYear":"2025","fundamentalsSource":"TradingView Scanner","fundamentalsAsOf":"2026-08-10T08:00:00Z","trend":[],"nightTrend":[]}"#.utf8)
+        let data = Data(#"{"symbol":"AAPL","name":"Apple","price":220.1,"pe":31.2,"peStatic":32.78,"marketCap":3350000000000,"peType":"ttm","netIncomeTTM":122575000000,"week52Low":169.21,"currency":"USD","fundamentalsCurrency":"USD","fiscalYear":"2025","fundamentalsSource":"TradingView Scanner","fundamentalsAsOf":"2026-08-10T08:00:00Z","trend":[],"nightTrend":[]}"#.utf8)
 
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
         XCTAssertEqual(quote.symbol, "AAPL")
         XCTAssertEqual(quote.pe, 31.2)
+        XCTAssertEqual(quote.peStatic, 32.78)
         XCTAssertEqual(quote.peType, "ttm")
         XCTAssertEqual(quote.marketCap, 3_350_000_000_000)
         XCTAssertEqual(quote.netIncomeTTM, 122_575_000_000)

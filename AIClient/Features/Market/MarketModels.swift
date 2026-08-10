@@ -229,6 +229,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let low: Double?
     let pe: Double?
     let marketCap: Double?
+    var peStatic: Double?
     var peType: String?
     var netIncomeTTM: Double?
     var week52Low: Double?
@@ -290,7 +291,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode
-        case price, openPrice, previousClose, high, low, pe, marketCap, peType, netIncomeTTM, week52Low
+        case price, openPrice, previousClose, high, low, pe, marketCap, peStatic, peType, netIncomeTTM, week52Low
         case currency, fundamentalsCurrency, fiscalYear, fundamentalsSource, fundamentalsAsOf, volume, turnover
         case dataSource, delaySeconds, marketSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, quality, trend, nightTrend, stale
@@ -312,6 +313,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         low: Double?,
         pe: Double?,
         marketCap: Double?,
+        peStatic: Double? = nil,
         peType: String? = nil,
         netIncomeTTM: Double? = nil,
         week52Low: Double? = nil,
@@ -350,6 +352,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.low = low
         self.pe = pe
         self.marketCap = marketCap
+        self.peStatic = peStatic
         self.peType = peType
         self.netIncomeTTM = netIncomeTTM
         self.week52Low = week52Low
@@ -391,6 +394,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         low = try values.decodeIfPresent(Double.self, forKey: .low)
         pe = try values.decodeIfPresent(Double.self, forKey: .pe)
         marketCap = try values.decodeIfPresent(Double.self, forKey: .marketCap)
+        peStatic = try values.decodeIfPresent(Double.self, forKey: .peStatic)
         peType = try values.decodeIfPresent(String.self, forKey: .peType)
         netIncomeTTM = try values.decodeIfPresent(Double.self, forKey: .netIncomeTTM)
         week52Low = try values.decodeIfPresent(Double.self, forKey: .week52Low)
@@ -509,6 +513,7 @@ struct MarketQuoteUpdate: Decodable {
             nightTrend: extendedTrend,
             stale: false
         )
+        merged.peStatic = current?.peStatic
         merged.peType = current?.peType
         merged.netIncomeTTM = current?.netIncomeTTM
         merged.week52Low = current?.week52Low
