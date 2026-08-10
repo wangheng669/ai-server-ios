@@ -204,10 +204,14 @@ final class CompanyResearchStore: ObservableObject {
     @Published private(set) var companies: [CompanyResearchProfile] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
-    private let service: CompanyResearchService
+    private let fetch: () async throws -> CompanyResearchPayload
 
     init(service: CompanyResearchService = CompanyResearchService()) {
-        self.service = service
+        fetch = { try await service.fetch() }
+    }
+
+    init(fetch: @escaping () async throws -> CompanyResearchPayload) {
+        self.fetch = fetch
     }
 
     func load(force: Bool = false) async {
@@ -216,7 +220,7 @@ final class CompanyResearchStore: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            companies = try await service.fetch().companies
+            companies = try await fetch().companies
         } catch {
             errorMessage = "公司研究暂时无法载入"
         }
@@ -239,6 +243,8 @@ struct CompanyResearchView: View {
     }
 
     @StateObject private var store: CompanyResearchStore
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedSection: Section = .overview
     @State private var financialRange: FinancialRange = .quarterly
     @State private var presentedCompany: CompanyResearchProfile?
@@ -273,7 +279,14 @@ struct CompanyResearchView: View {
                     .presentationCornerRadius(28)
             }
         }
-        .task { await store.load() }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.load(force: true)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard rootTabIsActive, phase == .active else { return }
+            Task { await store.load(force: true) }
+        }
     }
 
     private var companyHub: some View {
