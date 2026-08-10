@@ -336,7 +336,7 @@ struct CompanyResearchView: View {
             Divider()
 
             HStack(spacing: 0) {
-                hubMetric("总市值", marketCap(company.market?.marketCap))
+                hubMetric("总市值", marketCap(company.market))
                 hubMetric("PE", formattedMultiple(company.market?.pe))
                 hubMetric("ROE", latestROE(company))
             }
@@ -433,7 +433,7 @@ struct CompanyResearchView: View {
                         .lineLimit(1)
                 }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                dashboardMetric("总市值", marketCap(company.market?.marketCap))
+                dashboardMetric("总市值", marketCap(company.market))
                 dashboardMetric("PE", formattedMultiple(company.market?.pe))
                 dashboardMetric("ROE", latestROE(company))
             }
@@ -522,7 +522,7 @@ struct CompanyResearchView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 10) {
                 nativeMetricCard("最新价", marketPrice(company.market), note: marketChange(company.market), icon: "chart.line.uptrend.xyaxis", color: companyAccent(company))
-                nativeMetricCard("总市值", marketCap(company.market?.marketCap), note: "当前市值", icon: "circle.grid.2x2", color: .indigo)
+                nativeMetricCard("总市值", marketCap(company.market), note: "当前市值", icon: "circle.grid.2x2", color: .indigo)
                 nativeMetricCard("PE (TTM)", formattedMultiple(company.market?.pe), note: "滚动市盈率", icon: "percent", color: .blue)
                 nativeMetricCard("ROE (TTM)", latestROE(company), note: company.financials.years.last?.year ?? "最新", icon: "gauge.with.dots.needle.50percent", color: .orange)
             }
@@ -729,7 +729,7 @@ struct CompanyResearchView: View {
             Text("行情快照").font(.system(size: 13, weight: .semibold))
             dashboardValueRow("最新价", marketPrice(company.market), accent: true)
             dashboardValueRow("涨跌幅", marketChange(company.market), accent: true)
-            dashboardValueRow("总市值", marketCap(company.market?.marketCap))
+            dashboardValueRow("总市值", marketCap(company.market))
             dashboardValueRow("PE (TTM)", formattedMultiple(company.market?.pe))
             dashboardValueRow("ROE (TTM)", latestROE(company))
         }
@@ -1099,7 +1099,7 @@ struct CompanyResearchView: View {
             researchBlock("当前估值") {
                 HStack {
                     summaryMetric("市盈率", formattedMultiple(company.market?.pe))
-                    summaryMetric("总市值", marketCap(company.market?.marketCap))
+                    summaryMetric("总市值", marketCap(company.market))
                     summaryMetric("历史分位", "待补充")
                 }
             }
@@ -1650,8 +1650,7 @@ struct CompanyResearchView: View {
 
     private func marketPrice(_ market: CompanyResearchMarket?) -> String {
         guard let price = market?.price else { return "--" }
-        let symbol = market?.currency == "CNY" ? "¥" : market?.currency == "USD" ? "$" : ""
-        return String(format: "%@%.2f", symbol, price)
+        return String(format: "%@%.2f", currencyPrefix(market?.currency), price)
     }
 
     private func marketChangeColor(_ market: CompanyResearchMarket?) -> Color {
@@ -1666,11 +1665,22 @@ struct CompanyResearchView: View {
         return change.contains("%") ? change : "\(change)%"
     }
 
-    private func marketCap(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        if value >= 1_000_000_000_000 { return String(format: "%.2f万亿", value / 1_000_000_000_000) }
-        if value >= 100_000_000 { return String(format: "%.0f亿", value / 100_000_000) }
-        return String(format: "%.0f万", value / 10_000)
+    private func marketCap(_ market: CompanyResearchMarket?) -> String {
+        guard let value = market?.marketCap else { return "--" }
+        let prefix = currencyPrefix(market?.currency)
+        if value >= 1_000_000_000_000 { return String(format: "%@%.2f万亿", prefix, value / 1_000_000_000_000) }
+        if value >= 100_000_000 { return String(format: "%@%.0f亿", prefix, value / 100_000_000) }
+        return String(format: "%@%.0f万", prefix, value / 10_000)
+    }
+
+    private func currencyPrefix(_ currency: String?) -> String {
+        switch currency {
+        case "CNY": return "¥"
+        case "USD": return "$"
+        case "HKD": return "HK$"
+        case let code?: return "\(code) "
+        case nil: return ""
+        }
     }
 
     private func formattedMultiple(_ value: Double?) -> String {
