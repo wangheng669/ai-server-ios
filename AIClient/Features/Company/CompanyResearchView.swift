@@ -130,6 +130,7 @@ struct CompanyResearchMarket: Decodable, Hashable {
     let changePercent: String
     let marketCap: Double?
     let pe: Double?
+    var peStatic: Double?
     var peType: String?
     var netIncomeTTM: Double?
     var week52Low: Double?
@@ -343,7 +344,8 @@ struct CompanyResearchView: View {
 
             HStack(spacing: 0) {
                 hubMetric("总市值", marketCap(company.market))
-                hubMetric("PE", formattedMultiple(company.market?.pe))
+                hubMetric("PE（静）", formattedMultiple(company.market?.peStatic))
+                hubMetric("PE（TTM）", formattedMultiple(company.market?.pe))
                 hubMetric("ROE", latestROE(company))
             }
         }
@@ -440,7 +442,8 @@ struct CompanyResearchView: View {
                 }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 dashboardMetric("总市值", marketCap(company.market))
-                dashboardMetric("PE", formattedMultiple(company.market?.pe))
+                dashboardMetric("PE 静", formattedMultiple(company.market?.peStatic))
+                dashboardMetric("PE TTM", formattedMultiple(company.market?.pe))
                 dashboardMetric("ROE", latestROE(company))
             }
             .padding(.vertical, 5)
@@ -529,6 +532,7 @@ struct CompanyResearchView: View {
             HStack(spacing: 10) {
                 nativeMetricCard("最新价", marketPrice(company.market), note: marketChange(company.market), icon: "chart.line.uptrend.xyaxis", color: companyAccent(company))
                 nativeMetricCard("总市值", marketCap(company.market), note: "当前市值", icon: "circle.grid.2x2", color: .indigo)
+                nativeMetricCard("PE（静）", formattedMultiple(company.market?.peStatic), note: "静态市盈率", icon: "percent", color: .cyan)
                 nativeMetricCard("PE (TTM)", formattedMultiple(company.market?.pe), note: "滚动市盈率", icon: "percent", color: .blue)
                 nativeMetricCard("ROE (TTM)", latestROE(company), note: company.financials.years.last?.year ?? "最新", icon: "gauge.with.dots.needle.50percent", color: .orange)
             }
@@ -736,6 +740,7 @@ struct CompanyResearchView: View {
             dashboardValueRow("最新价", marketPrice(company.market), accent: true)
             dashboardValueRow("涨跌幅", marketChange(company.market), accent: true)
             dashboardValueRow("总市值", marketCap(company.market))
+            dashboardValueRow("PE（静）", formattedMultiple(company.market?.peStatic))
             dashboardValueRow("PE (TTM)", formattedMultiple(company.market?.pe))
             dashboardValueRow("ROE (TTM)", latestROE(company))
         }
@@ -814,6 +819,7 @@ struct CompanyResearchView: View {
     private func dashboardValuation(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 17) {
             Text("估值带（PE）").font(.system(size: 13, weight: .semibold))
+            HStack { Text("当前 PE（静）"); Spacer(); Text(formattedMultiple(company.market?.peStatic)).foregroundStyle(.red).fontWeight(.semibold) }
             HStack { Text("当前 PE (TTM)"); Spacer(); Text(formattedMultiple(company.market?.pe)).foregroundStyle(.red).fontWeight(.semibold) }
             HStack { Text("历史分位（近10年）"); Spacer(); dashboardBadge("待补充") }
         }
@@ -1104,7 +1110,8 @@ struct CompanyResearchView: View {
         VStack(alignment: .leading, spacing: 0) {
             researchBlock("当前估值") {
                 HStack {
-                    summaryMetric("市盈率", formattedMultiple(company.market?.pe))
+                    summaryMetric("市盈率（静）", formattedMultiple(company.market?.peStatic))
+                    summaryMetric("市盈率（TTM）", formattedMultiple(company.market?.pe))
                     summaryMetric("总市值", marketCap(company.market))
                     summaryMetric("历史分位", "待补充")
                 }

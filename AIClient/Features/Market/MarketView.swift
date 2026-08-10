@@ -2470,7 +2470,8 @@ private struct MarketIndexDetailView: View {
                     Text("股票代码  \(quote?.displayCode ?? symbol)")
                     Text("上市市场  \(companyMarketLabel(symbol))")
                     if let marketCap = quote?.marketCap { Text("总市值  \(compactNumber(marketCap))") }
-                    if let pe = quote?.pe { Text("市盈率（TTM）  \(number(pe, digits: 2))") }
+                    Text("市盈率（静）  \(quote?.peStatic.map { number($0, digits: 2) } ?? "—")")
+                    Text("市盈率（TTM）  \(quote?.pe.map { number($0, digits: 2) } ?? "—")")
                     Text("归母净利润（TTM）  \(formattedNetIncome)")
                     if let fiscalYear = quote?.fiscalYear, !fiscalYear.isEmpty {
                         Text("财报基准  FY\(fiscalYear)")
