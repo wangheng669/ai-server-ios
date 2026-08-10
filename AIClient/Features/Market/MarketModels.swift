@@ -942,8 +942,14 @@ struct MarketCompanyValuationHistoryResponse: Decodable {
 }
 
 struct MarketCompanyValuationHistory: Decodable {
+    static let dataContractV2 = "company_valuation_history_v2"
+    static let dailyFrequency = "daily"
+    static let dailyMethod = "fiscal_anchor_scaled_by_adjusted_daily_close"
+
     let dataContract: String
     let symbol: String
+    let frequency: String
+    let method: String
     let peStatic: [MarketCompanyPEPoint]
     let peTTM: [MarketCompanyPEPoint]
     let source: String

@@ -168,15 +168,38 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDecodesCompanyStaticAndTTMPEHistory() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"company_valuation_history_v1","symbol":"GOOGL","peStatic":[{"date":"2025-12-31","value":28.96},{"date":"2026-08-10","value":32.75}],"peTTM":[{"date":"2026-06-30","value":17.95},{"date":"2026-08-10","value":17.80}],"source":"TradingView","asOf":"2026-08-10T08:00:00Z"}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"company_valuation_history_v2","symbol":"GOOGL","frequency":"daily","method":"fiscal_anchor_scaled_by_adjusted_daily_close","peStatic":[{"date":"2026-08-07","value":32.61},{"date":"2026-08-10","value":32.75}],"peTTM":[{"date":"2026-08-07","value":17.72},{"date":"2026-08-10","value":17.80}],"source":"TradingView","asOf":"2026-08-10T08:00:00Z"}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketCompanyValuationHistoryResponse.self, from: data)
 
-        XCTAssertEqual(response.data.dataContract, "company_valuation_history_v1")
+        XCTAssertEqual(response.data.dataContract, MarketCompanyValuationHistory.dataContractV2)
         XCTAssertEqual(response.data.symbol, "GOOGL")
+        XCTAssertEqual(response.data.frequency, MarketCompanyValuationHistory.dailyFrequency)
+        XCTAssertEqual(response.data.method, MarketCompanyValuationHistory.dailyMethod)
         XCTAssertEqual(response.data.peStatic.last?.value, 32.75)
         XCTAssertEqual(response.data.peTTM.last?.value, 17.80)
         XCTAssertEqual(response.data.source, "TradingView")
+    }
+
+    func testCompanyPEDisplayPointsPreserveDailyRangeAndExtrema() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var points = (0..<1_000).map { index in
+            CompanyPEChartPoint(
+                date: start.addingTimeInterval(Double(index) * 86_400),
+                value: 20 + Double(index % 17) / 10
+            )
+        }
+        points[444] = CompanyPEChartPoint(date: points[444].date, value: 80)
+        points[555] = CompanyPEChartPoint(date: points[555].date, value: 4)
+
+        let displayPoints = marketCompanyPEDisplayPoints(points, maxCount: 80)
+
+        XCTAssertLessThanOrEqual(displayPoints.count, 80)
+        XCTAssertEqual(displayPoints.first?.date, points.first?.date)
+        XCTAssertEqual(displayPoints.last?.date, points.last?.date)
+        XCTAssertTrue(displayPoints.contains { $0.value == 80 })
+        XCTAssertTrue(displayPoints.contains { $0.value == 4 })
+        XCTAssertEqual(displayPoints.map(\.date), displayPoints.map(\.date).sorted())
     }
 
     func testParsesSP500PEHistoryTable() {

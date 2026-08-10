@@ -142,7 +142,13 @@ struct MarketService {
         )
         components?.queryItems = [.init(name: "symbol", value: symbol)]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketCompanyValuationHistoryResponse.self).data
+        let history = try await request(url, as: MarketCompanyValuationHistoryResponse.self).data
+        guard history.dataContract == MarketCompanyValuationHistory.dataContractV2,
+              history.frequency == MarketCompanyValuationHistory.dailyFrequency,
+              history.method == MarketCompanyValuationHistory.dailyMethod else {
+            throw MarketServiceError.invalidResponse
+        }
+        return history
     }
 
     private func valuationHistory(market: String) async throws -> MarketValuationHistory {
