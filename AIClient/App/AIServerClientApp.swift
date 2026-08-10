@@ -139,7 +139,7 @@ struct AIServerClientApp: App {
 }
 
 private enum EditorialTab: Hashable {
-    case world, observation, investment, company, learning, people
+    case world, noise, observation, investment, company, learning, people
 }
 
 private struct EditorialRootView: View {
@@ -152,6 +152,7 @@ private struct EditorialRootView: View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--today-world-preview") { return .world }
         if ProcessInfo.processInfo.arguments.contains("--feed-preview") { return .observation }
+        if ProcessInfo.processInfo.arguments.contains("--google-noise-preview") { return .noise }
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
             ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
@@ -221,6 +222,7 @@ private struct EditorialRootView: View {
     private var hidesRootTabBar: Bool {
         switch selectedTab {
         case .world: worldShowsDetail
+        case .noise: false
         case .observation: feedHidesTabBar || feedShowsDetail
         case .investment: marketShowsDetail
         case .company: false
@@ -233,6 +235,9 @@ private struct EditorialRootView: View {
         ZStack {
             tabContent(.world) {
                 TodayWorldView(showsDetail: $worldShowsDetail)
+            }
+            tabContent(.noise) {
+                GoogleNoiseView()
             }
             tabContent(.observation) {
                 NewsFeedView(
@@ -340,6 +345,7 @@ private struct RootNavigationBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            item(.noise, title: "噪音", icon: "waveform.path.ecg")
             item(.observation, title: "观点", icon: "list.bullet.rectangle")
             item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
             item(.world, title: "今日世界", icon: "globe")
