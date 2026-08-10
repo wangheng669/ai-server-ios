@@ -43,6 +43,10 @@ struct PostDetailView: View {
     @State private var xCommentsError: String?
     @State private var xTranslations: [String: String] = [:]
     @State private var loadingXTranslationIDs: Set<String> = []
+    @State private var weiboComments: [WeiboComment] = []
+    @State private var weiboCommentCount: Int?
+    @State private var isLoadingWeiboComments = false
+    @State private var weiboCommentsError: String?
     @State private var xLiveDetail: XTweetDetailItem?
     @State private var xLiveTranslationText: String?
     @State private var isLoadingXFullText: Bool
@@ -160,7 +164,13 @@ struct PostDetailView: View {
             }
         }
         .task {
-            let commentsTask = post.sourceName == "X" ? Task { await loadXComments() } : nil
+            let commentsTask: Task<Void, Never>? = if post.sourceName == "X" {
+                Task { await loadXComments() }
+            } else if post.isWeiboRSS {
+                Task { await loadWeiboComments() }
+            } else {
+                nil
+            }
             if post.isNewYorkTimes {
                 await loadNewYorkTimesDetail()
             } else {
@@ -794,45 +804,75 @@ struct PostDetailView: View {
             HStack {
                 Text("评论")
                     .font(.system(size: 16, weight: .semibold))
-                if let replies = post.meta?.metrics?.replies, replies > 0 {
+                if let replies = weiboCommentCount ?? post.meta?.metrics?.replies, replies > 0 {
                     Text(compactCount(replies))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { openOriginal() } label: {
-                    HStack(spacing: 3) {
-                        Text("按热度")
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                if !weiboComments.isEmpty {
+                    Text("按热度")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 16)
             .frame(height: 48)
 
             Divider()
+            weiboCommentContent
+        }
+        .background(Color(uiColor: .systemBackground))
+    }
 
-            VStack(spacing: 11) {
-                Image(systemName: "bubble.left")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(.tertiary)
-                Text((post.meta?.metrics?.replies ?? 0) > 0 ? "前往微博查看全部评论" : "还没有评论，快来抢沙发")
-                    .font(.system(size: 14))
+    @ViewBuilder
+    private var weiboCommentContent: some View {
+        if isLoadingWeiboComments && weiboComments.isEmpty {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("正在加载评论…")
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+        } else if let weiboCommentsError, weiboComments.isEmpty {
+            VStack(spacing: 10) {
+                Text("评论加载失败")
+                    .font(.subheadline.weight(.semibold))
+                Text(weiboCommentsError)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                if post.linkURL != nil {
-                    Button("打开微博") { openOriginal() }
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color(red: 1, green: 0.45, blue: 0.12))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                HStack(spacing: 12) {
+                    Button("重试") { Task { await loadWeiboComments() } }
+                        .buttonStyle(.bordered)
+                    if post.linkURL != nil {
+                        Button("打开微博") { openOriginal() }
+                            .buttonStyle(.bordered)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 34)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 28)
+        } else if weiboComments.isEmpty {
+            VStack(spacing: 7) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.title3)
+                Text("暂无评论")
+                    .font(.subheadline.weight(.medium))
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+        } else {
+            ForEach(weiboComments) { comment in
+                WeiboCommentRow(comment: comment)
+                Divider().padding(.leading, 62)
+            }
         }
-        .background(Color(uiColor: .systemBackground))
     }
 
     private var weiboBottomBar: some View {
@@ -2572,6 +2612,28 @@ struct PostDetailView: View {
     }
 
     @MainActor
+    private func loadWeiboComments() async {
+        guard let postURL = post.linkURL else {
+            weiboCommentsError = "无法识别微博链接"
+            return
+        }
+        isLoadingWeiboComments = true
+        weiboCommentsError = nil
+        defer { isLoadingWeiboComments = false }
+        do {
+            let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchWeiboComments(postURL: postURL)
+            guard !Task.isCancelled else { return }
+            weiboComments = payload.items
+            weiboCommentCount = payload.commentCount
+        } catch is CancellationError {
+            return
+        } catch {
+            weiboCommentsError = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    @MainActor
     private func loadXTranslation(for comment: XComment) async {
         guard !["zh", "zh-cn", "zh-tw"].contains(comment.lang?.lowercased() ?? "") else { return }
         guard xTranslations[comment.id] == nil,
@@ -2712,6 +2774,112 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
                 return
             }
             decisionHandler(.allow)
+        }
+    }
+}
+
+private struct WeiboCommentRow: View {
+    let comment: WeiboComment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                AvatarView(url: comment.avatarURL, name: comment.authorName, size: 38)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Text(comment.authorName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .lineLimit(1)
+                        if let formattedTime {
+                            Text(formattedTime)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    if let replyTo = comment.replyToAuthorName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !replyTo.isEmpty {
+                        Text("回复 @\(replyTo)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(comment.text)
+                        .font(.system(size: 16))
+                        .lineSpacing(3)
+                        .textSelection(.enabled)
+                    HStack(spacing: 24) {
+                        metric("bubble.left", comment.replyCount)
+                        metric("heart", comment.likeCount)
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if !comment.replies.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(comment.replies) { reply in
+                        WeiboReplyRow(reply: reply)
+                    }
+                }
+                .padding(.leading, 48)
+            }
+        }
+        .padding(.horizontal, 15)
+        .padding(.vertical, 12)
+    }
+
+    private func metric(_ symbol: String, _ value: Int?) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+            if let value, value > 0 { Text(value.formatted()) }
+        }
+    }
+
+    private var formattedTime: String? {
+        guard let raw = comment.createdAt else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standard = ISO8601DateFormatter()
+        guard let date = fractional.date(from: raw) ?? standard.date(from: raw) else { return nil }
+        return date.formatted(
+            .dateTime.year().month().day().hour().minute().locale(Locale(identifier: "zh_CN"))
+        )
+    }
+}
+
+private struct WeiboReplyRow: View {
+    let reply: WeiboComment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            AvatarView(url: reply.avatarURL, name: reply.authorName, size: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(reply.authorName)
+                    .font(.system(size: 14, weight: .semibold))
+                if let replyTo = reply.replyToAuthorName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !replyTo.isEmpty {
+                    Text("回复 @\(replyTo)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Text(reply.text)
+                    .font(.system(size: 14))
+                    .lineSpacing(2)
+                    .textSelection(.enabled)
+                HStack(spacing: 18) {
+                    Image(systemName: "bubble.left")
+                    HStack(spacing: 5) {
+                        Image(systemName: "heart")
+                        if let likes = reply.likeCount, likes > 0 { Text(likes.formatted()) }
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

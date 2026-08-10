@@ -168,6 +168,26 @@ struct APIClient {
         ]
     }
 
+    func fetchWeiboComments(postURL: URL, limit: Int = 20) async throws -> WeiboCommentsResponse.Payload {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/ios/v1/weibo/comments"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = Self.weiboCommentsQueryItems(postURL: postURL, limit: limit)
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: WeiboCommentsResponse = try await get(url)
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data
+    }
+
+    static func weiboCommentsQueryItems(postURL: URL, limit: Int, replyLimit: Int = 3) -> [URLQueryItem] {
+        [
+            .init(name: "url", value: postURL.absoluteString),
+            .init(name: "limit", value: String(min(max(limit, 1), 20))),
+            .init(name: "reply_limit", value: String(min(max(replyLimit, 1), 20)))
+        ]
+    }
+
     static let weChatFeedIDs = [57, 2373]
 
     private func fetchWeChatPosts(page: Int, limit: Int) async throws -> [Post] {
