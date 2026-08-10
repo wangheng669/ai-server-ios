@@ -25,24 +25,31 @@ struct GoogleNoiseView: View {
         case positive, negative
         var id: Self { self }
         var title: String { self == .positive ? "正面" : "负面" }
-        var color: Color { self == .positive ? .green : .red }
-        var icon: String { self == .positive ? "arrow.up.right" : "arrow.down.right" }
     }
 
     @StateObject private var store = GoogleNoiseStore()
     @State private var sentiment: Sentiment = .positive
+    @State private var selectedPost: Post?
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                Color(uiColor: .systemBackground).ignoresSafeArea()
                 content
             }
             .navigationTitle("Google 噪音")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await store.load() }
+        }
+        .sheet(item: $selectedPost) { post in
+            NavigationStack {
+                PostDetailView(post: post, presentedAsSheet: true)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .task {
             await store.load(showLoading: true)
@@ -62,12 +69,17 @@ struct GoogleNoiseView: View {
             ProgressView("正在读取 X 实时信号…")
         } else if let snapshot = store.snapshot {
             ScrollView {
-                LazyVStack(spacing: 14) {
+                LazyVStack(spacing: 0) {
                     header(snapshot)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 14)
                     Picker("情绪", selection: $sentiment) {
                         ForEach(Sentiment.allCases) { item in Text(item.title).tag(item) }
                     }
                     .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
 
                     let visibleItems = snapshot.items.filter { $0.sentiment == sentiment.rawValue }
                     if visibleItems.isEmpty {
@@ -78,11 +90,19 @@ struct GoogleNoiseView: View {
                         )
                         .padding(.top, 56)
                     } else {
-                        ForEach(visibleItems) { item in noiseCard(item) }
+                        ForEach(visibleItems) { item in
+                            if let post = item.previewPost {
+                                NewsCardView(post: post, onOpen: { open(post) })
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                    .modifier(ConditionalTapGestureModifier(isEnabled: true) {
+                                        open(post)
+                                    })
+                                Divider().opacity(0.6)
+                            }
+                        }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
                 .padding(.bottom, 24)
             }
         } else {
@@ -102,7 +122,7 @@ struct GoogleNoiseView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("X 实时公司信号")
                         .font(.title2.bold())
-                    Text("透明规则分类 · 未接入大模型")
+                    Text("关键词预筛 · Qwen Flash 分类")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -133,71 +153,7 @@ struct GoogleNoiseView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func noiseCard(_ item: GoogleNoiseItem) -> some View {
-        Button {
-            if let url = URL(string: item.sourceURL) { openURL(url) }
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    avatar(item)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.authorName.isEmpty ? item.authorHandle : item.authorName)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text(authorMeta(item))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Label(sentiment.title, systemImage: sentiment.icon)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(sentiment.color)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(sentiment.color.opacity(0.1), in: Capsule())
-                }
-                if !item.title.isEmpty && item.title != item.content {
-                    Text(item.title).font(.headline).foregroundStyle(.primary)
-                }
-                Text(item.content)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(8)
-                HStack {
-                    Label(item.sentimentTerms.prefix(3).joined(separator: " · "), systemImage: "text.magnifyingglass")
-                        .lineLimit(1)
-                    Spacer()
-                    Image(systemName: "arrow.up.right.square")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            .padding(16)
-            .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder private func avatar(_ item: GoogleNoiseItem) -> some View {
-        if let url = URL(string: item.avatarURL), !item.avatarURL.isEmpty {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Circle().fill(Color.secondary.opacity(0.12))
-            }
-            .frame(width: 38, height: 38)
-            .clipShape(Circle())
-        } else {
-            Circle().fill(Color.blue.opacity(0.12)).frame(width: 38, height: 38)
-                .overlay(Text("X").font(.caption.bold()))
-        }
-    }
-
-    private func authorMeta(_ item: GoogleNoiseItem) -> String {
-        let handle = item.authorHandle.isEmpty ? "X 来源" : "@\(item.authorHandle.trimmingCharacters(in: CharacterSet(charactersIn: "@")))"
-        guard let value = item.publishedAt,
-              let date = ISO8601DateFormatter().date(from: value) else { return handle }
-        return "\(handle) · \(date.formatted(.relative(presentation: .named)))"
+    private func open(_ preview: Post) {
+        selectedPost = preview
     }
 }

@@ -2340,7 +2340,7 @@ private enum FeedScrollDirection {
     case towardNewer
 }
 
-private struct ConditionalTapGestureModifier: ViewModifier {
+struct ConditionalTapGestureModifier: ViewModifier {
     let isEnabled: Bool
     let action: () -> Void
 
@@ -2554,7 +2554,7 @@ private final class XAttributedTextBox {
     init(_ value: AttributedString) { self.value = value }
 }
 
-private struct NewsCardView: View {
+struct NewsCardView: View {
     private static let xTimelineCache: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
         cache.countLimit = 300

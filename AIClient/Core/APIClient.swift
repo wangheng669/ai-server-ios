@@ -921,6 +921,41 @@ struct GoogleNoiseItem: Decodable, Equatable, Identifiable {
         case publishedAt = "published_at"
         case classifiedAt = "classified_at"
     }
+
+    var previewPost: Post? {
+        guard let postID = Int(exactly: postID) else { return nil }
+        return Post(
+            id: postID,
+            title: title,
+            text: content,
+            summary: nil,
+            content: content,
+            contentZH: nil,
+            source: "x",
+            formattedTime: publishedAt.flatMap(Self.relativeTime),
+            weightReason: nil,
+            finalScore: nil,
+            weight: nil,
+            postLink: sourceURL,
+            articlePostAt: publishedAt,
+            user: PostUser(
+                userName: authorName,
+                userScreenName: authorHandle,
+                avatarURL: avatarURL,
+                userDesc: nil
+            ),
+            postTags: [],
+            images: [],
+            videos: [],
+            feedRank: nil,
+            meta: nil
+        )
+    }
+
+    private static func relativeTime(_ value: String) -> String? {
+        guard let date = ISO8601DateFormatter().date(from: value) else { return nil }
+        return date.formatted(.relative(presentation: .named))
+    }
 }
 
 struct TodayWorldYesterdayReportResponse: Decodable {
