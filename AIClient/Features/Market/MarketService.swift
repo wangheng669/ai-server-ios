@@ -142,7 +142,11 @@ struct MarketService {
         )
         components?.queryItems = [.init(name: "symbol", value: symbol)]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        let history = try await request(url, as: MarketCompanyValuationHistoryResponse.self).data
+        let history = try await request(
+            url,
+            as: MarketCompanyValuationHistoryResponse.self,
+            bypassCache: true
+        ).data
         guard history.dataContract == MarketCompanyValuationHistory.dataContractV2,
               history.frequency == MarketCompanyValuationHistory.dailyFrequency,
               history.method == MarketCompanyValuationHistory.dailyMethod else {
