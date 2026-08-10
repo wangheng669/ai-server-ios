@@ -27,6 +27,69 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(company.updates?.first?.category, "财报")
     }
 
+    @MainActor
+    func testCompanyResearchStoreForceReloadReplacesExistingCompanies() async {
+        let source = CompanyResearchSource(title: "测试", url: URL(string: "https://example.com")!)
+        func payload(pe: Double?) -> CompanyResearchPayload {
+            CompanyResearchPayload(
+                companies: [CompanyResearchProfile(
+                    id: "nvidia",
+                    name: "NVIDIA Corporation",
+                    shortName: "英伟达",
+                    logoUrl: URL(string: "https://example.com/nvidia.png")!,
+                    ticker: "NVDA",
+                    exchange: "纳斯达克证券交易所",
+                    industry: "半导体",
+                    location: "美国",
+                    tagline: "AI",
+                    thesis: "持续跟踪",
+                    metrics: [],
+                    highlights: [],
+                    moats: [],
+                    risks: [],
+                    questions: [],
+                    sources: [],
+                    buyback: CompanyResearchBuyback(
+                        status: "持续执行", asOfDate: "2026-08-10", shares: "--", amount: "--",
+                        percentage: "--", priceRange: "--", purpose: "--", progressNote: "--", source: source
+                    ),
+                    nextReport: CompanyResearchReport(
+                        reportType: "季度业绩", expectedDate: "2026-08-26", dateStatus: "预计窗口", note: "--", source: source
+                    ),
+                    consensus: nil,
+                    financials: CompanyResearchFinancials(unit: "亿美元", years: [], quarters: nil, forecasts: nil, source: source),
+                    framework: nil,
+                    business: nil,
+                    indicators: nil,
+                    updates: nil,
+                    market: CompanyResearchMarket(
+                        symbol: "NVDA", price: 223.96, changePercent: "2.71%", marketCap: 5_419_832_162_476,
+                        pe: pe, currency: "USD", timestamp: 1_786_329_600_000, status: "complete"
+                    ),
+                    updatedAt: Date(timeIntervalSince1970: 1_786_329_600)
+                )],
+                updatedAt: Date(timeIntervalSince1970: 1_786_329_600)
+            )
+        }
+
+        var fetchCount = 0
+        let store = CompanyResearchStore(fetch: {
+            fetchCount += 1
+            return payload(pe: fetchCount == 1 ? nil : 34.3)
+        })
+
+        await store.load()
+        XCTAssertEqual(fetchCount, 1)
+        XCTAssertNil(store.companies.first?.market?.pe)
+
+        await store.load()
+        XCTAssertEqual(fetchCount, 1)
+
+        await store.load(force: true)
+        XCTAssertEqual(fetchCount, 2)
+        XCTAssertEqual(store.companies.first?.market?.pe, 34.3)
+    }
+
     func testDecodesCompanyNetIncomeTTM() throws {
         let data = Data(#"{"success":true,"data":{"symbol":"AAPL","netIncomeTTM":122575000000,"currency":"USD","period":"TTM","fiscalYear":"2025","dataSource":"TradingView Scanner"}}"#.utf8)
 
