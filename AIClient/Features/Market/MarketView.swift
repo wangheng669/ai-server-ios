@@ -2715,10 +2715,35 @@ private struct CompanyPEChartPoint: Identifiable {
     var id: Date { date }
 }
 
+private enum CompanyPETimeRange: String, CaseIterable, Identifiable {
+    case fiveYears
+    case tenYears
+    case all
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .fiveYears: "近 5 年"
+        case .tenYears: "近 10 年"
+        case .all: "全部"
+        }
+    }
+
+    var years: Int? {
+        switch self {
+        case .fiveYears: 5
+        case .tenYears: 10
+        case .all: nil
+        }
+    }
+}
+
 struct CompanyValuationHistorySheet: View {
     let route: CompanyValuationHistoryRoute
     @Environment(\.dismiss) private var dismiss
     @State private var selectedKind: CompanyPEKind
+    @State private var selectedRange: CompanyPETimeRange = .all
+    @State private var selectedDate: Date?
     @State private var history: MarketCompanyValuationHistory?
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -2740,17 +2765,10 @@ struct CompanyValuationHistorySheet: View {
                     }
                     .pickerStyle(.segmented)
 
+                    rangePicker
                     chartCard
-                    Text(selectedKind.explanation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(3)
-
-                    if let history {
-                        Text("数据来源：\(history.source) · 更新于 \(formattedAsOf(history.asOf))")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
+                    historyPositionCard
+                    methodologyCard
                 }
                 .padding(18)
             }
@@ -2764,6 +2782,17 @@ struct CompanyValuationHistorySheet: View {
             }
         }
         .task(id: route.symbol) { await load() }
+        .onChange(of: selectedKind) { _, _ in selectedDate = nil }
+        .onChange(of: selectedRange) { _, _ in selectedDate = nil }
+    }
+
+    private var rangePicker: some View {
+        Picker("时间范围", selection: $selectedRange) {
+            ForEach(CompanyPETimeRange.allCases) { range in
+                Text(range.title).tag(range)
+            }
+        }
+        .pickerStyle(.segmented)
     }
 
     private var header: some View {
@@ -2813,7 +2842,23 @@ struct CompanyValuationHistorySheet: View {
                 )
                 .frame(maxWidth: .infinity, minHeight: 270)
             } else {
+                chartReading
+
                 Chart(points) { point in
+                    AreaMark(
+                        x: .value("日期", point.date),
+                        yStart: .value("基线", yDomain.lowerBound),
+                        yEnd: .value("PE", point.value)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [selectedKind.color.opacity(0.2), selectedKind.color.opacity(0.015)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+
                     LineMark(
                         x: .value("日期", point.date),
                         y: .value("PE", point.value)
@@ -2822,7 +2867,7 @@ struct CompanyValuationHistorySheet: View {
                     .foregroundStyle(selectedKind.color.gradient)
                     .lineStyle(.init(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
 
-                    if point.id == points.last?.id {
+                    if point.id == activePoint?.id {
                         PointMark(
                             x: .value("日期", point.date),
                             y: .value("PE", point.value)
@@ -2831,9 +2876,27 @@ struct CompanyValuationHistorySheet: View {
                         .symbolSize(55)
                     }
                 }
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let origin = geometry[proxy.plotFrame!].origin
+                                        let locationX = value.location.x - origin.x
+                                        guard let date: Date = proxy.value(atX: locationX) else { return }
+                                        selectedDate = date
+                                    }
+                                    .onEnded { _ in selectedDate = nil }
+                            )
+                    }
+                }
                 .chartYScale(domain: yDomain)
+                .chartXScale(range: .plotDimension(startPadding: 10, endPadding: 34))
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 5)) {
+                    AxisMarks(values: .automatic(desiredCount: 4)) {
                         AxisGridLine().foregroundStyle(.secondary.opacity(0.12))
                         AxisValueLabel(format: .dateTime.year())
                     }
@@ -2846,11 +2909,15 @@ struct CompanyValuationHistorySheet: View {
                 }
                 .frame(height: 270)
 
+                Divider()
+
                 HStack(spacing: 0) {
-                    statistic("最低", values.min())
-                    statistic("最高", values.max())
-                    statistic("历史点", Double(points.count), suffix: " 个", digits: 0)
+                    statistic("中位数", median)
+                    statistic("历史分位", percentile, suffix: "%", digits: 0)
+                    statistic("较上期", previousChange, suffix: "%", digits: 1, signed: true)
                 }
+
+                extremaRow
             }
         }
         .padding(16)
@@ -2861,13 +2928,128 @@ struct CompanyValuationHistorySheet: View {
         }
     }
 
-    private func statistic(_ title: String, _ value: Double?, suffix: String = "", digits: Int = 2) -> some View {
+    private var chartReading: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(activePoint?.id == points.last?.id ? "当前读数" : "历史读数")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(activePoint.map { formattedDate($0.date) } ?? "—")
+                    .font(.caption.weight(.medium))
+            }
+            Spacer()
+            Text(activePoint.map { String(format: "%.2f", $0.value) } ?? "—")
+                .font(.title3.bold().monospacedDigit())
+                .foregroundStyle(selectedKind.color)
+        }
+    }
+
+    private var extremaRow: some View {
+        HStack(spacing: 10) {
+            extremaBadge("区间最低", pointForMinimum, color: .green)
+            extremaBadge("区间最高", pointForMaximum, color: .red)
+        }
+    }
+
+    private func extremaBadge(_ title: String, _ point: CompanyPEChartPoint?, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(point.map { String(format: "%.2f", $0.value) } ?? "—")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(color)
+                Text(point.map { formattedDate($0.date) } ?? "")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func statistic(
+        _ title: String,
+        _ value: Double?,
+        suffix: String = "",
+        digits: Int = 2,
+        signed: Bool = false
+    ) -> some View {
         VStack(spacing: 4) {
             Text(title).font(.caption2).foregroundStyle(.secondary)
-            Text(value.map { String(format: "%.*f", digits, $0) + suffix } ?? "—")
+            Text(value.map {
+                let prefix = signed && $0 > 0 ? "+" : ""
+                return prefix + String(format: "%.*f", digits, $0) + suffix
+            } ?? "—")
                 .font(.subheadline.weight(.semibold).monospacedDigit())
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var historyPositionCard: some View {
+        if let percentile, let latest = points.last, let median {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("当前历史位置", systemImage: "scope")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(Int(percentile.rounded()))% 分位")
+                        .font(.subheadline.bold().monospacedDigit())
+                        .foregroundStyle(selectedKind.color)
+                }
+
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.13))
+                        Capsule()
+                            .fill(selectedKind.color.gradient)
+                            .frame(width: geometry.size.width * min(max(percentile / 100, 0), 1))
+                    }
+                }
+                .frame(height: 8)
+
+                Text("当前 \(String(format: "%.2f", latest.value))，高于所选区间约 \(Int(percentile.rounded()))% 的历史样本；区间中位数为 \(String(format: "%.2f", median))。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+            }
+            .padding(16)
+            .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+    }
+
+    private var methodologyCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("数据口径", systemImage: "info.circle")
+                .font(.subheadline.weight(.semibold))
+            Text(selectedKind.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+            if let history {
+                Divider()
+                HStack {
+                    Text("来源")
+                    Spacer()
+                    Text(history.source)
+                }
+                HStack {
+                    Text("更新日期")
+                    Spacer()
+                    Text(formattedAsOf(history.asOf))
+                }
+                HStack {
+                    Text("所选区间")
+                    Spacer()
+                    Text(rangeDescription)
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(16)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var rawPoints: [MarketCompanyPEPoint] {
@@ -2875,7 +3057,7 @@ struct CompanyValuationHistorySheet: View {
         return selectedKind == .staticPE ? history.peStatic : history.peTTM
     }
 
-    private var points: [CompanyPEChartPoint] {
+    private var allPoints: [CompanyPEChartPoint] {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -2888,7 +3070,47 @@ struct CompanyValuationHistorySheet: View {
         .sorted { $0.date < $1.date }
     }
 
+    private var points: [CompanyPEChartPoint] {
+        guard let years = selectedRange.years, let lastDate = allPoints.last?.date else { return allPoints }
+        let calendar = Calendar(identifier: .gregorian)
+        guard let cutoff = calendar.date(byAdding: .year, value: -years, to: lastDate) else { return allPoints }
+        return allPoints.filter { $0.date >= cutoff }
+    }
+
     private var values: [Double] { points.map(\.value) }
+
+    private var activePoint: CompanyPEChartPoint? {
+        guard let selectedDate else { return points.last }
+        return points.min { abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate)) }
+    }
+
+    private var median: Double? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let midpoint = sorted.count / 2
+        return sorted.count.isMultiple(of: 2) ? (sorted[midpoint - 1] + sorted[midpoint]) / 2 : sorted[midpoint]
+    }
+
+    private var percentile: Double? {
+        guard let latest = points.last?.value, !values.isEmpty else { return nil }
+        return Double(values.filter { $0 <= latest }.count) / Double(values.count) * 100
+    }
+
+    private var previousChange: Double? {
+        guard points.count >= 2 else { return nil }
+        let latest = points[points.count - 1].value
+        let previous = points[points.count - 2].value
+        guard previous != 0 else { return nil }
+        return (latest / previous - 1) * 100
+    }
+
+    private var pointForMinimum: CompanyPEChartPoint? { points.min { $0.value < $1.value } }
+    private var pointForMaximum: CompanyPEChartPoint? { points.max { $0.value < $1.value } }
+
+    private var rangeDescription: String {
+        guard let first = points.first, let last = points.last else { return "—" }
+        return "\(formattedDate(first.date)) – \(formattedDate(last.date)) · \(points.count) 个点"
+    }
 
     private var yDomain: ClosedRange<Double> {
         guard let low = values.min(), let high = values.max() else { return 0...1 }
@@ -2898,6 +3120,18 @@ struct CompanyValuationHistorySheet: View {
 
     private func formattedAsOf(_ value: String) -> String {
         String(value.prefix(10))
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let calendar = Calendar(identifier: .gregorian)
+        let year = calendar.component(.year, from: date)
+        let month = calendar.component(.month, from: date)
+        let day = calendar.component(.day, from: date)
+        if date == allPoints.last?.date, month != 12 || day != 31 {
+            return String(format: "%d-%02d-%02d", year, month, calendar.component(.day, from: date))
+        }
+        if selectedKind == .staticPE { return String(year) }
+        return "\(year) Q\((month - 1) / 3 + 1)"
     }
 
     @MainActor
