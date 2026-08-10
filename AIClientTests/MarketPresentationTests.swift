@@ -347,36 +347,22 @@ final class MarketPresentationTests: XCTestCase {
         dashboard.replace(replacement)
 
         XCTAssertEqual(dashboard.componentsByRegion["us"]?.first?.nightTrend, [])
+        XCTAssertEqual(dashboard.componentsByRegion["us"]?.first?.trend, [198, 200.5])
     }
 
-    func testSinglePremarketPointDoesNotReuseRegularSessionSparkline() throws {
+    @MainActor
+    func testPremarketQuoteUsesDashboardCurrentSessionTrend() throws {
         let quote = try JSONDecoder().decode(
             MarketQuote.self,
-            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.75,"previousClose":195.04,"marketSession":"pre","sessionPrice":200.84,"sessionChangePercent":2.97,"trend":[194,196,198,200],"nightTrend":[200.84]}"#.utf8)
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.75,"previousClose":195.04,"marketSession":"pre","sessionPrice":200.84,"sessionChangePercent":2.97,"trend":[200.1,200.4,200.84]}"#.utf8)
         )
+        let store = MarketStore()
 
-        XCTAssertEqual(marketExtendedSessionTrend(for: quote, fallback: quote.trend), [])
+        XCTAssertEqual(quote.trend, [200.1, 200.4, 200.84])
+        XCTAssertEqual(store.trendValues(for: quote), quote.trend)
+        XCTAssertFalse(marketQuoteNeedsTrendBackfill(quote))
         XCTAssertEqual(quote.sessionPrice, 200.84)
         XCTAssertTrue(quote.hasActiveExtendedSessionQuote)
-    }
-
-    func testMultiplePremarketPointsUsePremarketSparkline() throws {
-        let quote = try JSONDecoder().decode(
-            MarketQuote.self,
-            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.75,"marketSession":"pre","sessionPrice":200.84,"trend":[194,196,198,200],"nightTrend":[200.2,200.84]}"#.utf8)
-        )
-
-        XCTAssertEqual(marketExtendedSessionTrend(for: quote, fallback: quote.trend), [200.2, 200.84])
-    }
-
-    func testPremarketPriceDoesNotFabricateTrendWhenFeedsAreEmpty() throws {
-        let quote = try JSONDecoder().decode(
-            MarketQuote.self,
-            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":200.75,"previousClose":195.04,"marketSession":"pre","sessionPrice":200.84,"sessionChangePercent":2.97,"trend":[],"nightTrend":[]}"#.utf8)
-        )
-
-        XCTAssertEqual(marketExtendedSessionTrend(for: quote, fallback: []), [])
-        XCTAssertEqual(quote.formattedSessionPercent, "+2.97%")
     }
 
     func testClosedIndexFutureDoesNotReplaceCashProxy() throws {
