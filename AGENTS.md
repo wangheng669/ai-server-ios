@@ -22,7 +22,7 @@ GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停�
 - 仅当任务影响 App 构建、测试或安装时，才需要确认电脑名称、Runner 在线状态和 `devicectl` 设备状态。用户当前所在 Mac 能识别目标 iPhone 时，该 Mac 优先作为中央 Mac；当前 Mac 不可识别设备或用户明确要求时才回退另一台机器。
 - 正式真机安装只使用已合并的稳定 `main`。用户明确要求验收未合并改动时，可以安装任务分支或提交 SHA，但必须标记为临时测试，不得称为正式发布。
 - 构建成功、工作流触发或设备处于 Xcode `Preparing` 都不等于安装成功；必须取得 `devicectl` 安装成功证据。启动被锁屏拒绝时，应分别报告“已安装”和“未启动”。
-- GitHub Actions 因基础设施故障失败或无法开始时，只有用户明确授权且当前中央 Mac 能识别目标 iPhone，才可运行 `./ci/local-central-merge.sh --source codex/<任务> --failed-run <run-id> --confirm-infrastructure-failure`。不得跳过测试、签名、并发保护或必要的真机安装。
+- GitHub Actions 因基础设施故障失败或无法开始时，运行本地兜底前必须读取治理后台 `GET /api/admin/v1/system/ios-delivery-operations` 返回的 `localCentralAuthorization.enabled`。当该值为 `true` 时，视为用户对本地中央合并的持续明确授权；当该值为 `false`、缺失或接口不可用时，必须在当前对话中取得用户明确授权。无论采用哪种授权，仍须确认当前中央 Mac 能识别目标 iPhone，才可运行 `./ci/local-central-merge.sh --source codex/<任务> --failed-run <run-id> --confirm-infrastructure-failure`。不得跳过测试、签名、并发保护或必要的真机安装。
 
 ## 模拟器与共享资源
 
