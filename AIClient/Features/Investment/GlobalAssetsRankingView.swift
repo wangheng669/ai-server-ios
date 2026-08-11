@@ -89,10 +89,7 @@ struct GlobalAssetsRankingView: View {
                 .font(.system(size: 126, weight: .thin))
                 .foregroundStyle(.white.opacity(0.045))
                 .offset(x: 28, y: 20)
-            VStack(alignment: .leading, spacing: 17) {
-                Text("全球资产")
-                    .font(.system(size: 27, weight: .bold))
-                    .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 10) {
                 if let leader = ranking.assets.first {
                     Text("市值最高")
                         .font(.caption)
