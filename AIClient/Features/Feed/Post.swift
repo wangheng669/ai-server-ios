@@ -476,9 +476,15 @@ struct Post: Decodable, Identifiable, Hashable {
     }
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
     var needsXTranslation: Bool {
-        guard sourceName == "X", !hasTranslation, xTweetID != nil else { return false }
+        guard sourceName == "X", xTweetID != nil else { return false }
         guard let language = meta?.lang?.lowercased() else { return false }
-        return !language.hasPrefix("zh")
+        guard !language.hasPrefix("zh") else { return false }
+        guard hasTranslation else { return true }
+        let translation = displayContent
+        if XPostTextFormatter.isTruncated(translation) { return true }
+        return xStoredOriginalContent.count >= 600
+            && XPostTextFormatter.paragraphs(xStoredOriginalContent).count >= 3
+            && XPostTextFormatter.paragraphs(translation).count == 1
     }
     var needsXLiveDetail: Bool {
         sourceName == "X"
