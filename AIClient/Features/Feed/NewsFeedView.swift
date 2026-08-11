@@ -2897,9 +2897,7 @@ struct NewsCardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .modifier(ConditionalTapGestureModifier(
-            isEnabled: post.xueqiuBodyLinks.isEmpty && post.xueqiuQuoteLinks.isEmpty
-        ) { onOpen?() })
+        .onTapGesture { onOpen?() }
         .zIndex(1)
     }
 
