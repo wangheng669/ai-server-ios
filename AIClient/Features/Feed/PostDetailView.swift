@@ -2028,18 +2028,6 @@ struct PostDetailView: View {
                                 .padding(.top, 16)
                         }
 
-                        if !isLoadingXFullText,
-                           XPostTextFormatter.isTruncated(xDisplayedDetailText),
-                           post.linkURL != nil {
-                            Button { openOriginal() } label: {
-                                Label("X 源仅返回了摘要，前往 X 查看全文", systemImage: "arrow.up.right.square")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(.blue)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.top, 16)
-                        }
-
                         if let link = post.externalURL,
                            XPostTextFormatter.shouldShowExternalURL(link) {
                             Button { openURL(link) } label: {
@@ -2488,8 +2476,7 @@ struct PostDetailView: View {
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
             var translationTweetID = tweetID
-            if post.needsXLiveDetail,
-               let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
+            if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 xLiveDetail = liveDetail
                 translationTweetID = liveDetail.id
                 if post.videoURLs.isEmpty,
