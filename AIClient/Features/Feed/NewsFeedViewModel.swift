@@ -1,5 +1,121 @@
 import Foundation
 import Combine
+import CryptoKit
+
+struct FeedDiskSnapshot: Codable {
+    let schemaVersion: Int
+    let savedAt: Date
+    let source: String
+    let flashCategory: String?
+    let posts: [Post]
+    let page: Int
+    let canLoadMore: Bool
+}
+
+actor FeedDiskCache {
+    static let shared = FeedDiskCache()
+
+    private let directory: URL
+    private let maximumBytes: Int
+    private let maximumAge: TimeInterval
+
+    init(
+        directory: URL? = nil,
+        maximumBytes: Int = 32 * 1024 * 1024,
+        maximumAge: TimeInterval = 7 * 24 * 60 * 60
+    ) {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        self.directory = directory ?? root.appendingPathComponent("OfflineFeedSnapshots", isDirectory: true)
+        self.maximumBytes = max(1, maximumBytes)
+        self.maximumAge = max(1, maximumAge)
+    }
+
+    func load(source: FeedSource, flashCategory: String?, serverURL: URL) -> FeedDiskSnapshot? {
+        prepareDirectory()
+        let fileURL = snapshotURL(source: source, flashCategory: flashCategory, serverURL: serverURL)
+        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe),
+              let snapshot = try? JSONDecoder().decode(FeedDiskSnapshot.self, from: data),
+              snapshot.schemaVersion == 1,
+              snapshot.source == source.rawValue,
+              snapshot.flashCategory == flashCategory,
+              Date().timeIntervalSince(snapshot.savedAt) <= maximumAge else {
+            try? FileManager.default.removeItem(at: fileURL)
+            return nil
+        }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
+        return snapshot
+    }
+
+    func save(_ snapshot: FeedDiskSnapshot, serverURL: URL) {
+        guard !snapshot.posts.isEmpty else { return }
+        prepareDirectory()
+        let bounded = FeedDiskSnapshot(
+            schemaVersion: 1,
+            savedAt: snapshot.savedAt,
+            source: snapshot.source,
+            flashCategory: snapshot.flashCategory,
+            posts: Array(snapshot.posts.prefix(100)),
+            page: snapshot.page,
+            canLoadMore: snapshot.canLoadMore
+        )
+        guard let source = FeedSource(rawValue: snapshot.source),
+              let data = try? JSONEncoder().encode(bounded) else { return }
+        let fileURL = snapshotURL(source: source, flashCategory: snapshot.flashCategory, serverURL: serverURL)
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var mutableURL = fileURL
+            try? mutableURL.setResourceValues(values)
+            trim()
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    func trim() {
+        prepareDirectory()
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let expiration = Date().addingTimeInterval(-maximumAge)
+        var entries: [(url: URL, bytes: Int, date: Date)] = []
+        for fileURL in files {
+            guard let values = try? fileURL.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+            let date = values.contentModificationDate ?? .distantPast
+            if date < expiration {
+                try? FileManager.default.removeItem(at: fileURL)
+            } else {
+                entries.append((fileURL, values.fileSize ?? 0, date))
+            }
+        }
+        var totalBytes = entries.reduce(0) { $0 + $1.bytes }
+        entries.sort { $0.date < $1.date }
+        while totalBytes > maximumBytes, !entries.isEmpty {
+            let oldest = entries.removeFirst()
+            try? FileManager.default.removeItem(at: oldest.url)
+            totalBytes -= oldest.bytes
+        }
+    }
+
+    private func prepareDirectory() {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableURL = directory
+        try? mutableURL.setResourceValues(values)
+    }
+
+    private func snapshotURL(source: FeedSource, flashCategory: String?, serverURL: URL) -> URL {
+        let identity = [serverURL.absoluteString, source.rawValue, flashCategory ?? "all"].joined(separator: "|")
+        let digest = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent("\(digest).json", isDirectory: false)
+    }
+}
 
 @MainActor
 final class NewsFeedViewModel: ObservableObject {
@@ -49,6 +165,9 @@ final class NewsFeedViewModel: ObservableObject {
     private let selectedRSSPageSize = 20
     private var selectedWeChatPage = 1
     private let selectedWeChatPageSize = 20
+    private let serverURL: URL
+    private let diskCache: FeedDiskCache
+    private var restoredDiskKeys: Set<String> = []
 
     init(
         source initialSource: FeedSource? = nil,
@@ -59,7 +178,8 @@ final class NewsFeedViewModel: ObservableObject {
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchWeChatFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchPostDetail: ((Int) async throws -> Post)? = nil,
-        fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil
+        fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil,
+        diskCache: FeedDiskCache = .shared
     ) {
         #if DEBUG
         let override = ProcessInfo.processInfo.environment["AI_FEED_SOURCE"]
@@ -70,7 +190,10 @@ final class NewsFeedViewModel: ObservableObject {
         source = initialSource
             ?? FeedSource(rawValue: override ?? UserDefaults.standard.string(forKey: "feed.source") ?? "x")
             ?? .x
-        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        let serverURL = ServerConfiguration.currentURL
+        self.serverURL = serverURL
+        self.diskCache = diskCache
+        let client = APIClient(baseURL: serverURL)
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
         }
@@ -388,6 +511,7 @@ final class NewsFeedViewModel: ObservableObject {
         // Returning to a cached channel must preserve the exact feed snapshot.
         // Pull-to-refresh remains available when the user wants fresh content.
         guard !isLoading, posts.isEmpty || isSwitchingSource else { return }
+        await restoreDiskSnapshotIfNeeded(source: source, flashCategory: selectedFlashCategory)
         await refresh()
     }
 
@@ -475,11 +599,11 @@ final class NewsFeedViewModel: ObservableObject {
                 isSwitchingSource = false
             }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+            persistCurrentSnapshot()
         } catch is CancellationError { } catch {
             guard source == requestedSource, activeRefreshID == refreshID else { return }
-            if completesSourceSwitch {
+            if completesSourceSwitch, posts.isEmpty {
                 isSwitchingSource = false
-                posts = []
             }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
@@ -510,6 +634,7 @@ final class NewsFeedViewModel: ObservableObject {
             canLoadMore = !result.isEmpty
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+            persistCurrentSnapshot()
         } catch is CancellationError { } catch {
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
@@ -569,6 +694,7 @@ final class NewsFeedViewModel: ObservableObject {
             pendingRealtimePosts.insert(post, at: 0)
         }
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+        persistCurrentSnapshot()
     }
 
     func acceptPendingRealtimePosts() {
@@ -577,6 +703,37 @@ final class NewsFeedViewModel: ObservableObject {
         posts.insert(contentsOf: pendingRealtimePosts.filter { !existingIDs.contains($0.id) }, at: 0)
         pendingRealtimePosts = []
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+        persistCurrentSnapshot()
+    }
+
+    private func restoreDiskSnapshotIfNeeded(source: FeedSource, flashCategory: String?) async {
+        let key = "\(source.rawValue)|\(flashCategory ?? "all")"
+        guard restoredDiskKeys.insert(key).inserted else { return }
+        guard let snapshot = await diskCache.load(
+            source: source,
+            flashCategory: flashCategory,
+            serverURL: serverURL
+        ), self.source == source, selectedFlashCategory == flashCategory else { return }
+        posts = snapshot.posts
+        page = snapshot.page
+        canLoadMore = snapshot.canLoadMore
+        cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+        isSwitchingSource = false
+    }
+
+    private func persistCurrentSnapshot() {
+        let snapshot = FeedDiskSnapshot(
+            schemaVersion: 1,
+            savedAt: Date(),
+            source: source.rawValue,
+            flashCategory: selectedFlashCategory,
+            posts: posts,
+            page: page,
+            canLoadMore: canLoadMore
+        )
+        let serverURL = serverURL
+        let diskCache = diskCache
+        Task { await diskCache.save(snapshot, serverURL: serverURL) }
     }
 
     func matchesCurrentSource(_ post: Post) -> Bool {
