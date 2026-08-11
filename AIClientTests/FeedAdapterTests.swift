@@ -2,6 +2,96 @@ import XCTest
 @testable import AIServerClient
 
 final class FeedAdapterTests: XCTestCase {
+    func testFeedDiskCacheBoundsPostsAndSeparatesServers() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = FeedDiskCache(directory: directory)
+        let posts = try (1...120).map { id in
+            try JSONDecoder().decode(Post.self, from: Data(#"{"id":\#(id),"source":"x"}"#.utf8))
+        }
+        let snapshot = FeedDiskSnapshot(
+            schemaVersion: 1,
+            savedAt: Date(),
+            source: FeedSource.x.rawValue,
+            flashCategory: nil,
+            posts: posts,
+            page: 12,
+            canLoadMore: true
+        )
+        let firstServer = URL(string: "https://one.example")!
+        await cache.save(snapshot, serverURL: firstServer)
+
+        let restored = await cache.load(source: .x, flashCategory: nil, serverURL: firstServer)
+        XCTAssertEqual(restored?.posts.count, 100)
+        let otherServer = await cache.load(
+            source: .x,
+            flashCategory: nil,
+            serverURL: URL(string: "https://two.example")!
+        )
+        XCTAssertNil(otherServer)
+    }
+
+    func testFeedDiskCacheDeletesExpiredSnapshot() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = FeedDiskCache(directory: directory, maximumAge: 60)
+        let post = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))
+        await cache.save(
+            FeedDiskSnapshot(
+                schemaVersion: 1,
+                savedAt: Date().addingTimeInterval(-61),
+                source: FeedSource.x.rawValue,
+                flashCategory: nil,
+                posts: [post],
+                page: 1,
+                canLoadMore: true
+            ),
+            serverURL: URL(string: "https://expired.example")!
+        )
+
+        let restored = await cache.load(
+            source: .x,
+            flashCategory: nil,
+            serverURL: URL(string: "https://expired.example")!
+        )
+        XCTAssertNil(restored)
+        XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: directory.path).count), 0)
+    }
+
+    @MainActor
+    func testInitialNetworkFailureKeepsOfflineSnapshotVisible() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = FeedDiskCache(directory: directory)
+        let post = try JSONDecoder().decode(Post.self, from: Data(#"{"id":42,"source":"x","title":"离线内容"}"#.utf8))
+        await cache.save(
+            FeedDiskSnapshot(
+                schemaVersion: 1,
+                savedAt: Date(),
+                source: FeedSource.x.rawValue,
+                flashCategory: nil,
+                posts: [post],
+                page: 1,
+                canLoadMore: true
+            ),
+            serverURL: ServerConfiguration.currentURL
+        )
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in throw URLError(.notConnectedToInternet) },
+            diskCache: cache
+        )
+
+        await model.loadInitial()
+
+        XCTAssertEqual(model.posts.map(\.id), [42])
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertFalse(model.isSwitchingSource)
+    }
+
     func testFeedSourceTransitionAnimatesOnlyAdjacentTabs() {
         let sources = FeedSource.allCases
         XCTAssertGreaterThanOrEqual(sources.count, 3)

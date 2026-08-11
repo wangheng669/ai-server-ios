@@ -388,7 +388,7 @@ struct CategoryResponse: Decodable {
 }
 struct FeedCategory: Decodable { let id: Int; let name: String }
 
-struct Post: Decodable, Identifiable, Hashable {
+struct Post: Codable, Identifiable, Hashable {
     static let minimumFeedScore = 5
     static let importantFlashScore = 7.0
     private static let htmlTextCache: NSCache<NSString, NSString> = {
@@ -1397,7 +1397,7 @@ struct Post: Decodable, Identifiable, Hashable {
     }
 }
 
-struct PostMeta: Decodable, Hashable {
+struct PostMeta: Codable, Hashable {
     let metrics: PostMetrics?
     let lang: String?
     let urls: [String]?
@@ -1480,7 +1480,7 @@ struct PostMeta: Decodable, Hashable {
     }
 }
 
-struct XReplyContext: Decodable, Hashable {
+struct XReplyContext: Codable, Hashable {
     let id: String?
     let authorName: String?
     let screenName: String?
@@ -1503,7 +1503,7 @@ struct XReplyContext: Decodable, Hashable {
     }
 }
 
-struct XQuotedPost: Decodable, Hashable {
+struct XQuotedPost: Codable, Hashable {
     let id: String?
     let text: String?
     let textZH: String?
@@ -1521,7 +1521,7 @@ struct XQuotedPost: Decodable, Hashable {
     var originalText: String? { xNonempty(text) }
 }
 
-struct XQuotedAuthor: Decodable, Hashable {
+struct XQuotedAuthor: Codable, Hashable {
     let name: String?
     let screenName: String?
     let profileImageURL: String?
@@ -1537,7 +1537,7 @@ struct XQuotedAuthor: Decodable, Hashable {
     }
 }
 
-struct XQuotedMedia: Decodable, Hashable {
+struct XQuotedMedia: Codable, Hashable {
     let type: String?
     let url: String?
     let thumbnailURL: String?
@@ -1563,7 +1563,7 @@ private func xNonempty(_ value: String?) -> String? {
     return value
 }
 
-struct ZhihuAnswerAuthor: Decodable, Hashable {
+struct ZhihuAnswerAuthor: Codable, Hashable {
     let name, headline, avatarURL: String?
     enum CodingKeys: String, CodingKey {
         case name, headline
@@ -1571,11 +1571,11 @@ struct ZhihuAnswerAuthor: Decodable, Hashable {
     }
 }
 
-struct PostMetrics: Decodable, Hashable {
+struct PostMetrics: Codable, Hashable {
     let bookmarks, likes, quotes, replies, retweets, views: Int?
 }
 
-struct PostUser: Decodable, Hashable {
+struct PostUser: Codable, Hashable {
     let userID, personID: String?
     let userName, userScreenName, avatarURL, userDesc: String?
     let canonicalName, platformDisplayName, identityStatus, platform: String?
@@ -1643,6 +1643,22 @@ struct PostUser: Decodable, Hashable {
         verifiedType = try container.decodeIfPresent(String.self, forKey: .verifiedType)
     }
 
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(userID, forKey: .userID)
+        try container.encodeIfPresent(personID, forKey: .personID)
+        try container.encodeIfPresent(userName, forKey: .userName)
+        try container.encodeIfPresent(userScreenName, forKey: .userScreenName)
+        try container.encodeIfPresent(avatarURL, forKey: .avatarURL)
+        try container.encodeIfPresent(userDesc, forKey: .userDesc)
+        try container.encodeIfPresent(canonicalName, forKey: .canonicalName)
+        try container.encodeIfPresent(platformDisplayName, forKey: .platformDisplayName)
+        try container.encodeIfPresent(identityStatus, forKey: .identityStatus)
+        try container.encodeIfPresent(platform, forKey: .platform)
+        try container.encodeIfPresent(verified, forKey: .verified)
+        try container.encodeIfPresent(verifiedType, forKey: .verifiedType)
+    }
+
     var resolvedCanonicalName: String? {
         if let identity = AccountIdentityResolver.knownIdentity(userID: personID ?? userID) {
             return identity.canonicalName
@@ -1678,8 +1694,8 @@ struct PostUser: Decodable, Hashable {
     }
 }
 
-struct PostTag: Decodable, Hashable { let id: Int; let name: String }
-struct PostImage: Decodable, Hashable {
+struct PostTag: Codable, Hashable { let id: Int; let name: String }
+struct PostImage: Codable, Hashable {
     let url: String
     let width, height: Int?
     let altText: String?
@@ -1734,7 +1750,7 @@ struct PostImage: Decodable, Hashable {
         return nil
     }
 }
-struct PostVideo: Decodable, Hashable {
+struct PostVideo: Codable, Hashable {
     let url, playURL, coverURL, previewImageURL, preview: String?
     let width, height: Int?
     enum CodingKeys: String, CodingKey {
