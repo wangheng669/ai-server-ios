@@ -39,7 +39,7 @@ struct RetailInvestorView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    sentimentPageHeader
+                    marketPicker
                     if let message = selectedMarket == .korea ? store.koreaLeverageErrorMessage : store.errorMessage {
                         errorBanner(message)
                             .padding(.horizontal, 16)
@@ -176,34 +176,6 @@ struct RetailInvestorView: View {
         .background(InvestmentDesign.surface)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedMarket.title)市场情绪 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
-    }
-
-    private var sentimentPageHeader: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("市场情绪")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                    Text("把今天的市场，读成一句话")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if store.isLoading {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text(Date.now.formatted(.dateTime.month().day().weekday(.abbreviated).locale(Locale(identifier: "zh_CN"))))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            marketPicker
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
-        .background(InvestmentDesign.surface)
     }
 
     private var sentimentDecisionHero: some View {
@@ -490,6 +462,9 @@ struct RetailInvestorView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(InvestmentDesign.surface)
         .accessibilityLabel("选择市场情绪")
     }
 
