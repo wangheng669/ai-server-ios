@@ -626,6 +626,20 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(post.needsXStoredDetailRefresh)
     }
 
+    func testXDetailRefreshesTruncatedStoredArticleTranslation() throws {
+        let original = (["Title"] + Array(repeating: "A complete long English article paragraph.", count: 20)).joined(separator: "\n\n")
+        let data = try JSONSerialization.data(withJSONObject: [
+            "id": 7, "source": "x", "content": original,
+            "content_zh": "问题不在于我们是否正在建设数据中心。那个...",
+            "post_link": "https://x.com/JensenHuang/status/2086934705207959965",
+            "meta": ["lang": "zxx", "article_text": original]
+        ])
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertTrue(post.needsXTranslation)
+        XCTAssertTrue(post.needsXStoredDetailRefresh)
+    }
+
     func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
         let data = #"{"id":7,"source":"x","content":"列表摘要…","content_zh":"被压平的完整中文正文","post_link":"https://x.com/example/status/123","meta":{"lang":"zh","note_text":"第一段。\n\n第二段。"}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: data)
