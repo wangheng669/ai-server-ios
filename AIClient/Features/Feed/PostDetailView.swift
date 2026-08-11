@@ -1063,6 +1063,19 @@ struct PostDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
+
+            if post.linkURL != nil {
+                Button { openOriginal() } label: {
+                    Image("XueqiuMark")
+                        .resizable()
+                        .renderingMode(.original)
+                        .scaledToFit()
+                        .frame(width: 34, height: 34)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("在雪球中打开")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
