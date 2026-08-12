@@ -1068,8 +1068,14 @@ private struct TodayWorldYesterdayReportSheet: View {
                     ForEach(sections) { section in
                         sectionHeader(section)
 
-                        ForEach(Array(section.systems.enumerated()), id: \.element.id) { index, system in
-                            systemCard(system, index: index)
+                        ForEach(section.groups) { group in
+                            if showsGroupHeading(section) {
+                                groupHeader(group)
+                            }
+
+                            ForEach(Array(group.systems.enumerated()), id: \.element.id) { index, system in
+                                systemCard(system, index: index)
+                            }
                         }
                     }
 
@@ -1134,6 +1140,7 @@ private struct TodayWorldYesterdayReportSheet: View {
 
             HStack(spacing: 18) {
                 metric(value: "\(sections.count)", label: "板块")
+                metric(value: "\(groups.count)", label: "分组")
                 metric(value: "\(systems.count)", label: "体系")
                 metric(value: "\(report.sourceCount)", label: "来源")
             }
@@ -1162,6 +1169,19 @@ private struct TodayWorldYesterdayReportSheet: View {
         .padding(.top, 4)
         .padding(.horizontal, 2)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    private func groupHeader(_ group: TodayWorldAdvancedReportGroup) -> some View {
+        Text(group.groupName)
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(.teal)
+            .padding(.top, 2)
+            .padding(.horizontal, 2)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func showsGroupHeading(_ section: TodayWorldAdvancedReportSection) -> Bool {
+        section.sectionKey == "investment" || section.groups.count > 1
     }
 
     private func systemCard(_ system: TodayWorldAdvancedReportSystem, index: Int) -> some View {
@@ -1214,6 +1234,10 @@ private struct TodayWorldYesterdayReportSheet: View {
 
     private var systems: [TodayWorldAdvancedReportSystem] {
         report.report.advanced?.systems ?? []
+    }
+
+    private var groups: [TodayWorldAdvancedReportGroup] {
+        sections.flatMap(\.groups)
     }
 
     private var sections: [TodayWorldAdvancedReportSection] {
