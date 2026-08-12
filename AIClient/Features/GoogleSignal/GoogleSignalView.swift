@@ -772,15 +772,23 @@ private struct GoogleSignalEventCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            Text(event.title)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(event.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+
+                Spacer(minLength: 0)
+
+                signalBadge(event.sentimentTitle, color: event.sentimentColor)
+                    .fixedSize()
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
