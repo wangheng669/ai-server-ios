@@ -1184,7 +1184,9 @@ struct Post: Codable, Identifiable, Hashable {
     }
     private func htmlText(_ value: String?) -> String? {
         guard let value = clean(value) else { return nil }
-        guard value.contains("<") || value.contains("&lt;") || value.contains("&amp;lt;") else { return value }
+        let containsHTMLEntity = ["&amp;", "&lt;", "&gt;", "&quot;", "&apos;", "&nbsp;", "&#"]
+            .contains(where: value.contains)
+        guard value.contains("<") || containsHTMLEntity else { return value }
         let cacheKey = value as NSString
         if let cached = Self.htmlTextCache.object(forKey: cacheKey) {
             return cached as String

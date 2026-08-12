@@ -110,7 +110,7 @@ final class GoogleSignalTests: XCTestCase {
               "post_id": 495112,
               "article_id": "42",
               "title": "Google update",
-              "content": "Google 发布了新版本。",
+              "content": "Google 发布了新版本 &amp; 更多功能。",
               "language": "zh",
               "author_name": "Google AI",
               "author_handle": "GoogleAI",
@@ -127,7 +127,7 @@ final class GoogleSignalTests: XCTestCase {
         XCTAssertEqual(post.id, 495112)
         XCTAssertEqual(post.sourceName, "X")
         XCTAssertEqual(post.authorHandle, "@GoogleAI")
-        XCTAssertEqual(post.displayContent, "Google 发布了新版本。")
+        XCTAssertEqual(post.displayContent, "Google 发布了新版本 & 更多功能。")
         XCTAssertEqual(post.xTweetID, "42")
     }
 
