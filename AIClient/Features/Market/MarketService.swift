@@ -144,7 +144,12 @@ struct MarketService {
         if refresh { queryItems.append(.init(name: "refresh", value: "true")) }
         components?.queryItems = queryItems
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketSentimentSnapshotResponse.self, bypassCache: refresh).data
+        return try await request(
+            url,
+            as: MarketSentimentSnapshotResponse.self,
+            bypassCache: refresh,
+            useCachedResponseWhenAvailable: true
+        ).data
     }
 
     func companyValuationHistory(symbol: String) async throws -> MarketCompanyValuationHistory {
@@ -177,14 +182,18 @@ struct MarketService {
     private func request<Response: Decodable>(
         _ url: URL,
         as type: Response.Type,
-        bypassCache: Bool = false
+        bypassCache: Bool = false,
+        useCachedResponseWhenAvailable: Bool = false
     ) async throws -> Response {
         let data: Data
         let response: URLResponse
         do {
             var request = URLRequest(
                 url: url,
-                cachePolicy: bypassCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
+                cachePolicy: marketRequestCachePolicy(
+                    bypassCache: bypassCache,
+                    useCachedResponseWhenAvailable: useCachedResponseWhenAvailable
+                )
             )
             if bypassCache { request.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
             (data, response) = try await session.data(for: request)
@@ -221,6 +230,15 @@ struct MarketService {
         do { return try JSONDecoder().decode(type, from: data) }
         catch { throw MarketServiceError.decoding(error) }
     }
+}
+
+func marketRequestCachePolicy(
+    bypassCache: Bool,
+    useCachedResponseWhenAvailable: Bool
+) -> URLRequest.CachePolicy {
+    if bypassCache { return .reloadIgnoringLocalCacheData }
+    if useCachedResponseWhenAvailable { return .returnCacheDataElseLoad }
+    return .useProtocolCachePolicy
 }
 
 enum VideoInterpretationServiceError: LocalizedError {
