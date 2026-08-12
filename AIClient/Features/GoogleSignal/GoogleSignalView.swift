@@ -508,7 +508,6 @@ struct GoogleSignalView: View {
     @StateObject private var store = GoogleSignalStore()
     @Binding var section: GoogleSignalSection
     @Binding var sentiment: GoogleSignalSentimentFilter
-    @Binding var showsFilters: Bool
     @State private var selectedEvent: GoogleSignalEvent?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -526,12 +525,6 @@ struct GoogleSignalView: View {
         .sheet(item: $selectedEvent) { event in
             GoogleSignalEventDetailView(event: event)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
-        }
-        .sheet(isPresented: $showsFilters) {
-            GoogleSignalFilterSheet(section: $section, sentiment: $sentiment)
-                .presentationDetents([.height(310)])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
@@ -634,14 +627,22 @@ struct GoogleSignalFilterButton: View {
     }
 }
 
-private struct GoogleSignalFilterSheet: View {
+struct GoogleSignalFilterOverlay: View {
     @Binding var section: GoogleSignalSection
     @Binding var sentiment: GoogleSignalSentimentFilter
-    @Environment(\.dismiss) private var dismiss
+    @Binding var isPresented: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 24) {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: dismiss)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 16) {
+                header
                 filterGroup(
                     "内容",
                     items: GoogleSignalSection.allCases,
@@ -654,17 +655,59 @@ private struct GoogleSignalFilterSheet: View {
                     selection: $sentiment,
                     title: \.title
                 )
-                Spacer(minLength: 0)
             }
+            .padding(14)
+            .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(InvestmentDesign.divider, lineWidth: 0.5)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(InvestmentDesign.surface)
+                    .frame(width: 14, height: 14)
+                    .rotationEffect(.degrees(45))
+                    .offset(x: -48, y: 6)
+            }
+            .shadow(color: .black.opacity(0.14), radius: 22, y: 9)
             .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .navigationTitle("筛选")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+            .padding(.bottom, 130)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, dismiss)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(InvestmentDesign.accent)
+            Text("信号筛选")
+                .font(.subheadline.weight(.bold))
+
+            Spacer(minLength: 8)
+
+            if section != .highlights || sentiment != .all {
+                Button("重置") {
+                    withAnimation(filterAnimation) {
+                        section = .highlights
+                        sentiment = .all
+                    }
                 }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(InvestmentDesign.accent)
             }
+        }
+    }
+
+    private var filterAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.2, extraBounce: 0)
+    }
+
+    private func dismiss() {
+        withAnimation(filterAnimation) {
+            isPresented = false
         }
     }
 
@@ -674,26 +717,46 @@ private struct GoogleSignalFilterSheet: View {
         selection: Binding<Item>,
         title: KeyPath<Item, String>
     ) -> some View where Item.ID == Item {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(groupTitle)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 ForEach(items) { item in
                     Button {
-                        selection.wrappedValue = item
+                        withAnimation(filterAnimation) {
+                            selection.wrappedValue = item
+                        }
                     } label: {
-                        Text(item[keyPath: title])
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(selection.wrappedValue == item ? Color.white : Color.primary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 42)
-                            .background(
-                                selection.wrappedValue == item
-                                    ? Color.accentColor
-                                    : Color(uiColor: .secondarySystemBackground),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
+                        HStack(spacing: 5) {
+                            if selection.wrappedValue == item {
+                                Circle()
+                                    .fill(InvestmentDesign.accent)
+                                    .frame(width: 5, height: 5)
+                            }
+                            Text(item[keyPath: title])
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(
+                            selection.wrappedValue == item ? InvestmentDesign.accent : Color.primary
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(
+                            selection.wrappedValue == item
+                                ? InvestmentDesign.accentSoft
+                                : InvestmentDesign.secondarySurface,
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(
+                                    selection.wrappedValue == item
+                                        ? InvestmentDesign.accent.opacity(0.24)
+                                        : Color.clear,
+                                    lineWidth: 1
+                                )
+                        }
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(selection.wrappedValue == item ? .isSelected : [])
