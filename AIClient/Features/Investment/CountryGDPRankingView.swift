@@ -236,10 +236,10 @@ struct CountryGDPRankingView: View {
         .background(InvestmentDesign.surface)
         .sheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
-                .presentationDetents([.fraction(0.72), .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationBackground(GDPDesign.porcelain)
+                .presentationBackground(InvestmentDesign.surface)
         }
         .task(id: category) {
             if category == .countryGDP, ranking == nil {
