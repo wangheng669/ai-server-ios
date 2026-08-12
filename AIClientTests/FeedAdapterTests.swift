@@ -991,6 +991,31 @@ final class FeedAdapterTests: XCTestCase {
         )
     }
 
+    func testXueqiuMediaGridRejectsMalformedRelativeImageSource() throws {
+        let data = #"{"id":2806844,"source":"rss:16","meta":{"rss_feed_name":"雪球-但斌"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+        let malformedRelativeURL = ServerConfiguration.currentURL.appending(path: "title=")
+        var proxyComponents = URLComponents(
+            url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/image-proxy"),
+            resolvingAgainstBaseURL: false
+        )
+        proxyComponents?.queryItems = [
+            .init(name: "url", value: "https://xqimg.imedao.com/example.jpg")
+        ]
+        let proxyURL = try XCTUnwrap(proxyComponents?.url)
+        let directURL = try XCTUnwrap(URL(string: "https://xqimg.imedao.com/example.jpg"))
+
+        XCTAssertFalse(
+            XueqiuMediaDisplayPolicy.shouldDisplay(
+                malformedRelativeURL,
+                post: post,
+                usesExplicitPlacement: true
+            )
+        )
+        XCTAssertTrue(XueqiuMediaDisplayPolicy.shouldDisplay(proxyURL, post: post, usesExplicitPlacement: true))
+        XCTAssertTrue(XueqiuMediaDisplayPolicy.shouldDisplay(directURL, post: post, usesExplicitPlacement: true))
+    }
+
     func testWeChatArticlePreservesTextAndInlineImageOrder() throws {
         let html = """
         <p>第一段正文。</p>
