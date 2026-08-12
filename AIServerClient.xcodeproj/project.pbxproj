@@ -37,6 +37,8 @@
 		70916F86F3EB28B10FB8EB3C /* PostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F7ED7E08363D8510FC627D /* PostDetailView.swift */; };
 		70A27F86F3EB28B10FB8EB3C /* YouTubeVideoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A27D7E08363D8510FC627D /* YouTubeVideoDetailView.swift */; };
 		776DA836074F7FFF481B3A5B /* FeedAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */; };
+		D0B100000000000000000001 /* WeiboEmbeddedPagePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B100000000000000000003 /* WeiboEmbeddedPagePolicy.swift */; };
+		D0B100000000000000000002 /* WeiboEmbeddedPagePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B100000000000000000004 /* WeiboEmbeddedPagePolicyTests.swift */; };
 		7C42227FAAD006BD492F3F7E /* LearningServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFA9759085824610FC53E65 /* LearningServiceTests.swift */; };
 		801D06F0246D5D96D45CA002 /* FamousHoldingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40244177985ED17E7717147A /* FamousHoldingsStore.swift */; };
 		8F922EC1F4F62D3B56B74D1D /* ServerSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097BF52E5F2C1BE5326021E6 /* ServerSetupView.swift */; };
@@ -147,6 +149,8 @@
 		9A2C22D012A44ABE4FDE5A64 /* PersonDetailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonDetailStore.swift; sourceTree = "<group>"; };
 		9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedAdapterTests.swift; sourceTree = "<group>"; };
 		9F83C9F64DA0CE10A02AD089 /* NewsFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedView.swift; sourceTree = "<group>"; };
+		D0B100000000000000000003 /* WeiboEmbeddedPagePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeiboEmbeddedPagePolicy.swift; sourceTree = "<group>"; };
+		D0B100000000000000000004 /* WeiboEmbeddedPagePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeiboEmbeddedPagePolicyTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000004 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		A10000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000006 /* NotificationServiceExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationServiceExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -188,6 +192,7 @@
 				07AB1EAB21326C8E0E5C12EB /* MarketPresentationTests.swift */,
 				5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */,
 				3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */,
+				D0B100000000000000000004 /* WeiboEmbeddedPagePolicyTests.swift */,
 			);
 			path = AIClientTests;
 			sourceTree = "<group>";
@@ -227,6 +232,7 @@
 			isa = PBXGroup;
 			children = (
 				9F83C9F64DA0CE10A02AD089 /* NewsFeedView.swift */,
+				D0B100000000000000000003 /* WeiboEmbeddedPagePolicy.swift */,
 				8B9ED3C144483DC5D1DFAA3A /* NewsFeedViewModel.swift */,
 				1A3FE9C2FF8A73D898482112 /* Post.swift */,
 				BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */,
@@ -534,6 +540,7 @@
 				F55F498E463A853C948EB388 /* MarketPresentationTests.swift in Sources */,
 				D146819617D52DA2230A9506 /* PostDecodingTests.swift in Sources */,
 				26D2AAFFCB9B9B48EE1CD558 /* ServerAddressValidatorTests.swift in Sources */,
+				D0B100000000000000000002 /* WeiboEmbeddedPagePolicyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -568,6 +575,7 @@
 				212E02E9454406B9CEE36D72 /* MarketStore.swift in Sources */,
 				0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */,
 				FFAD6FA1551774C67C10B5A6 /* NewsFeedView.swift in Sources */,
+				D0B100000000000000000001 /* WeiboEmbeddedPagePolicy.swift in Sources */,
 				C844C5ED835C1B08C94DC464 /* NewsFeedViewModel.swift in Sources */,
 				A12DB4EFD18F02485AC3A268 /* PeopleModels.swift in Sources */,
 				30DCD0C5835091D25C86B8A3 /* PeopleService.swift in Sources */,

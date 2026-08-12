@@ -1,0 +1,51 @@
+import XCTest
+@testable import AIServerClient
+
+final class WeiboEmbeddedPagePolicyTests: XCTestCase {
+    func testRestoresSessionForWeiboSearchLinks() throws {
+        let url = try XCTUnwrap(URL(string: "https://s.weibo.com/weibo?q=test"))
+
+        XCTAssertTrue(WeiboEmbeddedPagePolicy.shouldRestoreSession(for: url))
+    }
+
+    func testDoesNotRestoreWeiboSessionForUnrelatedLinks() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.com/search?q=test"))
+
+        XCTAssertFalse(WeiboEmbeddedPagePolicy.shouldRestoreSession(for: url))
+    }
+
+    func testAnonymousWeiboEmptyResultRequiresAuthentication() throws {
+        let url = try XCTUnwrap(
+            URL(string: "https://m.weibo.cn/search?containerid=100103type%3D1%26q%3Dtest")
+        )
+
+        XCTAssertTrue(
+            WeiboEmbeddedPagePolicy.requiresAuthentication(
+                url: url,
+                bodyText: "\n 这里还没有内容 \n"
+            )
+        )
+    }
+
+    func testWeiboPageWithResultsDoesNotRequireAuthentication() throws {
+        let url = try XCTUnwrap(URL(string: "https://m.weibo.cn/search?q=test"))
+
+        XCTAssertFalse(
+            WeiboEmbeddedPagePolicy.requiresAuthentication(
+                url: url,
+                bodyText: "测试热搜 第一条微博内容"
+            )
+        )
+    }
+
+    func testLoginPageIsNeverReplacedByAuthenticationPrompt() throws {
+        let url = try XCTUnwrap(URL(string: "https://passport.weibo.com/sso/signin"))
+
+        XCTAssertFalse(
+            WeiboEmbeddedPagePolicy.requiresAuthentication(
+                url: url,
+                bodyText: "这里还没有内容"
+            )
+        )
+    }
+}
