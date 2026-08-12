@@ -204,7 +204,7 @@ private struct EditorialRootView: View {
     @State private var notificationPersonID: String?
     @State private var notificationVideoID: Int64?
     @State private var lastDynamicTab: EditorialTab = .observation
-    @State private var lastResearchTab: EditorialTab = .company
+    @State private var lastResearchTab: EditorialTab = .investment
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -249,9 +249,9 @@ private struct EditorialRootView: View {
         switch selectedTab {
         case .noise, .observation:
             [.observation, .noise]
-        case .company, .people:
-            [.company, .people]
-        case .world, .investment, .learning:
+        case .investment, .company, .people:
+            [.investment, .company, .people]
+        case .world, .learning:
             nil
         }
     }
@@ -358,9 +358,9 @@ private struct EditorialRootView: View {
             switch tab {
             case .noise, .observation:
                 lastDynamicTab = tab
-            case .company, .people:
+            case .investment, .company, .people:
                 lastResearchTab = tab
-            case .world, .investment, .learning:
+            case .world, .learning:
                 break
             }
         }
@@ -434,17 +434,16 @@ private struct RootNavigationBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            item(.world, title: "今日", icon: "globe")
             item(
                 dynamicTarget,
                 selectedTabs: [.noise, .observation],
-                title: "动态",
+                title: "观点",
                 icon: "list.bullet.rectangle"
             )
-            item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
-            item(.world, title: "今日", icon: "globe")
             item(
                 researchTarget,
-                selectedTabs: [.company, .people],
+                selectedTabs: [.investment, .company, .people],
                 title: "研究",
                 icon: "magnifyingglass"
             )
