@@ -150,9 +150,23 @@ struct XTweetDetailItem: Decodable, Equatable {
     let text: String
     let noteText: String?
     let shortText: String?
+    let author: Author?
     let media: [Media]?
     let createdAt: String?
     let metrics: PostMetrics?
+    let lang: String?
+
+    struct Author: Decodable, Equatable {
+        let name: String?
+        let screenName: String?
+        let profileImageURL: String?
+        let verified: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case name, screenName, verified
+            case profileImageURL = "profileImageUrl"
+        }
+    }
 
     struct Media: Decodable, Equatable {
         let type: String?
@@ -492,7 +506,12 @@ struct Post: Codable, Identifiable, Hashable {
             && XPostTextFormatter.shouldWaitForFullText(xStoredOriginalContent)
     }
     var needsXStoredDetailRefresh: Bool {
-        needsXLiveDetail || needsXTranslation
+        needsXLiveDetail || needsXTranslation || needsXReplyContextRefresh
+    }
+    var needsXReplyContextRefresh: Bool {
+        sourceName == "X"
+            && clean(meta?.inReplyToStatusID) != nil
+            && meta?.replyContext?.displayText == nil
     }
 
     func replacingTranslation(with translation: String) -> Post {

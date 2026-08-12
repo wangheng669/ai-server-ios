@@ -49,6 +49,8 @@ struct PostDetailView: View {
     @State private var weiboCommentsError: String?
     @State private var xLiveDetail: XTweetDetailItem?
     @State private var xLiveTranslationText: String?
+    @State private var xLiveReplyContext: XReplyContext?
+    @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
     @State private var weiboImageSelection: ImageGallerySelection?
     @State private var speechPlayer: AVPlayer?
@@ -2025,10 +2027,18 @@ struct PostDetailView: View {
                         }
                         .padding(.top, 24)
 
-                        if let reply = post.meta?.replyContext,
+                        if let reply = xResolvedReplyContext,
                            let replyText = reply.displayText {
                             XReplyContextCard(reply: reply, text: replyText)
                                 .padding(.top, 14)
+                        } else if isLoadingXReplyContext {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("正在加载被回复内容…")
+                            }
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 14)
                         } else if let replyHandle = xReplyHandle {
                             Label("回复 \(replyHandle)", systemImage: "arrowshape.turn.up.left")
                                 .font(.system(size: 14, weight: .medium))
@@ -2285,6 +2295,13 @@ struct PostDetailView: View {
         return "@\(value)"
     }
 
+    private var xResolvedReplyContext: XReplyContext? {
+        if let stored = post.meta?.replyContext, stored.displayText != nil {
+            return stored
+        }
+        return xLiveReplyContext
+    }
+
     private func xQuotedPostCard(_ quote: XQuotedPost) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
@@ -2487,6 +2504,11 @@ struct PostDetailView: View {
                 isLoadingXFullText = false
             }
         }
+        let replyContextTask: Task<Void, Never>? = if post.sourceName == "X" {
+            Task { await loadXReplyContext(using: client) }
+        } else {
+            nil
+        }
         if post.sourceName == "X", let tweetID = post.xTweetID {
             var translationTweetID = tweetID
             if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
@@ -2514,6 +2536,7 @@ struct PostDetailView: View {
         } else if post.sourceName == "X" {
             isLoadingXFullText = false
         }
+        await replyContextTask?.value
         if post.isYouTube || post.isBilibili || post.isWeiboRSS {
             player?.pause()
             player = nil
@@ -2524,6 +2547,39 @@ struct PostDetailView: View {
             await detectVideoAspectRatio(url: video)
         } else if let video = post.videoURLs.first, detectedVideoAspectRatio == nil {
             await detectVideoAspectRatio(url: video)
+        }
+    }
+
+    @MainActor
+    private func loadXReplyContext(using client: APIClient) async {
+        guard post.meta?.replyContext?.displayText == nil,
+              let replyID = post.meta?.inReplyToStatusID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !replyID.isEmpty else {
+            return
+        }
+        isLoadingXReplyContext = true
+        defer { isLoadingXReplyContext = false }
+        do {
+            let detail = try await client.fetchXTweetDetail(tweetID: replyID)
+            let language = detail.lang?.lowercased() ?? ""
+            let translatedText: String? = if language.hasPrefix("zh") {
+                nil
+            } else {
+                (try? await client.fetchXTranslation(tweetID: detail.id))?.text
+            }
+            guard !Task.isCancelled else { return }
+            xLiveReplyContext = XReplyContext(
+                id: detail.id,
+                authorName: detail.author?.name,
+                screenName: detail.author?.screenName ?? post.meta?.inReplyToScreenName,
+                avatarURL: detail.author?.profileImageURL,
+                text: detail.fullText,
+                textZH: translatedText
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            // The existing "回复 @用户" label remains as a useful fallback.
         }
     }
 
