@@ -963,7 +963,7 @@ private struct TodayWorldDailyDigestView: View {
                 if isRefreshing {
                     ProgressView().controlSize(.mini)
                 } else if let advanced, advanced.status == "succeeded" {
-                    Text("\(advanced.systems.count) 个体系")
+                    Text("\(advanced.sections.count) 个板块")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(.teal)
                         .padding(.horizontal, 9)
@@ -1065,8 +1065,12 @@ private struct TodayWorldYesterdayReportSheet: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     header
 
-                    ForEach(Array(systems.enumerated()), id: \.element.id) { index, system in
-                        systemCard(system, index: index)
+                    ForEach(sections) { section in
+                        sectionHeader(section)
+
+                        ForEach(Array(section.systems.enumerated()), id: \.element.id) { index, system in
+                            systemCard(system, index: index)
+                        }
                     }
 
                     HStack(spacing: 6) {
@@ -1129,9 +1133,9 @@ private struct TodayWorldYesterdayReportSheet: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 18) {
+                metric(value: "\(sections.count)", label: "板块")
                 metric(value: "\(systems.count)", label: "体系")
                 metric(value: "\(report.sourceCount)", label: "来源")
-                metric(value: "\(report.postCount)", label: "动态")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1144,6 +1148,20 @@ private struct TodayWorldYesterdayReportSheet: View {
             Text(value).font(.system(size: 19, weight: .bold, design: .rounded))
             Text(label).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
         }
+    }
+
+    private func sectionHeader(_ section: TodayWorldAdvancedReportSection) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(section.sectionName)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+            Spacer()
+            Text("\(section.systems.count) 个体系")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+        .padding(.horizontal, 2)
+        .accessibilityAddTraits(.isHeader)
     }
 
     private func systemCard(_ system: TodayWorldAdvancedReportSystem, index: Int) -> some View {
@@ -1196,6 +1214,10 @@ private struct TodayWorldYesterdayReportSheet: View {
 
     private var systems: [TodayWorldAdvancedReportSystem] {
         report.report.advanced?.systems ?? []
+    }
+
+    private var sections: [TodayWorldAdvancedReportSection] {
+        report.report.advanced?.sections ?? []
     }
 
     private func sourceLabel(_ system: TodayWorldAdvancedReportSystem) -> String {

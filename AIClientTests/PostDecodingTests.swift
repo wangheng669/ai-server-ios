@@ -1314,24 +1314,27 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testTodayWorldYesterdayReportDecoding() throws {
-        let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"systems":[{"system_key":"legacy","system_name":"旧日报","accounts":[]}],"advanced":{"status":"succeeded","stage":"done","systems":[{"system_key":"altman","system_name":"奥特曼系","summary":"OpenAI 更新模型，Sam Altman 转发说明。","source_keys":["openai","sam-altman"],"source_names":["OpenAI","Sam Altman"],"post_ids":[43,42]}],"system_count":1,"source_char_count":320,"char_count":28,"compression_ratio":0.0875,"model":"qwen3.5-flash","total_tokens":456,"cost_cny":0.0042,"completed_at":"2026-08-08T06:18:00+08:00"}},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123,"completed_at":"2026-08-08T06:16:00+08:00"}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"sections":[{"section_key":"artificial-intelligence","section_name":"人工智能","systems":[]}],"advanced":{"status":"succeeded","stage":"done","sections":[{"section_key":"artificial-intelligence","section_name":"人工智能","systems":[{"system_key":"altman","system_name":"奥特曼系","summary":"OpenAI 更新模型，Sam Altman 转发说明。","source_keys":["openai","sam-altman"],"source_names":["OpenAI","Sam Altman"],"post_ids":[43,42]}]},{"section_key":"investment","section_name":"投资","systems":[{"system_key":"dan-bin","system_name":"但斌","summary":"复盘市场。","source_keys":["dan-bin"],"source_names":["但斌"],"post_ids":[44]}]}],"section_count":2,"system_count":2,"source_char_count":320,"char_count":28,"compression_ratio":0.0875,"model":"qwen3.5-flash","total_tokens":456,"cost_cny":0.0042,"completed_at":"2026-08-08T06:18:00+08:00"}},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123,"completed_at":"2026-08-08T06:16:00+08:00"}}"#.utf8)
         let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
 
         XCTAssertEqual(response.data.date, "2026-08-07")
         XCTAssertEqual(response.data.sourceCount, 3)
         XCTAssertEqual(response.data.report.advanced?.status, "succeeded")
+        XCTAssertEqual(response.data.report.advanced?.sections.map(\.sectionName), ["人工智能", "投资"])
+        XCTAssertEqual(response.data.report.advanced?.sectionCount, 2)
         XCTAssertEqual(response.data.report.advanced?.systems.first?.systemName, "奥特曼系")
         XCTAssertEqual(response.data.report.advanced?.systems.first?.sourceNames, ["OpenAI", "Sam Altman"])
         XCTAssertEqual(response.data.report.advanced?.systems.first?.postIDs, [43, 42])
         XCTAssertEqual(response.data.report.advanced?.compressionRatio, 0.0875)
     }
 
-    func testTodayWorldYesterdayReportDecodesAdvancedProgressWithoutLegacySystems() throws {
+    func testTodayWorldYesterdayReportDecodesAdvancedProgressWithoutSections() throws {
         let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"advanced":{"status":"running","stage":"compressing","started_at":"2026-08-08T06:18:00+08:00"}},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123}}"#.utf8)
         let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
 
         XCTAssertEqual(response.data.report.advanced?.status, "running")
         XCTAssertEqual(response.data.report.advanced?.stage, "compressing")
+        XCTAssertEqual(response.data.report.advanced?.sections, [])
         XCTAssertEqual(response.data.report.advanced?.systems, [])
     }
 
