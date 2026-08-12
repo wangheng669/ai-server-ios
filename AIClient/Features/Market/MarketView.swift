@@ -1030,8 +1030,8 @@ private struct MarketIndexTable: View {
                             trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
                                  ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
                                  : quote),
-                            companyLogoPath: nil,
-                            showsCompanyLogo: false
+                            companyLogoPath: store.companyLogoPaths[quote.symbol],
+                            showsCompanyLogo: true
                          )
                     }
                     .buttonStyle(MarketPressStyle())
@@ -1071,7 +1071,7 @@ private struct MarketIndexTable: View {
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             await withTaskGroup(of: Void.self) { group in
-                for quote in coreStocks {
+                for quote in quotes + coreStocks {
                     group.addTask {
                         await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
                     }
@@ -1081,7 +1081,7 @@ private struct MarketIndexTable: View {
     }
 
     private var componentLogoRequestID: String {
-        "\(region.dashboardID):\(coreStocks.map(\.symbol).joined(separator: ","))"
+        "\(region.dashboardID):\((quotes + coreStocks).map(\.symbol).joined(separator: ","))"
     }
 }
 
@@ -1502,6 +1502,7 @@ private struct MarketIndexTableRow: View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
                 accessibilityLayout
+                    .dynamicTypeSize(.xLarge)
             } else {
                 standardLayout
             }
@@ -1553,7 +1554,7 @@ private struct MarketIndexTableRow: View {
             .frame(width: 62, alignment: .trailing)
 
             Group {
-                if trend.count >= 3 {
+                if trend.count >= 2 {
                     Sparkline(values: trend, color: displayedTint)
                 } else {
                     Text("—").font(.caption).foregroundStyle(.tertiary)
@@ -1565,10 +1566,19 @@ private struct MarketIndexTableRow: View {
 
     private var accessibilityLayout: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(displayedName).font(.headline).lineLimit(2)
-                Spacer()
-                Text(statusLabel).font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 8) {
+                if showsCompanyLogo {
+                    CompanyLogo(quote: quote, path: companyLogoPath, size: 32)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(displayedName).font(.headline).lineLimit(2)
+                    Text(statusLabel).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if trend.count >= 2 {
+                    Sparkline(values: trend, color: displayedTint)
+                        .frame(width: 64, height: 34)
+                }
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(displayedCode).font(.caption).foregroundStyle(.secondary)
@@ -2434,6 +2444,10 @@ private struct MarketIndexDetailView: View {
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
     private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
     private var chartSymbol: String { quote?.symbol ?? symbol }
+    private var chartFallbackSymbol: String? {
+        guard historicalSymbol != chartSymbol else { return nil }
+        return historicalSymbol
+    }
     private var isIndex: Bool {
         store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
             || CoreDescriptor(symbol: symbol).isIndex
@@ -2470,7 +2484,12 @@ private struct MarketIndexDetailView: View {
                                 }
                             }
                         detailHeader
-                        MarketDetailChart(selectedRange: $selectedRange, symbol: chartSymbol, store: store)
+                        MarketDetailChart(
+                            selectedRange: $selectedRange,
+                            symbol: chartSymbol,
+                            fallbackSymbol: chartFallbackSymbol,
+                            store: store
+                        )
                             .id(chartSymbol)
                         keyData
                         if showsCompanyProfile { companyProfile }
@@ -3455,10 +3474,23 @@ struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
 private struct MarketDetailChart: View {
     @Binding var selectedRange: MarketRange
     let symbol: String
+    let fallbackSymbol: String?
     let store: MarketStore
     @State private var inspectedPoint: MarketChartPoint?
 
-    private var chart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
+    private var primaryChart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
+    private var fallbackChart: MarketChart? {
+        guard let fallbackSymbol else { return nil }
+        return store.chart(symbol: fallbackSymbol, range: selectedRange)
+    }
+    private var usesFallbackChart: Bool {
+        marketShouldUseFallbackChart(
+            primaryPoints: primaryChart?.candles ?? [],
+            fallbackPoints: fallbackChart?.candles ?? []
+        )
+    }
+    private var displayedSymbol: String { usesFallbackChart ? fallbackSymbol ?? symbol : symbol }
+    private var chart: MarketChart? { usesFallbackChart ? fallbackChart : primaryChart }
     private var points: [MarketChartPoint] {
         marketChartDisplayPoints(chart?.candles ?? []).sorted { $0.timestamp < $1.timestamp }
     }
@@ -3487,7 +3519,7 @@ private struct MarketDetailChart: View {
             ZStack {
                 ChartGrid(values: values)
                 if values.isEmpty {
-                    if store.loadingCharts.contains(ChartKey(symbol: symbol, range: selectedRange)) {
+                    if isLoadingChart {
                         VStack(spacing: 10) {
                             ProgressView()
                             Text("正在加载\(selectedRange.rawValue)走势图")
@@ -3496,17 +3528,17 @@ private struct MarketDetailChart: View {
                         }
                         .accessibilityElement(children: .combine)
                     }
-                    else if let error = store.chartError(symbol: symbol, range: selectedRange) {
+                    else if let error = displayedChartError {
                         VStack(spacing: 8) {
                             Text(error).font(.system(size: 12)).foregroundStyle(.secondary)
-                            Button("重新加载") { Task { await store.loadChart(symbol: symbol, range: selectedRange, force: true) } }
+                            Button("重新加载") { Task { await reloadChart() } }
                                 .font(.system(size: 12, weight: .semibold)).frame(minWidth: 88, minHeight: 44)
                         }
                     } else { Text(chartStatusMessage).font(.system(size: 12)).foregroundStyle(.secondary) }
                 } else {
                     MarketSessionLineChart(
                         points: points,
-                        regularColor: quoteTint(store.quote(symbol: symbol)),
+                        regularColor: quoteTint(store.quote(symbol: displayedSymbol)),
                         interval: chart?.interval
                     )
                         .id(selectedRange)
@@ -3524,7 +3556,7 @@ private struct MarketDetailChart: View {
                         )
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
                     }
-                    if let previousClose = store.quote(symbol: symbol)?.previousClose {
+                    if let previousClose = store.quote(symbol: displayedSymbol)?.previousClose {
                         ChartReferenceLine(value: previousClose, values: values)
                     }
                     ChartInspectionOverlay(
@@ -3532,7 +3564,7 @@ private struct MarketDetailChart: View {
                         interval: chart?.interval,
                         range: selectedRange,
                         timezone: chart?.timezone,
-                        tint: quoteTint(store.quote(symbol: symbol)),
+                        tint: quoteTint(store.quote(symbol: displayedSymbol)),
                         selected: $inspectedPoint
                     )
                 }
@@ -3575,6 +3607,10 @@ private struct MarketDetailChart: View {
         .task(id: ChartKey(symbol: symbol, range: selectedRange)) {
             inspectedPoint = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
+            if marketChartDisplayPoints(primaryChart?.candles ?? []).count < 2,
+               let fallbackSymbol {
+                await store.loadChart(symbol: fallbackSymbol, range: selectedRange)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(selectedRange.rawValue)行情图表，可拖动查看具体时间和价格")
@@ -3590,7 +3626,26 @@ private struct MarketDetailChart: View {
         let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
         let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
         let sessionText = marketChartExtendedSessionLabel(points).map { " · \($0)" } ?? ""
-        return hasVolume ? "\(dated)\(sessionText) · 成交量" : "\(dated)\(sessionText)"
+        let referenceText = usesFallbackChart ? " · 参考 \(displayedSymbol)" : ""
+        return hasVolume ? "\(dated)\(sessionText)\(referenceText) · 成交量" : "\(dated)\(sessionText)\(referenceText)"
+    }
+    private var isLoadingChart: Bool {
+        store.loadingCharts.contains(ChartKey(symbol: symbol, range: selectedRange))
+            || fallbackSymbol.map { store.loadingCharts.contains(ChartKey(symbol: $0, range: selectedRange)) } == true
+    }
+    private var displayedChartError: String? {
+        if let fallbackSymbol,
+           let fallbackError = store.chartError(symbol: fallbackSymbol, range: selectedRange) {
+            return fallbackError
+        }
+        return store.chartError(symbol: symbol, range: selectedRange)
+    }
+    private func reloadChart() async {
+        await store.loadChart(symbol: symbol, range: selectedRange, force: true)
+        if marketChartDisplayPoints(primaryChart?.candles ?? []).count < 2,
+           let fallbackSymbol {
+            await store.loadChart(symbol: fallbackSymbol, range: selectedRange, force: true)
+        }
     }
     private var coverageMessage: String? {
         guard let quality = chart?.quality else { return nil }
