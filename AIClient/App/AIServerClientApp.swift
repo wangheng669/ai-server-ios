@@ -942,78 +942,102 @@ private struct TodayWorldDailyDigestView: View {
     let onOpen: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 6) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(displayDate)
-                    .font(.system(size: 12, weight: .medium))
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Color.teal, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("昨日简报")
+                        .font(.system(size: 16, weight: .bold))
+                    Text(displayDate)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
 
                 Spacer()
 
-                if let report {
-                    Text("\(report.sourceCount) 个账号 · \(report.postCount) 条")
-                        .font(.system(size: 12, weight: .medium))
-                }
-
                 if isRefreshing {
-                    ProgressView()
-                        .controlSize(.mini)
+                    ProgressView().controlSize(.mini)
+                } else if let advanced, advanced.status == "succeeded" {
+                    Text("\(advanced.systems.count) 个体系")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.teal)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.teal.opacity(0.1), in: Capsule())
                 }
             }
-            .foregroundStyle(.secondary)
 
-            HStack(spacing: 7) {
-                Image(systemName: "doc.text.fill")
-                    .foregroundStyle(.teal)
-                Text("昨日日报")
-                    .font(.system(size: 15, weight: .bold))
-            }
-
-            if report?.status == "running" || report?.status == "queued" {
-                HStack(spacing: 7) {
-                    ProgressView().controlSize(.small)
-                    Text("Qwen 正在整理昨日动态，退出页面不会中断。")
-                }
-                .font(.system(size: 12.5))
-                .foregroundStyle(.secondary)
-            } else if report?.status == "failed" {
-                Text("昨日日报生成失败，已在治理后台保留失败原因。")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            } else if let report, report.status == "succeeded", !report.report.systems.isEmpty {
-                Text("\(report.sourceCount) 个账号昨天有更新，按人物系查看他们分别做了什么。")
-                    .font(.system(size: 12.5))
-                    .lineLimit(3)
-
-                Button(action: onOpen) {
-                    HStack(spacing: 8) {
-                        Text("查看完整日报")
-                            .font(.system(size: 13, weight: .semibold))
-                        Spacer()
-                        Text("\(report.sourceCount) 个账号")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.top, 2)
-                }
-                .buttonStyle(.plain)
-            } else {
-                Text("昨日没有可展示的日报，生成状态可在治理后台查看。")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
+            content
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(14)
+        .background(
+            LinearGradient(
+                colors: [Color.teal.opacity(0.11), Color.secondary.opacity(0.035)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.teal.opacity(0.18), lineWidth: 0.6)
         }
         .padding(.horizontal, 14)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if report?.status == "running" || report?.status == "queued" {
+            statusRow("正在聚合昨日动态", showsProgress: true)
+        } else if report?.status == "failed" {
+            statusRow("昨日数据整理失败，请稍后再试")
+        } else if advanced?.status == "running" || advanced?.status == "queued" {
+            statusRow("正在压缩、去重并生成进阶简报", showsProgress: true)
+        } else if advanced?.status == "failed" {
+            statusRow("进阶简报生成失败，请稍后再试")
+        } else if let advanced, advanced.status == "succeeded", let first = advanced.systems.first {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 11) {
+                    Text(first.summary)
+                        .font(.system(size: 14.5, weight: .regular))
+                        .lineSpacing(4)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 6) {
+                        Text("阅读完整简报")
+                            .font(.system(size: 12.5, weight: .semibold))
+                        Spacer()
+                        Text("\(report?.postCount ?? 0) 条动态浓缩")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 10.5, weight: .bold))
+                    }
+                    .foregroundStyle(.primary)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("打开进阶版昨日简报")
+        } else {
+            statusRow("进阶简报尚未生成")
+        }
+    }
+
+    private var advanced: TodayWorldAdvancedReport? { report?.report.advanced }
+
+    private func statusRow(_ message: String, showsProgress: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            if showsProgress { ProgressView().controlSize(.small) }
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var displayDate: String {
@@ -1033,35 +1057,35 @@ private struct TodayWorldDailyDigestView: View {
 private struct TodayWorldYesterdayReportSheet: View {
     @Environment(\.dismiss) private var dismiss
     let report: TodayWorldYesterdayReportPayload
-    @State private var selectedAccount: TodayWorldYesterdayReportAccount?
+    @State private var selectedSystem: TodayWorldAdvancedReportSystem?
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     header
 
-                    ForEach(Array(report.report.systems.enumerated()), id: \.element.id) { index, system in
-                        if index > 0 {
-                            Divider()
-                                .padding(.vertical, 20)
-                        }
-                        systemSection(system)
+                    ForEach(Array(systems.enumerated()), id: \.element.id) { index, system in
+                        systemCard(system, index: index)
                     }
 
-                    Text("以上内容汇总自 \(report.postCount) 条昨日动态")
-                    .font(.system(size: 12.5))
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.teal)
+                        Text("已从 \(report.postCount) 条动态中压缩去重")
+                    }
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 28)
-                    .padding(.bottom, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
             }
             .scrollIndicators(.hidden)
-            .background(Color(uiColor: .systemBackground))
-            .navigationTitle("昨日日报")
+            .background(Color(uiColor: .secondarySystemBackground))
+            .navigationTitle("昨日简报")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -1070,8 +1094,8 @@ private struct TodayWorldYesterdayReportSheet: View {
                 }
             }
         }
-        .sheet(item: $selectedAccount) { account in
-            TodayWorldReportAccountPostsSheet(account: account, reportDate: report.date)
+        .sheet(item: $selectedSystem) { system in
+            TodayWorldReportSourcesSheet(system: system, reportDate: report.date)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
@@ -1080,67 +1104,103 @@ private struct TodayWorldYesterdayReportSheet: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Label(displayDate, systemImage: "calendar")
-                Spacer()
-                Text("\(report.sourceCount) 个账号 · \(report.postCount) 条")
-            }
-            .font(.system(size: 13.5, weight: .medium))
-            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("DAILY BRIEF")
+                        .font(.system(size: 11, weight: .black))
+                        .tracking(1.8)
+                        .foregroundStyle(.teal)
+                    Text(displayDate)
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                }
 
-            Divider()
+                Spacer()
+
+                Image(systemName: "sparkles")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Color.teal, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
+            Text("跨账号合并相同事实，只保留值得阅读的进展。")
+                .font(.system(size: 14.5))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 18) {
+                metric(value: "\(systems.count)", label: "体系")
+                metric(value: "\(report.sourceCount)", label: "来源")
+                metric(value: "\(report.postCount)", label: "动态")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 20)
+        .padding(18)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    @ViewBuilder
-    private func systemSection(_ system: TodayWorldYesterdayReportSystem) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(system.systemName)
-                .font(.system(size: 17, weight: .bold))
-                .padding(.bottom, 14)
+    private func metric(value: String, label: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(value).font(.system(size: 19, weight: .bold, design: .rounded))
+            Text(label).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
+        }
+    }
 
-            ForEach(Array(system.accounts.enumerated()), id: \.element.id) { index, account in
-                if index > 0 {
-                    Divider()
-                        .padding(.vertical, 14)
-                }
-
-                Button {
-                    selectedAccount = account
-                } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(account.name)
-                                .font(.system(size: 15.5, weight: .semibold))
-                            if account.sourceType == "company" {
-                                Text("机构账号")
-                                    .font(.system(size: 11.5, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Text(account.summary)
-                            .font(.system(size: 15))
-                            .lineSpacing(5)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        HStack(spacing: 4) {
-                            Text("\(account.postIDs.count) 条动态")
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9.5, weight: .semibold))
-                        }
-                        .font(.system(size: 12.5, weight: .medium))
+    private func systemCard(_ system: TodayWorldAdvancedReportSystem, index: Int) -> some View {
+        Button {
+            selectedSystem = system
+        } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Text(String(format: "%02d", index + 1))
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundStyle(.teal)
+                    Text(system.systemName)
+                        .font(.system(size: 17, weight: .bold))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("查看中文翻译和原文")
+
+                Text(system.summary)
+                    .font(.system(size: 15.5))
+                    .lineSpacing(6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+
+                Divider()
+
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(sourceLabel(system))
+                        .lineLimit(1)
+                    Spacer()
+                    Text("\(system.postIDs.count) 条依据")
+                }
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.secondary)
+            }
+            .padding(17)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.primary.opacity(0.055), lineWidth: 0.6)
             }
         }
+        .buttonStyle(.plain)
+        .accessibilityHint("查看引用动态和原文")
+    }
+
+    private var systems: [TodayWorldAdvancedReportSystem] {
+        report.report.advanced?.systems ?? []
+    }
+
+    private func sourceLabel(_ system: TodayWorldAdvancedReportSystem) -> String {
+        let names = system.sourceNames.isEmpty ? system.sourceKeys : system.sourceNames
+        return names.joined(separator: " · ")
     }
 
     private var displayDate: String {
@@ -1156,9 +1216,9 @@ private struct TodayWorldYesterdayReportSheet: View {
     }
 }
 
-private struct TodayWorldReportAccountPostsSheet: View {
+private struct TodayWorldReportSourcesSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let account: TodayWorldYesterdayReportAccount
+    let system: TodayWorldAdvancedReportSystem
     let reportDate: String
 
     @State private var posts: [Post] = []
@@ -1208,7 +1268,7 @@ private struct TodayWorldReportAccountPostsSheet: View {
                 }
             }
             .background(Color(uiColor: .systemBackground))
-            .navigationTitle(account.name)
+            .navigationTitle(system.systemName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -1217,7 +1277,7 @@ private struct TodayWorldReportAccountPostsSheet: View {
                 }
             }
         }
-        .task(id: account.id) { await load() }
+        .task(id: system.id) { await load() }
         .sheet(item: $selectedPost) { post in
             NavigationStack {
                 PostDetailView(post: post, presentedAsSheet: true)
@@ -1285,7 +1345,7 @@ private struct TodayWorldReportAccountPostsSheet: View {
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
         do {
             var loaded: [Post] = []
-            for postID in account.postIDs {
+            for postID in system.postIDs {
                 let post = try await client.fetchPost(id: postID)
                 loaded.append(post)
                 if post.needsXTranslation, let tweetID = post.xTweetID {

@@ -999,43 +999,75 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
 }
 
 struct TodayWorldYesterdayReportContent: Decodable, Equatable {
-    let systems: [TodayWorldYesterdayReportSystem]
+    let advanced: TodayWorldAdvancedReport?
 
     enum CodingKeys: String, CodingKey {
-        case systems
+        case advanced
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        systems = try container.decodeIfPresent([TodayWorldYesterdayReportSystem].self, forKey: .systems) ?? []
+        advanced = try container.decodeIfPresent(TodayWorldAdvancedReport.self, forKey: .advanced)
     }
 }
 
-struct TodayWorldYesterdayReportSystem: Decodable, Equatable, Identifiable {
+struct TodayWorldAdvancedReport: Decodable, Equatable {
+    let status: String
+    let stage: String?
+    let error: String?
+    let systems: [TodayWorldAdvancedReportSystem]
+    let systemCount: Int
+    let sourceCharCount: Int
+    let charCount: Int
+    let compressionRatio: Double?
+    let model: String?
+    let totalTokens: Int?
+    let costCNY: Double?
+    let completedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, stage, error, systems, model
+        case systemCount = "system_count"
+        case sourceCharCount = "source_char_count"
+        case charCount = "char_count"
+        case compressionRatio = "compression_ratio"
+        case totalTokens = "total_tokens"
+        case costCNY = "cost_cny"
+        case completedAt = "completed_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+        stage = try container.decodeIfPresent(String.self, forKey: .stage)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        systems = try container.decodeIfPresent([TodayWorldAdvancedReportSystem].self, forKey: .systems) ?? []
+        systemCount = try container.decodeIfPresent(Int.self, forKey: .systemCount) ?? systems.count
+        sourceCharCount = try container.decodeIfPresent(Int.self, forKey: .sourceCharCount) ?? 0
+        charCount = try container.decodeIfPresent(Int.self, forKey: .charCount) ?? 0
+        compressionRatio = try container.decodeIfPresent(Double.self, forKey: .compressionRatio)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
+        costCNY = try container.decodeIfPresent(Double.self, forKey: .costCNY)
+        completedAt = try container.decodeIfPresent(String.self, forKey: .completedAt)
+    }
+}
+
+struct TodayWorldAdvancedReportSystem: Decodable, Equatable, Identifiable {
     let systemKey: String
     let systemName: String
-    let accounts: [TodayWorldYesterdayReportAccount]
+    let summary: String
+    let sourceKeys: [String]
+    let sourceNames: [String]
+    let postIDs: [Int]
     var id: String { systemKey }
 
     enum CodingKeys: String, CodingKey {
-        case accounts
+        case summary
         case systemKey = "system_key"
         case systemName = "system_name"
-    }
-}
-
-struct TodayWorldYesterdayReportAccount: Decodable, Equatable, Identifiable {
-    let sourceKey: String
-    let name: String
-    let sourceType: String?
-    let summary: String
-    let postIDs: [Int]
-    var id: String { sourceKey }
-
-    enum CodingKeys: String, CodingKey {
-        case name, summary
-        case sourceKey = "source_key"
-        case sourceType = "source_type"
+        case sourceKeys = "source_keys"
+        case sourceNames = "source_names"
         case postIDs = "post_ids"
     }
 }
