@@ -7,7 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA1000000000000000000001 /* GoogleNoiseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000002 /* GoogleNoiseView.swift */; };
+		AA1000000000000000000001 /* GoogleSignalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000002 /* GoogleSignalView.swift */; };
+		AA2000000000000000000001 /* GoogleSignalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000002 /* GoogleSignalTests.swift */; };
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
 		0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F23 /* MarketView.swift */; };
 		0C1A2B3C4D5E6F708192A3B4 /* ChinaMacroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D2E3F405162738495A6B7C8 /* ChinaMacroView.swift */; };
@@ -104,7 +105,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		AA1000000000000000000002 /* GoogleNoiseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleNoiseView.swift; sourceTree = "<group>"; };
+		AA1000000000000000000002 /* GoogleSignalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalView.swift; sourceTree = "<group>"; };
+		AA2000000000000000000002 /* GoogleSignalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalTests.swift; sourceTree = "<group>"; };
 		041A88D0726A910552794148 /* FamousHoldingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingDetailView.swift; sourceTree = "<group>"; };
 		07AB1EAB21326C8E0E5C12EB /* MarketPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketPresentationTests.swift; sourceTree = "<group>"; };
 		07CD0E8186D0B14FE290474A /* LearningDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDetailView.swift; sourceTree = "<group>"; };
@@ -169,7 +171,7 @@
 		AA1000000000000000000003 /* GoogleNoise */ = {
 			isa = PBXGroup;
 			children = (
-				AA1000000000000000000002 /* GoogleNoiseView.swift */,
+				AA1000000000000000000002 /* GoogleSignalView.swift */,
 			);
 			path = GoogleNoise;
 			sourceTree = "<group>";
@@ -178,6 +180,7 @@
 			isa = PBXGroup;
 			children = (
 				AFDC2300DFD6141704CC0B16 /* CountryGDPRankingTests.swift */,
+				AA2000000000000000000002 /* GoogleSignalTests.swift */,
 				D9D7B5B9A81B19337F41D31D /* FamousHoldingsTests.swift */,
 				9A673417C2F4555F258D3B10 /* FeedAdapterTests.swift */,
 				2E41B4D8C7F35A209B6E1D53 /* IdeologyCampTests.swift */,
@@ -523,6 +526,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6EB37888E57023644BA4E8B0 /* CountryGDPRankingTests.swift in Sources */,
+				AA2000000000000000000001 /* GoogleSignalTests.swift in Sources */,
 				925FAFC4FD006E95D2EA124B /* FamousHoldingsTests.swift in Sources */,
 				776DA836074F7FFF481B3A5B /* FeedAdapterTests.swift in Sources */,
 				1D30A3C7B6E2491F8A5D0C42 /* IdeologyCampTests.swift in Sources */,
@@ -537,7 +541,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA1000000000000000000001 /* GoogleNoiseView.swift in Sources */,
+				AA1000000000000000000001 /* GoogleSignalView.swift in Sources */,
 				0C1A2B3C4D5E6F708192A3B4 /* ChinaMacroView.swift in Sources */,
 				0E1F2A3B4C5D6E7F8091A2B3 /* InstitutionResearchView.swift in Sources */,
 				0D1E2F30415263748596A7B8 /* CompanyResearchView.swift in Sources */,
