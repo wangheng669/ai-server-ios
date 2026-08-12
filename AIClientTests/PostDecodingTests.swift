@@ -484,10 +484,19 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.meta?.inReplyToStatusID, "42")
         XCTAssertEqual(post.meta?.replyContext?.displayText, "被回复的动态")
         XCTAssertEqual(post.meta?.replyContext?.handle, "@openai")
+        XCTAssertFalse(post.needsXReplyContextRefresh)
         let media = try XCTUnwrap(post.meta?.quotedTweet?.media?.first)
         XCTAssertTrue(media.isVideo)
         XCTAssertEqual(media.playbackURL?.absoluteString, "https://example.com/demo.mp4")
         XCTAssertEqual(media.previewURL?.absoluteString, "https://example.com/demo.jpg")
+    }
+
+    func testXReplyWithoutStoredContextRequestsDetailRefresh() throws {
+        let data = #"{"id":1,"source":"x","content":"Reply","post_link":"https://x.com/example/status/123","meta":{"in_reply_to_screen_name":"openai","in_reply_to_status_id":"42","lang":"en"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertTrue(post.needsXReplyContextRefresh)
+        XCTAssertTrue(post.needsXStoredDetailRefresh)
     }
 
     func testXDetailUsesStoredLongTextAndFormatsBullets() throws {
@@ -504,12 +513,15 @@ final class PostDecodingTests: XCTestCase {
     }
 
     func testDecodesLiveXTweetDetailResponse() throws {
-        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段","createdAt":"Sat Aug 01 08:16:38 +0000 2026","metrics":{"bookmarks":9,"likes":15,"quotes":0,"replies":1,"retweets":2,"views":3740}}}}"#.data(using: .utf8)!
+        let data = #"{"success":true,"data":{"item":{"id":"123","text":"short…","shortText":"short…","noteText":"完整正文第一段\n\n第二段","author":{"name":"OpenAI","screenName":"openai","profileImageUrl":"https://example.com/openai.jpg","verified":true},"createdAt":"Sat Aug 01 08:16:38 +0000 2026","metrics":{"bookmarks":9,"likes":15,"quotes":0,"replies":1,"retweets":2,"views":3740},"lang":"en"}}}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(XTweetDetailResponse.self, from: data)
 
         XCTAssertEqual(response.data.item.fullText, "完整正文第一段\n\n第二段")
         XCTAssertEqual(response.data.item.metrics?.views, 3740)
         XCTAssertEqual(response.data.item.metrics?.bookmarks, 9)
+        XCTAssertEqual(response.data.item.author?.screenName, "openai")
+        XCTAssertEqual(response.data.item.author?.profileImageURL, "https://example.com/openai.jpg")
+        XCTAssertEqual(response.data.item.lang, "en")
     }
 
     func testDecodesCompleteXCommentMetrics() throws {
