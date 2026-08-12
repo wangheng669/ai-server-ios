@@ -123,7 +123,7 @@ struct GlobalAssetsRankingView: View {
                 if index < ranking.assets.count - 1 {
                     Divider()
                         .overlay(InvestmentDesign.divider)
-                        .padding(.leading, 52)
+                        .padding(.leading, 56)
                 }
             }
         }
@@ -154,7 +154,6 @@ struct GlobalAssetsRankingView: View {
 
     private func assetRow(_ asset: GlobalAsset) -> some View {
         HStack(spacing: 10) {
-            rankBadge(asset.rank)
             assetIcon(asset, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(asset.name).font(.body.weight(.semibold)).lineLimit(1)
@@ -177,14 +176,6 @@ struct GlobalAssetsRankingView: View {
         .frame(minHeight: 62)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("第 \(asset.rank) 名，\(asset.name)，市值 \(GlobalAssetsFormat.marketCap(asset.marketCapUSD))")
-    }
-
-    private func rankBadge(_ rank: Int) -> some View {
-        Text("\(rank)")
-            .font(.system(size: 13, weight: rank <= 3 ? .bold : .regular, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(rank <= 3 ? InvestmentDesign.accent : Color.secondary)
-            .frame(width: 26)
     }
 
     private func assetIcon(_ asset: GlobalAsset, size: CGFloat) -> some View {

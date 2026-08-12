@@ -14,11 +14,6 @@ struct CountryGDPRoute: Hashable, Identifiable {
         countryName = country.localizedName
     }
 
-    var flag: String {
-        iso2Code.uppercased().unicodeScalars.compactMap { scalar in
-            UnicodeScalar(127397 + scalar.value).map(String.init)
-        }.joined()
-    }
 }
 
 struct CountryGDPHistoryResponse: Decodable {
@@ -159,8 +154,7 @@ struct CountryGDPDetailView: View {
     private func hero(_ history: CountryGDPHistory?) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 11) {
-                Text(route.flag)
-                    .font(.system(size: 32))
+                FlatCountryFlag(iso2Code: route.iso2Code, width: 42, height: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(localizedName)
                         .font(.title3.bold())
