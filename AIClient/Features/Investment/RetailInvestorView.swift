@@ -38,23 +38,18 @@ struct RetailInvestorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     marketPicker
                     if let message = selectedMarket == .korea ? store.koreaLeverageErrorMessage : store.errorMessage {
                         errorBanner(message)
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
                     }
                     if selectedMarket == .korea {
                         koreaLeverageContent
                     } else {
                         sentimentDecisionHero
-                        actionPlaybook
-                        sectionGap
-                        investorMoodCard
                         if selectedMarket == .china {
-                            sectionGap
-                            sectorHighlights
+                            chinaSupplementCard
                         }
                         methodologyNote
                     }
@@ -62,11 +57,6 @@ struct RetailInvestorView: View {
                 .padding(.bottom, 36)
             }
             .background(InvestmentDesign.canvas)
-            .refreshable {
-                async let overview: Void = store.load(marketStore: marketStore, force: true)
-                async let details: Void = store.loadDetails(for: selectedMarket, force: true)
-                _ = await (overview, details)
-            }
             .task(id: rootTabIsActive) {
                 guard rootTabIsActive else { return }
                 await store.load(marketStore: marketStore)
@@ -181,7 +171,7 @@ struct RetailInvestorView: View {
     private var sentimentDecisionHero: some View {
         let snapshot = store.snapshot(for: selectedMarket)
         let score = snapshot?.score
-        let accent = temperatureColor(score)
+        let accent = InvestmentDesign.accent
         let breadth = selectedBreadth
         return VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .center, spacing: 18) {
@@ -231,28 +221,20 @@ struct RetailInvestorView: View {
             .frame(height: 7)
 
             HStack(spacing: 0) {
-                heroMetric("上涨", value: breadth.total > 0 ? "\(Int((breadth.upRatio * 100).rounded()))%" : "—", tint: breadth.total > 0 ? InvestmentDesign.gain : .secondary)
+                heroMetric("上涨", value: breadth.total > 0 ? "\(Int((breadth.upRatio * 100).rounded()))%" : "—", tint: breadth.total > 0 ? InvestmentDesign.accent : .secondary)
                 heroDivider
-                heroMetric("赚钱效应", value: breadthEffectLabel(breadth), tint: breadth.total > 0 ? (breadth.up >= breadth.down ? InvestmentDesign.gain : InvestmentDesign.loss) : .secondary)
+                heroMetric("赚钱效应", value: breadthEffectLabel(breadth), tint: breadth.total > 0 ? InvestmentDesign.accent : .secondary)
                 heroDivider
-                heroMetric("估值位置", value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—", tint: .blue)
+                heroMetric("估值位置", value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—", tint: InvestmentDesign.accent)
             }
         }
         .padding(20)
-        .background(
-            LinearGradient(
-                colors: [InvestmentDesign.surface, accent.opacity(0.10)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-        )
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(accent.opacity(0.16), lineWidth: 0.75)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.75)
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 10)
     }
 
     private func heroMetric(_ title: String, value: String, tint: Color) -> some View {
@@ -580,14 +562,14 @@ struct RetailInvestorView: View {
                     HStack(spacing: 10) {
                         Text(String(index + 1))
                             .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(index == 0 ? InvestmentDesign.gain : Color.secondary.opacity(0.58))
+                            .foregroundStyle(index == 0 ? InvestmentDesign.accent : Color.secondary.opacity(0.58))
                             .frame(width: 14)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(sector.name)
                                 .font(.system(size: 13, weight: .semibold))
                             GeometryReader { proxy in
                                 Capsule()
-                                    .fill((sector.percentValue >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss).opacity(0.58))
+                                    .fill(InvestmentDesign.accent.opacity(index == 0 ? 0.72 : 0.42))
                                     .frame(width: max(10, proxy.size.width * abs(sector.percentValue) / maxChange))
                             }
                             .frame(height: 3)
@@ -596,7 +578,7 @@ struct RetailInvestorView: View {
                         Spacer()
                         Text(RetailSentimentFormat.percent(sector.percentValue))
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(sector.percentValue >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
+                            .foregroundStyle(.primary)
                             .frame(width: 56, alignment: .trailing)
                     }
                     .frame(height: 32)
@@ -608,7 +590,21 @@ struct RetailInvestorView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(InvestmentDesign.surface)
+    }
+
+    private var chinaSupplementCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectorHighlights
+            Divider().overlay(InvestmentDesign.divider)
+            investorMoodCard
+        }
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.75)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 16)
     }
 
     private var marketBreadthCard: some View {
@@ -774,7 +770,6 @@ struct RetailInvestorView: View {
             }
         }
         .padding(.vertical, 16)
-        .background(InvestmentDesign.surface)
     }
 
     private func investorMoodSummary(_ items: [InvestorMoodItem]) -> some View {
@@ -791,7 +786,7 @@ struct RetailInvestorView: View {
             ForEach(groups) { group in
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(RetailSentimentFormat.moodColor(group.label))
+                        .fill(InvestmentDesign.accent)
                         .frame(width: 6, height: 6)
                     Text("\(group.label) \(group.count)")
                 }
@@ -849,7 +844,7 @@ struct RetailInvestorView: View {
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.top, 2)
     }
 
     private var sectionGap: some View {
@@ -1267,7 +1262,7 @@ private struct InvestorMoodVideoCard: View {
                     image.resizable().scaledToFill()
                 } else {
                     LinearGradient(
-                        colors: [.black, RetailSentimentFormat.moodColor(item.label).opacity(0.55)],
+                        colors: [.black, InvestmentDesign.accent.opacity(0.48)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -1289,13 +1284,12 @@ private struct InvestorMoodVideoCard: View {
     }
 
     private var moodBadge: some View {
-        let color = RetailSentimentFormat.moodColor(item.label)
         return Text(item.stale ? "\(item.label) · 旧样本" : item.label)
             .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(color)
+            .foregroundStyle(InvestmentDesign.accent)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(color.opacity(0.11), in: Capsule())
+            .background(InvestmentDesign.accentSoft, in: Capsule())
     }
 }
 
