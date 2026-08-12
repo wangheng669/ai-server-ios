@@ -2,6 +2,18 @@ import XCTest
 @testable import AIServerClient
 
 final class FeedAdapterTests: XCTestCase {
+    func testRSSCardImmediatelyUsesServerLocalizedSummaryAsTitle() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:71","title":"Target appoints its first chief AI officer","summary":"大型零售商押注人工智能，Target任命其首位首席人工智能官","content":"In this article"}"#.utf8)
+        )
+
+        XCTAssertEqual(post.rssServerLocalizedTitle, "大型零售商押注人工智能，Target任命其首位首席人工智能官")
+        XCTAssertEqual(post.displayTitle, "大型零售商押注人工智能，Target任命其首位首席人工智能官")
+        XCTAssertEqual(post.rssListContent, post.displayTitle)
+        XCTAssertFalse(post.needsRSSCardTranslation)
+    }
+
     func testEnglishRSSCardRequestsChineseTranslation() throws {
         let post = try JSONDecoder().decode(
             Post.self,
