@@ -15,6 +15,18 @@ struct FeedDiskSnapshot: Codable {
 struct RSSCardTranslation: Equatable {
     let title: String
     let excerpt: String?
+
+    static func translated(
+        title: String,
+        excerpt: String?,
+        using translate: (String) async throws -> String
+    ) async throws -> RSSCardTranslation {
+        let translatedTitle = try await translate(title)
+        let translatedExcerpt: String? = if let excerpt {
+            try? await translate(excerpt)
+        } else { nil }
+        return RSSCardTranslation(title: translatedTitle, excerpt: translatedExcerpt)
+    }
 }
 
 actor FeedDiskCache {
@@ -208,14 +220,9 @@ final class NewsFeedViewModel: ObservableObject {
         }
         self.translateRSSCard = translateRSSCard ?? { title, excerpt in
             let service = PersonArticleTranslationService.shared
-            let translatedTitle = try await service.translate(title)
-            let translatedExcerpt: String?
-            if let excerpt {
-                translatedExcerpt = try await service.translate(excerpt)
-            } else {
-                translatedExcerpt = nil
+            return try await RSSCardTranslation.translated(title: title, excerpt: excerpt) {
+                try await service.translate($0)
             }
-            return RSSCardTranslation(title: translatedTitle, excerpt: translatedExcerpt)
         }
         self.fetchRSSFeeds = fetchRSSFeeds ?? { try await client.fetchRSSFeeds() }
         self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID, page, limit in
@@ -301,6 +308,7 @@ final class NewsFeedViewModel: ObservableObject {
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
             selectedRSSPosts = warmedPosts
             canLoadMoreRSSSelection = !result.isEmpty
+            scheduleRSSCardTranslations(for: warmedPosts)
         } catch is CancellationError {
             return
         } catch {
@@ -328,6 +336,7 @@ final class NewsFeedViewModel: ObservableObject {
             selectedRSSPage = nextPage
             canLoadMoreRSSSelection = !result.isEmpty
             errorMessage = nil
+            scheduleRSSCardTranslations(for: warmedPosts)
         } catch is CancellationError {
             return
         } catch {
@@ -478,22 +487,89 @@ final class NewsFeedViewModel: ObservableObject {
               let title = post.rssTranslationTitle,
               rssCardTranslations[post.id] == nil,
               !loadingRSSTranslationIDs.contains(post.id) else { return }
+        if let cached = Self.cachedRSSCardTranslation(for: post, sourceTitle: title) {
+            rssCardTranslations[post.id] = cached
+            return
+        }
         loadingRSSTranslationIDs.insert(post.id)
         defer { loadingRSSTranslationIDs.remove(post.id) }
         do {
             let translation = try await translateRSSCard(title, post.rssTranslationExcerpt)
             guard !Task.isCancelled else { return }
             let translatedTitle = translation.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !translatedTitle.isEmpty, translatedTitle != title else { return }
-            rssCardTranslations[post.id] = RSSCardTranslation(
+            guard !translatedTitle.isEmpty,
+                  translatedTitle != title,
+                  Self.containsHanCharacters(translatedTitle) else { return }
+            let value = RSSCardTranslation(
                 title: translatedTitle,
                 excerpt: translation.excerpt?.trimmingCharacters(in: .whitespacesAndNewlines)
             )
+            rssCardTranslations[post.id] = value
+            Self.cacheRSSCardTranslation(value, for: post, sourceTitle: title)
         } catch is CancellationError {
             return
         } catch {
             // Translation is best-effort. Keep the source card visible on failure.
         }
+    }
+
+    /// Starts translation independently of SwiftUI row lifetime, so quick
+    /// scrolling cannot cancel headlines that have already been fetched.
+    private func scheduleRSSCardTranslations(for posts: [Post]) {
+        let candidates = posts.filter(\.needsRSSCardTranslation)
+        guard !candidates.isEmpty else { return }
+        for post in candidates {
+            Task { @MainActor [weak self] in
+                guard let self, !Task.isCancelled else { return }
+                await translateRSSPostIfNeeded(post)
+            }
+        }
+    }
+
+    private struct CachedRSSCardTranslation: Codable {
+        let sourceTitle: String
+        let translatedTitle: String
+        let translatedExcerpt: String?
+    }
+
+    private static func cachedRSSCardTranslation(for post: Post, sourceTitle: String) -> RSSCardTranslation? {
+        guard let data = UserDefaults.standard.data(forKey: rssCardTranslationCacheKey(postID: post.id)),
+              let cached = try? JSONDecoder().decode(CachedRSSCardTranslation.self, from: data),
+              cached.sourceTitle == sourceTitle,
+              containsHanCharacters(cached.translatedTitle) else { return nil }
+        return RSSCardTranslation(title: cached.translatedTitle, excerpt: cached.translatedExcerpt)
+    }
+
+    private static func cacheRSSCardTranslation(_ value: RSSCardTranslation, for post: Post, sourceTitle: String) {
+        let cached = CachedRSSCardTranslation(
+            sourceTitle: sourceTitle,
+            translatedTitle: value.title,
+            translatedExcerpt: value.excerpt
+        )
+        guard let data = try? JSONEncoder().encode(cached) else { return }
+        let defaults = UserDefaults.standard
+        let key = rssCardTranslationCacheKey(postID: post.id)
+        defaults.set(data, forKey: key)
+        var keys = defaults.stringArray(forKey: rssCardTranslationCacheIndexKey) ?? []
+        keys.removeAll { $0 == key }
+        keys.append(key)
+        if keys.count > 600 {
+            for expiredKey in keys.prefix(keys.count - 600) {
+                defaults.removeObject(forKey: expiredKey)
+            }
+            keys = Array(keys.suffix(600))
+        }
+        defaults.set(keys, forKey: rssCardTranslationCacheIndexKey)
+    }
+
+    private static let rssCardTranslationCacheIndexKey = "feed.rss-card-translation.v2.index"
+
+    private static func rssCardTranslationCacheKey(postID: Int) -> String {
+        "feed.rss-card-translation.v2.\(postID)"
+    }
+
+    private static func containsHanCharacters(_ value: String) -> Bool {
+        value.unicodeScalars.contains { (0x4E00...0x9FFF).contains(Int($0.value)) }
     }
 
     private func scheduleXTranslationPublish() {
@@ -652,6 +728,7 @@ final class NewsFeedViewModel: ObservableObject {
             }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             guard source == requestedSource, activeRefreshID == refreshID else { return }
             if completesSourceSwitch, posts.isEmpty {
@@ -687,6 +764,7 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
@@ -771,6 +849,7 @@ final class NewsFeedViewModel: ObservableObject {
         canLoadMore = snapshot.canLoadMore
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         isSwitchingSource = false
+        scheduleRSSCardTranslations(for: posts)
     }
 
     private func persistCurrentSnapshot() {
