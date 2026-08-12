@@ -78,6 +78,7 @@ struct InvestmentView: View {
     @State private var section: InvestmentSection
     @State private var marketShowsDetail = false
     @State private var holdingsShowsDetail = false
+    @State private var headerIsCompact = false
     @State private var marketStore = MarketStore()
     @State private var sentimentStore = RetailSentimentStore()
     @State private var holdingsStore = FamousHoldingsStore()
@@ -110,11 +111,18 @@ struct InvestmentView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !showsDetail {
-                InvestmentHeader(selection: $section)
+                InvestmentHeader(selection: $section, isCompact: headerIsCompact && section == .market)
             }
 
             TabView(selection: $section) {
-                MarketView(store: marketStore, showsDetail: $marketShowsDetail)
+                MarketView(
+                    store: marketStore,
+                    showsDetail: $marketShowsDetail,
+                    onCompactHeaderChange: { compact in
+                        guard section == .market, headerIsCompact != compact else { return }
+                        withAnimation(.easeOut(duration: 0.18)) { headerIsCompact = compact }
+                    }
+                )
                     .tag(InvestmentSection.market)
 
                 RetailInvestorView(
@@ -150,6 +158,7 @@ struct InvestmentView: View {
             marketShowsDetail = false
             holdingsShowsDetail = false
             showsDetail = false
+            headerIsCompact = false
         }
         .onDisappear {
             showsDetail = false
@@ -159,6 +168,7 @@ struct InvestmentView: View {
 
 private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
+    let isCompact: Bool
 
     private var category: InvestmentCategory {
         selection.category
@@ -169,66 +179,56 @@ private struct InvestmentHeader: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 0) {
-                ForEach(InvestmentCategory.allCases) { item in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            selection = item.defaultSection
-                        }
-                    } label: {
-                        VStack(spacing: 0) {
-                            Text(item.rawValue)
-                                .font(.system(size: 15, weight: category == item ? .semibold : .regular))
-                                .foregroundStyle(primaryColor(isSelected: category == item))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 38)
-                            Capsule()
-                                .fill(category == item ? InvestmentDesign.accent : .clear)
-                                .frame(width: 20, height: 2.5)
-                        }
+        Group {
+            if !isCompact {
+                compactHeader
+                    .padding(.horizontal, 16)
+                    .padding(.top, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 8)
+                    .background(usesDarkStyle ? GDPDesign.midnight : InvestmentDesign.surface)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(usesDarkStyle ? Color.white.opacity(0.08) : InvestmentDesign.divider)
+                            .frame(height: 0.5)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(category == item ? .isSelected : [])
-                }
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-
-            HStack(spacing: 8) {
-                ForEach(category.sections) { section in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            selection = section
-                        }
-                    } label: {
-                        Text(section.subsectionTitle)
-                            .font(.system(size: 13, weight: selection == section ? .semibold : .regular))
-                            .foregroundStyle(secondaryColor(isSelected: selection == section))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(
-                                Capsule()
-                                    .fill(secondaryBackground(isSelected: selection == section))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == section ? .isSelected : [])
-                }
-            }
-            .id(category)
-            .transition(.opacity)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 8)
-        .background(usesDarkStyle ? GDPDesign.midnight : InvestmentDesign.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(usesDarkStyle ? Color.white.opacity(0.08) : InvestmentDesign.divider)
-                .frame(height: 0.5)
         }
         .animation(.easeOut(duration: 0.18), value: usesDarkStyle)
         .animation(.easeOut(duration: 0.18), value: category)
+        .animation(.easeOut(duration: 0.18), value: isCompact)
+    }
+
+    private var compactHeader: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(InvestmentCategory.allCases) { item in
+                    Button(item.rawValue) { selection = item.defaultSection }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(category.rawValue).font(.subheadline.weight(.semibold))
+                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(primaryColor(isSelected: true))
+                .frame(minHeight: 36)
+            }
+            Divider().frame(height: 22)
+            ForEach(category.sections) { section in
+                Button { selection = section } label: {
+                    Text(section.subsectionTitle)
+                        .font(.subheadline.weight(selection == section ? .semibold : .regular))
+                        .foregroundStyle(secondaryColor(isSelected: selection == section))
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 36)
+                        .background(secondaryBackground(isSelected: selection == section), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == section ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     private func primaryColor(isSelected: Bool) -> Color {

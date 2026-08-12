@@ -2,6 +2,22 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testRealtimeProxyUsesClearDetailAndCompactMarketNames() throws {
+        let data = Data(#"{"symbol":"QQQ","name":"纳斯达克100实时代理（QQQ）","displayName":"纳斯达克100实时代理（QQQ）","instrumentType":"realtime-proxy-etf","price":718.45}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.detailPresentationName, "纳斯达克100 ETF")
+        XCTAssertEqual(quote.detailInstrumentLabel, "QQQ · 指数代理 ETF")
+        XCTAssertEqual(quote.compactMarketName, "纳指100实时代理（QQQ）")
+    }
+
+    func testCompactMarketNameRemovesFuturesNoise() throws {
+        let data = Data(#"{"symbol":"NQ1!","name":"纳斯达克 100 E-mini 期货","price":29740}"#.utf8)
+        let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
+
+        XCTAssertEqual(quote.compactMarketName, "纳指 100 期货")
+    }
+
     func testSentimentSnapshotCachePolicyUsesAvailableCacheOnWeakNetworks() {
         XCTAssertEqual(
             marketRequestCachePolicy(bypassCache: false, useCachedResponseWhenAvailable: true),

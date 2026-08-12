@@ -1306,6 +1306,31 @@ extension MarketQuote {
         displayName ?? name
     }
 
+    var detailPresentationName: String {
+        guard instrumentType == "realtime-proxy-etf" else { return presentationName }
+        let base = presentationName
+            .replacingOccurrences(of: "实时代理", with: "")
+            .replacingOccurrences(of: "（\(symbol)）", with: "")
+            .replacingOccurrences(of: "(\(symbol))", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return base.localizedCaseInsensitiveContains("ETF") ? base : "\(base) ETF"
+    }
+
+    var detailInstrumentLabel: String {
+        if instrumentType == "realtime-proxy-etf" { return "\(displayCode) · 指数代理 ETF" }
+        if instrumentType == "reference-index" { return "\(displayCode) · 参考指数" }
+        return displayCode
+    }
+
+    var compactMarketName: String {
+        presentationName
+            .replacingOccurrences(of: "纳斯达克 100", with: "纳指 100")
+            .replacingOccurrences(of: "纳斯达克100", with: "纳指100")
+            .replacingOccurrences(of: "道琼斯工业指数", with: "道指")
+            .replacingOccurrences(of: " E-mini", with: "")
+            .replacingOccurrences(of: "E-mini ", with: "")
+    }
+
     var freshnessLabel: String {
         if tradingSession == .alwaysOpen { return tradingSession.displayLabel }
         if tradingSession == .closed {

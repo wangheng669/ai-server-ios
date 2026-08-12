@@ -21,6 +21,7 @@ private struct MarketDetailRoute: Identifiable, Equatable {
 struct MarketView: View {
     @Binding private var showsDetail: Bool
     private let store: MarketStore
+    private let onCompactHeaderChange: (Bool) -> Void
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -40,18 +41,30 @@ struct MarketView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     @MainActor
-    init(store: MarketStore, showsDetail: Binding<Bool> = .constant(false)) {
+    init(
+        store: MarketStore,
+        showsDetail: Binding<Bool> = .constant(false),
+        onCompactHeaderChange: @escaping (Bool) -> Void = { _ in }
+    ) {
         self.store = store
+        self.onCompactHeaderChange = onCompactHeaderChange
         _showsDetail = showsDetail
     }
 
     @MainActor
-    init(showsDetail: Binding<Bool> = .constant(false)) {
-        self.init(store: MarketStore(), showsDetail: showsDetail)
+    init(
+        showsDetail: Binding<Bool> = .constant(false),
+        onCompactHeaderChange: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.init(
+            store: MarketStore(),
+            showsDetail: showsDetail,
+            onCompactHeaderChange: onCompactHeaderChange
+        )
     }
 
     var body: some View {
-        MarketHomeView(store: store) {
+        MarketHomeView(store: store, onCompactHeaderChange: onCompactHeaderChange) {
             selectedDetail = MarketDetailRoute(symbol: $0)
         }
         .sheet(item: $selectedDetail) { route in
@@ -84,6 +97,7 @@ struct MarketView: View {
 
 private struct MarketHomeView: View {
     let store: MarketStore
+    let onCompactHeaderChange: (Bool) -> Void
     let onSelectIndex: (String) -> Void
     @State private var selectedMarket: MarketRegion = {
         #if DEBUG
@@ -109,7 +123,14 @@ private struct MarketHomeView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    Color.clear.frame(height: 0).id("market-top")
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: MarketHomeScrollOffsetPreferenceKey.self,
+                            value: geometry.frame(in: .named("market-scroll")).minY
+                        )
+                    }
+                    .frame(height: 1)
+                    .id("market-top")
                     ZStack {
                         MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
                             .id(selectedMarket)
@@ -150,12 +171,16 @@ private struct MarketHomeView: View {
                 }
             }
             .background(MarketTerminalPalette.header.ignoresSafeArea())
+            .coordinateSpace(name: "market-scroll")
             .scrollIndicators(.hidden)
             .refreshable { await store.refresh() }
             .onChange(of: selectedMarket) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo("market-top", anchor: .top)
                 }
+            }
+            .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
+                onCompactHeaderChange(offset < -28)
             }
             .task {
                 #if DEBUG
@@ -226,6 +251,14 @@ private struct MarketHomeView: View {
     }
 }
 
+private struct MarketHomeScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 private enum MarketTerminalPalette {
     static let header = InvestmentDesign.surface
     static let headerSurface = InvestmentDesign.secondarySurface
@@ -290,6 +323,7 @@ private struct MarketTerminalHero: View {
     let store: MarketStore
     let region: MarketRegion
     let onSelectIndex: (String) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
     private var overnightQuote: MarketQuote? {
@@ -301,66 +335,12 @@ private struct MarketTerminalHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top) {
-                HStack(spacing: 6) {
-                    Circle().fill(sessionTint).frame(width: 7, height: 7)
-                    Text(sessionHeadline)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(sessionTint)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                        .layoutPriority(1)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(heroDate)
-                    MarketLiveStatus(store: store)
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Color.secondary)
-            }
+            heroStatusHeader
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(displayedQuote?.presentationName ?? quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name)
-                            .font(.system(size: 22, weight: .semibold))
-                            .lineLimit(1)
-                            .layoutPriority(1)
-                        Text(overnightQuote.map { "\($0.displayCode) · 指数期货夜盘" }
-                            ?? quote?.displayCode
-                            ?? CoreDescriptor(symbol: region.primarySymbol).code)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Color.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                        Spacer(minLength: 0)
-                    }
-                    HStack(alignment: .bottom, spacing: 15) {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                                .font(.system(size: 36, weight: .semibold))
-                                .monospacedDigit()
-                                .tracking(-0.8)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.78)
-                            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
-                                .font(.system(size: 15, weight: .semibold))
-                                .monospacedDigit()
-                                .foregroundStyle(quoteTint(displayedQuote))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.6)
-                                .allowsTightening(true)
-                        }
-                        .frame(width: 154, alignment: .leading)
-
-                        TerminalLeadChart(
-                            quote: displayedQuote,
-                            trend: store.trendValues(for: displayedQuote),
-                            isOvernight: overnightQuote != nil
-                        )
-                             .frame(maxWidth: .infinity, minHeight: 128)
-                     }
+                    heroInstrumentTitle
+                    heroPriceAndChart
                 }
                 .foregroundStyle(.primary)
             }
@@ -370,14 +350,24 @@ private struct MarketTerminalHero: View {
 
             Group {
             if region == .crypto {
-                HStack(spacing: 0) {
-                    cryptoMetric(symbol: "BINANCE:ETHUSDT")
-                    TerminalDivider()
-                    cryptoMetric(symbol: "BINANCE:SOLUSDT")
-                    TerminalDivider()
-                    cryptoMetric(symbol: "BINANCE:BNBUSDT")
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 0) {
+                        cryptoMetric(symbol: "BINANCE:ETHUSDT").frame(height: 58)
+                        Divider()
+                        cryptoMetric(symbol: "BINANCE:SOLUSDT").frame(height: 58)
+                        Divider()
+                        cryptoMetric(symbol: "BINANCE:BNBUSDT").frame(height: 58)
+                    }
+                    .dynamicTypeSize(.large)
+                } else {
+                    HStack(spacing: 0) {
+                        cryptoMetric(symbol: "BINANCE:ETHUSDT")
+                        TerminalDivider()
+                        cryptoMetric(symbol: "BINANCE:SOLUSDT")
+                        TerminalDivider()
+                        cryptoMetric(symbol: "BINANCE:BNBUSDT")
+                    }
                 }
-                .frame(height: 76)
             } else if region == .china {
                 ChinaMarketMetrics(store: store)
             } else if region == .japan {
@@ -403,30 +393,29 @@ private struct MarketTerminalHero: View {
                     companionSymbol: "^KS11"
                 )
             } else if region == .unitedStates {
-                HStack(spacing: 0) {
-                     MarketTerminalMetric(
-                        title: "VIX 恐慌指数",
-                        value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
-                        change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
-                        tint: quoteTint(store.quote(symbol: "^VIX")),
-                         trend: store.trendValues(for: store.quote(symbol: "^VIX"))
-                    )
-                    TerminalDivider()
-                    MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
-                    TerminalDivider()
-                    MarketTerminalMetric(
-                        title: "美国 10Y 国债收益率",
-                        value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
-                        change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
-                        tint: quoteTint(store.quote(symbol: "^TNX")),
-                         trend: store.trendValues(for: store.quote(symbol: "^TNX"))
-                    )
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 0) {
+                        unitedStatesVIXMetric.frame(height: 58)
+                        Divider()
+                        MarketTerminalSentiment(sentiment: store.dashboard?.sentiment).frame(height: 58)
+                        Divider()
+                        unitedStatesYieldMetric.frame(height: 58)
+                    }
+                    .dynamicTypeSize(.large)
+                } else {
+                    HStack(spacing: 0) {
+                        unitedStatesVIXMetric
+                        TerminalDivider()
+                        MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
+                        TerminalDivider()
+                        unitedStatesYieldMetric
+                    }
                 }
             } else {
                  EuropeMarketMetrics(store: store)
             }
             }
-            .frame(height: 76)
+            .frame(height: dynamicTypeSize.isAccessibilitySize ? 180 : 76)
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -462,6 +451,140 @@ private struct MarketTerminalHero: View {
         )
     }
 
+    private var unitedStatesVIXMetric: some View {
+        MarketTerminalMetric(
+            title: "VIX 恐慌指数",
+            value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
+            change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
+            tint: quoteTint(store.quote(symbol: "^VIX")),
+            trend: store.trendValues(for: store.quote(symbol: "^VIX"))
+        )
+    }
+
+    private var unitedStatesYieldMetric: some View {
+        MarketTerminalMetric(
+            title: "美国 10Y 国债收益率",
+            value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
+            change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
+            tint: quoteTint(store.quote(symbol: "^TNX")),
+            trend: store.trendValues(for: store.quote(symbol: "^TNX"))
+        )
+    }
+
+    @ViewBuilder private var heroStatusHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 7) {
+                sessionStatus
+                HStack(spacing: 8) {
+                    Text(heroDateLabel)
+                    MarketLiveStatus(store: store)
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color.secondary)
+                .dynamicTypeSize(.large)
+            }
+        } else {
+            HStack(alignment: .top) {
+                sessionStatus
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(heroDateLabel)
+                    MarketLiveStatus(store: store)
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.secondary)
+            }
+        }
+    }
+
+    private var sessionStatus: some View {
+        HStack(spacing: 6) {
+            Circle().fill(sessionTint).frame(width: 7, height: 7)
+            Text(sessionHeadline)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(sessionTint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+    }
+
+    @ViewBuilder private var heroInstrumentTitle: some View {
+        let name = displayedQuote?.presentationName ?? quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
+        let code = overnightQuote.map { "\($0.displayCode) · 指数期货夜盘" }
+            ?? quote?.displayCode
+            ?? CoreDescriptor(symbol: region.primarySymbol).code
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name).font(.title3.weight(.semibold)).lineLimit(2)
+                Text(code).font(.caption.weight(.medium)).foregroundStyle(Color.secondary).lineLimit(1)
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(name)
+                    .font(.system(size: 22, weight: .semibold))
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Text(code)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    @ViewBuilder private var heroPriceAndChart: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 12) {
+                heroPriceSummary
+                heroChart.frame(maxWidth: .infinity, minHeight: 112)
+            }
+        } else {
+            GeometryReader { geometry in
+                HStack(alignment: .bottom, spacing: 12) {
+                    heroPriceSummary
+                        .frame(width: max(120, geometry.size.width - 182), alignment: .leading)
+                        .clipped()
+                    heroChart.frame(width: 170, height: 128)
+                }
+            }
+            .frame(height: 128)
+        }
+    }
+
+    private var heroPriceSummary: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                .font(.system(.largeTitle, design: .default, weight: .semibold))
+                .monospacedDigit()
+                .tracking(-0.8)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
+                .font(.headline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(quoteTint(displayedQuote))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var heroChart: some View {
+        TerminalLeadChart(
+            quote: displayedQuote,
+            trend: store.trendValues(for: displayedQuote),
+            isOvernight: overnightQuote != nil
+        )
+    }
+
+    private var heroDateLabel: String {
+        "\(region == .crypto ? "行情日期" : "交易日") \(heroDate)"
+    }
+
     private var heroDate: String {
         if let tradingDate = quote?.quality?.tradingDate,
            let date = DateFormatter.marketTradingDate.date(from: tradingDate) {
@@ -480,14 +603,28 @@ private struct MarketTerminalHero: View {
 
 private struct EuropeMarketMetrics: View {
     let store: MarketStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 0) {
-            metric("欧洲50", "^STOXX50E")
-            TerminalDivider()
-            metric("德国 DAX", "^GDAXI")
-            TerminalDivider()
-            metric("英国 FTSE", "^FTSE")
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 0) {
+                    metric("欧洲50", "^STOXX50E").frame(height: 58)
+                    Divider()
+                    metric("德国 DAX", "^GDAXI").frame(height: 58)
+                    Divider()
+                    metric("英国 FTSE", "^FTSE").frame(height: 58)
+                }
+                .dynamicTypeSize(.large)
+            } else {
+                HStack(spacing: 0) {
+                    metric("欧洲50", "^STOXX50E")
+                    TerminalDivider()
+                    metric("德国 DAX", "^GDAXI")
+                    TerminalDivider()
+                    metric("英国 FTSE", "^FTSE")
+                }
+            }
         }
     }
 
@@ -512,42 +649,69 @@ private struct RegionalMarketMetrics: View {
     let yieldSymbol: String
     let companionTitle: String
     let companionSymbol: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var exchangeQuote: MarketQuote? { store.quote(symbol: exchangeSymbol) }
     private var yieldQuote: MarketQuote? { store.quote(symbol: yieldSymbol) }
     private var companionQuote: MarketQuote? { store.quote(symbol: companionSymbol) }
 
     var body: some View {
-        HStack(spacing: 0) {
-            MarketTerminalMetric(
-                title: exchangeTitle,
-                value: exchangeQuote.map { number($0.price, digits: exchangeDigits) } ?? "—",
-                change: exchangeQuote?.formattedPercent ?? exchangeSymbol,
-                tint: quoteTint(exchangeQuote),
-                trend: exchangeQuote?.trend ?? []
-            )
-            TerminalDivider()
-            MarketTerminalMetric(
-                title: yieldTitle,
-                value: yieldQuote.map { String(format: "%.2f%%", $0.price) } ?? "—",
-                change: yieldQuote?.formattedPercent ?? "等待行情",
-                tint: quoteTint(yieldQuote),
-                trend: yieldQuote?.trend ?? []
-            )
-            TerminalDivider()
-            MarketTerminalMetric(
-                title: companionTitle,
-                value: companionQuote.map { number($0.price, digits: 2) } ?? "—",
-                change: companionQuote?.formattedPercent ?? "等待行情",
-                tint: quoteTint(companionQuote),
-                trend: companionQuote?.trend ?? []
-            )
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 0) {
+                    exchangeMetric.frame(height: 58)
+                    Divider()
+                    yieldMetric.frame(height: 58)
+                    Divider()
+                    companionMetric.frame(height: 58)
+                }
+                .dynamicTypeSize(.large)
+            } else {
+                HStack(spacing: 0) {
+                    exchangeMetric
+                    TerminalDivider()
+                    yieldMetric
+                    TerminalDivider()
+                    companionMetric
+                }
+            }
         }
+    }
+
+    private var exchangeMetric: some View {
+        MarketTerminalMetric(
+            title: exchangeTitle,
+            value: exchangeQuote.map { number($0.price, digits: exchangeDigits) } ?? "—",
+            change: exchangeQuote?.formattedPercent ?? exchangeSymbol,
+            tint: quoteTint(exchangeQuote),
+            trend: exchangeQuote?.trend ?? []
+        )
+    }
+
+    private var yieldMetric: some View {
+        MarketTerminalMetric(
+            title: yieldTitle,
+            value: yieldQuote.map { String(format: "%.2f%%", $0.price) } ?? "—",
+            change: yieldQuote?.formattedPercent ?? "等待行情",
+            tint: quoteTint(yieldQuote),
+            trend: yieldQuote?.trend ?? []
+        )
+    }
+
+    private var companionMetric: some View {
+        MarketTerminalMetric(
+            title: companionTitle,
+            value: companionQuote.map { number($0.price, digits: 2) } ?? "—",
+            change: companionQuote?.formattedPercent ?? "等待行情",
+            tint: quoteTint(companionQuote),
+            trend: companionQuote?.trend ?? []
+        )
     }
 }
 
 private struct ChinaMarketMetrics: View {
     let store: MarketStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var exchangeRate: MarketQuote? { store.quote(symbol: "USDCNY") }
     private var breadth: MarketBreadth? { store.dashboard?.currentAShareBreadth }
@@ -564,25 +728,46 @@ private struct ChinaMarketMetrics: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            MarketTerminalMetric(
-                title: "人民币汇率",
-                value: exchangeRate.map { number($0.price, digits: 4) } ?? "—",
-                change: exchangeRate?.formattedPercent ?? "USD/CNY",
-                tint: quoteTint(exchangeRate),
-                trend: exchangeRate?.trend ?? []
-            )
-            TerminalDivider()
-            MarketTerminalMetric(
-                title: turnoverMetric?.title ?? "成交额",
-                value: turnoverMetric.map { turnoverText($0.value) } ?? "—",
-                change: turnoverMetric?.note ?? "等待行情",
-                tint: .secondary,
-                trend: []
-            )
-            TerminalDivider()
-            MarketBreadthMetric(breadth: breadth, isStale: breadthIsStale)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 0) {
+                    exchangeMetric.frame(height: 58)
+                    Divider()
+                    turnoverView.frame(height: 58)
+                    Divider()
+                    MarketBreadthMetric(breadth: breadth, isStale: breadthIsStale).frame(height: 58)
+                }
+                .dynamicTypeSize(.large)
+            } else {
+                HStack(spacing: 0) {
+                    exchangeMetric
+                    TerminalDivider()
+                    turnoverView
+                    TerminalDivider()
+                    MarketBreadthMetric(breadth: breadth, isStale: breadthIsStale)
+                }
+            }
         }
+    }
+
+    private var exchangeMetric: some View {
+        MarketTerminalMetric(
+            title: "人民币汇率",
+            value: exchangeRate.map { number($0.price, digits: 4) } ?? "—",
+            change: exchangeRate?.formattedPercent ?? "USD/CNY",
+            tint: quoteTint(exchangeRate),
+            trend: exchangeRate?.trend ?? []
+        )
+    }
+
+    private var turnoverView: some View {
+        MarketTerminalMetric(
+            title: turnoverMetric?.title ?? "成交额",
+            value: turnoverMetric.map { turnoverText($0.value) } ?? "—",
+            change: turnoverMetric?.note ?? "等待行情",
+            tint: .secondary,
+            trend: []
+        )
     }
 
     private func turnoverText(_ value: Double) -> String {
@@ -799,6 +984,7 @@ private struct MarketIndexTable: View {
     let onSelectIndex: (String) -> Void
 
     @State private var chinaScope: ChinaIndexScope = .core
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
     private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
@@ -811,18 +997,20 @@ private struct MarketIndexTable: View {
             if region == .china {
                 ChinaIndexScopePicker(selection: $chinaScope)
             }
-            HStack(spacing: 8) {
-                Text("名称 / 代码").frame(width: 112, alignment: .leading)
-                Text("最新价").frame(maxWidth: .infinity, alignment: .trailing)
-                Text("涨跌幅").frame(width: 64, alignment: .trailing)
-                Text("日内走势").frame(width: 60, alignment: .trailing)
-            }
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .frame(height: 32)
+            if !dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 8) {
+                    Text("名称 / 代码").frame(width: 132, alignment: .leading)
+                    Text("最新价").frame(maxWidth: .infinity, alignment: .trailing)
+                    Text("涨跌幅").frame(width: 62, alignment: .trailing)
+                    Text("走势").frame(width: 50, alignment: .trailing)
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
 
-            Divider().opacity(0.45)
+                Divider().opacity(0.45)
+            }
 
             if quotes.isEmpty {
                 HStack(spacing: 8) {
@@ -842,8 +1030,8 @@ private struct MarketIndexTable: View {
                             trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
                                  ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
                                  : quote),
-                            companyLogoPath: store.companyLogoPaths[quote.symbol],
-                            showsCompanyLogo: true
+                            companyLogoPath: nil,
+                            showsCompanyLogo: false
                          )
                     }
                     .buttonStyle(MarketPressStyle())
@@ -883,7 +1071,7 @@ private struct MarketIndexTable: View {
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             await withTaskGroup(of: Void.self) { group in
-                for quote in quotes + coreStocks {
+                for quote in coreStocks {
                     group.addTask {
                         await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
                     }
@@ -893,7 +1081,7 @@ private struct MarketIndexTable: View {
     }
 
     private var componentLogoRequestID: String {
-        "\(region.dashboardID):\((quotes + coreStocks).map(\.symbol).joined(separator: ","))"
+        "\(region.dashboardID):\(coreStocks.map(\.symbol).joined(separator: ","))"
     }
 }
 
@@ -1308,8 +1496,24 @@ private struct MarketIndexTableRow: View {
     let trend: [Double]
     var companyLogoPath: String? = nil
     var showsCompanyLogo = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                accessibilityLayout
+            } else {
+                standardLayout
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 88 : 62)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("打开指数详情")
+    }
+
+    private var standardLayout: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 if showsCompanyLogo {
@@ -1324,11 +1528,11 @@ private struct MarketIndexTableRow: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
                     }
-                    Text(displayedName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.68)
+                    Text(displayedName).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.78)
                     Text(displayedCode).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            .frame(width: 112, alignment: .leading)
+            .frame(width: 132, alignment: .leading)
 
             Text(number(displayedPrice, digits: cryptoPriceDigits(displayedPrice, symbol: displayedSymbol)))
                 .font(.system(size: 13.5, weight: .medium)).monospacedDigit()
@@ -1346,7 +1550,7 @@ private struct MarketIndexTableRow: View {
             }
             .font(.footnote.weight(.semibold)).monospacedDigit()
             .foregroundStyle(displayedTint)
-            .frame(width: 64, alignment: .trailing)
+            .frame(width: 62, alignment: .trailing)
 
             Group {
                 if trend.count >= 3 {
@@ -1355,13 +1559,26 @@ private struct MarketIndexTableRow: View {
                     Text("—").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-            .frame(width: 60, height: 32)
+            .frame(width: 50, height: 32)
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 62)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("打开指数详情")
+    }
+
+    private var accessibilityLayout: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(displayedName).font(.headline).lineLimit(2)
+                Spacer()
+                Text(statusLabel).font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(displayedCode).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(number(displayedPrice, digits: cryptoPriceDigits(displayedPrice, symbol: displayedSymbol)))
+                    .font(.body.weight(.medium)).monospacedDigit()
+                Text(displayedPercent)
+                    .font(.body.weight(.semibold)).monospacedDigit().foregroundStyle(displayedTint)
+            }
+        }
     }
 
     private var usesEmbeddedExtendedSession: Bool {
@@ -1379,7 +1596,7 @@ private struct MarketIndexTableRow: View {
     }
 
     private var displayedName: String {
-        overnightQuote?.presentationName ?? quote.presentationName
+        (overnightQuote ?? quote).compactMarketName
     }
 
     private var displayedCode: String {
@@ -1799,7 +2016,11 @@ private struct MarketLiveStatus: View {
                     Text("实时连接")
                 }
             } else if store.realtimeStatus == .connecting || store.realtimeStatus == .reconnecting {
-                Text("连接重试中")
+                if let date = store.latestQuoteDate {
+                    Text("截至 \(date.formatted(date: .omitted, time: .shortened)) · 连接恢复中")
+                } else {
+                    Text("实时连接恢复中")
+                }
             } else if store.realtimeStatus == .connected {
                 Text("等待实时行情")
             } else if let date = store.latestQuoteDate {
@@ -2212,6 +2433,7 @@ private struct MarketIndexDetailView: View {
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
     private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
+    private var chartSymbol: String { quote?.symbol ?? symbol }
     private var isIndex: Bool {
         store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
             || CoreDescriptor(symbol: symbol).isIndex
@@ -2248,8 +2470,8 @@ private struct MarketIndexDetailView: View {
                                 }
                             }
                         detailHeader
-                        MarketDetailChart(selectedRange: $selectedRange, symbol: historicalSymbol, store: store)
-                            .id(historicalSymbol)
+                        MarketDetailChart(selectedRange: $selectedRange, symbol: chartSymbol, store: store)
+                            .id(chartSymbol)
                         keyData
                         if showsCompanyProfile { companyProfile }
                         if isIndex {
@@ -2347,7 +2569,7 @@ private struct MarketIndexDetailView: View {
 
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 if let quote {
                     CompanyLogo(quote: quote, path: companyLogoPath)
                 } else {
@@ -2357,15 +2579,18 @@ private struct MarketIndexDetailView: View {
                         .frame(width: 36, height: 36)
                         .background(MarketStyle.accent, in: RoundedRectangle(cornerRadius: 9))
                 }
-                Text(quote?.presentationName ?? CoreDescriptor(symbol: symbol).name)
-                    .font(.system(size: 22, weight: .semibold))
-                    .tracking(-0.35)
-                    .lineLimit(1)
-                Text(quote?.displayCode ?? CoreDescriptor(symbol: symbol).code)
-                    .font(.caption.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(quote?.detailPresentationName ?? CoreDescriptor(symbol: symbol).name)
+                        .font(.title3.weight(.semibold))
+                        .tracking(-0.25)
+                        .lineLimit(2)
+                    Text(quote?.detailInstrumentLabel ?? CoreDescriptor(symbol: symbol).code)
+                        .font(.caption.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .layoutPriority(1)
                 Spacer(minLength: 4)
                 HStack(spacing: 5) {
                     Circle().fill(sessionColor).frame(width: 6, height: 6)
@@ -3262,7 +3487,15 @@ private struct MarketDetailChart: View {
             ZStack {
                 ChartGrid(values: values)
                 if values.isEmpty {
-                    if store.loadingCharts.contains(ChartKey(symbol: symbol, range: selectedRange)) { ProgressView() }
+                    if store.loadingCharts.contains(ChartKey(symbol: symbol, range: selectedRange)) {
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("正在加载\(selectedRange.rawValue)走势图")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                     else if let error = store.chartError(symbol: symbol, range: selectedRange) {
                         VStack(spacing: 8) {
                             Text(error).font(.system(size: 12)).foregroundStyle(.secondary)
