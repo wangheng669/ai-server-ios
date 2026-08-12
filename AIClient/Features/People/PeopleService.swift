@@ -243,7 +243,7 @@ actor PersonArticleTranslationService {
         var translatedChunks: [String] = []
         for chunk in chunks {
             guard !Task.isCancelled else { throw CancellationError() }
-            await reserveRequestSlot()
+            try await reserveRequestSlot()
             translatedChunks.append(try await translateChunk(chunk))
         }
         let translated = Self.preserveProductNames(
@@ -254,13 +254,13 @@ actor PersonArticleTranslationService {
         return translated
     }
 
-    private func reserveRequestSlot() async {
+    private func reserveRequestSlot() async throws {
         let now = Date()
         let scheduled = max(now, nextRequestAt)
         nextRequestAt = scheduled.addingTimeInterval(0.4)
         let delay = scheduled.timeIntervalSince(now)
         if delay > 0 {
-            try? await Task.sleep(for: .seconds(delay))
+            try await Task.sleep(for: .seconds(delay))
         }
     }
 
@@ -279,7 +279,17 @@ actor PersonArticleTranslationService {
             ]
             request.httpBody = form.percentEncodedQuery?.data(using: .utf8)
 
-            let (data, response) = try await session.data(for: request)
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard attempt < 2 else { throw error }
+                try await Task.sleep(for: .milliseconds(700 * (attempt + 1)))
+                continue
+            }
             guard let http = response as? HTTPURLResponse else {
                 throw PeopleServiceError.invalidResponse
             }

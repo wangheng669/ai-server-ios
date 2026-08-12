@@ -1324,3 +1324,42 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(TodayWorldTextFormatter.compact(text), "第一段 第二段")
     }
 }
+
+final class RSSCardTranslationTests: XCTestCase {
+    func testHeadlineSurvivesOptionalExcerptTranslationFailure() async throws {
+        let result = try await RSSCardTranslation.translated(
+            title: "Markets rally",
+            excerpt: "Stocks rose in afternoon trading."
+        ) { text in
+            if text == "Markets rally" { return "市场上涨" }
+            throw URLError(.timedOut)
+        }
+
+        XCTAssertEqual(result.title, "市场上涨")
+        XCTAssertNil(result.excerpt)
+    }
+
+    @MainActor
+    func testRefreshTranslatesCardsWithoutWaitingForVisibleRows() async throws {
+        let postID = 9_810_001
+        let cacheKey = "feed.rss-card-translation.v2.\(postID)"
+        UserDefaults.standard.removeObject(forKey: cacheKey)
+        defer { UserDefaults.standard.removeObject(forKey: cacheKey) }
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":9810001,"source":"rss:43","title":"Startup raises new funding"}"#.utf8)
+        )
+        let model = NewsFeedViewModel(
+            source: .rss,
+            fetchPosts: { _, _, _ in [post] },
+            translateRSSCard: { _, _ in RSSCardTranslation(title: "初创公司完成新一轮融资", excerpt: nil) }
+        )
+
+        await model.refresh()
+        for _ in 0..<20 where model.postForDisplay(post).displayTitle != "初创公司完成新一轮融资" {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.postForDisplay(post).displayTitle, "初创公司完成新一轮融资")
+    }
+}
