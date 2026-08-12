@@ -1112,6 +1112,14 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
     }
 }
 
+func marketShouldUseFallbackChart(
+    primaryPoints: [MarketChartPoint],
+    fallbackPoints: [MarketChartPoint]
+) -> Bool {
+    marketChartDisplayPoints(primaryPoints).count < 2
+        && marketChartDisplayPoints(fallbackPoints).count >= 2
+}
+
 func market52WeekLow(_ chart: MarketChart?) -> Double? {
     guard chart?.quality.status == .complete else { return nil }
     return chart?.candles

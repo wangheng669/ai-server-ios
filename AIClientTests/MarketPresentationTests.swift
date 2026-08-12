@@ -2,6 +2,15 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testChartFallsBackOnlyWhenPrimaryHasNoDrawableLine() {
+        let primary = [chartPoint(timestamp: 1, close: 10)]
+        let fallback = [chartPoint(timestamp: 1, close: 10), chartPoint(timestamp: 2, close: 11)]
+
+        XCTAssertTrue(marketShouldUseFallbackChart(primaryPoints: primary, fallbackPoints: fallback))
+        XCTAssertFalse(marketShouldUseFallbackChart(primaryPoints: fallback, fallbackPoints: fallback))
+        XCTAssertFalse(marketShouldUseFallbackChart(primaryPoints: primary, fallbackPoints: primary))
+    }
+
     func testRealtimeProxyUsesClearDetailAndCompactMarketNames() throws {
         let data = Data(#"{"symbol":"QQQ","name":"纳斯达克100实时代理（QQQ）","displayName":"纳斯达克100实时代理（QQQ）","instrumentType":"realtime-proxy-etf","price":718.45}"#.utf8)
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
