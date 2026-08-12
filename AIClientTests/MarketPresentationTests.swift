@@ -479,6 +479,16 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.crypto.first?.freshnessLabel, "24小时交易")
     }
 
+    func testDashboardDecodesCommodityQuotes() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","definitionVersion":"2026-08-12.1","generatedAt":"2026-08-12T10:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"componentsByRegion":{},"crypto":[],"commodities":[{"symbol":"GC1!","name":"COMEX 黄金","instrumentType":"commodity-future","displayMode":"continuous-front-month","priceUnit":"美元/盎司","price":3310.5,"previousClose":3290,"marketSession":"regular","delaySeconds":600,"trend":[3290,3300,3310.5]}],"missingSymbols":[],"expectedSymbols":["GC1!"],"symbolHealth":[],"regions":[{"id":"commodity","metricSymbols":["GC1!"]}]}}"#.utf8)
+        let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+        let gold = try XCTUnwrap(response.data.commodities.first)
+
+        XCTAssertEqual(gold.detailInstrumentLabel, "黄金主连 · 连续主力合约 · 美元/盎司")
+        XCTAssertEqual(gold.visibleDelayMinutes, 10)
+        XCTAssertEqual(response.data.quote(symbol: "GC1!")?.price, 3310.5)
+    }
+
     func testDashboardDecodesV4RealtimeProxyContract() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","definitionVersion":"2026-07-29.2","generatedAt":"2026-07-30T07:26:57Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理（SPY）","displayName":"标普500实时代理（SPY）","instrumentType":"realtime-proxy-etf","proxyFor":"^GSPC","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","price":729.46}],"referenceIndices":[{"symbol":"^GSPC","name":"标普500","instrumentType":"reference-index","displayMode":"historical-reference","price":7316.15}],"realtimeProxies":[{"symbol":"SPY","referenceSymbol":"^GSPC","historicalSymbol":"^GSPC","displayName":"标普500实时代理（SPY）"}],"metrics":[],"componentsByRegion":{},"crypto":[],"indexSessions":{},"missingSymbols":[],"expectedSymbols":["SPY","^GSPC"],"symbolHealth":[],"regions":[]}}"#.utf8)
 

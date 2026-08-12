@@ -16,6 +16,7 @@ struct MarketDashboard: Codable {
     var metrics: [MarketQuote]
     var componentsByRegion: [String: [MarketQuote]]
     var crypto: [MarketQuote]
+    var commodities: [MarketQuote]
     var indexSessions: [String: MarketQuote]?
     let componentsMeta: MarketComponentsMeta?
     let freshness: MarketDashboardFreshness?
@@ -34,7 +35,7 @@ struct MarketDashboard: Codable {
 
     enum CodingKeys: String, CodingKey {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, referenceIndices, realtimeProxies
-        case metrics, componentsByRegion, crypto
+        case metrics, componentsByRegion, crypto, commodities
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
         case ashareOverview, marketStructure, sentiment
     }
@@ -51,6 +52,7 @@ struct MarketDashboard: Codable {
         metrics = try values.decodeLossyQuotes(forKey: .metrics)
         componentsByRegion = try values.decode([String: [MarketQuote]].self, forKey: .componentsByRegion)
         crypto = try values.decodeLossyQuotes(forKey: .crypto)
+        commodities = try values.decodeLossyQuotes(forKey: .commodities)
         indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
         freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
@@ -71,6 +73,7 @@ struct MarketDashboard: Codable {
             replace(quote, in: &componentsByRegion[region, default: []])
         }
         replace(quote, in: &crypto)
+        replace(quote, in: &commodities)
         for key in indexSessions.map({ Array($0.keys) }) ?? [] where indexSessions?[key]?.symbol == quote.symbol {
             var quotes = [indexSessions?[key]].compactMap { $0 }
             replace(quote, in: &quotes)
@@ -85,12 +88,13 @@ struct MarketDashboard: Codable {
     }
 
     func quote(symbol: String) -> MarketQuote? {
-        coreIndices.first(where: { $0.symbol == symbol })
-            ?? referenceIndices.first(where: { $0.symbol == symbol })
-            ?? metrics.first(where: { $0.symbol == symbol })
-            ?? componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol })
-            ?? crypto.first(where: { $0.symbol == symbol })
-            ?? indexSessions?.values.first(where: { $0.symbol == symbol })
+        if let quote = coreIndices.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = referenceIndices.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = metrics.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = crypto.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = commodities.first(where: { $0.symbol == symbol }) { return quote }
+        return indexSessions?.values.first(where: { $0.symbol == symbol })
     }
 
     var allRegionalComponents: [MarketQuote] {
@@ -226,6 +230,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     let referenceSymbol: String?
     let historicalSymbol: String?
     let displayMode: String?
+    let priceUnit: String?
     let price: Double
     let openPrice: Double?
     let previousClose: Double?
@@ -296,7 +301,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode
+        case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode, priceUnit
         case price, openPrice, previousClose, high, low, pe, marketCap, peStatic, peType, netIncomeTTM, week52Low
         case currency, fundamentalsCurrency, fiscalYear, fundamentalsSource, fundamentalsAsOf, volume, turnover
         case dataSource, delaySeconds, marketSession, sessionPrice, sessionChangePercent, sessionDataSource
@@ -312,6 +317,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         referenceSymbol: String?,
         historicalSymbol: String?,
         displayMode: String?,
+        priceUnit: String? = nil,
         price: Double,
         openPrice: Double?,
         previousClose: Double?,
@@ -353,6 +359,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.referenceSymbol = referenceSymbol
         self.historicalSymbol = historicalSymbol
         self.displayMode = displayMode
+        self.priceUnit = priceUnit
         self.price = price
         self.openPrice = openPrice
         self.previousClose = previousClose
@@ -397,6 +404,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         referenceSymbol = try values.decodeIfPresent(String.self, forKey: .referenceSymbol)
         historicalSymbol = try values.decodeIfPresent(String.self, forKey: .historicalSymbol)
         displayMode = try values.decodeIfPresent(String.self, forKey: .displayMode)
+        priceUnit = try values.decodeIfPresent(String.self, forKey: .priceUnit)
         price = try values.decode(Double.self, forKey: .price)
         openPrice = try values.decodeIfPresent(Double.self, forKey: .openPrice)
         previousClose = try values.decodeIfPresent(Double.self, forKey: .previousClose)
@@ -528,6 +536,7 @@ struct MarketQuoteUpdate: Decodable {
             referenceSymbol: current?.referenceSymbol,
             historicalSymbol: current?.historicalSymbol,
             displayMode: current?.displayMode,
+            priceUnit: current?.priceUnit,
             price: price,
             openPrice: openPrice ?? current?.openPrice,
             previousClose: previousClose ?? current?.previousClose,
@@ -1327,6 +1336,9 @@ extension MarketQuote {
     var detailInstrumentLabel: String {
         if instrumentType == "realtime-proxy-etf" { return "\(displayCode) · 指数代理 ETF" }
         if instrumentType == "reference-index" { return "\(displayCode) · 参考指数" }
+        if instrumentType == "commodity-future" {
+            return [displayCode, "连续主力合约", priceUnit].compactMap { $0 }.joined(separator: " · ")
+        }
         return displayCode
     }
 
@@ -1382,6 +1394,12 @@ extension MarketQuote {
         case "^FCHI": "CAC40"
         case "^VIX": "VIX"
         case "^TNX": "US10Y"
+        case "GC1!": "黄金主连"
+        case "CL1!": "原油主连"
+        case "HG1!": "铜主连"
+        case "SI1!": "白银主连"
+        case "NG1!": "天然气主连"
+        case "ZC1!": "玉米主连"
         default: symbol
         }
     }
