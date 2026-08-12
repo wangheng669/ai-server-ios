@@ -1363,3 +1363,40 @@ final class RSSCardTranslationTests: XCTestCase {
         XCTAssertEqual(model.postForDisplay(post).displayTitle, "初创公司完成新一轮融资")
     }
 }
+
+final class RSSSourcePresentationTests: XCTestCase {
+    func testRSSCardUsesFeedNameAndRejectsManagedFallbackAvatar() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:96","title":"标题","user":{"user_name":"https://www.guandian.cn","user_screen_name":"观点网","avatar_url":"/api/ios/v1/rss/feeds/96/avatar"},"meta":{"rss_feed_name":"观点网","rss_feed_icon":null}}"#.utf8)
+        )
+
+        XCTAssertEqual(post.rssCardSourceName, "观点网")
+        XCTAssertEqual(post.authorName, "观点网")
+        XCTAssertNil(post.rssCardAvatarURL)
+    }
+
+    func testRSSCardKeepsManagedAvatarWhenFeedHasRealIcon() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss:46","title":"标题","user":{"user_name":"文章作者","user_screen_name":"爱范儿","avatar_url":"/api/ios/v1/rss/feeds/46/avatar"},"meta":{"rss_feed_name":"爱范儿","rss_feed_icon":"/img/rss-feed-icons/rss-feed-46.ico"}}"#.utf8)
+        )
+
+        XCTAssertEqual(post.rssCardSourceName, "爱范儿")
+        XCTAssertEqual(post.rssCardAvatarURL?.path, "/api/ios/v1/rss/feeds/46/avatar")
+    }
+
+    func testRSSFeedDirectoryHidesGeneratedFallbackAvatar() throws {
+        let fallback = try JSONDecoder().decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":96,"name":"观点网","avatar_url":"/api/ios/v1/rss/feeds/96/avatar?v=1","avatar_status":"fallback","is_enabled":true}"#.utf8)
+        )
+        let ready = try JSONDecoder().decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":46,"name":"爱范儿","avatar_url":"/api/ios/v1/rss/feeds/46/avatar?v=1","avatar_status":"ready","is_enabled":true}"#.utf8)
+        )
+
+        XCTAssertNil(fallback.preferredAvatarURL)
+        XCTAssertEqual(ready.preferredAvatarURL?.path, "/api/ios/v1/rss/feeds/46/avatar")
+    }
+}

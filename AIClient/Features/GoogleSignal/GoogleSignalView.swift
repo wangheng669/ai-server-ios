@@ -302,6 +302,7 @@ private extension PostMeta {
             zhihuAnswerVoteupCount: nil,
             zhihuAnswerCommentCount: nil,
             rssFeedName: nil,
+            rssFeedIcon: nil,
             rssArticleLink: nil,
             flashCategory: nil,
             flashSimilarityGroupId: nil,

@@ -30,6 +30,7 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
     let feedURL: String?
     let icon: String?
     let avatar: String?
+    let avatarStatus: String?
     let updatedAt: String?
     let isEnabled: Bool
     let foloMeta: FoloMeta?
@@ -46,6 +47,7 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
         case id, name, icon
         case feedURL = "feed_url"
         case avatar = "avatar_url"
+        case avatarStatus = "avatar_status"
         case updatedAt = "updated_at"
         case isEnabled = "is_enabled"
         case foloMeta = "folo_meta"
@@ -69,6 +71,7 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
     }
 
     var preferredAvatarURL: URL? {
+        guard avatarStatus?.lowercased() != "fallback" else { return nil }
         if let avatar, !avatar.isEmpty,
            let url = URL(string: avatar, relativeTo: ServerConfiguration.currentURL)?.absoluteURL {
             return url
@@ -617,7 +620,19 @@ struct Post: Codable, Identifiable, Hashable {
         return firstSentence.count > 66 ? String(firstSentence.prefix(66)) + "…" : firstSentence
     }
     var authorName: String {
-        user?.resolvedCanonicalName ?? clean(user?.userName) ?? clean(user?.userScreenName) ?? sourceName
+        if isRSS,
+           let storedName = clean(user?.userName),
+           URL(string: storedName)?.scheme != nil {
+            return clean(user?.userScreenName) ?? clean(meta?.rssFeedName) ?? sourceName
+        }
+        return user?.resolvedCanonicalName ?? clean(user?.userName) ?? clean(user?.userScreenName) ?? sourceName
+    }
+    var rssCardSourceName: String {
+        guard isRSS else { return authorName }
+        return clean(meta?.rssFeedName) ?? clean(user?.userScreenName) ?? authorName
+    }
+    var rssCardAvatarURL: URL? {
+        avatarURL
     }
     var authorHandle: String? {
         if let accountLabel = user?.resolvedAccountLabel {
@@ -1100,7 +1115,12 @@ struct Post: Codable, Identifiable, Hashable {
         let value = parts[statusIndex + 1]
         return !value.isEmpty && value.allSatisfy(\.isNumber) ? value : nil
     }
-    var avatarURL: URL? { clean(user?.avatarURL).flatMap(MediaURL.image) }
+    var avatarURL: URL? {
+        guard let url = clean(user?.avatarURL).flatMap(MediaURL.image) else { return nil }
+        guard isRSS, clean(meta?.rssFeedIcon) == nil else { return url }
+        let path = url.path.lowercased()
+        return path.contains("/rss/feeds/") && path.hasSuffix("/avatar") ? nil : url
+    }
     var tagNames: [String] { (postTags ?? []).map(\.name) }
     var photoCredit: String? { clean(meta?.photoCredit) ?? (images ?? []).compactMap(\.altText).first(where: { !$0.isEmpty }) }
     var externalURL: URL? { (meta?.urls ?? []).compactMap(URL.init(string:)).first }
@@ -1509,6 +1529,7 @@ struct PostMeta: Codable, Hashable {
     let zhihuAnswerVoteupCount: Int?
     let zhihuAnswerCommentCount: Int?
     let rssFeedName: String?
+    let rssFeedIcon: String?
     let rssArticleLink: String?
     let flashCategory: String?
     let flashSimilarityGroupId: Int64?
@@ -1537,6 +1558,7 @@ struct PostMeta: Codable, Hashable {
         case zhihuAnswerVoteupCount = "zhihu_answer_voteup_count"
         case zhihuAnswerCommentCount = "zhihu_answer_comment_count"
         case rssFeedName = "rss_feed_name"
+        case rssFeedIcon = "rss_feed_icon"
         case rssArticleLink = "rss_article_link"
         case flashCategory, flashSimilarityGroupId, flashSimilarityScore, flashSimilarCount, flashPlatformCount, flashPlatforms
     }
@@ -1558,7 +1580,7 @@ struct PostMeta: Codable, Hashable {
             zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
             zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
             zhihuAnswerVoteupCount: nil, zhihuAnswerCommentCount: nil,
-            rssFeedName: nil, rssArticleLink: nil,
+            rssFeedName: nil, rssFeedIcon: nil, rssArticleLink: nil,
             flashCategory: category,
             flashSimilarityGroupId: similarityGroupId,
             flashSimilarityScore: similarityScore,
