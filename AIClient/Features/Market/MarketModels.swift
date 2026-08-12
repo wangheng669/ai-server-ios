@@ -12,6 +12,9 @@ enum CommodityLogoKind: String, CaseIterable {
     case silver
     case naturalGas
     case corn
+    case liveCattle
+    case feederCattle
+    case leanHogs
 
     init?(symbol: String) {
         switch symbol.uppercased() {
@@ -21,11 +24,14 @@ enum CommodityLogoKind: String, CaseIterable {
         case "SI1!": self = .silver
         case "NG1!": self = .naturalGas
         case "ZC1!": self = .corn
+        case "LE1!": self = .liveCattle
+        case "GF1!": self = .feederCattle
+        case "HE1!": self = .leanHogs
         default: return nil
         }
     }
 
-    var monogram: String {
+    var logoText: String {
         switch self {
         case .gold: "Au"
         case .crudeOil: "WTI"
@@ -33,6 +39,16 @@ enum CommodityLogoKind: String, CaseIterable {
         case .silver: "Ag"
         case .naturalGas: "NG"
         case .corn: "ZC"
+        case .liveCattle: "🐂"
+        case .feederCattle: "🐄"
+        case .leanHogs: "🐖"
+        }
+    }
+
+    var isLivestock: Bool {
+        switch self {
+        case .liveCattle, .feederCattle, .leanHogs: true
+        default: false
         }
     }
 
@@ -44,6 +60,9 @@ enum CommodityLogoKind: String, CaseIterable {
         case .silver: "白银"
         case .naturalGas: "天然气"
         case .corn: "玉米"
+        case .liveCattle: "活牛"
+        case .feederCattle: "育肥牛"
+        case .leanHogs: "瘦肉猪"
         }
     }
 }
