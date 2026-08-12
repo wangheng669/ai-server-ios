@@ -186,7 +186,7 @@ final class MarketStore {
             return Date(timeIntervalSince1970: Double(timestamp) / 1000)
         }
         let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.referenceIndices ?? []) + (dashboard?.metrics ?? [])
-            + (dashboard?.allRegionalComponents ?? []) + (dashboard?.crypto ?? [])
+            + (dashboard?.allRegionalComponents ?? []) + (dashboard?.crypto ?? []) + (dashboard?.commodities ?? [])
         guard let timestamp = quotes.compactMap(\.timestamp).max() else { return nil }
         return Date(timeIntervalSince1970: Double(timestamp) / 1000)
     }
@@ -222,6 +222,7 @@ final class MarketStore {
             + dashboard.coreIndices
             + dashboard.referenceIndices
             + dashboard.metrics
+            + dashboard.commodities
         for quote in quotes
         where marketQuoteNeedsTrendBackfill(quote) && seen.insert(quote.symbol).inserted {
             symbols.append(quote.symbol)
@@ -267,7 +268,7 @@ final class MarketStore {
 
     var maximumOpenMarketDelayMinutes: Int? {
         let quotes = (dashboard?.coreIndices ?? []) + (dashboard?.referenceIndices ?? [])
-            + (dashboard?.metrics ?? []) + (dashboard?.allRegionalComponents ?? [])
+            + (dashboard?.metrics ?? []) + (dashboard?.allRegionalComponents ?? []) + (dashboard?.commodities ?? [])
         return quotes
             .filter { $0.marketSession == "regular" }
             .compactMap(\.visibleDelayMinutes)
@@ -285,6 +286,7 @@ final class MarketStore {
         if let quote = dashboard?.metrics.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.allRegionalComponents.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.crypto.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = dashboard?.commodities.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = dashboard?.indexSessions?.values.first(where: { $0.symbol == symbol }) { return quote }
         return indexConstituents.values.lazy
             .flatMap(\.items)
