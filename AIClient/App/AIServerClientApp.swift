@@ -273,8 +273,7 @@ private struct EditorialRootView: View {
                 tabContent(.signal) {
                     GoogleSignalView(
                         section: $signalSection,
-                        sentiment: $signalSentiment,
-                        showsFilters: $showsSignalFilters
+                        sentiment: $signalSentiment
                     )
                 }
                 tabContent(.observation) {
@@ -348,6 +347,19 @@ private struct EditorialRootView: View {
             )
             .background(.clear)
         }
+        .overlay {
+            if selectedTab == .signal, showsSignalFilters {
+                GoogleSignalFilterOverlay(
+                    section: $signalSection,
+                    sentiment: $signalSentiment,
+                    isPresented: $showsSignalFilters
+                )
+            }
+        }
+        .animation(
+            reduceMotion ? nil : .smooth(duration: 0.24, extraBounce: 0),
+            value: showsSignalFilters
+        )
         .sensoryFeedback(.success, trigger: deploymentStatus?.identity) { _, _ in
             if case .succeeded = deploymentStatus?.phase { return true }
             return false
@@ -379,6 +391,9 @@ private struct EditorialRootView: View {
             personPushNavigation.clear()
         }
         .onChange(of: selectedTab, initial: true) { _, tab in
+            if tab != .signal {
+                showsSignalFilters = false
+            }
             switch tab {
             case .signal, .observation:
                 lastDynamicTab = tab
