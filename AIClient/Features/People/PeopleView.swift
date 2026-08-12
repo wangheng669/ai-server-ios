@@ -255,14 +255,16 @@ private struct PeopleSwimlaneExplorer: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color(uiColor: .systemBackground)
+            Color(uiColor: .systemGroupedBackground)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 utilityBar
 
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: 14) {
+                        focusedPersonHero
+
                         if lanes.isEmpty {
                             emptyRelationships
                         } else {
@@ -271,12 +273,11 @@ private struct PeopleSwimlaneExplorer: View {
                             }
                         }
                     }
-                    .padding(.bottom, 18)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 4)
+                    .padding(.bottom, 94)
                 }
                 .scrollIndicators(.hidden)
-
-                focusDock
-                    .padding(.bottom, 56)
             }
 
             if showsSearch {
@@ -316,7 +317,18 @@ private struct PeopleSwimlaneExplorer: View {
     }
 
     private var utilityBar: some View {
-        HStack {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("人物关系")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+
+                Text("从一个人，看见他的关系网络")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
             Menu {
                 Button {
                     guard !isRefreshing else { return }
@@ -331,29 +343,139 @@ private struct PeopleSwimlaneExplorer: View {
                 .disabled(isRefreshing)
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
                     .contentShape(Circle())
             }
             .accessibilityLabel("更多")
-
-            Spacer()
 
             Button {
                 withAnimation(animation) { showsSearch = true }
                 Task { @MainActor in searchIsFocused = true }
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("搜索人物")
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
-        .frame(height: 48)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+    }
+
+    private var focusedPersonHero: some View {
+        Button {
+            onOpenPerson(focusedPerson)
+        } label: {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 14) {
+                    AvatarView(
+                        url: focusedPerson.avatarURL(baseURL: baseURL),
+                        name: focusedPerson.name,
+                        size: 68,
+                        assetName: focusedPerson.avatarAssetName
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(Color(uiColor: .secondarySystemGroupedBackground), lineWidth: 4)
+                            .overlay { Circle().stroke(Color.accentColor.opacity(0.7), lineWidth: 2) }
+                    }
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(focusedPerson.name)
+                            .font(.system(size: 23, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+
+                        Text(focusedPersonHeroSubtitle)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+
+                HStack(spacing: 0) {
+                    heroMetric(value: "\(relationshipCount)", label: "关联人物")
+                    heroDivider
+                    heroMetric(value: "\(lanes.count)", label: "关系分组")
+                    heroDivider
+                    heroMetric(value: "\(focusedPerson.todayCount)", label: "今日动态")
+                }
+
+                HStack(spacing: 8) {
+                    sidePerson(previousPerson)
+
+                    Label("左右滑动切换人物", systemImage: "arrow.left.and.right")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+
+                    sidePerson(nextPerson)
+                }
+                .padding(.top, -3)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.primary.opacity(0.055), lineWidth: 0.7)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(PeoplePressStyle())
+        .offset(x: focusPreviewOffset)
+        .highPriorityGesture(focusGesture)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(focusedPerson.name)，\(focusedPersonHeroSubtitle)，\(relationshipCount) 位关联人物")
+        .accessibilityHint("点击查看详情，左右滑动切换人物")
+        .accessibilityAction(named: "上一个人物") { moveFocus(by: -1) }
+        .accessibilityAction(named: "下一个人物") { moveFocus(by: 1) }
+    }
+
+    private var focusedPersonHeroSubtitle: String {
+        let role = focusedPerson.roles.first
+        var parts: [String] = []
+        if let organization = focusedPerson.organizationName ?? role?.organization,
+           !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append(organization)
+        }
+        if let title = role?.title,
+           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !parts.contains(where: { $0.localizedCaseInsensitiveContains(title) }) {
+            parts.append(title)
+        }
+        return parts.isEmpty ? focusedPerson.topic.rawValue : parts.joined(separator: " · ")
+    }
+
+    private func heroMetric(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+            Text(label)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var heroDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.08))
+            .frame(width: 0.7, height: 30)
     }
 
     private var emptyRelationships: some View {
@@ -377,7 +499,8 @@ private struct PeopleSwimlaneExplorer: View {
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 48)
+        .padding(.vertical, 36)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -500,34 +623,34 @@ private struct PeopleSwimlaneExplorer: View {
         _ lane: PeopleRelationshipCluster,
         index: Int
     ) -> some View {
-        return VStack(alignment: .leading, spacing: 9) {
+        let columns = [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ]
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text(lane.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text("\(lane.memberCount)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
+                Text("\(lane.memberCount) 位")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
             }
-            .padding(.horizontal, 20)
 
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 15) {
-                    ForEach(lane.members) { member in
-                        relationshipNode(member)
-                    }
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                ForEach(lane.members) { member in
+                    relationshipNode(member)
                 }
-                .padding(.horizontal, 20)
             }
-            .scrollIndicators(.hidden)
         }
-        .padding(.top, index == 0 ? 12 : 15)
-        .padding(.bottom, 14)
-        .overlay(alignment: .bottom) {
-            Divider()
-                .padding(.leading, 20)
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 0.7)
         }
     }
 
@@ -537,21 +660,32 @@ private struct PeopleSwimlaneExplorer: View {
                 focus(on: person)
             }
         } label: {
-            VStack(spacing: 5) {
+            HStack(spacing: 10) {
                 AvatarView(
                     url: member.avatarURL(baseURL: baseURL),
                     name: member.name,
-                    size: 48,
+                    size: 42,
                     assetName: member.person?.avatarAssetName ?? member.avatarAssetName
                 )
 
-                Text(member.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(member.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    Text(member.relationship)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
             }
-            .frame(width: 62)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
         .buttonStyle(PeoplePressStyle())
         .accessibilityLabel("\(member.name)，与\(focusedPerson.name)的关系：\(member.relationship)")
