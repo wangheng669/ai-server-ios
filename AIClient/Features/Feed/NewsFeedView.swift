@@ -1279,10 +1279,16 @@ private final class EmbeddedWebPagePreloader: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<WKWebView, Error>?
 
     func load(_ url: URL) async throws -> WKWebView {
-        try await withCheckedThrowingContinuation { continuation in
+        let configuration = EmbeddedWebView.configuration(for: url)
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        if WeiboEmbeddedPagePolicy.shouldRestoreSession(for: url) {
+            await WeiboSessionCookieStore.install(
+                in: configuration.websiteDataStore.httpCookieStore
+            )
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
-            let configuration = EmbeddedWebView.configuration(for: url)
-            let webView = WKWebView(frame: .zero, configuration: configuration)
             webView.navigationDelegate = self
             self.webView = webView
             webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 20))
@@ -1374,7 +1380,22 @@ private struct EmbeddedWebPage: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        EmbeddedWebView(url: url, model: model, preparedWebView: preparedWebView)
+        ZStack {
+            EmbeddedWebView(url: url, model: model, preparedWebView: preparedWebView)
+
+            if source == .weibo, model.requiresWeiboAuthentication {
+                ContentUnavailableView {
+                    Label("微博需要登录", systemImage: "person.crop.circle.badge.exclamationmark")
+                } description: {
+                    Text("微博已限制匿名搜索，登录后即可查看这条热搜的讨论内容。")
+                } actions: {
+                    Button("登录微博") { model.beginWeiboLogin() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(.horizontal, 24)
+                .background(Color(uiColor: .systemBackground))
+            }
+        }
         .background(Color(uiColor: .systemBackground))
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -1487,6 +1508,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
     @Published var estimatedProgress = 0.0
     @Published var isAuthenticating = false
     @Published var isWeiboLoggedIn = false
+    @Published var requiresWeiboAuthentication = false
     @Published var weiboAvatarURL: URL?
     @Published var weiboDisplayName: String? = WeiboSessionCookieStore.storedDisplayName
     var weiboAccountInitial: String? {
@@ -1497,6 +1519,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
     private var isFetchingAvatar = false
 
     func reload() {
+        requiresWeiboAuthentication = false
         webView?.reload()
     }
 
@@ -1508,6 +1531,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
         guard let webView else { return }
         if let current = webView.url, !isWeiboLoginURL(current) { rememberReturnURL(current) }
         isAuthenticating = true
+        requiresWeiboAuthentication = false
         var components = URLComponents(string: "https://passport.weibo.com/sso/signin")!
         components.queryItems = [
             URLQueryItem(name: "entry", value: "wapsso"),
@@ -1519,6 +1543,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
 
     func finishWeiboLogin() {
         isAuthenticating = false
+        requiresWeiboAuthentication = false
         let destination = returnURL ?? URL(string: "https://s.weibo.com/top/summary")!
         returnURL = nil
         if let cookieStore = webView?.configuration.websiteDataStore.httpCookieStore {
@@ -1547,6 +1572,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
         guard let webView else { return }
         isAuthenticating = false
         isWeiboLoggedIn = false
+        requiresWeiboAuthentication = false
         weiboAvatarURL = nil
         weiboDisplayName = nil
         returnURL = nil
@@ -1886,6 +1912,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let model: EmbeddedWebViewModel
         private var progressObservation: NSKeyValueObservation?
+        private var pageInspectionTask: Task<Void, Never>?
         private var didBeginLoad = false
 
         init(model: EmbeddedWebViewModel) {
@@ -1921,15 +1948,23 @@ private struct EmbeddedWebView: UIViewRepresentable {
             model.rememberReturnURL(webView.url ?? url)
             model.estimatedProgress = 1
             model.isLoading = false
+            inspectWeiboPage(webView)
         }
 
         func stopObserving() {
+            pageInspectionTask?.cancel()
+            pageInspectionTask = nil
             progressObservation?.invalidate()
             progressObservation = nil
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            Task { @MainActor in model.isLoading = true }
+            pageInspectionTask?.cancel()
+            pageInspectionTask = nil
+            Task { @MainActor in
+                model.isLoading = true
+                model.requiresWeiboAuthentication = false
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1939,6 +1974,27 @@ private struct EmbeddedWebView: UIViewRepresentable {
                 let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
                 model.refreshWeiboSession(from: cookieStore, persist: !model.isAuthenticating)
                 model.fetchAccountAvatar(from: cookieStore)
+                inspectWeiboPage(webView)
+            }
+        }
+
+        private func inspectWeiboPage(_ webView: WKWebView) {
+            pageInspectionTask?.cancel()
+            pageInspectionTask = Task { @MainActor [weak self, weak webView] in
+                guard let self, let webView else { return }
+                for _ in 0..<24 {
+                    guard !Task.isCancelled else { return }
+                    let bodyText = (try? await webView.evaluateJavaScript(
+                        WeiboEmbeddedPagePolicy.bodyTextJavaScript
+                    )) as? String ?? ""
+                    let requiresAuthentication = WeiboEmbeddedPagePolicy.requiresAuthentication(
+                        url: webView.url,
+                        bodyText: bodyText
+                    )
+                    self.model.requiresWeiboAuthentication = requiresAuthentication
+                    if requiresAuthentication { return }
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
             }
         }
 
