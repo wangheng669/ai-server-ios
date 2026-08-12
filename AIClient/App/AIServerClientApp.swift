@@ -140,6 +140,18 @@ struct AIServerClientApp: App {
 
 private enum EditorialTab: Hashable {
     case world, noise, observation, investment, company, learning, people
+
+    var sectionTitle: String {
+        switch self {
+        case .noise: "噪音"
+        case .observation: "观点"
+        case .company: "公司"
+        case .people: "人物"
+        case .world: "今日"
+        case .investment: "数据"
+        case .learning: "知识"
+        }
+    }
 }
 
 private struct EditorialRootView: View {
@@ -191,6 +203,8 @@ private struct EditorialRootView: View {
     @State private var notificationPostID: Int?
     @State private var notificationPersonID: String?
     @State private var notificationVideoID: Int64?
+    @State private var lastDynamicTab: EditorialTab = .observation
+    @State private var lastResearchTab: EditorialTab = .company
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -231,38 +245,56 @@ private struct EditorialRootView: View {
         }
     }
 
+    private var groupedRootTabs: [EditorialTab]? {
+        switch selectedTab {
+        case .noise, .observation:
+            [.observation, .noise]
+        case .company, .people:
+            [.company, .people]
+        case .world, .investment, .learning:
+            nil
+        }
+    }
+
     var body: some View {
-        ZStack {
-            tabContent(.world) {
-                TodayWorldView(showsDetail: $worldShowsDetail)
+        VStack(spacing: 0) {
+            if !hidesRootTabBar, let groupedRootTabs {
+                RootSectionBar(selection: $selectedTab, tabs: groupedRootTabs)
             }
-            tabContent(.noise) {
-                GoogleNoiseView()
+
+            ZStack {
+                tabContent(.world) {
+                    TodayWorldView(showsDetail: $worldShowsDetail)
+                }
+                tabContent(.noise) {
+                    GoogleNoiseView()
+                }
+                tabContent(.observation) {
+                    NewsFeedView(
+                        showsDetail: $feedShowsDetail,
+                        hidesTabBar: $feedHidesTabBar,
+                        notificationPostID: $notificationPostID
+                    )
+                }
+                tabContent(.investment) {
+                    InvestmentView(showsDetail: $marketShowsDetail)
+                }
+                tabContent(.company) {
+                    CompanyResearchView()
+                }
+                tabContent(.learning) {
+                    LearningView(showsDetail: $learningShowsDetail)
+                }
+                tabContent(.people) {
+                    PeopleView(
+                        store: peopleStore,
+                        showsDetail: $peopleShowsDetail,
+                        notificationPersonID: $notificationPersonID,
+                        notificationVideoID: $notificationVideoID
+                    )
+                }
             }
-            tabContent(.observation) {
-                NewsFeedView(
-                    showsDetail: $feedShowsDetail,
-                    hidesTabBar: $feedHidesTabBar,
-                    notificationPostID: $notificationPostID
-                )
-            }
-            tabContent(.investment) {
-                InvestmentView(showsDetail: $marketShowsDetail)
-            }
-            tabContent(.company) {
-                CompanyResearchView()
-            }
-            tabContent(.learning) {
-                LearningView(showsDetail: $learningShowsDetail)
-            }
-            tabContent(.people) {
-                PeopleView(
-                    store: peopleStore,
-                    showsDetail: $peopleShowsDetail,
-                    notificationPersonID: $notificationPersonID,
-                    notificationVideoID: $notificationVideoID
-                )
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -278,7 +310,11 @@ private struct EditorialRootView: View {
                 }
 
                 if !hidesRootTabBar {
-                    RootNavigationBar(selection: $selectedTab)
+                    RootNavigationBar(
+                        selection: $selectedTab,
+                        dynamicTarget: lastDynamicTab,
+                        researchTarget: lastResearchTab
+                    )
                 }
             }
             .padding(.bottom, -13)
@@ -318,6 +354,16 @@ private struct EditorialRootView: View {
             }
             personPushNavigation.clear()
         }
+        .onChange(of: selectedTab, initial: true) { _, tab in
+            switch tab {
+            case .noise, .observation:
+                lastDynamicTab = tab
+            case .company, .people:
+                lastResearchTab = tab
+            case .world, .investment, .learning:
+                break
+            }
+        }
     }
 
     private func tabContent<Content: View>(
@@ -338,20 +384,71 @@ private struct EditorialRootView: View {
     }
 }
 
+private struct RootSectionBar: View {
+    @Binding var selection: EditorialTab
+    let tabs: [EditorialTab]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(tabs, id: \.self) { tab in
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        selection = tab
+                    }
+                } label: {
+                    Text(tab.sectionTitle)
+                        .font(.system(size: 14, weight: selection == tab ? .semibold : .regular))
+                        .foregroundStyle(selection == tab ? InvestmentDesign.accent : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(
+                                    selection == tab
+                                        ? InvestmentDesign.accentSoft
+                                        : InvestmentDesign.secondarySurface
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == tab ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(InvestmentDesign.divider)
+                .frame(height: 0.5)
+        }
+    }
+}
+
 private struct RootNavigationBar: View {
     @Binding var selection: EditorialTab
+    let dynamicTarget: EditorialTab
+    let researchTarget: EditorialTab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var selectionAnimation
 
     var body: some View {
         HStack(spacing: 0) {
-            item(.noise, title: "噪音", icon: "waveform.path.ecg")
-            item(.observation, title: "观点", icon: "list.bullet.rectangle")
+            item(
+                dynamicTarget,
+                selectedTabs: [.noise, .observation],
+                title: "动态",
+                icon: "list.bullet.rectangle"
+            )
             item(.investment, title: "数据", icon: "chart.line.uptrend.xyaxis")
-            item(.world, title: "今日世界", icon: "globe")
-            item(.company, title: "公司", icon: "building.2")
+            item(.world, title: "今日", icon: "globe")
+            item(
+                researchTarget,
+                selectedTabs: [.company, .people],
+                title: "研究",
+                icon: "magnifyingglass"
+            )
             item(.learning, title: "知识", icon: "books.vertical")
-            item(.people, title: "人物", icon: "person")
         }
         .frame(maxWidth: 368)
         .frame(height: 54)
@@ -365,33 +462,40 @@ private struct RootNavigationBar: View {
         .padding(.bottom, 2)
     }
 
-    private func item(_ tab: EditorialTab, title: String, icon: String) -> some View {
-        Button {
+    private func item(
+        _ tab: EditorialTab,
+        selectedTabs: [EditorialTab] = [],
+        title: String,
+        icon: String
+    ) -> some View {
+        let isSelected = selection == tab || selectedTabs.contains(selection)
+
+        return Button {
             withAnimation(reduceMotion ? nil : .snappy(duration: 0.24, extraBounce: 0.04)) {
                 selection = tab
             }
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: icon)
-                    .font(.system(size: 18, weight: selection == tab ? .semibold : .regular))
+                    .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
                     .symbolRenderingMode(.monochrome)
 
                 Text(title)
-                    .font(.system(size: 10, weight: selection == tab ? .medium : .regular))
+                    .font(.system(size: 10, weight: isSelected ? .medium : .regular))
 
                 Circle()
-                    .fill(selection == tab ? InvestmentDesign.accent : Color.clear)
+                    .fill(isSelected ? InvestmentDesign.accent : Color.clear)
                     .frame(width: 3, height: 3)
             }
             .foregroundStyle(
-                selection == tab
+                isSelected
                     ? InvestmentDesign.accent
                     : Color.primary.opacity(0.68)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .background {
-                if selection == tab {
+                if isSelected {
                     Capsule()
                         .fill(InvestmentDesign.accent.opacity(0.1))
                         .matchedGeometryEffect(id: "root-tab-selection", in: selectionAnimation)
@@ -402,7 +506,7 @@ private struct RootNavigationBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
-        .accessibilityAddTraits(selection == tab ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
