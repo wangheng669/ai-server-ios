@@ -2,6 +2,19 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesCachedSentimentSnapshot() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_sentiment_snapshot_v1","market":"hong-kong","score":66.67,"label":"正常","valuationPercentile":83.33,"sentimentPercentile":50,"advancerShare":50,"breadth":{"up":4,"down":5,"flat":1},"fetchedAt":"2026-08-12T02:00:00Z","cached":true,"stale":false}}"#.utf8)
+
+        let snapshot = try JSONDecoder().decode(MarketSentimentSnapshotResponse.self, from: data).data
+
+        XCTAssertEqual(snapshot.dataContract, "market_sentiment_snapshot_v1")
+        XCTAssertEqual(snapshot.score, 66.67, accuracy: 0.001)
+        XCTAssertEqual(snapshot.valuationPercentile, 83.33)
+        XCTAssertEqual(snapshot.breadth?.up, 4)
+        XCTAssertTrue(snapshot.cached)
+        XCTAssertFalse(snapshot.stale)
+    }
+
     func testDecodesServerBackedInstitutionResearch() throws {
         let data = Data(#"{"data":{"institutionsCount":3,"items":[{"id":"morgan-stanley-more-stocks-join-bull-market","institution":"Morgan Stanley","institutionShortName":"MS","title":"更多股票加入牛市","originalTitle":"More Stocks Join the Bull Market","summary":"市场领导力正在扩散。","publishedOn":"2026-07-22","sourceType":"官方播客文字稿","categories":["美股","市场广度"],"metrics":[],"source":{"title":"More Stocks Join the Bull Market","url":"https://www.morganstanley.com/insights/example"},"isSystemSummary":true,"presentation":"lead"},{"id":"goldman-sp500-forecast-2026","institution":"Goldman Sachs","institutionShortName":"GS","title":"盈利增长推动美股上行","originalTitle":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","summary":"盈利预测上调。","publishedOn":"2026-05-28","sourceType":"官方研究文章","categories":["美股"],"metrics":[{"label":"2026 EPS","value":"$340"}],"targetRevision":{"label":"标普500年末目标","previousValue":"7,600","currentValue":"8,000"},"source":{"title":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","url":"https://www.goldmansachs.com/insights/example"},"isSystemSummary":true,"presentation":"revision"}],"updatedAt":"2026-08-10T00:00:00Z"}}"#.utf8)
         let decoder = JSONDecoder()
