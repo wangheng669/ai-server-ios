@@ -27,6 +27,8 @@ struct CityRegionNews: Identifiable, Hashable {
 
 struct CityRegion: Identifiable, Hashable {
     let id: String
+    let adcode: Int
+    let parentAdcode: Int?
     let name: String
     let level: CityRegionLevel
     let introduction: String
@@ -42,68 +44,74 @@ enum CityNewsMockData {
     static let root: CityRegion = {
         let guangdong = province(
             id: "guangdong",
+            adcode: 440000,
             name: "广东省",
             introduction: "中国南部沿海省份，粤港澳大湾区核心区域。制造业、科技与外贸活跃。",
             facts: ["省会 广州", "21个地级市"],
             cities: [
-                city("shenzhen", "深圳市", "粤港澳大湾区核心城市，以科技创新、金融与现代服务业著称。", ["常住人口 1,779万", "9个行政区"], ["南山区", "福田区", "罗湖区", "宝安区", "龙岗区"]),
-                city("guangzhou", "广州市", "广东省省会和国家中心城市，是华南地区重要的商贸、交通与文化中心。", ["常住人口 1,898万", "11个行政区"], ["天河区", "越秀区", "海珠区", "白云区"]),
-                city("foshan", "佛山市", "珠江三角洲重要制造业城市，以装备制造、家电和陶瓷产业见长。", ["常住人口 961万", "5个行政区"], ["禅城区", "南海区", "顺德区"]),
-                city("dongguan", "东莞市", "粤港澳大湾区制造业基地，电子信息和先进制造产业集聚。", ["常住人口 1,050万", "4个片区"], ["南城街道", "松山湖", "虎门镇"])
+                city(
+                    "shenzhen", 440300, "深圳市",
+                    "粤港澳大湾区核心城市，以科技创新、金融与现代服务业著称。",
+                    ["常住人口 1,779万", "9个行政区"],
+                    [(440305, "南山区"), (440304, "福田区"), (440303, "罗湖区"), (440306, "宝安区")]
+                )
             ]
-        )
-
-        let beijing = province(
-            id: "beijing",
-            name: "北京市",
-            introduction: "中华人民共和国首都，全国政治、文化、国际交往和科技创新中心。",
-            facts: ["直辖市", "16个行政区"],
-            cities: [city("beijing-city", "北京城区", "首都功能核心区域，汇集公共文化、科技创新与现代服务资源。", ["国家中心城市", "16个行政区"], ["海淀区", "朝阳区", "东城区", "西城区"])]
-        )
-
-        let shanghai = province(
-            id: "shanghai",
-            name: "上海市",
-            introduction: "中国重要的国际经济、金融、贸易、航运和科技创新中心。",
-            facts: ["直辖市", "16个行政区"],
-            cities: [city("shanghai-city", "上海城区", "长江三角洲核心城市，现代服务业、先进制造业和国际贸易高度集聚。", ["国际金融中心", "16个行政区"], ["浦东新区", "黄浦区", "徐汇区", "静安区"])]
         )
 
         let zhejiang = province(
             id: "zhejiang",
+            adcode: 330000,
             name: "浙江省",
             introduction: "中国东南沿海省份，数字经济、民营经济和港口贸易优势突出。",
             facts: ["省会 杭州", "11个地级市"],
             cities: [
-                city("hangzhou", "杭州市", "浙江省省会，数字经济和文化旅游产业发达。", ["常住人口 1,262万", "13个区县"], ["西湖区", "余杭区", "滨江区"]),
-                city("ningbo", "宁波市", "长三角南翼经济中心和国际港口城市。", ["副省级城市", "10个区县"], ["鄞州区", "海曙区", "北仑区"])
+                city(
+                    "hangzhou", 330100, "杭州市",
+                    "浙江省省会，数字经济和文化旅游产业发达。",
+                    ["常住人口 1,262万", "13个区县"],
+                    [(330106, "西湖区"), (330110, "余杭区"), (330108, "滨江区")]
+                )
             ]
         )
 
         let sichuan = province(
             id: "sichuan",
+            adcode: 510000,
             name: "四川省",
             introduction: "中国西部重要经济、人口和文化大省，电子信息、能源与文旅资源丰富。",
             facts: ["省会 成都", "21个市州"],
-            cities: [city("chengdu", "成都市", "成渝地区双城经济圈核心城市，电子信息和现代服务业发达。", ["国家中心城市", "23个区县"], ["高新区", "锦江区", "武侯区", "天府新区"])]
+            cities: [city(
+                "chengdu", 510100, "成都市",
+                "成渝地区双城经济圈核心城市，电子信息和现代服务业发达。",
+                ["国家中心城市", "23个区县"],
+                [(510104, "锦江区"), (510107, "武侯区"), (510116, "双流区"), (510117, "郫都区")]
+            )]
         )
 
         let shaanxi = province(
             id: "shaanxi",
+            adcode: 610000,
             name: "陕西省",
             introduction: "连接中国东西部的重要省份，科教、航空航天、能源和历史文化资源突出。",
             facts: ["省会 西安", "10个地级市"],
-            cities: [city("xian", "西安市", "国家中心城市和重要科研教育基地，历史文化与硬科技产业并重。", ["常住人口 1,308万", "13个区县"], ["雁塔区", "碑林区", "未央区", "高新区"])]
+            cities: [city(
+                "xian", 610100, "西安市",
+                "国家中心城市和重要科研教育基地，历史文化与硬科技产业并重。",
+                ["常住人口 1,308万", "13个区县"],
+                [(610113, "雁塔区"), (610103, "碑林区"), (610112, "未央区"), (610104, "莲湖区")]
+            )]
         )
 
         return CityRegion(
             id: "china",
+            adcode: 100000,
+            parentAdcode: nil,
             name: "全国",
             level: .country,
             introduction: "这里按省份、城市和区县逐级查看地区概况与当天新闻，每一级都有独立内容。",
             facts: ["省级行政区", "三级地区新闻"],
             news: news(for: "全国", seed: "区域发展"),
-            children: [guangdong, beijing, shanghai, zhejiang, sichuan, shaanxi]
+            children: [guangdong, zhejiang, sichuan, shaanxi]
         )
     }()
 
@@ -121,6 +129,7 @@ enum CityNewsMockData {
 
     private static func province(
         id: String,
+        adcode: Int,
         name: String,
         introduction: String,
         facts: [String],
@@ -128,6 +137,8 @@ enum CityNewsMockData {
     ) -> CityRegion {
         CityRegion(
             id: id,
+            adcode: adcode,
+            parentAdcode: 100000,
             name: name,
             level: .province,
             introduction: introduction,
@@ -139,22 +150,27 @@ enum CityNewsMockData {
 
     private static func city(
         _ id: String,
+        _ adcode: Int,
         _ name: String,
         _ introduction: String,
         _ facts: [String],
-        _ districtNames: [String]
+        _ districts: [(adcode: Int, name: String)]
     ) -> CityRegion {
         CityRegion(
             id: id,
+            adcode: adcode,
+            parentAdcode: adcode / 10000 * 10000,
             name: name,
             level: .city,
             introduction: introduction,
             facts: facts,
             news: news(for: name, seed: "产业创新"),
-            children: districtNames.enumerated().map { index, districtName in
+            children: districts.enumerated().map { index, entry in
                 district(
-                    id: "\(id)-\(index)",
-                    name: districtName,
+                    id: "\(id)-\(entry.adcode)",
+                    adcode: entry.adcode,
+                    parentAdcode: adcode,
+                    name: entry.name,
                     cityName: name,
                     index: index
                 )
@@ -162,10 +178,19 @@ enum CityNewsMockData {
         )
     }
 
-    private static func district(id: String, name: String, cityName: String, index: Int) -> CityRegion {
+    private static func district(
+        id: String,
+        adcode: Int,
+        parentAdcode: Int,
+        name: String,
+        cityName: String,
+        index: Int
+    ) -> CityRegion {
         let featured = name == "南山区"
         return CityRegion(
             id: id,
+            adcode: adcode,
+            parentAdcode: parentAdcode,
             name: name,
             level: .district,
             introduction: featured
@@ -215,7 +240,7 @@ struct CityNewsView: View {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--city-district-preview") {
-            _path = State(initialValue: CityNewsMockData.path(to: "shenzhen-0"))
+            _path = State(initialValue: CityNewsMockData.path(to: "shenzhen-440305"))
             directlyPresentedPreviewRegion = nil
         } else if arguments.contains("--city-city-preview") {
             _path = State(initialValue: CityNewsMockData.path(to: "shenzhen"))
@@ -309,79 +334,228 @@ private struct CityRegionMapCard: View {
     let region: CityRegion
 
     var body: some View {
-        ZStack {
-            CityRegionMapShape(level: region.level)
-                .fill(CityNewsDesign.accentSoft)
-                .overlay {
-                    CityRegionMapShape(level: region.level)
-                        .stroke(CityNewsDesign.accent.opacity(0.45), lineWidth: 1)
-                }
-                .padding(.horizontal, 34)
-                .padding(.vertical, 12)
-
-            VStack(spacing: 5) {
-                Image(systemName: "mappin.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(CityNewsDesign.accent)
-                Text(region.name)
-                    .font(.subheadline.weight(.semibold))
-            }
-        }
-        .frame(height: 146)
+        CityAdministrativeMap(region: region)
+        .frame(height: region.level == .country ? 226 : 206)
         .frame(maxWidth: .infinity)
         .background(CityNewsDesign.surface, in: RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(CityNewsDesign.divider, lineWidth: 0.6)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(region.name)地图示意")
+        .accessibilityLabel("\(region.name)行政区地图")
     }
 }
 
-private struct CityRegionMapShape: Shape {
-    let level: CityRegionLevel
+struct CityMapFeatureCollection: Decodable {
+    let features: [CityMapFeature]
+}
 
-    func path(in rect: CGRect) -> Path {
-        let points: [CGPoint]
-        switch level {
+struct CityMapFeature: Decodable, Identifiable {
+    struct Properties: Decodable {
+        struct Parent: Decodable { let adcode: Int }
+
+        let adcode: Int
+        let name: String
+        let level: String
+        let parent: Parent?
+        let center: [Double]?
+        let centroid: [Double]?
+    }
+
+    struct Geometry: Decodable {
+        let polygons: [[[[Double]]]]
+
+        private enum CodingKeys: String, CodingKey { case type, coordinates }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try container.decode(String.self, forKey: .type)
+            if type == "Polygon" {
+                polygons = [try container.decode([[[Double]]].self, forKey: .coordinates)]
+            } else {
+                polygons = try container.decode([[[[Double]]]].self, forKey: .coordinates)
+            }
+        }
+    }
+
+    let properties: Properties
+    let geometry: Geometry
+
+    var id: Int { properties.adcode }
+    var parentAdcode: Int? { properties.parent?.adcode }
+    var allCoordinates: [[Double]] { geometry.polygons.flatMap { $0.flatMap { $0 } } }
+
+    var labelCoordinate: [Double]? {
+        properties.centroid ?? properties.center ?? allCoordinates.first
+    }
+}
+
+struct CityMapRepository {
+    static let shared = CityMapRepository()
+
+    let features: [CityMapFeature]
+
+    init(bundle: Bundle = .main) {
+        guard
+            let url = bundle.url(forResource: "CityMapRegions", withExtension: "geojson"),
+            let data = try? Data(contentsOf: url),
+            let collection = try? JSONDecoder().decode(CityMapFeatureCollection.self, from: data)
+        else {
+            features = []
+            return
+        }
+        features = collection.features
+    }
+
+    func features(for region: CityRegion) -> [CityMapFeature] {
+        switch region.level {
         case .country:
-            points = [
-                .init(x: 0.05, y: 0.38), .init(x: 0.17, y: 0.20), .init(x: 0.36, y: 0.29),
-                .init(x: 0.48, y: 0.14), .init(x: 0.66, y: 0.21), .init(x: 0.76, y: 0.34),
-                .init(x: 0.94, y: 0.30), .init(x: 0.88, y: 0.53), .init(x: 0.73, y: 0.60),
-                .init(x: 0.66, y: 0.82), .init(x: 0.48, y: 0.72), .init(x: 0.30, y: 0.77),
-                .init(x: 0.18, y: 0.61), .init(x: 0.08, y: 0.58)
-            ]
+            features.filter { $0.properties.level == "province" }
         case .province:
-            points = [
-                .init(x: 0.06, y: 0.45), .init(x: 0.17, y: 0.23), .init(x: 0.38, y: 0.30),
-                .init(x: 0.55, y: 0.18), .init(x: 0.76, y: 0.26), .init(x: 0.93, y: 0.47),
-                .init(x: 0.81, y: 0.68), .init(x: 0.59, y: 0.71), .init(x: 0.43, y: 0.85),
-                .init(x: 0.25, y: 0.69), .init(x: 0.11, y: 0.65)
-            ]
+            features.filter { $0.properties.level == "city" && $0.parentAdcode == region.adcode }
         case .city:
-            points = [
-                .init(x: 0.10, y: 0.29), .init(x: 0.29, y: 0.16), .init(x: 0.48, y: 0.28),
-                .init(x: 0.68, y: 0.19), .init(x: 0.91, y: 0.39), .init(x: 0.83, y: 0.69),
-                .init(x: 0.62, y: 0.76), .init(x: 0.44, y: 0.68), .init(x: 0.24, y: 0.83),
-                .init(x: 0.07, y: 0.59)
-            ]
+            features.filter { $0.properties.level == "district" && $0.parentAdcode == region.adcode }
         case .district:
-            points = [
-                .init(x: 0.19, y: 0.18), .init(x: 0.49, y: 0.10), .init(x: 0.79, y: 0.24),
-                .init(x: 0.91, y: 0.52), .init(x: 0.72, y: 0.82), .init(x: 0.42, y: 0.75),
-                .init(x: 0.14, y: 0.88), .init(x: 0.06, y: 0.48)
-            ]
+            features.filter { $0.properties.level == "district" && $0.parentAdcode == region.parentAdcode }
         }
+    }
+}
 
-        var path = Path()
-        guard let first = points.first else { return path }
-        path.move(to: CGPoint(x: rect.minX + first.x * rect.width, y: rect.minY + first.y * rect.height))
-        for point in points.dropFirst() {
-            path.addLine(to: CGPoint(x: rect.minX + point.x * rect.width, y: rect.minY + point.y * rect.height))
+private struct CityAdministrativeMap: View {
+    let region: CityRegion
+
+    private var features: [CityMapFeature] { CityMapRepository.shared.features(for: region) }
+    private var childByAdcode: [Int: CityRegion] { Dictionary(uniqueKeysWithValues: region.children.map { ($0.adcode, $0) }) }
+    private var availableAdcodes: Set<Int> { Set(region.children.map(\.adcode)) }
+
+    var body: some View {
+        GeometryReader { geometry in
+            if features.isEmpty {
+                ContentUnavailableView("地图数据不可用", systemImage: "map")
+            } else {
+                let projection = CityMapProjection(features: features, size: geometry.size)
+                ZStack {
+                    Canvas { context, _ in
+                        for feature in features {
+                            let path = projection.path(for: feature)
+                            context.fill(
+                                path,
+                                with: .color(fillColor(for: feature)),
+                                style: FillStyle(eoFill: true)
+                            )
+                            context.stroke(path, with: .color(.white.opacity(0.85)), lineWidth: 0.65)
+                        }
+                    }
+
+                    ForEach(markerFeatures) { feature in
+                        if let coordinate = feature.labelCoordinate {
+                            if let child = childByAdcode[feature.id] {
+                                NavigationLink(value: child) {
+                                    mapLabel(feature.properties.name, selected: false)
+                                }
+                                .buttonStyle(.plain)
+                                .position(projection.point(for: coordinate))
+                                .accessibilityHint("进入并查看\(child.name)简介和新闻")
+                            } else {
+                                mapLabel(feature.properties.name, selected: true)
+                                    .position(projection.point(for: coordinate))
+                            }
+                        }
+                    }
+
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Text("行政区边界 · 原型数据")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(8)
+                    .allowsHitTesting(false)
+                }
+                .padding(8)
+            }
         }
-        path.closeSubpath()
+    }
+
+    private var markerFeatures: [CityMapFeature] {
+        if region.children.isEmpty {
+            return features.filter { $0.id == region.adcode }
+        }
+        return features.filter { availableAdcodes.contains($0.id) }
+    }
+
+    private func fillColor(for feature: CityMapFeature) -> Color {
+        if feature.id == region.adcode { return CityNewsDesign.accent.opacity(0.78) }
+        if availableAdcodes.contains(feature.id) { return CityNewsDesign.accent.opacity(0.32) }
+        return Color.secondary.opacity(0.13)
+    }
+
+    private func mapLabel(_ text: String, selected: Bool) -> some View {
+        Text(text.replacingOccurrences(of: "省", with: "").replacingOccurrences(of: "市", with: ""))
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(selected ? .white : CityNewsDesign.accent)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .background(selected ? CityNewsDesign.accent : Color.white.opacity(0.94), in: Capsule())
+            .overlay { Capsule().stroke(CityNewsDesign.accent.opacity(0.35), lineWidth: 0.5) }
+    }
+}
+
+private struct CityMapProjection {
+    private let minX: Double
+    private let maxY: Double
+    private let scale: Double
+    private let offsetX: Double
+    private let offsetY: Double
+
+    init(features: [CityMapFeature], size: CGSize) {
+        let coordinates = features.flatMap(\.allCoordinates)
+        let xs = coordinates.compactMap { $0.first }
+        let ys = coordinates.compactMap { $0.count > 1 ? $0[1] : nil }
+        let sourceMinX = xs.min() ?? 0
+        let sourceMaxX = xs.max() ?? 1
+        let sourceMinY = ys.min() ?? 0
+        let sourceMaxY = ys.max() ?? 1
+        let padding = 8.0
+        let sourceWidth = max(sourceMaxX - sourceMinX, 0.001)
+        let sourceHeight = max(sourceMaxY - sourceMinY, 0.001)
+        let fittedScale = min(
+            max(Double(size.width) - padding * 2, 1) / sourceWidth,
+            max(Double(size.height) - padding * 2, 1) / sourceHeight
+        )
+        let renderedWidth = sourceWidth * fittedScale
+        let renderedHeight = sourceHeight * fittedScale
+
+        minX = sourceMinX
+        maxY = sourceMaxY
+        scale = fittedScale
+        offsetX = (Double(size.width) - renderedWidth) / 2
+        offsetY = (Double(size.height) - renderedHeight) / 2
+    }
+
+    func point(for coordinate: [Double]) -> CGPoint {
+        guard coordinate.count >= 2 else { return .zero }
+        return CGPoint(
+            x: (coordinate[0] - minX) * scale + offsetX,
+            y: (maxY - coordinate[1]) * scale + offsetY
+        )
+    }
+
+    func path(for feature: CityMapFeature) -> Path {
+        var path = Path()
+        for polygon in feature.geometry.polygons {
+            for ring in polygon {
+                guard let first = ring.first else { continue }
+                path.move(to: point(for: first))
+                for coordinate in ring.dropFirst() {
+                    path.addLine(to: point(for: coordinate))
+                }
+                path.closeSubpath()
+            }
+        }
         return path
     }
 }

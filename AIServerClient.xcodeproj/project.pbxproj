@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
 		C17A00000000000000000004 /* CityNewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000005 /* CityNewsTests.swift */; };
+		C17A00000000000000000006 /* CityMapRegions.geojson in Resources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000007 /* CityMapRegions.geojson */; };
 		AA1000000000000000000001 /* GoogleSignalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000002 /* GoogleSignalView.swift */; };
 		AA2000000000000000000001 /* GoogleSignalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000002 /* GoogleSignalTests.swift */; };
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
@@ -110,6 +111,7 @@
 
 /* Begin PBXFileReference section */
 		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
+		C17A00000000000000000007 /* CityMapRegions.geojson */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = CityMaps/CityMapRegions.geojson; sourceTree = "<group>"; };
 		C17A00000000000000000005 /* CityNewsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsTests.swift; sourceTree = "<group>"; };
 		AA1000000000000000000002 /* GoogleSignalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalView.swift; sourceTree = "<group>"; };
 		AA2000000000000000000002 /* GoogleSignalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalTests.swift; sourceTree = "<group>"; };
@@ -217,6 +219,7 @@
 			isa = PBXGroup;
 			children = (
 				137FDCB7037445C35ED02C74 /* Assets.xcassets */,
+				C17A00000000000000000007 /* CityMapRegions.geojson */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -519,6 +522,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D861C048F423A45336AE551F /* Assets.xcassets in Resources */,
+				C17A00000000000000000006 /* CityMapRegions.geojson in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
