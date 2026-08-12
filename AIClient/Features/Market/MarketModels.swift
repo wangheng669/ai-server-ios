@@ -88,13 +88,13 @@ struct MarketDashboard: Codable {
     }
 
     func quote(symbol: String) -> MarketQuote? {
-        coreIndices.first(where: { $0.symbol == symbol })
-            ?? referenceIndices.first(where: { $0.symbol == symbol })
-            ?? metrics.first(where: { $0.symbol == symbol })
-            ?? componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol })
-            ?? crypto.first(where: { $0.symbol == symbol })
-            ?? commodities.first(where: { $0.symbol == symbol })
-            ?? indexSessions?.values.first(where: { $0.symbol == symbol })
+        if let quote = coreIndices.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = referenceIndices.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = metrics.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = crypto.first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = commodities.first(where: { $0.symbol == symbol }) { return quote }
+        return indexSessions?.values.first(where: { $0.symbol == symbol })
     }
 
     var allRegionalComponents: [MarketQuote] {
