@@ -43,7 +43,17 @@ struct LearningTopic: Decodable, Identifiable, Hashable {
 
     func mediaURL(_ value: String?, baseURL: URL = ServerConfiguration.currentURL) -> URL? {
         guard let value, !value.isEmpty else { return nil }
-        if let absolute = URL(string: value), absolute.scheme != nil { return absolute }
+        if let absolute = URL(string: value), absolute.scheme != nil {
+            return MediaURL.video(absolute.absoluteString) ?? absolute
+        }
+        return URL(string: value, relativeTo: baseURL)?.absoluteURL
+    }
+
+    func imageURL(_ value: String?, baseURL: URL = ServerConfiguration.currentURL) -> URL? {
+        guard let value, !value.isEmpty else { return nil }
+        if let absolute = URL(string: value), absolute.scheme != nil {
+            return MediaURL.image(absolute.absoluteString) ?? absolute
+        }
         return URL(string: value, relativeTo: baseURL)?.absoluteURL
     }
 }
@@ -109,7 +119,7 @@ struct LearningVideoReference: Decodable, Hashable, Identifiable {
 
     var coverURL: URL? {
         guard let coverURLValue else { return nil }
-        return URL(string: coverURLValue)
+        return MediaURL.image(coverURLValue) ?? URL(string: coverURLValue)
     }
 
     var clipDurationText: String {
@@ -202,7 +212,7 @@ struct LearningVideoLesson: Decodable, Identifiable, Hashable {
 
     var coverURL: URL? {
         guard let coverURLValue else { return nil }
-        return URL(string: coverURLValue)
+        return MediaURL.image(coverURLValue) ?? URL(string: coverURLValue)
     }
 
     var durationText: String {
@@ -360,7 +370,7 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
 
     var coverURL: URL? {
         guard let coverURLValue else { return nil }
-        return URL(string: coverURLValue)
+        return MediaURL.image(coverURLValue) ?? URL(string: coverURLValue)
     }
 
     var openURL: URL? { URL(string: openURLValue) }
@@ -506,6 +516,8 @@ enum KnowledgeConceptImageURL {
         guard let rawValue, let url = URL(string: rawValue) else { return nil }
         guard let host = url.host?.lowercased() else { return url }
 
+        let optimizedURL: URL
+
         if host == "upload.wikimedia.org",
            url.path.hasPrefix(commonsPathPrefix),
            !url.path.hasPrefix("\(commonsPathPrefix)thumb/"),
@@ -515,19 +527,18 @@ enum KnowledgeConceptImageURL {
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
             components?.path = "\(commonsPathPrefix)thumb/\(relativePath)/\(thumbnailWidth)px-\(filename)"
             components?.query = nil
-            return components?.url ?? url
-        }
-
-        if host == "commons.wikimedia.org",
+            optimizedURL = components?.url ?? url
+        } else if host == "commons.wikimedia.org",
            url.path.hasPrefix("/wiki/Special:Redirect/file/") {
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
             var queryItems = components?.queryItems?.filter { $0.name != "width" } ?? []
             queryItems.append(URLQueryItem(name: "width", value: thumbnailWidth))
             components?.queryItems = queryItems
-            return components?.url ?? url
+            optimizedURL = components?.url ?? url
+        } else {
+            optimizedURL = url
         }
-
-        return url
+        return MediaURL.image(optimizedURL.absoluteString) ?? optimizedURL
     }
 
     private static func isRasterImage(_ url: URL) -> Bool {

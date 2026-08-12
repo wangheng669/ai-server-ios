@@ -473,7 +473,8 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertEqual(post.meta?.quotedTweet?.author?.handle, "@example")
         XCTAssertEqual(post.meta?.quotedTweet?.displayText, "双子座是谁？")
-        XCTAssertEqual(post.meta?.quotedTweet?.media?.first?.displayURL?.absoluteString, "https://example.com/t.jpg")
+        let displayURL = try XCTUnwrap(post.meta?.quotedTweet?.media?.first?.displayURL)
+        XCTAssertEqual(try proxyTarget(displayURL).absoluteString, "https://example.com/t.jpg")
     }
 
     func testDecodesXReplyAndQuotedVideoContext() throws {
@@ -487,8 +488,8 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertFalse(post.needsXReplyContextRefresh)
         let media = try XCTUnwrap(post.meta?.quotedTweet?.media?.first)
         XCTAssertTrue(media.isVideo)
-        XCTAssertEqual(media.playbackURL?.absoluteString, "https://example.com/demo.mp4")
-        XCTAssertEqual(media.previewURL?.absoluteString, "https://example.com/demo.jpg")
+        XCTAssertEqual(try proxyTarget(XCTUnwrap(media.playbackURL)).absoluteString, "https://example.com/demo.mp4")
+        XCTAssertEqual(try proxyTarget(XCTUnwrap(media.previewURL)).absoluteString, "https://example.com/demo.jpg")
     }
 
     func testXReplyWithoutStoredContextRequestsDetailRefresh() throws {
@@ -702,7 +703,10 @@ final class PostDecodingTests: XCTestCase {
         let imported = try JSONDecoder().decode(XPersonImportResponse.self, from: importData)
 
         XCTAssertEqual(search.results.first?.handle, "@sama")
-        XCTAssertEqual(search.results.first?.avatarURL?.absoluteString, "https://example.com/avatar.jpg")
+        XCTAssertEqual(
+            try proxyTarget(XCTUnwrap(search.results.first?.avatarURL)).absoluteString,
+            "https://example.com/avatar.jpg"
+        )
         XCTAssertTrue(search.results.first?.verified == true)
         XCTAssertEqual(imported.person.id, "1605")
         XCTAssertTrue(imported.added)
@@ -716,7 +720,10 @@ final class PostDecodingTests: XCTestCase {
 
         XCTAssertEqual(search.results.first?.name, "马云")
         XCTAssertEqual(search.results.first?.sourceLabel, "中文维基百科")
-        XCTAssertEqual(search.results.first?.avatarURL?.absoluteString, "https://example.com/jack-ma.jpg")
+        XCTAssertEqual(
+            try proxyTarget(XCTUnwrap(search.results.first?.avatarURL)).absoluteString,
+            "https://example.com/jack-ma.jpg"
+        )
         XCTAssertEqual(search.results.first?.articleURL?.host, "zh.wikipedia.org")
         XCTAssertEqual(imported.person.id, "curated:wikidata:q1137062")
         XCTAssertFalse(imported.person.hasOwnPostSource)
@@ -861,16 +868,19 @@ final class PostDecodingTests: XCTestCase {
         let json = #"{"id":17,"source":"rss:14","images":[{"url":"https://xqimg.imedao.com/example.jpeg!custom.jpg"}]}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: json)
 
-        XCTAssertEqual(post.imageURLs.first?.absoluteString, "https://xqimg.imedao.com/example.jpeg")
+        XCTAssertEqual(
+            try proxyTarget(XCTUnwrap(post.imageURLs.first)).absoluteString,
+            "https://xqimg.imedao.com/example.jpeg"
+        )
     }
 
     func testXueqiuImagesKeepTheirBodyAndReplyPlacement() throws {
         let json = #"{"id":18,"source":"rss:14","content":"正文<br/><img src=\"https://xqimg.imedao.com/body.jpg!custom.jpg\"/><blockquote>回复者: 回复内容<br/><img src=\"https://xqimg.imedao.com/reply.jpg!custom.jpg\"/></blockquote>","images":[{"url":"https://xqimg.imedao.com/body.jpg!custom.jpg"},{"url":"https://xqimg.imedao.com/reply.jpg!custom.jpg"},{"url":"https://xqimg.imedao.com/unplaced.jpg!custom.jpg"}]}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: json)
 
-        XCTAssertEqual(post.xueqiuBodyImageURLs.map(\.lastPathComponent), ["body.jpg"])
-        XCTAssertEqual(post.xueqiuQuoteImageURLs.map(\.lastPathComponent), ["reply.jpg"])
-        XCTAssertEqual(post.xueqiuUnplacedImageURLs.map(\.lastPathComponent), ["unplaced.jpg"])
+        XCTAssertEqual(try post.xueqiuBodyImageURLs.map { try proxyTarget($0).lastPathComponent }, ["body.jpg"])
+        XCTAssertEqual(try post.xueqiuQuoteImageURLs.map { try proxyTarget($0).lastPathComponent }, ["reply.jpg"])
+        XCTAssertEqual(try post.xueqiuUnplacedImageURLs.map { try proxyTarget($0).lastPathComponent }, ["unplaced.jpg"])
     }
 
     func testXueqiuKeepsBodyAndQuoteHyperlinksClickable() throws {
@@ -934,7 +944,13 @@ final class PostDecodingTests: XCTestCase {
         let post = try JSONDecoder().decode(Post.self, from: json)
 
         XCTAssertTrue(post.isYouTube)
-        XCTAssertEqual(post.youtubeCoverURL?.absoluteString, "https://i.ytimg.com/vi/DZR27djdRco/hqdefault.jpg")
+        let coverURL = try XCTUnwrap(post.youtubeCoverURL)
+        let components = try XCTUnwrap(URLComponents(url: coverURL, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(coverURL.path, "/api/ios/v1/image-proxy")
+        XCTAssertEqual(
+            components.queryItems?.first(where: { $0.name == "url" })?.value,
+            "https://i.ytimg.com/vi/DZR27djdRco/hqdefault.jpg"
+        )
     }
 
     func testBilibiliRSSPostUsesBilibiliPresentationFromArticleLink() throws {
@@ -1150,7 +1166,13 @@ final class PostDecodingTests: XCTestCase {
         let json = #"{"post":{"id":102,"videos":[{"url":"https://example.com/page","play_url":"https://cdn.example.com/video.mp4"}]}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(PostDetailResponse.self, from: json).post
 
-        XCTAssertEqual(post.videoURLs.first?.absoluteString, "https://cdn.example.com/video.mp4")
+        let playbackURL = try XCTUnwrap(post.videoURLs.first)
+        let components = try XCTUnwrap(URLComponents(url: playbackURL, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(playbackURL.path, "/api/ios/v1/media-proxy")
+        XCTAssertEqual(
+            components.queryItems?.first(where: { $0.name == "url" })?.value,
+            "https://cdn.example.com/video.mp4"
+        )
     }
 
     func testDecodesXVideoWithoutRequiringImageOrPreview() throws {
@@ -1220,10 +1242,24 @@ final class PostDecodingTests: XCTestCase {
             NewYorkTimesArticleParser.extract(from: html),
             NewYorkTimesArticle(blocks: [
                 .paragraph("图片前正文。"),
-                .image(url: URL(string: "https://example.com/full.jpg")!, caption: "图片说明", credit: "摄影署名"),
+                .image(
+                    url: MediaURL.image("https://example.com/full.jpg")!,
+                    caption: "图片说明",
+                    credit: "摄影署名"
+                ),
                 .paragraph("图片后正文。")
             ])
         )
+    }
+
+    private func proxyTarget(_ url: URL) throws -> URL {
+        let value = try XCTUnwrap(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "url" })?
+                .value
+        )
+        return try XCTUnwrap(URL(string: value))
     }
 
     func testNewYorkTimesInlineImageUsesServerProxy() throws {

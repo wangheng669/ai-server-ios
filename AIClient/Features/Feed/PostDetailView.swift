@@ -1198,6 +1198,7 @@ struct PostDetailView: View {
                 originalURL: post.linkURL
             ),
             subtitleLoader: youtubeSubtitleLoader,
+            playbackLoader: youtubePlaybackLoader,
             presentedAsSheet: presentedAsSheet,
             startsAutomatically: true
         )
@@ -1209,6 +1210,15 @@ struct PostDetailView: View {
             let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
                 .fetchYouTubeSubtitles(videoID: videoID)
             return YouTubeSubtitleResult(status: payload.status, cues: payload.cues)
+        }
+    }
+
+    private var youtubePlaybackLoader: YouTubeVideoDetailView.PlaybackLoader? {
+        guard let url = post.linkURL else { return nil }
+        let title = post.displayTitle
+        return {
+            try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .resolveYouTubePlayback(url: url, title: title)
         }
     }
 
@@ -2346,10 +2356,10 @@ struct PostDetailView: View {
 
     @ViewBuilder
     private func xQuotedMedia(_ media: XQuotedMedia) -> some View {
-        if let videoURL = media.directPlaybackURL ?? media.playbackURL {
+        if let videoURL = media.playbackURL {
             XVideoPlayerView(
                 url: videoURL,
-                fallbackURL: media.directPlaybackURL == nil ? nil : media.playbackURL,
+                fallbackURL: nil,
                 thumbnailURL: media.previewURL,
                 generatesThumbnailWhenMissing: false
             )
@@ -2424,11 +2434,11 @@ struct PostDetailView: View {
     }
 
     private var xDetailVideoURL: URL? {
-        post.directVideoURLs.first ?? xLiveDetail?.directVideoURL
+        post.videoURLs.first ?? xLiveDetail?.videoURL
     }
 
     private var xDetailVideoFallbackURL: URL? {
-        post.videoURLs.first ?? xLiveDetail?.videoURL
+        nil
     }
 
     private var xDetailVideoPreviewURL: URL? {
@@ -2488,7 +2498,7 @@ struct PostDetailView: View {
             await detectVideoAspectRatio(url: video)
         } else if post.sourceName == "X",
                   xVideoMetadataAspectRatio == nil,
-                  let video = post.directVideoURLs.first ?? post.videoURLs.first {
+                  let video = post.videoURLs.first {
             await detectVideoAspectRatio(url: video)
         }
 
@@ -2515,7 +2525,7 @@ struct PostDetailView: View {
                 xLiveDetail = liveDetail
                 translationTweetID = liveDetail.id
                 if post.videoURLs.isEmpty,
-                   let videoURL = liveDetail.directVideoURL ?? liveDetail.videoURL,
+                   let videoURL = liveDetail.videoURL,
                    detectedVideoAspectRatio == nil,
                    xVideoMetadataAspectRatio == nil {
                     await detectVideoAspectRatio(url: videoURL)
@@ -3407,26 +3417,37 @@ struct YouTubeEmbeddedPlayer: UIViewRepresentable {
     static func dismantleUIView(_ webView: WKWebView, coordinator: Void) {}
 }
 
-private struct NativeVideoPlayer: UIViewControllerRepresentable {
-    let url: URL
+struct NativeVideoPlayer: UIViewControllerRepresentable {
+    let source: VideoPlaybackSource
+    var startsAt: Double = 0
     let onReady: () -> Void
     let onFailed: () -> Void
+    var onTime: (Double) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onReady: onReady, onFailed: onFailed)
+        Coordinator(onReady: onReady, onFailed: onFailed, onTime: onTime)
     }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.showsPlaybackControls = true
         controller.videoGravity = .resizeAspect
-        let item = AVPlayerItem(url: url)
+        let asset = AVURLAsset(
+            url: source.url,
+            options: source.httpHeaders.isEmpty
+                ? nil
+                : ["AVURLAssetHTTPHeaderFieldsKey": source.httpHeaders]
+        )
+        let item = AVPlayerItem(asset: asset)
         let player = AVPlayer(playerItem: item)
         #if targetEnvironment(simulator)
         player.isMuted = true
         #endif
         controller.player = player
         context.coordinator.observe(item: item, player: player)
+        if startsAt > 0 {
+            player.seek(to: CMTime(seconds: startsAt, preferredTimescale: 600))
+        }
         player.play()
         return controller
     }
@@ -3441,16 +3462,32 @@ private struct NativeVideoPlayer: UIViewControllerRepresentable {
     final class Coordinator: NSObject {
         let onReady: () -> Void
         let onFailed: () -> Void
+        let onTime: (Double) -> Void
         private var statusObservation: NSKeyValueObservation?
         private var failureObserver: NSObjectProtocol?
+        private var timeObserver: Any?
+        private weak var observedPlayer: AVPlayer?
         private var deliveredState = false
 
-        init(onReady: @escaping () -> Void, onFailed: @escaping () -> Void) {
+        init(
+            onReady: @escaping () -> Void,
+            onFailed: @escaping () -> Void,
+            onTime: @escaping (Double) -> Void
+        ) {
             self.onReady = onReady
             self.onFailed = onFailed
+            self.onTime = onTime
         }
 
         func observe(item: AVPlayerItem, player: AVPlayer) {
+            observedPlayer = player
+            timeObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+                queue: .main
+            ) { [weak self] time in
+                guard time.seconds.isFinite else { return }
+                self?.onTime(time.seconds)
+            }
             statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self, weak player] item, _ in
                 DispatchQueue.main.async {
                     guard let self, !self.deliveredState else { return }
@@ -3487,6 +3524,11 @@ private struct NativeVideoPlayer: UIViewControllerRepresentable {
         func stopObserving() {
             statusObservation?.invalidate()
             statusObservation = nil
+            if let timeObserver, let observedPlayer {
+                observedPlayer.removeTimeObserver(timeObserver)
+            }
+            timeObserver = nil
+            observedPlayer = nil
             if let failureObserver {
                 NotificationCenter.default.removeObserver(failureObserver)
                 self.failureObserver = nil

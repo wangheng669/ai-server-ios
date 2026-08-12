@@ -34,10 +34,139 @@ struct InAppBrowserSheet: View {
                     )
                 Divider().opacity(0.55)
             }
-            MinimalInAppWebView(url: url, title: $title)
+            if ExternalAccessPolicy.requiresServerRelay(url) {
+                ServerArticleReaderView(url: url) { title = $0 }
+            } else {
+                MinimalInAppWebView(url: url, title: $title)
+            }
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .accessibilityAction(.escape) { dismiss() }
+    }
+}
+
+enum ExternalAccessPolicy {
+    private static let directHostSuffixes = [
+        "wanghengai.xin", "bilibili.com", "b23.tv", "weibo.com", "weibo.cn",
+        "sina.com.cn", "sina.cn", "zhihu.com", "xueqiu.com", "futunn.com",
+        "douyin.com", "toutiao.com", "baidu.com", "qq.com", "weixin.qq.com",
+        "163.com", "sohu.com", "ifeng.com", "cctv.com", "cctv.cn", "12371.cn",
+    ]
+
+    static func requiresServerRelay(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased() else { return false }
+        return !directHostSuffixes.contains(where: { host == $0 || host.hasSuffix(".\($0)") })
+    }
+}
+
+struct ServerArticleReaderView: View {
+    let url: URL
+    var titleChanged: ((String) -> Void)?
+    @State private var payload: ArticlePreviewResponse.Payload?
+    @State private var loadError: String?
+
+    init(url: URL, titleChanged: ((String) -> Void)? = nil) {
+        self.url = url
+        self.titleChanged = titleChanged
+    }
+
+    var body: some View {
+        Group {
+            if let payload {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(displayTitle(payload))
+                            .font(.system(size: 25, weight: .bold, design: .serif))
+                            .lineSpacing(4)
+
+                        HStack(spacing: 8) {
+                            Text(payload.siteName.isEmpty ? (url.host ?? "网页") : payload.siteName)
+                            if !payload.byline.isEmpty { Text("·"); Text(payload.byline) }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        ForEach(imageURLs(payload), id: \.self) { imageURL in
+                            RemoteImage(url: imageURL, height: 220, cornerRadius: 12, contentMode: .fit)
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        Text(displayText(payload))
+                            .font(.system(size: 17, design: .serif))
+                            .lineSpacing(7)
+                            .textSelection(.enabled)
+
+                        ShareLink(item: url) {
+                            Label("分享原始链接", systemImage: "square.and.arrow.up")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                }
+            } else if let loadError {
+                ContentUnavailableView {
+                    Label("正文载入失败", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(loadError)
+                } actions: {
+                    Button("重试") { Task { await load() } }
+                }
+            } else {
+                ProgressView("正在通过服务器读取正文…")
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .task(id: url) { await load() }
+    }
+
+    private func load() async {
+        loadError = nil
+        do {
+            let next = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchArticlePreview(url: url)
+                .data
+            payload = next
+            titleChanged?(displayTitle(next))
+        } catch {
+            payload = nil
+            loadError = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    private func displayTitle(_ payload: ArticlePreviewResponse.Payload) -> String {
+        let value = payload.titleZH.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? payload.title : value
+    }
+
+    private func displayText(_ payload: ArticlePreviewResponse.Payload) -> String {
+        let translated = payload.textContentZH.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !translated.isEmpty { return translated }
+        let original = payload.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return original.isEmpty ? payload.excerpt : original
+    }
+
+    private func imageURLs(_ payload: ArticlePreviewResponse.Payload) -> [URL] {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?i)\b(?:src|data-src)\s*=\s*[\"']([^\"']+)[\"']"#
+        ) else { return [] }
+        let html = payload.contentZH.isEmpty ? payload.content : payload.contentZH
+        let source = html as NSString
+        var seen = Set<URL>()
+        return regex.matches(in: html, range: NSRange(location: 0, length: source.length))
+            .compactMap { match -> URL? in
+                guard match.numberOfRanges > 1 else { return nil }
+                let raw = source.substring(with: match.range(at: 1))
+                let normalized = raw.hasPrefix("//") ? "https:\(raw)" : raw
+                guard let absolute = URL(string: normalized, relativeTo: url)?.absoluteURL,
+                      let relayed = MediaURL.image(absolute.absoluteString),
+                      seen.insert(relayed).inserted else { return nil }
+                return relayed
+            }
+            .prefix(8)
+            .map { $0 }
     }
 }
 
@@ -463,7 +592,8 @@ actor ImageLoader {
 
     static func load(_ url: URL?, targetSize: CGSize? = nil) async -> UIImage? {
         guard let url else { return nil }
-        return await shared.image(for: url, targetSize: targetSize, scale: UIScreen.main.scale)
+        let relayedURL = MediaURL.image(url.absoluteString) ?? url
+        return await shared.image(for: relayedURL, targetSize: targetSize, scale: UIScreen.main.scale)
     }
 
     private func image(for url: URL, targetSize: CGSize?, scale: CGFloat) async -> UIImage? {
@@ -870,12 +1000,11 @@ struct PostMediaGrid: View {
 
 private extension Post {
     var feedPlaybackURL: URL? {
-        sourceName == "X" ? directVideoURLs.first ?? videoURLs.first : videoURLs.first
+        videoURLs.first
     }
 
     var feedPlaybackFallbackURL: URL? {
-        guard sourceName == "X", directVideoURLs.first != nil else { return nil }
-        return videoURLs.first
+        nil
     }
 }
 

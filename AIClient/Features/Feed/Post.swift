@@ -1011,7 +1011,7 @@ struct Post: Codable, Identifiable, Hashable {
     var youtubeCoverURL: URL? {
         if let previewURL { return previewURL }
         guard let videoID = youtubeVideoID else { return nil }
-        return URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg")
+        return MediaURL.image("https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg")
     }
     var youtubeVideoID: String? {
         guard isYouTube, let linkURL else { return nil }
@@ -1781,8 +1781,6 @@ struct PostVideo: Codable, Hashable {
 }
 
 enum MediaURL {
-    private static let imageHostSuffixes = ["twimg.com", "hdslb.com", "biliimg.com", "sinaimg.cn", "sina.com.cn", "ytimg.com", "ggpht.com", "truthsocial.com", "nyt.com", "nytimes.com", "qpic.cn", "assets.imedao.com"]
-
     static func image(_ raw: String) -> URL? {
         let decoded = highResolutionXueqiuImageURL(
             raw.replacingOccurrences(of: "&amp;", with: "&")
@@ -1805,7 +1803,7 @@ enum MediaURL {
             ]
             return parts?.url
         }
-        return resolved(decoded, proxy: "image-proxy", hosts: imageHostSuffixes)
+        return resolved(decoded, proxy: "image-proxy")
     }
 
     private static func highResolutionXueqiuImageURL(_ raw: String) -> String {
@@ -1842,7 +1840,7 @@ enum MediaURL {
 
     static func video(_ raw: String) -> URL? {
         guard let direct = directVideo(raw) else { return nil }
-        return resolved(direct.absoluteString, proxy: "media-proxy", hosts: ["video.twimg.com", "truthsocial.com"])
+        return resolved(direct.absoluteString, proxy: "media-proxy")
     }
 
     static func videoThumbnail(for videoURL: URL, at seconds: Double = 0) -> URL? {
@@ -1874,10 +1872,16 @@ enum MediaURL {
         return url.pathComponents.first { $0.range(of: #"^BV[0-9A-Za-z]{10}$"#, options: .regularExpression) != nil }
     }
 
-    private static func resolved(_ raw: String, proxy: String, hosts: [String]) -> URL? {
+    private static func resolved(_ raw: String, proxy: String, hosts: [String]? = nil) -> URL? {
         let value = raw.hasPrefix("//") ? "https:\(raw)" : raw
         guard let direct = URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
-        guard let host = direct.host?.lowercased(), hosts.contains(where: { host == $0 || host.hasSuffix(".\($0)") }) else { return direct }
+        guard let scheme = direct.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return direct }
+        guard let host = direct.host?.lowercased() else { return direct }
+        if host == ServerConfiguration.currentURL.host?.lowercased() { return direct }
+        if let hosts,
+           !hosts.contains(where: { host == $0 || host.hasSuffix(".\($0)") }) {
+            return direct
+        }
         var parts = URLComponents(url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/\(proxy)"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [.init(name: "url", value: direct.absoluteString), .init(name: "soft", value: "1"), .init(name: "context", value: "ios-feed")]
         return parts?.url
