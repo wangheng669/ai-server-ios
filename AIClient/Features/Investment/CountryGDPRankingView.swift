@@ -329,10 +329,7 @@ struct CountryGDPRankingView: View {
                 .offset(x: 34, y: 18)
 
             VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("全球经济")
-                        .font(.system(size: 27, weight: .bold))
-                        .foregroundStyle(.white)
+                HStack {
                     Spacer()
                     HStack(spacing: 5) {
                         Text(verbatim: "\(ranking.year)")

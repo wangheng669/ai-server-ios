@@ -48,10 +48,7 @@ struct RetailInvestorView: View {
                     if selectedMarket == .korea {
                         koreaLeverageContent
                     } else {
-                        sentimentDailyHeader
-                        sectionGap
                         sentimentDecisionHero
-                        sentimentDecisionGrid
                         actionPlaybook
                         sectionGap
                         investorMoodCard
@@ -181,87 +178,70 @@ struct RetailInvestorView: View {
         .accessibilityLabel("\(selectedMarket.title)市场情绪 \(temperature.map { String(Int($0.rounded())) } ?? "暂无数据")")
     }
 
-    private var sentimentDailyHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("情绪日报")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text(
-                    Date.now.formatted(
-                        Date.FormatStyle()
-                            .month(.defaultDigits)
-                            .day(.defaultDigits)
-                            .weekday(.wide)
-                            .locale(Locale(identifier: "zh_CN"))
-                    )
-                )
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if store.isLoading {
-                ProgressView().controlSize(.small)
-            } else {
-                Label("实时更新", systemImage: "waveform.path.ecg")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(InvestmentDesign.accentSoft, in: Capsule())
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
-        .background(InvestmentDesign.surface)
-    }
-
     private var sentimentDecisionHero: some View {
         let snapshot = store.snapshot(for: selectedMarket)
         let score = snapshot?.score
         let accent = temperatureColor(score)
         let breadth = selectedBreadth
-        return VStack(alignment: .leading, spacing: 17) {
-            HStack(alignment: .center, spacing: 14) {
-                Image(systemName: sentimentSymbol(score))
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 46, height: 46)
-                    .background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(sentimentVerdict(score))
-                        .font(.system(size: 23, weight: .bold))
-                    Text(selectedMarket.title + " · " + (snapshot?.label.nonEmpty ?? "等待数据"))
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center, spacing: 18) {
+                ZStack {
+                    Circle().stroke(Color.primary.opacity(0.07), lineWidth: 8)
+                    Circle()
+                        .trim(from: 0, to: max(0.02, min((score ?? 0) / 100, 1)))
+                        .stroke(accent, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    VStack(spacing: -1) {
+                        Text(score.map { String(Int($0.rounded())) } ?? "—")
+                            .font(.system(size: 31, weight: .bold, design: .rounded))
+                            .foregroundStyle(accent)
+                            .contentTransition(.numericText())
+                        Text("情绪值")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer()
-                HStack(alignment: .lastTextBaseline, spacing: 3) {
-                    Text(score.map { String(Int($0.rounded())) } ?? "—")
-                        .font(.system(size: 43, weight: .bold, design: .rounded))
+                .frame(width: 104, height: 104)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Label(snapshot?.label.nonEmpty ?? "等待数据", systemImage: sentimentSymbol(score))
+                        .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(accent)
-                        .contentTransition(.numericText())
-                    Text("/100")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                    Text(sentimentVerdict(score))
+                        .font(.system(size: 24, weight: .bold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(decisionNarrative(score: score, breadth: breadth))
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(2)
                 }
             }
 
-            Text(decisionNarrative(score: score, breadth: breadth))
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineSpacing(3)
+            GeometryReader { proxy in
+                if breadth.total > 0 {
+                    HStack(spacing: 3) {
+                        Capsule().fill(InvestmentDesign.gain).frame(width: proxy.size.width * breadth.upRatio)
+                        Capsule().fill(Color.secondary.opacity(0.25)).frame(width: proxy.size.width * breadth.flatRatio)
+                        Capsule().fill(InvestmentDesign.loss)
+                    }
+                } else {
+                    Capsule().fill(Color.secondary.opacity(0.16))
+                }
+            }
+            .frame(height: 7)
 
-            HStack(spacing: 8) {
-                decisionDriver("赚钱效应", state: breadthEffectLabel(breadth), tint: breadth.up >= breadth.down ? InvestmentDesign.gain : InvestmentDesign.loss)
-                decisionDriver("市场温度", state: snapshot?.label.nonEmpty ?? "待更新", tint: accent)
-                decisionDriver("情绪分歧", state: breadth.flatRatio > 0.12 ? "较明显" : "可控", tint: InvestmentDesign.warning)
+            HStack(spacing: 0) {
+                heroMetric("上涨", value: breadth.total > 0 ? "\(Int((breadth.upRatio * 100).rounded()))%" : "—", tint: breadth.total > 0 ? InvestmentDesign.gain : .secondary)
+                heroDivider
+                heroMetric("赚钱效应", value: breadthEffectLabel(breadth), tint: breadth.total > 0 ? (breadth.up >= breadth.down ? InvestmentDesign.gain : InvestmentDesign.loss) : .secondary)
+                heroDivider
+                heroMetric("估值位置", value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—", tint: .blue)
             }
         }
-        .padding(18)
+        .padding(20)
         .background(
             LinearGradient(
-                colors: [InvestmentDesign.secondarySurface, accent.opacity(0.08)],
+                colors: [InvestmentDesign.surface, accent.opacity(0.10)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ),
@@ -272,7 +252,23 @@ struct RetailInvestorView: View {
                 .stroke(accent.opacity(0.16), lineWidth: 0.75)
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .padding(.bottom, 10)
+    }
+
+    private func heroMetric(_ title: String, value: String, tint: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var heroDivider: some View {
+        Rectangle().fill(InvestmentDesign.divider).frame(width: 0.5, height: 28)
     }
 
     private var sentimentDecisionGrid: some View {
@@ -300,7 +296,7 @@ struct RetailInvestorView: View {
 
     private var actionPlaybook: some View {
         let score = store.snapshot(for: selectedMarket)?.score
-        return VStack(alignment: .leading, spacing: 13) {
+        return VStack(alignment: .leading, spacing: 15) {
             HStack {
                 Label("今日应对", systemImage: "checklist")
                     .font(.system(size: 16, weight: .semibold))
@@ -309,28 +305,31 @@ struct RetailInvestorView: View {
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
-            HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
                 ForEach(Array(actionSuggestions(score).enumerated()), id: \.offset) { index, suggestion in
-                    VStack(spacing: 7) {
-                        Text(String(index + 1))
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Image(systemName: actionSymbol(index))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(suggestion.tint)
-                            .frame(width: 25, height: 25)
-                            .background(suggestion.tint.opacity(0.12), in: Circle())
+                            .frame(width: 28, height: 28)
+                            .background(suggestion.tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 9))
                         Text(suggestion.title)
                             .font(.system(size: 12, weight: .semibold))
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity)
-                    if index < 2 {
-                        Rectangle().fill(InvestmentDesign.divider).frame(width: 0.5, height: 34)
-                    }
+                    .padding(11)
+                    .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
         .padding(16)
         .background(InvestmentDesign.surface)
         .overlay(alignment: .bottom) { Divider().overlay(InvestmentDesign.divider) }
+    }
+
+    private func actionSymbol(_ index: Int) -> String {
+        ["slider.horizontal.3", "scope", "shield.checkered"][min(index, 2)]
     }
 
     private func decisionDriver(_ title: String, state: String, tint: Color) -> some View {
@@ -445,36 +444,27 @@ struct RetailInvestorView: View {
     }
 
     private var marketPicker: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 7) {
             ForEach(SentimentMarket.allCases) { market in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {
                         selectedMarket = market
                     }
                 } label: {
-                    VStack(spacing: 0) {
-                        Text(market.title)
-                            .font(.system(size: 13, weight: selectedMarket == market ? .semibold : .regular))
-                            .foregroundStyle(selectedMarket == market ? Color.primary : Color.secondary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 39)
-                        Capsule()
-                            .fill(selectedMarket == market ? InvestmentDesign.accent : .clear)
-                            .frame(width: 17, height: 2)
-                    }
+                    Text(market.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(selectedMarket == market ? Color.white : Color.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(selectedMarket == market ? InvestmentDesign.accent : InvestmentDesign.secondarySurface, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 5)
+        .padding(.vertical, 12)
         .background(InvestmentDesign.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(InvestmentDesign.divider)
-                .frame(height: 0.5)
-        }
         .accessibilityLabel("选择市场情绪")
     }
 

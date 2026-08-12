@@ -343,6 +343,7 @@ private enum ChinaMacroSection: String, CaseIterable, Identifiable {
         case .energy: "用电与实体活力"
         }
     }
+
 }
 
 private struct ChinaMacroPresentation: Identifiable {
@@ -415,24 +416,20 @@ struct ChinaMacroView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(section.title)
-                .font(.system(size: 27, weight: .bold, design: .rounded))
-            HStack(spacing: 12) {
-                Label(
-                    latestYear.map { "最新数据 \(String($0)) 年" } ?? "正在更新数据",
-                    systemImage: "calendar"
-                )
-                if let updatedAt = store.lastUpdatedAt {
-                    Label(chinaMacroTimestamp(updatedAt, includeYear: false), systemImage: "arrow.clockwise")
-                }
-                if store.isLoading && !store.years.isEmpty {
-                    ProgressView().controlSize(.mini)
-                }
+        HStack(spacing: 12) {
+            Label(
+                latestYear.map { "最新数据 \(String($0)) 年" } ?? "正在更新数据",
+                systemImage: "calendar"
+            )
+            if let updatedAt = store.lastUpdatedAt {
+                Label(chinaMacroTimestamp(updatedAt, includeYear: false), systemImage: "arrow.clockwise")
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            if store.isLoading && !store.years.isEmpty {
+                ProgressView().controlSize(.mini)
+            }
         }
+        .font(.caption)
+        .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

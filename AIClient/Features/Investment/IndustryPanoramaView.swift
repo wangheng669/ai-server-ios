@@ -261,17 +261,12 @@ struct IndustryPanoramaView: View {
 
     private func industryIntroduction(_ industry: IndustryPayload) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 10) {
-                Text(industry.title)
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(HoldingsPalette.ink)
-                Text(industry.scale.period)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(InvestmentDesign.accentSoft, in: Capsule())
-            }
+            Text(industry.scale.period)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(InvestmentDesign.accent)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(InvestmentDesign.accentSoft, in: Capsule())
 
             Text(industry.subtitle)
                 .font(.system(size: 14))
