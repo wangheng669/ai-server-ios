@@ -205,6 +205,7 @@ private struct EditorialRootView: View {
     @State private var notificationVideoID: Int64?
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var lastResearchTab: EditorialTab = .investment
+    @State private var presentedExternalLink: InAppBrowserDestination?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -297,6 +298,14 @@ private struct EditorialRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .environment(\.openURL, OpenURLAction { url in
+            guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+                return .systemAction
+            }
+            presentedExternalLink = InAppBrowserDestination(url: url)
+            return .handled
+        })
+        .inAppBrowserCover(item: $presentedExternalLink)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
                 if let deploymentStatus {

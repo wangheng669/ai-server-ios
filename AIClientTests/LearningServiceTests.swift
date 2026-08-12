@@ -137,7 +137,8 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(response.data.yesterdayReadingText, "2 小时 3 分钟")
         XCTAssertEqual(response.data.books.count, 2)
         XCTAssertEqual(response.data.books.first?.id, "3300203616")
-        XCTAssertEqual(response.data.books.first?.coverURL?.host, "example.com")
+        let coverURL = try XCTUnwrap(response.data.books.first?.coverURL)
+        XCTAssertEqual(try proxiedImageTarget(coverURL).host, "example.com")
         XCTAssertEqual(response.data.books.first?.openURL?.scheme, "weread")
         XCTAssertEqual(response.data.books.first?.displayReadingProgress, 42)
         XCTAssertEqual(response.data.books.first?.readingDurationText, "累计阅读 2 小时 3 分钟")
@@ -187,7 +188,8 @@ final class LearningServiceTests: XCTestCase {
 
     func testKnowledgeConceptCoverURLUsesWikimediaThumbnail() throws {
         let original = "https://upload.wikimedia.org/wikipedia/commons/4/4e/YuanShikaiPresidente1915.jpg"
-        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(original))
+        let proxied = try XCTUnwrap(KnowledgeConceptImageURL.optimized(original))
+        let optimized = try proxiedImageTarget(proxied)
 
         XCTAssertEqual(optimized.host, "upload.wikimedia.org")
         XCTAssertTrue(optimized.path.contains("/wikipedia/commons/thumb/"))
@@ -196,14 +198,16 @@ final class LearningServiceTests: XCTestCase {
 
     func testKnowledgeConceptCoverURLKeepsExistingThumbnail() throws {
         let thumbnail = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Yuan.jpg/320px-Yuan.jpg"
-        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(thumbnail))
+        let proxied = try XCTUnwrap(KnowledgeConceptImageURL.optimized(thumbnail))
+        let optimized = try proxiedImageTarget(proxied)
 
         XCTAssertEqual(optimized.absoluteString, thumbnail)
     }
 
     func testKnowledgeConceptCoverURLSetsRedirectWidth() throws {
         let redirect = "https://commons.wikimedia.org/wiki/Special:Redirect/file/Hankou.jpg?width=1200"
-        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(redirect))
+        let proxied = try XCTUnwrap(KnowledgeConceptImageURL.optimized(redirect))
+        let optimized = try proxiedImageTarget(proxied)
         let width = URLComponents(url: optimized, resolvingAgainstBaseURL: false)?
             .queryItems?
             .first(where: { $0.name == "width" })?
@@ -212,11 +216,23 @@ final class LearningServiceTests: XCTestCase {
         XCTAssertEqual(width, "960")
     }
 
-    func testKnowledgeConceptCoverURLLeavesOtherHostsUntouched() throws {
+    func testKnowledgeConceptCoverURLProxiesOtherHosts() throws {
         let original = "https://example.com/history/cover.jpg"
-        let optimized = try XCTUnwrap(KnowledgeConceptImageURL.optimized(original))
+        let proxied = try XCTUnwrap(KnowledgeConceptImageURL.optimized(original))
+        let optimized = try proxiedImageTarget(proxied)
 
         XCTAssertEqual(optimized.absoluteString, original)
+    }
+
+    private func proxiedImageTarget(_ url: URL) throws -> URL {
+        XCTAssertEqual(url.path, "/api/ios/v1/image-proxy")
+        let value = try XCTUnwrap(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "url" })?
+                .value
+        )
+        return try XCTUnwrap(URL(string: value))
     }
 
     func testDecodesIndependentVideoLessonDetail() throws {

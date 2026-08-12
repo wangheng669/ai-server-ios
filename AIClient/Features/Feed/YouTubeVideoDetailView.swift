@@ -26,9 +26,11 @@ struct YouTubeSubtitlesResponse: Decodable {
 
 struct YouTubeVideoDetailView: View {
     typealias SubtitleLoader = @Sendable () async throws -> YouTubeSubtitleResult
+    typealias PlaybackLoader = @Sendable () async throws -> VideoPlaybackSource
 
     let video: YouTubeVideoDetailModel
     var subtitleLoader: SubtitleLoader?
+    var playbackLoader: PlaybackLoader?
     var presentedAsSheet = true
     var startsAutomatically = false
 
@@ -39,6 +41,10 @@ struct YouTubeVideoDetailView: View {
     @State private var isFullscreen = false
     @State private var isPlaying = false
     @State private var playbackFailed = false
+    @State private var playbackSource: VideoPlaybackSource?
+    @State private var isResolvingPlayback = false
+    @State private var activePlayerInstance: String?
+    @State private var playbackGeneration = 0
     @State private var isDescriptionExpanded = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -82,7 +88,7 @@ struct YouTubeVideoDetailView: View {
         }
         .task(id: video.id) {
             if startsAutomatically {
-                startPlayback(instanceID: "youtube-detail-inline")
+                await startPlayback(instanceID: "youtube-detail-inline")
             }
             await loadSubtitles()
         }
@@ -138,7 +144,7 @@ struct YouTubeVideoDetailView: View {
                     .buttonStyle(.plain)
                     .disabled(video.originalURL == nil)
                 if isPlaying {
-                    Button { startPlayback(instanceID: "youtube-detail-inline") } label: {
+                    Button { Task { await startPlayback(instanceID: "youtube-detail-inline") } } label: {
                         actionLabel("重新播放", symbol: "arrow.counterclockwise")
                     }
                     .buttonStyle(.plain)
@@ -207,19 +213,23 @@ struct YouTubeVideoDetailView: View {
 
     private func player(instanceID: String, showsFullscreenButton: Bool = true) -> some View {
         ZStack(alignment: .topTrailing) {
-            YouTubeEmbeddedPlayer(
-                videoID: video.videoID,
-                instanceID: instanceID,
-                options: .customSubtitles,
-                onPlaying: { isPlaying = true; playbackFailed = false },
-                onFailed: { playbackFailed = true },
-                onTime: { seconds in
+            if activePlayerInstance == instanceID, let playbackSource {
+                NativeVideoPlayer(
+                    source: playbackSource,
+                    startsAt: Double(currentMS) / 1_000,
+                    onReady: { isPlaying = true; playbackFailed = false },
+                    onFailed: { playbackFailed = true; isPlaying = false },
+                    onTime: { seconds in
                     let isFullPlayer = instanceID == "youtube-detail-full"
                     guard isFullPlayer == isFullscreen else { return }
                     updatePlaybackTime(seconds)
-                }
-            )
-            if !isPlaying { videoPoster(instanceID: instanceID) }
+                    }
+                )
+                .id("\(instanceID)-\(playbackGeneration)")
+            }
+            if activePlayerInstance != instanceID || playbackSource == nil || !isPlaying {
+                videoPoster(instanceID: instanceID)
+            }
             if showsFullscreenButton {
                 Button { enterFullscreen() } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -239,13 +249,17 @@ struct YouTubeVideoDetailView: View {
                 if let image = phase.image { image.resizable().scaledToFill() } else { Color.black }
             }
             LinearGradient(colors: [.black.opacity(0.08), .black.opacity(0.42)], startPoint: .top, endPoint: .bottom)
-            Button { startPlayback(instanceID: instanceID) } label: {
-                Image(systemName: playbackFailed ? "arrow.clockwise" : "play.fill")
+            Button { Task { await startPlayback(instanceID: instanceID) } } label: {
+                if isResolvingPlayback, activePlayerInstance == instanceID {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: playbackFailed ? "arrow.clockwise" : "play.fill")
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(.white)
+                }
+            }
                     .frame(width: 62, height: 62)
                     .background(.black.opacity(0.68), in: Circle())
-            }
             .buttonStyle(.plain)
             .accessibilityLabel(playbackFailed ? "重新加载视频" : "播放视频")
         }
@@ -346,36 +360,44 @@ struct YouTubeVideoDetailView: View {
 
     private func seek(to cue: PersonVideoSubtitleCue) {
         currentMS = cue.startMS
-        YouTubeWarmPlayerPool.shared.seek(
-            videoID: video.videoID,
-            instanceID: isFullscreen ? "youtube-detail-full" : "youtube-detail-inline",
-            options: .customSubtitles,
-            seconds: Double(cue.startMS) / 1_000
-        )
+        playbackGeneration += 1
     }
 
-    private func startPlayback(instanceID: String) {
+    private func startPlayback(instanceID: String) async {
         playbackFailed = false
-        YouTubeWarmPlayerPool.shared.startPlayback(
-            videoID: video.videoID,
-            instanceID: instanceID,
-            options: .customSubtitles
-        )
+        activePlayerInstance = instanceID
+        guard playbackSource == nil else {
+            playbackGeneration += 1
+            return
+        }
+        guard let playbackLoader else {
+            playbackFailed = true
+            return
+        }
+        isResolvingPlayback = true
+        defer { isResolvingPlayback = false }
+        do {
+            playbackSource = try await playbackLoader()
+            playbackGeneration += 1
+        } catch {
+            playbackFailed = true
+        }
     }
 
     private func enterFullscreen() {
-        YouTubeWarmPlayerPool.shared.pause(videoID: video.videoID, instanceID: "youtube-detail-inline", options: .customSubtitles)
         AppOrientationController.shared.setVideoFullscreen(true)
         isPlaying = false
         isFullscreen = true
-        startPlayback(instanceID: "youtube-detail-full")
+        activePlayerInstance = "youtube-detail-full"
+        playbackGeneration += 1
     }
 
     private func exitFullscreen() {
-        YouTubeWarmPlayerPool.shared.pause(videoID: video.videoID, instanceID: "youtube-detail-full", options: .customSubtitles)
         AppOrientationController.shared.setVideoFullscreen(false)
         isPlaying = false
         isFullscreen = false
+        activePlayerInstance = "youtube-detail-inline"
+        playbackGeneration += 1
     }
 
     private func openOriginal() {

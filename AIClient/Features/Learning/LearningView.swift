@@ -2419,7 +2419,7 @@ private struct LearningTopicThumbnail: View {
     private func loadImage() async {
         image = nil
         finishedLoading = false
-        guard let url = topic.mediaURL(topic.thumbnailURLValue) else {
+        guard let url = topic.imageURL(topic.thumbnailURLValue) else {
             finishedLoading = true
             learningImageLogger.error("Missing thumbnail URL for topic \(topic.id, privacy: .public)")
             return

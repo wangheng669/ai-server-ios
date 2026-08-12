@@ -1430,7 +1430,7 @@ private struct EmbeddedWebPage: View {
 
     @ViewBuilder private var weiboAccountButtonLabel: some View {
         if let avatarURL = model.weiboAvatarURL {
-            AsyncImage(url: avatarURL) { image in
+            AsyncImage(url: MediaURL.image(avatarURL.absoluteString) ?? avatarURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 Image(systemName: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle")

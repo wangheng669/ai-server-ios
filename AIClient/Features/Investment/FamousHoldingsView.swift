@@ -760,7 +760,9 @@ struct HoldingsCompanyLogo: View {
 
     private var logoURL: URL? {
         guard let path, !path.isEmpty else { return nil }
-        if let absolute = URL(string: path), absolute.scheme != nil { return absolute }
+        if let absolute = URL(string: path), absolute.scheme != nil {
+            return MediaURL.image(absolute.absoluteString) ?? absolute
+        }
         return URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
     }
 }

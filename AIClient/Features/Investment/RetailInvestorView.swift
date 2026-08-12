@@ -1274,7 +1274,7 @@ private struct InvestorMoodVideoCard: View {
     private var thumbnail: some View {
         ZStack {
             Color.black
-            AsyncImage(url: item.directCoverURL ?? item.coverPlaybackURL ?? URL(string: item.coverUrl)) { phase in
+            AsyncImage(url: item.coverPlaybackURL ?? MediaURL.image(item.coverUrl) ?? URL(string: item.coverUrl)) { phase in
                 if let image = phase.image {
                     image.resizable().scaledToFill()
                 } else {

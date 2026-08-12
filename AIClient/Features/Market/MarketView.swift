@@ -4155,7 +4155,8 @@ private struct CompanyLogo: View {
 
     private var logoURL: URL? {
         guard let path, !path.isEmpty else { return nil }
-        return URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
+        guard let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
+        return MediaURL.image(url.absoluteString) ?? url
     }
 
 }

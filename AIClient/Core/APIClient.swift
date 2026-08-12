@@ -594,6 +594,36 @@ struct APIClient {
         return try await get(previewURL)
     }
 
+    func fetchWikipediaEntities(titles: [String], language: String = "zh") async throws -> [WikipediaRelayEntity] {
+        var parts = URLComponents(
+            url: baseURL.appending(path: "api/ios/v1/wikipedia/entities"),
+            resolvingAgainstBaseURL: false
+        )
+        parts?.queryItems = [
+            .init(name: "language", value: language),
+            .init(name: "titles", value: titles.joined(separator: "|")),
+        ]
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: WikipediaRelayEntitiesResponse = try await get(url)
+        guard response.success else { throw APIError.invalidResponse }
+        return response.entities
+    }
+
+    func fetchWikipediaArticle(title: String, language: String = "zh") async throws -> WikipediaRelayArticle {
+        var parts = URLComponents(
+            url: baseURL.appending(path: "api/ios/v1/wikipedia/article"),
+            resolvingAgainstBaseURL: false
+        )
+        parts?.queryItems = [
+            .init(name: "language", value: language),
+            .init(name: "title", value: title),
+        ]
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: WikipediaRelayArticleResponse = try await get(url)
+        guard response.success else { throw APIError.invalidResponse }
+        return response.article
+    }
+
     static func articlePreviewURL(for articleURL: URL, baseURL: URL) -> URL? {
         var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/preview"), resolvingAgainstBaseURL: false)
         parts?.queryItems = [
@@ -845,17 +875,64 @@ struct ArticlePreviewResponse: Decodable {
     let data: Payload
     struct Payload: Decodable {
         let title: String
+        let byline: String
+        let excerpt: String
+        let siteName: String
         let content: String
         let textContent: String
         let titleZH: String
+        let contentZH: String
         let textContentZH: String
 
         enum CodingKeys: String, CodingKey {
-            case title, content, textContent
+            case title, byline, excerpt, siteName, content, textContent
             case titleZH = "titleZh"
+            case contentZH = "contentZh"
             case textContentZH = "textContentZh"
         }
     }
+}
+
+struct WikipediaRelayEntity: Decodable, Equatable {
+    let query: String
+    let id: String
+    let pageID: Int64
+    let language: String
+    let title: String
+    let extract: String?
+    let articleURL: URL
+
+    enum CodingKeys: String, CodingKey {
+        case query, id, language, title, extract
+        case pageID = "page_id"
+        case articleURL = "article_url"
+    }
+}
+
+private struct WikipediaRelayEntitiesResponse: Decodable {
+    let success: Bool
+    let entities: [WikipediaRelayEntity]
+}
+
+struct WikipediaRelayArticle: Decodable, Equatable {
+    let language: String
+    let pageID: Int64
+    let title: String
+    let displayTitle: String
+    let html: String
+    let articleURL: URL
+
+    enum CodingKeys: String, CodingKey {
+        case language, title, html
+        case pageID = "page_id"
+        case displayTitle = "display_title"
+        case articleURL = "article_url"
+    }
+}
+
+private struct WikipediaRelayArticleResponse: Decodable {
+    let success: Bool
+    let article: WikipediaRelayArticle
 }
 
 private struct HealthResponse: Decodable { let status: String }

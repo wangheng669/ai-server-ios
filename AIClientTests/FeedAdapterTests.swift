@@ -969,9 +969,12 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, "https://pbs.twimg.com/media/demo.jpg")
     }
 
-    func testOrdinaryImageRemainsDirect() throws {
+    func testOrdinaryImageUsesServerProxy() throws {
         let url = try XCTUnwrap(MediaURL.image("https://example.com/image.jpg"))
-        XCTAssertEqual(url.absoluteString, "https://example.com/image.jpg")
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+
+        XCTAssertTrue(url.path.hasSuffix("/api/ios/v1/image-proxy"))
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, "https://example.com/image.jpg")
     }
 
     func testNewYorkTimesImageUsesServerProxy() throws {

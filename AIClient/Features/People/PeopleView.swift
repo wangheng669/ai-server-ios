@@ -3104,6 +3104,11 @@ private struct PersonDetailPage: View {
                     subtitleLoader: {
                         let payload = try await PeopleService().subtitles(videoID: video.id)
                         return YouTubeSubtitleResult(status: payload.status, cues: payload.cues)
+                    },
+                    playbackLoader: {
+                        guard let url = video.canonicalURL else { throw APIError.invalidURL }
+                        return try await APIClient(baseURL: ServerConfiguration.currentURL)
+                            .resolveYouTubePlayback(url: url, title: video.displayTitle)
                     }
                 )
             }

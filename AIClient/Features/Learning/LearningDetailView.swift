@@ -439,7 +439,7 @@ private struct LearningArticleView: View {
             if let player {
                 VideoPlayer(player: player)
             } else {
-                AsyncImage(url: topic.mediaURL(detail.videoPosterURLValue)) { phase in
+                AsyncImage(url: topic.imageURL(detail.videoPosterURLValue)) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
                     } else {
@@ -732,7 +732,7 @@ private struct LearningBlockView: View {
             .padding(.bottom, 20)
 
         case "image":
-            AsyncImage(url: topic.mediaURL(block.imageURLValue)) { phase in
+            AsyncImage(url: topic.imageURL(block.imageURLValue)) { phase in
                 if let image = phase.image {
                     image
                         .resizable()

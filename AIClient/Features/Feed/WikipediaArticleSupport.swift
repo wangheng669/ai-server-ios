@@ -136,48 +136,18 @@ actor WikipediaEntityResolver {
     }
 
     private func fetch(titles: [String], language: String) async throws -> [String: WikipediaEntity] {
-        var components = URLComponents(string: "https://\(language).wikipedia.org/w/api.php")!
-        components.queryItems = [
-            .init(name: "action", value: "query"),
-            .init(name: "titles", value: titles.joined(separator: "|")),
-            .init(name: "redirects", value: "1"),
-            .init(name: "prop", value: "extracts|info"),
-            .init(name: "inprop", value: "url"),
-            .init(name: "exintro", value: "1"),
-            .init(name: "explaintext", value: "1"),
-            .init(name: "format", value: "json"),
-            .init(name: "formatversion", value: "2")
-        ]
-        guard let url = components.url else { return [:] }
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
-        request.setValue("AIServerClient/1.0 (iOS encyclopedia links)", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [:] }
-        let payload = try JSONDecoder().decode(WikipediaQueryResponse.self, from: data)
-        guard let query = payload.query else { return [:] }
-
-        var aliases: [String: String] = [:]
-        for item in (query.normalized ?? []) + (query.redirects ?? []) { aliases[item.from] = item.to }
-        let pages = (query.pages ?? []).filter { $0.missing == nil && $0.pageid != nil }
-
+        let pages = try await APIClient(baseURL: ServerConfiguration.currentURL)
+            .fetchWikipediaEntities(titles: titles, language: language)
         var result: [String: WikipediaEntity] = [:]
-        for candidate in titles {
-            var resolvedTitle = candidate
-            var visited = Set<String>()
-            while let next = aliases[resolvedTitle], visited.insert(resolvedTitle).inserted { resolvedTitle = next }
-            guard let page = pages.first(where: {
-                $0.title.compare(resolvedTitle, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
-            }), let pageID = page.pageid else { continue }
+        for page in pages {
             let trimmedSummary = page.extract?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let summary = trimmedSummary.isEmpty ? "查看维基百科中的完整词条。" : trimmedSummary
-            let pageURL = page.fullurl.flatMap(URL.init(string:))
-                ?? URL(string: "https://\(language).wikipedia.org/wiki/\(page.title.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? page.title)")!
-            result[candidate] = WikipediaEntity(
-                id: "\(language)-\(pageID)",
-                term: candidate,
+            result[page.query] = WikipediaEntity(
+                id: "\(page.language)-\(page.pageID)",
+                term: page.query,
                 title: page.title,
                 summary: String(summary.prefix(120)),
-                url: pageURL
+                url: page.articleURL
             )
         }
         return result
@@ -304,6 +274,8 @@ struct WikipediaReaderView: View {
     @Environment(\.openURL) private var openURL
     @StateObject private var browser = WikipediaBrowserModel()
     @State private var presentedLink: WikipediaEntity?
+    @State private var article: WikipediaRelayArticle?
+    @State private var loadError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -311,8 +283,29 @@ struct WikipediaReaderView: View {
 
             GeometryReader { proxy in
                 ZStack(alignment: .bottom) {
-                    WikipediaWebView(url: entity.url, model: browser) {
-                        presentedLink = $0
+                    if let article {
+                        WikipediaWebView(
+                            url: article.articleURL,
+                            html: WikipediaRelayedHTML.document(
+                                article.html,
+                                title: article.title,
+                                baseURL: article.articleURL
+                            ),
+                            model: browser
+                        ) {
+                            presentedLink = $0
+                        }
+                        .id(article.pageID)
+                    } else if let loadError {
+                        ContentUnavailableView {
+                            Label("百科内容载入失败", systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(loadError)
+                        } actions: {
+                            Button("重试") { Task { await loadArticle() } }
+                        }
+                    } else {
+                        ProgressView("正在通过服务器载入百科…")
                     }
 
                     readerToolbar
@@ -322,11 +315,26 @@ struct WikipediaReaderView: View {
             }
         }
         .background(archivePaper.ignoresSafeArea())
+        .task(id: entity.url) { await loadArticle() }
         .sheet(item: $presentedLink) { linkedEntity in
-            AnyView(
+            if linkedEntity.url.isWikipediaURL {
                 WikipediaReaderView(entity: linkedEntity)
                     .wikipediaReaderPresentation()
-            )
+            } else {
+                ServerArticleReaderView(url: linkedEntity.url)
+            }
+        }
+    }
+
+    private func loadArticle() async {
+        loadError = nil
+        do {
+            let language = entity.url.host?.lowercased().hasPrefix("en.") == true ? "en" : "zh"
+            article = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchWikipediaArticle(title: entity.title, language: language)
+        } catch {
+            article = nil
+            loadError = NetworkErrorPresentation.message(for: error)
         }
     }
 
@@ -1571,6 +1579,7 @@ enum WikipediaLinkPresentation {
 
 private struct WikipediaWebView: UIViewRepresentable {
     let url: URL
+    let html: String
     @ObservedObject var model: WikipediaBrowserModel
     let openLink: (WikipediaEntity) -> Void
 
@@ -1609,14 +1618,11 @@ private struct WikipediaWebView: UIViewRepresentable {
         webView.addGestureRecognizer(nextPageGesture)
         context.coordinator.observe(webView)
         model.attach(webView)
-        webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20))
+        webView.loadHTMLString(html, baseURL: url)
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        guard webView.url == nil else { return }
-        webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20))
-    }
+    func updateUIView(_ webView: WKWebView, context: Context) {}
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.stopObserving()
@@ -1696,11 +1702,6 @@ private struct WikipediaWebView: UIViewRepresentable {
                 return
             }
 
-            if destinationURL.isWikipediaURL {
-                decisionHandler(.allow)
-                return
-            }
-
             guard let entity = WikipediaLinkPresentation.entity(
                     for: destinationURL,
                     currentURL: webView.url
@@ -1725,5 +1726,53 @@ private struct WikipediaWebView: UIViewRepresentable {
         }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { model.update(from: webView) }
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { model.update(from: webView) }
+    }
+}
+
+enum WikipediaRelayedHTML {
+    private static let imageAttributeRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b(src|data-src)\s*=\s*([\"'])([^\"']+)\2"#
+    )
+
+    static func document(_ fragment: String, title: String, baseURL: URL) -> String {
+        let relayed = relayImages(in: fragment, baseURL: baseURL)
+        return """
+        <!doctype html>
+        <html lang="zh">
+          <head>
+            <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+            <base href="\(escape(baseURL.absoluteString))">
+            <title>\(escape(title))</title>
+          </head>
+          <body>
+            <h1 id="firstHeading">\(escape(title))</h1>
+            \(relayed)
+          </body>
+        </html>
+        """
+    }
+
+    private static func relayImages(in html: String, baseURL: URL) -> String {
+        let mutable = NSMutableString(string: html)
+        let matches = imageAttributeRegex.matches(
+            in: html,
+            range: NSRange(location: 0, length: (html as NSString).length)
+        )
+        for match in matches.reversed() {
+            let raw = (html as NSString).substring(with: match.range(at: 3))
+            let absoluteValue = raw.hasPrefix("//") ? "https:\(raw)" : raw
+            guard let absolute = URL(string: absoluteValue, relativeTo: baseURL)?.absoluteURL,
+                  let relayed = MediaURL.image(absolute.absoluteString) else { continue }
+            mutable.replaceCharacters(in: match.range(at: 3), with: escape(relayed.absoluteString))
+        }
+        return mutable as String
+    }
+
+    private static func escape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
     }
 }

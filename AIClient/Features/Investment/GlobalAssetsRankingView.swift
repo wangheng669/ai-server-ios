@@ -146,7 +146,7 @@ struct GlobalAssetsRankingView: View {
     }
 
     private func assetIcon(_ asset: GlobalAsset, size: CGFloat) -> some View {
-        AsyncImage(url: asset.iconURL) { phase in
+        AsyncImage(url: asset.iconURL.flatMap { MediaURL.image($0.absoluteString) ?? $0 }) { phase in
             if case let .success(image) = phase {
                 image.resizable().scaledToFit()
             } else {

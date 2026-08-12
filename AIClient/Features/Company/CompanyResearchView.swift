@@ -1713,7 +1713,9 @@ struct CompanyResearchView: View {
     }
 
     private func resolvedCompanyLogoURL(_ company: CompanyResearchProfile) -> URL {
-        guard company.logoUrl.scheme == nil else { return company.logoUrl }
+        guard company.logoUrl.scheme == nil else {
+            return MediaURL.image(company.logoUrl.absoluteString) ?? company.logoUrl
+        }
         let path = company.logoUrl.relativeString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return ServerConfiguration.currentURL.appending(path: path)
     }
