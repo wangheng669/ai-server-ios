@@ -626,6 +626,10 @@ struct NewsFeedView: View {
                                 guard rootTabIsActive, source == .x, source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
+                            .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
+                                guard rootTabIsActive, source == model.source else { return }
+                                await model.translateRSSPostIfNeeded(post)
+                            }
                             .task(id: "\(rootTabIsActive)-youtube-prewarm-\(post.id)") {
                                 guard rootTabIsActive,
                                       source == .youtube,

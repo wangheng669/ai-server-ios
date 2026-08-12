@@ -12,6 +12,11 @@ struct FeedDiskSnapshot: Codable {
     let canLoadMore: Bool
 }
 
+struct RSSCardTranslation: Equatable {
+    let title: String
+    let excerpt: String?
+}
+
 actor FeedDiskCache {
     static let shared = FeedDiskCache()
 
@@ -126,6 +131,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isSwitchingSource = false
     @Published private(set) var pendingRealtimePosts: [Post] = []
     @Published private(set) var xTranslations: [Int: String] = [:]
+    @Published private(set) var rssCardTranslations: [Int: RSSCardTranslation] = [:]
     @Published private(set) var rssFeeds: [RSSFeedSource] = []
     @Published private(set) var selectedRSSFeedID: Int?
     @Published private(set) var selectedRSSPosts: [Post] = []
@@ -154,12 +160,14 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchPosts: (Int, Int, FeedSource) async throws -> [Post]
     private let fetchFlashPosts: (Int, Int, String?) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
+    private let translateRSSCard: (String, String?) async throws -> RSSCardTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchWeChatFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchPostDetail: (Int) async throws -> Post
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
+    private var loadingRSSTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
     private var selectedRSSPage = 1
     private let selectedRSSPageSize = 20
@@ -174,6 +182,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
+        translateRSSCard: ((String, String?) async throws -> RSSCardTranslation)? = nil,
         fetchRSSFeeds: (() async throws -> [RSSFeedSource])? = nil,
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchWeChatFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
@@ -196,6 +205,17 @@ final class NewsFeedViewModel: ObservableObject {
         let client = APIClient(baseURL: serverURL)
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
+        }
+        self.translateRSSCard = translateRSSCard ?? { title, excerpt in
+            let service = PersonArticleTranslationService.shared
+            let translatedTitle = try await service.translate(title)
+            let translatedExcerpt: String?
+            if let excerpt {
+                translatedExcerpt = try await service.translate(excerpt)
+            } else {
+                translatedExcerpt = nil
+            }
+            return RSSCardTranslation(title: translatedTitle, excerpt: translatedExcerpt)
         }
         self.fetchRSSFeeds = fetchRSSFeeds ?? { try await client.fetchRSSFeeds() }
         self.fetchRSSFeedPosts = fetchRSSFeedPosts ?? { feedID, page, limit in
@@ -411,8 +431,17 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func postForDisplay(_ post: Post) -> Post {
-        guard let translation = xTranslations[post.id] else { return post }
-        return post.replacingTranslation(with: translation)
+        var displayed = post
+        if let translation = xTranslations[post.id] {
+            displayed = displayed.replacingTranslation(with: translation)
+        }
+        if let translation = rssCardTranslations[post.id] {
+            displayed = displayed.replacingRSSCardTranslation(
+                title: translation.title,
+                excerpt: translation.excerpt
+            )
+        }
+        return displayed
     }
 
     func preloadedNewYorkTimesArticle(for postID: Int) -> NewYorkTimesArticle? {
@@ -441,6 +470,29 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             // Translation is best-effort. Keep the original post visible on failure.
+        }
+    }
+
+    func translateRSSPostIfNeeded(_ post: Post) async {
+        guard post.needsRSSCardTranslation,
+              let title = post.rssTranslationTitle,
+              rssCardTranslations[post.id] == nil,
+              !loadingRSSTranslationIDs.contains(post.id) else { return }
+        loadingRSSTranslationIDs.insert(post.id)
+        defer { loadingRSSTranslationIDs.remove(post.id) }
+        do {
+            let translation = try await translateRSSCard(title, post.rssTranslationExcerpt)
+            guard !Task.isCancelled else { return }
+            let translatedTitle = translation.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !translatedTitle.isEmpty, translatedTitle != title else { return }
+            rssCardTranslations[post.id] = RSSCardTranslation(
+                title: translatedTitle,
+                excerpt: translation.excerpt?.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            // Translation is best-effort. Keep the source card visible on failure.
         }
     }
 
