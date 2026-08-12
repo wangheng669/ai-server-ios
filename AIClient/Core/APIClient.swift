@@ -46,21 +46,6 @@ struct APIClient {
         return response.data
     }
 
-    func fetchGoogleNoise(sentiment: String? = nil, limit: Int = 60) async throws -> GoogleNoiseSnapshot {
-        var components = URLComponents(
-            url: baseURL.appending(path: "api/ios/v1/google-noise"),
-            resolvingAgainstBaseURL: false
-        )
-        components?.queryItems = [.init(name: "limit", value: String(min(max(limit, 1), 100)))]
-        if let sentiment, sentiment == "positive" || sentiment == "negative" || sentiment == "neutral" {
-            components?.queryItems?.append(.init(name: "sentiment", value: sentiment))
-        }
-        guard let url = components?.url else { throw APIError.invalidURL }
-        let response: GoogleNoiseResponse = try await get(url, cachePolicy: .reloadIgnoringLocalCacheData)
-        guard response.success else { throw APIError.invalidResponse }
-        return response.data.snapshot
-    }
-
     func fetchPosts(
         page: Int,
         limit: Int = 20,
@@ -940,110 +925,6 @@ private struct HealthResponse: Decodable { let status: String }
 struct TodayWorldResponse: Decodable {
     let success: Bool
     let data: TodayWorldPayload
-}
-
-struct GoogleNoiseResponse: Decodable {
-    let success: Bool
-    let data: Payload
-
-    struct Payload: Decodable { let snapshot: GoogleNoiseSnapshot }
-}
-
-struct GoogleNoiseSnapshot: Decodable, Equatable {
-    let generatedAt: String
-    let stats: GoogleNoiseStats
-    let items: [GoogleNoiseItem]
-
-    enum CodingKeys: String, CodingKey {
-        case stats, items
-        case generatedAt = "generated_at"
-    }
-}
-
-struct GoogleNoiseStats: Decodable, Equatable {
-    let scanned: Int
-    let relevant: Int
-    let positive: Int
-    let negative: Int
-    let neutral: Int
-}
-
-struct GoogleNoiseItem: Decodable, Equatable, Identifiable {
-    let id: Int64
-    let postID: Int64
-    let articleID: String
-    let title: String
-    let content: String
-    let originalContent: String
-    let contentZH: String?
-    let language: String
-    let authorName: String
-    let authorHandle: String
-    let avatarURL: String
-    let sourceURL: String
-    let sentiment: String
-    let score: Int
-    let companyTerms: [String]
-    let sentimentTerms: [String]
-    let publishedAt: String?
-    let classifiedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, title, content, sentiment, score, language
-        case postID = "post_id"
-        case articleID = "article_id"
-        case originalContent = "original_content"
-        case contentZH = "content_zh"
-        case authorName = "author_name"
-        case authorHandle = "author_handle"
-        case avatarURL = "avatar_url"
-        case sourceURL = "source_url"
-        case companyTerms = "company_terms"
-        case sentimentTerms = "sentiment_terms"
-        case publishedAt = "published_at"
-        case classifiedAt = "classified_at"
-    }
-
-    var previewPost: Post? {
-        guard let postID = Int(exactly: postID) else { return nil }
-        let translated = contentZH?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return Post(
-            id: postID,
-            title: title,
-            text: originalContent,
-            summary: nil,
-            content: originalContent,
-            contentZH: translated?.isEmpty == false ? translated : nil,
-            source: "x",
-            formattedTime: publishedAt.flatMap(Self.relativeTime),
-            weightReason: nil,
-            finalScore: nil,
-            weight: nil,
-            postLink: sourceURL,
-            articlePostAt: publishedAt,
-            user: PostUser(
-                userName: authorName,
-                userScreenName: authorHandle,
-                avatarURL: avatarURL,
-                userDesc: nil
-            ),
-            postTags: [],
-            images: [],
-            videos: [],
-            feedRank: nil,
-            meta: nil
-        )
-    }
-
-    var needsTranslation: Bool {
-        contentZH?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-            && !language.lowercased().hasPrefix("zh")
-    }
-
-    private static func relativeTime(_ value: String) -> String? {
-        guard let date = ISO8601DateFormatter().date(from: value) else { return nil }
-        return date.formatted(.relative(presentation: .named))
-    }
 }
 
 struct TodayWorldYesterdayReportResponse: Decodable {

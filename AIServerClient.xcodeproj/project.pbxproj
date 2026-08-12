@@ -168,12 +168,12 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
-		AA1000000000000000000003 /* GoogleNoise */ = {
+		AA1000000000000000000003 /* GoogleSignal */ = {
 			isa = PBXGroup;
 			children = (
 				AA1000000000000000000002 /* GoogleSignalView.swift */,
 			);
-			path = GoogleNoise;
+			path = GoogleSignal;
 			sourceTree = "<group>";
 		};
 		287F9373E17FFE1FC50C15E6 /* AIClientTests */ = {
@@ -314,7 +314,7 @@
 			children = (
 				2F30415263748596A7B8C9D0 /* Company */,
 				660608BC8DE73C89ED510152 /* Feed */,
-				AA1000000000000000000003 /* GoogleNoise */,
+				AA1000000000000000000003 /* GoogleSignal */,
 				DCD558141B0F54371B604FAE /* Investment */,
 				4E38F52FD860529B0FC42DEA /* Learning */,
 				D5175F49AD418B24DAF6F714 /* Market */,

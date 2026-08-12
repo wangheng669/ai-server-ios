@@ -139,11 +139,11 @@ struct AIServerClientApp: App {
 }
 
 private enum EditorialTab: Hashable {
-    case world, noise, observation, investment, company, learning, people
+    case world, signal, observation, investment, company, learning, people
 
     var sectionTitle: String {
         switch self {
-        case .noise: "噪音"
+        case .signal: "信号"
         case .observation: "观点"
         case .company: "公司"
         case .people: "人物"
@@ -164,7 +164,7 @@ private struct EditorialRootView: View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--today-world-preview") { return .world }
         if ProcessInfo.processInfo.arguments.contains("--feed-preview") { return .observation }
-        if ProcessInfo.processInfo.arguments.contains("--google-noise-preview") { return .noise }
+        if ProcessInfo.processInfo.arguments.contains("--google-signal-preview") { return .signal }
         if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
             ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
@@ -237,7 +237,7 @@ private struct EditorialRootView: View {
     private var hidesRootTabBar: Bool {
         switch selectedTab {
         case .world: worldShowsDetail
-        case .noise: false
+        case .signal: false
         case .observation: feedHidesTabBar || feedShowsDetail
         case .investment: marketShowsDetail
         case .company: false
@@ -248,8 +248,8 @@ private struct EditorialRootView: View {
 
     private var groupedRootTabs: [EditorialTab]? {
         switch selectedTab {
-        case .noise, .observation:
-            [.observation, .noise]
+        case .signal, .observation:
+            [.observation, .signal]
         case .investment, .company, .people:
             [.investment, .company, .people]
         case .world, .learning:
@@ -267,8 +267,8 @@ private struct EditorialRootView: View {
                 tabContent(.world) {
                     TodayWorldView(showsDetail: $worldShowsDetail)
                 }
-                tabContent(.noise) {
-                    GoogleNoiseView()
+                tabContent(.signal) {
+                    GoogleSignalView()
                 }
                 tabContent(.observation) {
                     NewsFeedView(
@@ -365,7 +365,7 @@ private struct EditorialRootView: View {
         }
         .onChange(of: selectedTab, initial: true) { _, tab in
             switch tab {
-            case .noise, .observation:
+            case .signal, .observation:
                 lastDynamicTab = tab
             case .investment, .company, .people:
                 lastResearchTab = tab
@@ -446,7 +446,7 @@ private struct RootNavigationBar: View {
             item(.world, title: "今日", icon: "globe")
             item(
                 dynamicTarget,
-                selectedTabs: [.noise, .observation],
+                selectedTabs: [.signal, .observation],
                 title: "观点",
                 icon: "list.bullet.rectangle"
             )

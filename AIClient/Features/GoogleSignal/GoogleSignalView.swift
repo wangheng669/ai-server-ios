@@ -840,7 +840,7 @@ private struct GoogleSignalEventDetailView: View {
             sectionTitle("代表性动态", icon: "quote.bubble")
             HStack(spacing: 10) {
                 AvatarView(
-                    url: event.representativeAvatarURL,
+                    url: URL(string: event.representativeAvatarURL),
                     name: event.representativeAuthorName,
                     size: 38,
                     cornerRadius: 19
@@ -931,7 +931,7 @@ private struct GoogleSignalEvidenceRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             AvatarView(
-                url: item.avatarURL,
+                url: URL(string: item.avatarURL),
                 name: item.authorName,
                 size: 36,
                 cornerRadius: 18
