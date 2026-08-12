@@ -138,7 +138,7 @@ struct AIServerClientApp: App {
 }
 
 private enum EditorialTab: Hashable {
-    case world, signal, observation, investment, company, learning, people
+    case world, signal, observation, investment, company, learning, people, city
 
     var sectionTitle: String {
         switch self {
@@ -149,6 +149,7 @@ private enum EditorialTab: Hashable {
         case .world: "今日"
         case .investment: "数据"
         case .learning: "知识"
+        case .city: "城市"
         }
     }
 }
@@ -188,6 +189,10 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") { return .learning }
+        if ProcessInfo.processInfo.arguments.contains("--city-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--city-province-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--city-city-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--city-district-preview") { return .city }
         return .world
         #else
         .world
@@ -245,6 +250,7 @@ private struct EditorialRootView: View {
         case .company: false
         case .learning: learningShowsDetail
         case .people: peopleShowsDetail
+        case .city: false
         }
     }
 
@@ -254,7 +260,7 @@ private struct EditorialRootView: View {
             [.observation, .signal]
         case .investment, .company, .people:
             [.investment, .company, .people]
-        case .world, .learning:
+        case .world, .learning, .city:
             nil
         }
     }
@@ -298,6 +304,9 @@ private struct EditorialRootView: View {
                         notificationPersonID: $notificationPersonID,
                         notificationVideoID: $notificationVideoID
                     )
+                }
+                tabContent(.city) {
+                    CityNewsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -398,7 +407,7 @@ private struct EditorialRootView: View {
                 lastDynamicTab = tab
             case .investment, .company, .people:
                 lastResearchTab = tab
-            case .world, .learning:
+            case .world, .learning, .city:
                 break
             }
         }
@@ -486,6 +495,7 @@ private struct RootNavigationBar: View {
                 icon: "magnifyingglass"
             )
             item(.learning, title: "知识", icon: "books.vertical")
+            item(.city, title: "城市", icon: "map")
         }
         .frame(maxWidth: 368)
         .frame(height: 54)
