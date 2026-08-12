@@ -1066,7 +1066,7 @@ private struct MarketIndexTable: View {
                                  ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
                                  : quote),
                             companyLogoPath: store.companyLogoPaths[quote.symbol],
-                            showsCompanyLogo: region != .commodity
+                            showsCompanyLogo: true
                          )
                     }
                     .buttonStyle(MarketPressStyle())
@@ -1554,7 +1554,7 @@ private struct MarketIndexTableRow: View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 if showsCompanyLogo {
-                    CompanyLogo(quote: quote, path: companyLogoPath, size: 32)
+                    MarketInstrumentLogo(quote: quote, path: companyLogoPath, size: 32)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
@@ -1604,7 +1604,7 @@ private struct MarketIndexTableRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
                 if showsCompanyLogo {
-                    CompanyLogo(quote: quote, path: companyLogoPath, size: 32)
+                    MarketInstrumentLogo(quote: quote, path: companyLogoPath, size: 32)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(displayedName).font(.headline).lineLimit(2)
@@ -2632,7 +2632,7 @@ private struct MarketIndexDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
                 if let quote {
-                    CompanyLogo(quote: quote, path: companyLogoPath)
+                    MarketInstrumentLogo(quote: quote, path: companyLogoPath)
                 } else {
                     Image(systemName: CoreDescriptor(symbol: symbol).icon)
                         .font(.system(size: 17, weight: .semibold))
@@ -4161,6 +4161,65 @@ private struct MarketConstituentRow: View {
         .frame(minHeight: 64)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(quote.presentationName)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: 2))，\(quote.formattedPercent)，点按查看详情")
+    }
+}
+
+private struct MarketInstrumentLogo: View {
+    let quote: MarketQuote
+    let path: String?
+    var size: CGFloat = 40
+
+    @ViewBuilder
+    var body: some View {
+        if let commodity = CommodityLogoKind(symbol: quote.symbol) {
+            CommodityLogo(kind: commodity, size: size)
+        } else {
+            CompanyLogo(quote: quote, path: path, size: size)
+        }
+    }
+}
+
+private struct CommodityLogo: View {
+    let kind: CommodityLogoKind
+    var size: CGFloat = 40
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+                .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle()
+                .fill(Color.white.opacity(0.14))
+                .frame(width: size * 0.72, height: size * 0.72)
+                .offset(x: size * 0.25, y: size * 0.24)
+            Text(kind.monogram)
+                .font(.system(size: size * (kind == .crudeOil ? 0.25 : 0.32), weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(width: size, height: size)
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+                .stroke(Color.white.opacity(0.24), lineWidth: 0.75)
+        }
+        .shadow(color: colors.last?.opacity(0.18) ?? .clear, radius: 2, y: 1)
+        .accessibilityLabel("\(kind.accessibilityName)标识")
+    }
+
+    private var colors: [Color] {
+        switch kind {
+        case .gold:
+            [Color(red: 0.98, green: 0.75, blue: 0.18), Color(red: 0.73, green: 0.43, blue: 0.03)]
+        case .crudeOil:
+            [Color(red: 0.29, green: 0.31, blue: 0.34), Color(red: 0.08, green: 0.09, blue: 0.11)]
+        case .copper:
+            [Color(red: 0.86, green: 0.46, blue: 0.25), Color(red: 0.55, green: 0.20, blue: 0.10)]
+        case .silver:
+            [Color(red: 0.76, green: 0.81, blue: 0.87), Color(red: 0.38, green: 0.46, blue: 0.57)]
+        case .naturalGas:
+            [Color(red: 0.24, green: 0.67, blue: 0.96), Color(red: 0.10, green: 0.32, blue: 0.72)]
+        case .corn:
+            [Color(red: 0.64, green: 0.76, blue: 0.20), Color(red: 0.23, green: 0.48, blue: 0.15)]
+        }
     }
 }
 
