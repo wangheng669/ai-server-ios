@@ -135,6 +135,18 @@ struct MarketService {
         return MarketUSValuationHistory(pe: history.pe)
     }
 
+    func sentimentSnapshot(market: String, refresh: Bool = false) async throws -> MarketSentimentSnapshot {
+        var components = URLComponents(
+            url: baseURL.appending(path: "api/ios/v1/market/sentiment-snapshot"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [URLQueryItem(name: "market", value: market)]
+        if refresh { queryItems.append(.init(name: "refresh", value: "true")) }
+        components?.queryItems = queryItems
+        guard let url = components?.url else { throw MarketServiceError.invalidURL }
+        return try await request(url, as: MarketSentimentSnapshotResponse.self, bypassCache: refresh).data
+    }
+
     func companyValuationHistory(symbol: String) async throws -> MarketCompanyValuationHistory {
         var components = URLComponents(
             url: baseURL.appending(path: "api/ios/v1/market/company-valuation-history"),

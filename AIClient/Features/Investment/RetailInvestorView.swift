@@ -188,7 +188,7 @@ struct RetailInvestorView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if store.isLoadingDetails(for: selectedMarket) {
+                if store.isLoadingDetails(for: selectedMarket), snapshot == nil {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                         Text(store.detailLoadingMessage(for: selectedMarket))
@@ -1316,13 +1316,8 @@ final class RetailSentimentStore {
     private(set) var dashboard: MarketDashboard?
     private(set) var investorMood: InvestorMoodBoard?
     private(set) var temperature: MarketAShareTemperature?
-    private(set) var hongKongConstituents: MarketIndexConstituents?
-    private(set) var unitedStatesConstituents: MarketIndexConstituents?
-    private(set) var hongKongValuationHistory: MarketHKValuationHistory?
-    private(set) var hongKongCharts: [MarketChart] = []
-    private(set) var unitedStatesValuationHistory: MarketUSValuationHistory?
-    private(set) var unitedStatesCharts: [MarketChart] = []
     private(set) var koreaLeverage: MarketKoreaLeverage?
+    private(set) var marketSnapshots: [SentimentMarket: MarketSentimentSnapshot] = [:]
     private(set) var isLoadingKoreaLeverage = false
     private(set) var koreaLeverageErrorMessage: String?
     private(set) var isLoading = false
@@ -1364,17 +1359,11 @@ final class RetailSentimentStore {
         case .china:
             return "正在汇总数据"
         case .hongKong:
-            if hongKongConstituents == nil { return "加载核心成分" }
-            if hongKongValuationHistory == nil { return "读取估值历史" }
-            if hongKongCharts.isEmpty { return "计算历史分位" }
-            return "生成情绪值"
+            return "读取港股情绪快照"
         case .unitedStates:
-            if unitedStatesConstituents == nil { return "加载核心成分" }
-            if unitedStatesValuationHistory == nil { return "读取估值历史" }
-            if unitedStatesCharts.isEmpty { return "计算历史分位" }
-            return "生成情绪值"
+            return "读取美股情绪快照"
         case .korea:
-            return "读取杠杆数据"
+            return "读取韩股情绪快照"
         }
     }
 
@@ -1395,35 +1384,29 @@ final class RetailSentimentStore {
                 detail: "当前市场市盈率中位数与上涨家数占比，分别映射到历史百分位后等权合成。"
             )
         case .hongKong:
-            let breadth = constituentBreadth(for: market)
-            guard breadth.total > 0,
-                  let valuationPercentile = hongKongValuationPercentile,
-                  let sentimentPercentile = hongKongSentimentPercentile else { return nil }
-            let score = (valuationPercentile + sentimentPercentile) / 2
+            guard let remote = marketSnapshots[market] else { return nil }
             return SentimentSnapshot(
-                score: score,
-                label: SentimentSnapshot.label(for: score),
+                score: remote.score,
+                label: remote.label,
                 primaryTitle: "估值温度",
-                primaryValue: valuationPercentile,
+                primaryValue: remote.valuationPercentile,
                 secondaryTitle: "情绪温度",
-                secondaryValue: sentimentPercentile,
+                secondaryValue: remote.sentimentPercentile,
                 formula: "估值与情绪各占 50%",
-                fetchedAt: dashboard?.generatedAt,
+                fetchedAt: remote.fetchedAt,
                 detail: "与 A 股采用相同公式：恒生指数当前市盈率的历史百分位，与核心成分上涨家数占比的近一年历史百分位等权合成。"
             )
         case .unitedStates:
-            guard let valuationPercentile = unitedStatesValuationPercentile,
-                  let sentimentPercentile = unitedStatesSentimentPercentile else { return nil }
-            let score = (valuationPercentile + sentimentPercentile) / 2
+            guard let remote = marketSnapshots[market] else { return nil }
             return SentimentSnapshot(
-                score: score,
-                label: SentimentSnapshot.label(for: score),
+                score: remote.score,
+                label: remote.label,
                 primaryTitle: "估值温度",
-                primaryValue: valuationPercentile,
+                primaryValue: remote.valuationPercentile,
                 secondaryTitle: "情绪温度",
-                secondaryValue: sentimentPercentile,
+                secondaryValue: remote.sentimentPercentile,
                 formula: "估值与情绪各占 50%",
-                fetchedAt: dashboard?.generatedAt,
+                fetchedAt: remote.fetchedAt,
                 detail: "与 A 股采用相同公式：标普 500 当前市盈率的历史百分位，与核心成分上涨家数占比的近一年历史百分位等权合成。"
             )
         case .korea:
@@ -1432,70 +1415,10 @@ final class RetailSentimentStore {
     }
 
     func constituentBreadth(for market: SentimentMarket) -> SentimentBreadth {
-        let items: [MarketIndexConstituent]
-        switch market {
-        case .hongKong: items = hongKongConstituents?.items ?? []
-        case .unitedStates: items = unitedStatesConstituents?.items ?? []
-        case .china: items = []
-        case .korea: items = []
+        if let breadth = marketSnapshots[market]?.breadth {
+            return SentimentBreadth(up: breadth.up, down: breadth.down, flat: breadth.flat)
         }
-        var up = 0, down = 0, flat = 0
-        for item in items {
-            let change = item.quote.percentValue
-            if change > 0.001 { up += 1 }
-            else if change < -0.001 { down += 1 }
-            else { flat += 1 }
-        }
-        return SentimentBreadth(up: up, down: down, flat: flat)
-    }
-
-    private var hongKongValuationPercentile: Double? {
-        guard let values = hongKongValuationHistory?.pe.filter({ $0 > 0 }),
-              let current = values.last, !values.isEmpty else { return nil }
-        return percentile(of: current, in: values)
-    }
-
-    private var hongKongSentimentPercentile: Double? {
-        breadthPercentile(for: .hongKong, charts: hongKongCharts)
-    }
-
-    private var unitedStatesValuationPercentile: Double? {
-        guard let values = unitedStatesValuationHistory?.pe.filter({ $0 > 0 }),
-              let current = values.first, !values.isEmpty else { return nil }
-        return percentile(of: current, in: values)
-    }
-
-    private var unitedStatesSentimentPercentile: Double? {
-        breadthPercentile(for: .unitedStates, charts: unitedStatesCharts)
-    }
-
-    private func breadthPercentile(for market: SentimentMarket, charts: [MarketChart]) -> Double? {
-        let current = constituentBreadth(for: market).weightedAdvancerShare
-        guard !charts.isEmpty else { return nil }
-        var changesByDate: [Int64: [Double]] = [:]
-        for chart in charts {
-            let candles = chart.candles.sorted { $0.timestamp < $1.timestamp }
-            guard candles.count > 1 else { continue }
-            for index in 1..<candles.count {
-                let previous = candles[index - 1].close
-                guard previous > 0 else { continue }
-                changesByDate[candles[index].timestamp, default: []].append((candles[index].close - previous) / previous)
-            }
-        }
-        let historicalShares = changesByDate.values.compactMap { changes -> Double? in
-            guard changes.count >= max(3, charts.count / 2) else { return nil }
-            let up = changes.filter { $0 > 0.00001 }.count
-            let flat = changes.filter { abs($0) <= 0.00001 }.count
-            return (Double(up) + Double(flat) / 2) / Double(changes.count)
-        }
-        guard !historicalShares.isEmpty else { return nil }
-        return percentile(of: current, in: historicalShares)
-    }
-
-    private func percentile(of value: Double, in samples: [Double]) -> Double {
-        let less = samples.filter { $0 < value }.count
-        let equal = samples.filter { abs($0 - value) < 0.000_001 }.count
-        return 100 * (Double(less) + Double(equal) / 2) / Double(max(samples.count, 1))
+        return SentimentBreadth(up: 0, down: 0, flat: 0)
     }
 
     func load(marketStore: MarketStore, force: Bool = false) async {
@@ -1546,11 +1469,11 @@ final class RetailSentimentStore {
         case .china:
             true
         case .hongKong:
-            await loadHongKongDetails()
+            await loadMarketSnapshot(for: market, force: force)
         case .unitedStates:
-            await loadUnitedStatesDetails()
+            await loadMarketSnapshot(for: market, force: force)
         case .korea:
-            await loadKoreaLeverage(force: force)
+            await loadMarketSnapshot(for: market, force: force)
         }
         guard !Task.isCancelled else { return }
         if succeeded {
@@ -1563,105 +1486,38 @@ final class RetailSentimentStore {
         }
     }
 
-    private func loadKoreaLeverage(force: Bool) async -> Bool {
-        isLoadingKoreaLeverage = true
-        defer { isLoadingKoreaLeverage = false }
-        do {
-            koreaLeverage = try await service.koreaLeverage(refresh: force)
-            koreaLeverageErrorMessage = nil
-            detailErrors[.korea] = nil
-            return true
-        } catch is CancellationError {
-            return false
-        } catch {
-            koreaLeverageErrorMessage = error.localizedDescription
-            detailErrors[.korea] = error.localizedDescription
-            return false
-        }
-    }
-
-    private func loadHongKongDetails() async -> Bool {
-        async let constituentsRequest = service.indexConstituents(symbol: "^HSI")
-        async let valuationRequest = service.hongKongValuationHistory()
-        var requestError: String?
-        do {
-            hongKongConstituents = try await constituentsRequest
-        } catch is CancellationError {
-            return false
-        } catch {
-            requestError = error.localizedDescription
+    private func loadMarketSnapshot(for market: SentimentMarket, force: Bool) async -> Bool {
+        guard market != .china else { return true }
+        if market == .korea { isLoadingKoreaLeverage = true }
+        defer { if market == .korea { isLoadingKoreaLeverage = false } }
+        let apiMarket = switch market {
+        case .hongKong: "hong-kong"
+        case .unitedStates: "united-states"
+        case .korea: "korea"
+        case .china: ""
         }
         do {
-            hongKongValuationHistory = try await valuationRequest
-        } catch is CancellationError {
-            return false
-        } catch {
-            requestError = requestError ?? error.localizedDescription
-        }
-        if let constituents = hongKongConstituents {
-            hongKongCharts = await loadHistoricalCharts(for: constituents.items)
-        }
-        guard !Task.isCancelled else { return false }
-        let succeeded = snapshot(for: .hongKong) != nil
-        detailErrors[.hongKong] = succeeded ? nil : (requestError ?? "港股历史分位暂不可用")
-        return succeeded
-    }
-
-    private func loadUnitedStatesDetails() async -> Bool {
-        async let constituentsRequest = service.indexConstituents(symbol: "^GSPC")
-        async let valuationRequest = service.unitedStatesValuationHistory()
-        var requestError: String?
-        do {
-            unitedStatesConstituents = try await constituentsRequest
-        } catch is CancellationError {
-            return false
-        } catch {
-            requestError = error.localizedDescription
-        }
-        do {
-            unitedStatesValuationHistory = try await valuationRequest
-        } catch is CancellationError {
-            return false
-        } catch {
-            requestError = requestError ?? error.localizedDescription
-        }
-        if let constituents = unitedStatesConstituents {
-            unitedStatesCharts = await loadHistoricalCharts(for: constituents.items)
-        }
-        guard !Task.isCancelled else { return false }
-        let succeeded = snapshot(for: .unitedStates) != nil
-        detailErrors[.unitedStates] = succeeded ? nil : (requestError ?? "美股历史分位暂不可用")
-        return succeeded
-    }
-
-    private func loadHistoricalCharts(for items: [MarketIndexConstituent]) async -> [MarketChart] {
-        let symbols = items.map(\.quote.symbol)
-        guard !symbols.isEmpty else { return [] }
-        return await withTaskGroup(of: MarketChart?.self) { group in
-            var iterator = symbols.makeIterator()
-            let concurrency = min(4, symbols.count)
-            for _ in 0..<concurrency {
-                guard let symbol = iterator.next() else { break }
-                group.addTask { [service] in
-                    try? await service.chart(symbol: symbol, range: .year)
-                }
+            let value = try await service.sentimentSnapshot(market: apiMarket, refresh: force)
+            guard value.dataContract == "market_sentiment_snapshot_v1" else {
+                detailErrors[market] = "情绪快照格式不受支持"
+                return false
             }
-            var charts: [MarketChart] = []
-            while let result = await group.next() {
-                guard !Task.isCancelled else {
-                    group.cancelAll()
-                    break
-                }
-                if let chart = result { charts.append(chart) }
-                if let symbol = iterator.next() {
-                    group.addTask { [service] in
-                        try? await service.chart(symbol: symbol, range: .year)
-                    }
-                }
+            marketSnapshots[market] = value
+            if market == .korea {
+                koreaLeverage = value.koreaLeverage
+                koreaLeverageErrorMessage = value.koreaLeverage == nil ? "韩国杠杆快照暂不可用" : nil
             }
-            return charts
+            detailErrors[market] = nil
+            return market == .korea ? value.koreaLeverage != nil : true
+        } catch is CancellationError {
+            return false
+        } catch {
+            detailErrors[market] = error.localizedDescription
+            if market == .korea { koreaLeverageErrorMessage = error.localizedDescription }
+            return false
         }
     }
+
 }
 
 enum SentimentMarket: String, CaseIterable, Identifiable {
