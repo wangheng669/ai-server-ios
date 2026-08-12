@@ -664,6 +664,22 @@ actor ImageDiskCache {
     }
 }
 
+enum XueqiuMediaDisplayPolicy {
+    static func shouldDisplay(_ url: URL, post: Post, usesExplicitPlacement: Bool) -> Bool {
+        guard post.isXueqiu, usesExplicitPlacement else { return true }
+
+        let serverURL = ServerConfiguration.currentURL
+        let isServerOrigin = url.scheme?.lowercased() == serverURL.scheme?.lowercased()
+            && url.host?.lowercased() == serverURL.host?.lowercased()
+            && url.port == serverURL.port
+        guard isServerOrigin else { return true }
+
+        // Xueqiu image sources are absolute CDN URLs. A non-proxy URL resolved
+        // against our API origin is malformed HTML (for example `src=" title="`).
+        return url.path.hasSuffix("/image-proxy")
+    }
+}
+
 struct PostMediaGrid: View {
     let post: Post
     var imageURLs: [URL]? = nil
@@ -689,6 +705,13 @@ struct PostMediaGrid: View {
     private var allContentImageURLs: [URL] {
         (imageURLs ?? post.imageURLs)
             .filter { !knownCompactImageURLs.contains($0) && !compactImageURLs.contains($0) }
+            .filter {
+                XueqiuMediaDisplayPolicy.shouldDisplay(
+                    $0,
+                    post: post,
+                    usesExplicitPlacement: imageURLs != nil
+                )
+            }
     }
 
     private var contentImageURLs: [URL] {
