@@ -24,6 +24,47 @@ struct YouTubeSubtitlesResponse: Decodable {
     let cues: [PersonVideoSubtitleCue]
 }
 
+actor YouTubePlaybackSourceCache {
+    static let shared = YouTubePlaybackSourceCache()
+
+    private struct Entry {
+        let source: VideoPlaybackSource
+        let savedAt: Date
+    }
+
+    private let timeToLive: TimeInterval = 25 * 60
+    private var entries: [String: Entry] = [:]
+    private var inFlight: [String: Task<VideoPlaybackSource, Error>] = [:]
+
+    func source(url: URL, title: String, baseURL: URL) async throws -> VideoPlaybackSource {
+        let key = "\(baseURL.absoluteString)|\(url.absoluteString)"
+        if let entry = entries[key], Date().timeIntervalSince(entry.savedAt) < timeToLive {
+            return entry.source
+        }
+        if let task = inFlight[key] {
+            return try await task.value
+        }
+
+        let task = Task {
+            try await APIClient(baseURL: baseURL).resolveYouTubePlayback(url: url, title: title)
+        }
+        inFlight[key] = task
+        do {
+            let source = try await task.value
+            entries[key] = Entry(source: source, savedAt: Date())
+            inFlight[key] = nil
+            return source
+        } catch {
+            inFlight[key] = nil
+            throw error
+        }
+    }
+
+    func prewarm(url: URL, title: String, baseURL: URL) async {
+        _ = try? await source(url: url, title: title, baseURL: baseURL)
+    }
+}
+
 struct YouTubeVideoDetailView: View {
     typealias SubtitleLoader = @Sendable () async throws -> YouTubeSubtitleResult
     typealias PlaybackLoader = @Sendable () async throws -> VideoPlaybackSource

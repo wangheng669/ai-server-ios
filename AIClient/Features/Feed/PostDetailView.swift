@@ -1217,8 +1217,11 @@ struct PostDetailView: View {
         guard let url = post.linkURL else { return nil }
         let title = post.displayTitle
         return {
-            try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .resolveYouTubePlayback(url: url, title: title)
+            try await YouTubePlaybackSourceCache.shared.source(
+                url: url,
+                title: title,
+                baseURL: ServerConfiguration.currentURL
+            )
         }
     }
 

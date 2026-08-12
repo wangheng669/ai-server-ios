@@ -3107,8 +3107,11 @@ private struct PersonDetailPage: View {
                     },
                     playbackLoader: {
                         guard let url = video.canonicalURL else { throw APIError.invalidURL }
-                        return try await APIClient(baseURL: ServerConfiguration.currentURL)
-                            .resolveYouTubePlayback(url: url, title: video.displayTitle)
+                        return try await YouTubePlaybackSourceCache.shared.source(
+                            url: url,
+                            title: video.displayTitle,
+                            baseURL: ServerConfiguration.currentURL
+                        )
                     }
                 )
             }
