@@ -774,7 +774,7 @@ private struct GoogleSignalEventCard: View {
         Button(action: onOpen) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(event.title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -786,7 +786,7 @@ private struct GoogleSignalEventCard: View {
                     .fixedSize()
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
