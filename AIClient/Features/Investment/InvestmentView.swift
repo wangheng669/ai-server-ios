@@ -25,6 +25,52 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case gdp = "全球排行"
 
     var id: Self { self }
+
+    var category: InvestmentCategory {
+        switch self {
+        case .market, .sentiment:
+            .market
+        case .chinaMacro, .gdp:
+            .macro
+        case .institutionResearch, .holdings, .industries:
+            .research
+        }
+    }
+
+    var subsectionTitle: String {
+        switch self {
+        case .market: "行情"
+        case .sentiment: "情绪"
+        case .chinaMacro: "国内"
+        case .institutionResearch: "机构"
+        case .holdings: "投资人"
+        case .industries: "产业"
+        case .gdp: "全球排行"
+        }
+    }
+}
+
+private enum InvestmentCategory: String, CaseIterable, Identifiable {
+    case market = "市场"
+    case macro = "宏观"
+    case research = "研究"
+
+    var id: Self { self }
+
+    var sections: [InvestmentSection] {
+        switch self {
+        case .market:
+            [.market, .sentiment]
+        case .macro:
+            [.chinaMacro, .gdp]
+        case .research:
+            [.institutionResearch, .holdings, .industries]
+        }
+    }
+
+    var defaultSection: InvestmentSection {
+        sections[0]
+    }
 }
 
 struct InvestmentView: View {
@@ -114,51 +160,67 @@ struct InvestmentView: View {
 private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
 
+    private var category: InvestmentCategory {
+        selection.category
+    }
+
     private var usesDarkStyle: Bool {
         selection == .gdp
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 24) {
-                    ForEach(InvestmentSection.allCases) { section in
-                        Button {
-                            withAnimation(.easeOut(duration: 0.18)) {
-                                selection = section
-                                proxy.scrollTo(section, anchor: .center)
-                            }
-                        } label: {
-                            VStack(spacing: 0) {
-                                Text(section.rawValue)
-                                    .font(.system(size: 14, weight: selection == section ? .semibold : .regular))
-                                    .foregroundStyle(
-                                        usesDarkStyle
-                                            ? (selection == section ? Color.white : Color.white.opacity(0.6))
-                                            : (selection == section ? Color.primary : Color.secondary)
-                                    )
-                                    .frame(height: 42)
-                                Capsule()
-                                    .fill(selection == section ? InvestmentDesign.accent : .clear)
-                                    .frame(width: 18, height: 2.5)
-                            }
+        VStack(spacing: 8) {
+            HStack(spacing: 0) {
+                ForEach(InvestmentCategory.allCases) { item in
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            selection = item.defaultSection
                         }
-                        .id(section)
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(selection == section ? .isSelected : [])
+                    } label: {
+                        VStack(spacing: 0) {
+                            Text(item.rawValue)
+                                .font(.system(size: 15, weight: category == item ? .semibold : .regular))
+                                .foregroundStyle(primaryColor(isSelected: category == item))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 38)
+                            Capsule()
+                                .fill(category == item ? InvestmentDesign.accent : .clear)
+                                .frame(width: 20, height: 2.5)
+                        }
                     }
-                }
-                .padding(.horizontal, 18)
-            }
-            .scrollIndicators(.hidden)
-            .onChange(of: selection) { _, value in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(value, anchor: .center)
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(category == item ? .isSelected : [])
                 }
             }
+
+            HStack(spacing: 8) {
+                ForEach(category.sections) { section in
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            selection = section
+                        }
+                    } label: {
+                        Text(section.subsectionTitle)
+                            .font(.system(size: 13, weight: selection == section ? .semibold : .regular))
+                            .foregroundStyle(secondaryColor(isSelected: selection == section))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(secondaryBackground(isSelected: selection == section))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selection == section ? .isSelected : [])
+                }
+            }
+            .id(category)
+            .transition(.opacity)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 6)
+        .padding(.bottom, 8)
         .background(usesDarkStyle ? GDPDesign.midnight : InvestmentDesign.surface)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -166,5 +228,27 @@ private struct InvestmentHeader: View {
                 .frame(height: 0.5)
         }
         .animation(.easeOut(duration: 0.18), value: usesDarkStyle)
+        .animation(.easeOut(duration: 0.18), value: category)
+    }
+
+    private func primaryColor(isSelected: Bool) -> Color {
+        if usesDarkStyle {
+            return isSelected ? .white : .white.opacity(0.6)
+        }
+        return isSelected ? .primary : .secondary
+    }
+
+    private func secondaryColor(isSelected: Bool) -> Color {
+        if usesDarkStyle {
+            return isSelected ? .white : .white.opacity(0.72)
+        }
+        return isSelected ? InvestmentDesign.accent : .secondary
+    }
+
+    private func secondaryBackground(isSelected: Bool) -> Color {
+        if usesDarkStyle {
+            return isSelected ? InvestmentDesign.accent.opacity(0.9) : .white.opacity(0.08)
+        }
+        return isSelected ? InvestmentDesign.accentSoft : InvestmentDesign.secondarySurface
     }
 }
