@@ -2,6 +2,21 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testSentimentSnapshotCachePolicyUsesAvailableCacheOnWeakNetworks() {
+        XCTAssertEqual(
+            marketRequestCachePolicy(bypassCache: false, useCachedResponseWhenAvailable: true),
+            .returnCacheDataElseLoad
+        )
+        XCTAssertEqual(
+            marketRequestCachePolicy(bypassCache: true, useCachedResponseWhenAvailable: true),
+            .reloadIgnoringLocalCacheData
+        )
+        XCTAssertEqual(
+            marketRequestCachePolicy(bypassCache: false, useCachedResponseWhenAvailable: false),
+            .useProtocolCachePolicy
+        )
+    }
+
     func testDecodesCachedSentimentSnapshot() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_sentiment_snapshot_v1","market":"hong-kong","score":66.67,"label":"正常","valuationPercentile":83.33,"sentimentPercentile":50,"advancerShare":50,"breadth":{"up":4,"down":5,"flat":1},"fetchedAt":"2026-08-12T02:00:00Z","cached":true,"stale":false}}"#.utf8)
 
