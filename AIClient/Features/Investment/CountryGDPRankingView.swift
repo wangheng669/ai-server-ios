@@ -220,16 +220,14 @@ struct CountryGDPRankingView: View {
                     Group {
                         if let ranking {
                             ScrollView {
-                                LazyVStack(spacing: InvestmentDesign.sectionSpacing) {
+                                LazyVStack(spacing: 0) {
                                     overview(ranking)
-                                    rankingCard(ranking)
+                                    rankingSection(ranking)
                                     sourceFooter(ranking)
                                 }
-                                .padding(.horizontal, InvestmentDesign.pageInset)
-                                .padding(.top, 12)
                                 .padding(.bottom, 28)
                             }
-                            .background(InvestmentDesign.canvas)
+                            .background(InvestmentDesign.surface)
                             .scrollIndicators(.hidden)
                             .scrollDismissesKeyboard(.interactively)
                             .refreshable { await load() }
@@ -239,14 +237,14 @@ struct CountryGDPRankingView: View {
                             errorState
                         }
                     }
-                    .background(InvestmentDesign.canvas)
+                    .background(InvestmentDesign.surface)
                     .toolbar(.hidden, for: .navigationBar)
                 }
             case .globalAssets:
                 GlobalAssetsRankingView()
             }
         }
-        .background(InvestmentDesign.canvas)
+        .background(InvestmentDesign.surface)
         .sheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
                 .presentationDetents([.fraction(0.72), .large])
@@ -264,7 +262,7 @@ struct CountryGDPRankingView: View {
     }
 
     private var categoryPicker: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 28) {
             ForEach(GlobalRankingCategory.allCases) { item in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) { category = item }
@@ -276,19 +274,19 @@ struct CountryGDPRankingView: View {
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .foregroundStyle(category == item ? InvestmentDesign.accent : Color.secondary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 34)
-                    .background(category == item ? InvestmentDesign.surface : Color.clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .shadow(color: category == item ? Color.black.opacity(0.06) : .clear, radius: 3, y: 1)
+                    .frame(height: 40)
+                    .overlay(alignment: .bottom) {
+                        Capsule()
+                            .fill(category == item ? InvestmentDesign.accent : Color.clear)
+                            .frame(height: 2)
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(category == item ? .isSelected : [])
             }
+            Spacer(minLength: 0)
         }
-        .padding(3)
-        .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, InvestmentDesign.pageInset)
-        .padding(.vertical, 10)
         .background(InvestmentDesign.surface)
         .overlay(alignment: .bottom) {
             Rectangle().fill(InvestmentDesign.divider).frame(height: 0.5)
@@ -296,21 +294,15 @@ struct CountryGDPRankingView: View {
         .accessibilityIdentifier("global-ranking-category-picker")
     }
 
-    private func rankingCard(_ ranking: CountryGDPRanking) -> some View {
+    private func rankingSection(_ ranking: CountryGDPRanking) -> some View {
         VStack(spacing: 0) {
             rankingHeader(ranking)
             searchField
-                .padding(.horizontal, 14)
-                .padding(.bottom, 10)
+                .padding(.horizontal, InvestmentDesign.pageInset)
+                .padding(.bottom, 14)
             Divider().overlay(InvestmentDesign.divider)
             countries(ranking)
         }
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -332,7 +324,7 @@ struct CountryGDPRankingView: View {
                     if index < visibleCountries.count - 1 {
                         Divider()
                             .overlay(InvestmentDesign.divider)
-                            .padding(.leading, 54)
+                            .padding(.leading, 52)
                     }
                 }
             }
@@ -340,13 +332,11 @@ struct CountryGDPRankingView: View {
     }
 
     private func overview(_ ranking: CountryGDPRanking) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 9) {
                 Image(systemName: "globe.asia.australia.fill")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(InvestmentDesign.accent)
-                    .frame(width: 42, height: 42)
-                    .background(InvestmentDesign.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("全球经济体")
                         .font(.system(size: 16, weight: .bold))
@@ -357,29 +347,25 @@ struct CountryGDPRankingView: View {
                 Spacer()
                 Text(verbatim: "\(ranking.year)")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .padding(.horizontal, 10)
-                    .frame(height: 28)
-                    .background(InvestmentDesign.accentSoft, in: Capsule())
+                    .foregroundStyle(.secondary)
             }
 
             if let leader = ranking.countries.first {
-                HStack(alignment: .bottom, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("规模最大的经济体")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                         HStack(spacing: 8) {
-                            Text(leader.flag).font(.system(size: 25))
+                            Text(leader.flag).font(.system(size: 24))
                             Text(leader.localizedName)
-                                .font(.system(size: 18, weight: .bold))
+                                .font(.system(size: 20, weight: .bold))
                         }
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(CountryGDPFormat.compact(leader.gdpCurrentUSD))
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .foregroundStyle(InvestmentDesign.accent)
+                            .font(.system(size: 21, weight: .bold, design: .rounded))
                             .minimumScaleFactor(0.68)
                             .lineLimit(1)
                         if let growth = leader.gdpGrowthPercent {
@@ -389,15 +375,14 @@ struct CountryGDPRankingView: View {
                         }
                     }
                 }
-                .padding(.top, 2)
             }
         }
-        .padding(16)
+        .padding(.horizontal, InvestmentDesign.pageInset)
+        .padding(.top, 20)
+        .padding(.bottom, 22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
+        .overlay(alignment: .bottom) {
+            Divider().overlay(InvestmentDesign.divider)
         }
     }
 
@@ -433,9 +418,9 @@ struct CountryGDPRankingView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.horizontal, InvestmentDesign.pageInset)
+        .padding(.top, 20)
+        .padding(.bottom, 12)
     }
 
     private func countryRow(_ country: CountryGDP) -> some View {
@@ -462,7 +447,7 @@ struct CountryGDPRankingView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.quaternary)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, InvestmentDesign.pageInset)
         .frame(minHeight: 58)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -471,11 +456,10 @@ struct CountryGDPRankingView: View {
 
     private func rankBadge(_ rank: Int) -> some View {
         Text("\(rank)")
-            .font(.system(size: 11, weight: rank <= 3 ? .bold : .medium, design: .rounded))
+            .font(.system(size: 13, weight: rank <= 3 ? .bold : .regular, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(rank <= 3 ? InvestmentDesign.accent : Color.secondary)
-            .frame(width: 28, height: 28)
-            .background(rank <= 3 ? InvestmentDesign.accentSoft : InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(width: 26)
     }
 
     @ViewBuilder
@@ -520,11 +504,10 @@ struct CountryGDPRankingView: View {
             }
         }
         .buttonStyle(.plain)
-        .padding(14)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
+        .padding(.horizontal, InvestmentDesign.pageInset)
+        .padding(.top, 18)
+        .overlay(alignment: .top) {
+            Divider().overlay(InvestmentDesign.divider)
         }
     }
 
