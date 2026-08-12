@@ -8,46 +8,14 @@ struct GlobalAssetsRankingView: View {
         Group {
             if let ranking {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: InvestmentDesign.sectionSpacing) {
                         overview(ranking)
-                        HStack {
-                            Text("资产市值排名").font(.headline)
-                            Spacer()
-                            Text("\(ranking.assets.count) 项资产")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, InvestmentDesign.pageInset)
-                        .padding(.top, 18)
-                        .padding(.bottom, 10)
-
-                        ForEach(Array(ranking.assets.enumerated()), id: \.element.id) { index, asset in
-                            assetRow(asset)
-                            if index < ranking.assets.count - 1 {
-                                Divider()
-                                    .overlay(InvestmentDesign.divider)
-                                    .padding(.leading, 62)
-                            }
-                        }
-
-                        Link(destination: ranking.sourceURL) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "externaldrive.connected.to.line.below")
-                                    .foregroundStyle(InvestmentDesign.accent)
-                                Text("数据由服务器定时采集自 \(ranking.sourceName) 并存入数据库；当前页面仅读取服务器接口。")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.leading)
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, InvestmentDesign.pageInset)
-                        .padding(.vertical, 22)
+                        rankingCard(ranking)
+                        sourceFooter(ranking)
                     }
+                    .padding(.horizontal, InvestmentDesign.pageInset)
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
                 .refreshable { await load() }
@@ -72,57 +40,135 @@ struct GlobalAssetsRankingView: View {
                 .frame(minHeight: 320)
             }
         }
-        .background(GDPDesign.porcelain)
+        .background(InvestmentDesign.canvas)
         .task {
             if ranking == nil { await load() }
         }
     }
 
     private func overview(_ ranking: GlobalAssetsRanking) -> some View {
-        ZStack(alignment: .trailing) {
-            LinearGradient(
-                colors: [GDPDesign.midnight, GDPDesign.midnightLight],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            Image(systemName: "chart.pie.fill")
-                .font(.system(size: 126, weight: .thin))
-                .foregroundStyle(.white.opacity(0.045))
-                .offset(x: 28, y: 20)
-            VStack(alignment: .leading, spacing: 10) {
-                if let leader = ranking.assets.first {
-                    Text("市值最高")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.6))
-                    HStack(spacing: 10) {
-                        assetIcon(leader, size: 30)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(leader.name).font(.title3.weight(.semibold))
-                            Text(leader.symbol)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.65))
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .frame(width: 42, height: 42)
+                    .background(InvestmentDesign.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("全球资产")
+                        .font(.system(size: 16, weight: .bold))
+                        .lineLimit(1)
+                    Text("按实时总市值排名")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .layoutPriority(1)
+                Spacer()
+                Text("\(ranking.assets.count) 项")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(InvestmentDesign.accentSoft, in: Capsule())
+            }
+
+            if let leader = ranking.assets.first {
+                HStack(alignment: .bottom, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("当前市值最高")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            assetIcon(leader, size: 28)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(leader.name)
+                                    .font(.system(size: 18, weight: .bold))
+                                    .lineLimit(1)
+                                Text(leader.symbol).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                            }
                         }
-                        Spacer()
-                        Text(GlobalAssetsFormat.marketCap(leader.marketCapUSD))
-                            .font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .minimumScaleFactor(0.7)
-                            .lineLimit(1)
                     }
-                    .foregroundStyle(.white)
+                    .layoutPriority(1)
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(GlobalAssetsFormat.marketCap(leader.marketCapUSD))
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .foregroundStyle(InvestmentDesign.accent)
+                            .minimumScaleFactor(0.62)
+                            .lineLimit(1)
+                        change(leader.change24HPercent, label: "24h")
+                    }
                 }
             }
-            .padding(.horizontal, InvestmentDesign.pageInset)
-            .padding(.top, 20)
-            .padding(.bottom, 22)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
+        }
+    }
+
+    private func rankingCard(_ ranking: GlobalAssetsRanking) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("资产市值排名").font(.headline)
+                Spacer()
+                Text("24h / 7d 涨跌")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+
+            Divider().overlay(InvestmentDesign.divider)
+
+            ForEach(Array(ranking.assets.enumerated()), id: \.element.id) { index, asset in
+                assetRow(asset)
+                if index < ranking.assets.count - 1 {
+                    Divider()
+                        .overlay(InvestmentDesign.divider)
+                        .padding(.leading, 56)
+                }
+            }
+        }
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
+    }
+
+    private func sourceFooter(_ ranking: GlobalAssetsRanking) -> some View {
+        Link(destination: ranking.sourceURL) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "externaldrive.connected.to.line.below")
+                    .foregroundStyle(InvestmentDesign.accent)
+                Text("数据由服务器定时采集自 \(ranking.sourceName) 并存入数据库；当前页面仅读取服务器接口。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(14)
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius, style: .continuous)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
         }
     }
 
     private func assetRow(_ asset: GlobalAsset) -> some View {
         HStack(spacing: 10) {
-            Text("\(asset.rank)")
-                .font(.caption.monospacedDigit().weight(asset.rank <= 3 ? .semibold : .regular))
-                .foregroundStyle(asset.rank <= 3 ? .primary : .secondary)
-                .frame(width: 25)
+            rankBadge(asset.rank)
             assetIcon(asset, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(asset.name).font(.body.weight(.semibold)).lineLimit(1)
@@ -133,16 +179,27 @@ struct GlobalAssetsRankingView: View {
                 Text(GlobalAssetsFormat.marketCap(asset.marketCapUSD))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
+                    .minimumScaleFactor(0.72)
+                    .lineLimit(1)
                 HStack(spacing: 6) {
                     change(asset.change24HPercent, label: "24h")
                     change(asset.change7DPercent, label: "7d")
                 }
             }
         }
-        .padding(.horizontal, InvestmentDesign.pageInset)
+        .padding(.horizontal, 14)
         .frame(minHeight: 62)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("第 \(asset.rank) 名，\(asset.name)，市值 \(GlobalAssetsFormat.marketCap(asset.marketCapUSD))")
+    }
+
+    private func rankBadge(_ rank: Int) -> some View {
+        Text("\(rank)")
+            .font(.system(size: 11, weight: rank <= 3 ? .bold : .medium, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(rank <= 3 ? InvestmentDesign.accent : Color.secondary)
+            .frame(width: 28, height: 28)
+            .background(rank <= 3 ? InvestmentDesign.accentSoft : InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func assetIcon(_ asset: GlobalAsset, size: CGFloat) -> some View {
@@ -151,7 +208,7 @@ struct GlobalAssetsRankingView: View {
                 image.resizable().scaledToFit()
             } else {
                 ZStack {
-                    Circle().fill(GDPDesign.search)
+                    Circle().fill(InvestmentDesign.secondarySurface)
                     Text(String(asset.symbol.prefix(1)))
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)

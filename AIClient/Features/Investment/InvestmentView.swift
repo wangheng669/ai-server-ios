@@ -174,10 +174,6 @@ private struct InvestmentHeader: View {
         selection.category
     }
 
-    private var usesDarkStyle: Bool {
-        selection == .gdp
-    }
-
     var body: some View {
         Group {
             if !isCompact {
@@ -186,16 +182,15 @@ private struct InvestmentHeader: View {
                     .padding(.top, 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 8)
-                    .background(usesDarkStyle ? GDPDesign.midnight : InvestmentDesign.surface)
+                    .background(InvestmentDesign.surface)
                     .overlay(alignment: .bottom) {
                         Rectangle()
-                            .fill(usesDarkStyle ? Color.white.opacity(0.08) : InvestmentDesign.divider)
+                            .fill(InvestmentDesign.divider)
                             .frame(height: 0.5)
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.18), value: usesDarkStyle)
         .animation(.easeOut(duration: 0.18), value: category)
         .animation(.easeOut(duration: 0.18), value: isCompact)
     }
@@ -232,23 +227,14 @@ private struct InvestmentHeader: View {
     }
 
     private func primaryColor(isSelected: Bool) -> Color {
-        if usesDarkStyle {
-            return isSelected ? .white : .white.opacity(0.6)
-        }
         return isSelected ? .primary : .secondary
     }
 
     private func secondaryColor(isSelected: Bool) -> Color {
-        if usesDarkStyle {
-            return isSelected ? .white : .white.opacity(0.72)
-        }
         return isSelected ? InvestmentDesign.accent : .secondary
     }
 
     private func secondaryBackground(isSelected: Bool) -> Color {
-        if usesDarkStyle {
-            return isSelected ? InvestmentDesign.accent.opacity(0.9) : .white.opacity(0.08)
-        }
         return isSelected ? InvestmentDesign.accentSoft : InvestmentDesign.secondarySurface
     }
 }
