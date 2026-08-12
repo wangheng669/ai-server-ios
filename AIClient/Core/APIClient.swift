@@ -16,27 +16,6 @@ struct APIClient {
 
     func checkHealth() async throws { let _: HealthResponse = try await get(baseURL.appending(path: "health")) }
 
-    func fetchTodayWorld(limit: Int = 3, page: Int = 1, systemKey: String? = nil) async throws -> TodayWorldPayload {
-        var components = URLComponents(
-            url: baseURL.appending(path: "api/ios/v1/today-world"),
-            resolvingAgainstBaseURL: false
-        )
-        components?.queryItems = [
-            .init(name: "limit", value: String(min(max(limit, 1), 20))),
-            .init(name: "page", value: String(max(page, 1)))
-        ]
-        if let systemKey, !systemKey.isEmpty {
-            components?.queryItems?.append(.init(name: "system_key", value: systemKey))
-        }
-        guard let url = components?.url else { throw APIError.invalidURL }
-        let response: TodayWorldResponse = try await get(
-            url,
-            cachePolicy: .reloadIgnoringLocalCacheData
-        )
-        guard response.success else { throw APIError.invalidResponse }
-        return response.data
-    }
-
     func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
         let response: TodayWorldYesterdayReportResponse = try await get(
             baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
@@ -922,11 +901,6 @@ private struct WikipediaRelayArticleResponse: Decodable {
 
 private struct HealthResponse: Decodable { let status: String }
 
-struct TodayWorldResponse: Decodable {
-    let success: Bool
-    let data: TodayWorldPayload
-}
-
 struct TodayWorldYesterdayReportResponse: Decodable {
     let success: Bool
     let data: TodayWorldYesterdayReportPayload
@@ -1068,73 +1042,6 @@ struct TodayWorldAdvancedReportSystem: Decodable, Equatable, Identifiable {
         case sourceKeys = "source_keys"
         case sourceNames = "source_names"
         case postIDs = "post_ids"
-    }
-}
-
-struct TodayWorldPayload: Decodable, Equatable {
-    let schemaVersion: String
-    let date: String
-    let timezone: String
-    let generatedAt: String
-    let sections: [TodayWorldSection]
-
-    enum CodingKeys: String, CodingKey {
-        case date, timezone, sections
-        case schemaVersion = "schema_version"
-        case generatedAt = "generated_at"
-    }
-}
-
-struct TodayWorldSection: Decodable, Identifiable, Equatable {
-    let id: String
-    let kind: String
-    let title: String
-    let subtitle: String?
-    let layout: String
-    let entity: TodayWorldEntity?
-    let source: TodayWorldSource?
-    let items: [Post]
-    let itemCount: Int
-    let hasMore: Bool
-    let latestAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, kind, title, subtitle, layout, entity, source, items
-        case itemCount = "item_count"
-        case hasMore = "has_more"
-        case latestAt = "latest_at"
-    }
-}
-
-struct TodayWorldEntity: Decodable, Equatable {
-    let key: String
-    let name: String
-    let type: String
-    let avatarURL: String?
-    let xHandle: String?
-    let companyKey: String?
-    let companyName: String?
-
-    enum CodingKeys: String, CodingKey {
-        case key, name, type
-        case avatarURL = "avatar_url"
-        case xHandle = "x_handle"
-        case companyKey = "company_key"
-        case companyName = "company_name"
-    }
-}
-
-struct TodayWorldSource: Decodable, Equatable {
-    let type: String
-    let platform: String?
-    let account: String?
-    let feedView: String?
-    let homeFeedType: String?
-
-    enum CodingKeys: String, CodingKey {
-        case type, platform, account
-        case feedView = "feed_view"
-        case homeFeedType = "home_feed_type"
     }
 }
 
