@@ -171,76 +171,77 @@ struct RetailInvestorView: View {
     private var sentimentDecisionHero: some View {
         let snapshot = store.snapshot(for: selectedMarket)
         let score = snapshot?.score
-        let accent = InvestmentDesign.accent
         let breadth = selectedBreadth
-        return VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .center, spacing: 18) {
-                ZStack {
-                    Circle().stroke(Color.primary.opacity(0.07), lineWidth: 8)
-                    Circle()
-                        .trim(from: 0, to: max(0.02, min((score ?? 0) / 100, 1)))
-                        .stroke(accent, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    VStack(spacing: -1) {
-                        Text(score.map { String(Int($0.rounded())) } ?? "—")
-                            .font(.system(size: 31, weight: .bold, design: .rounded))
-                            .foregroundStyle(accent)
-                            .contentTransition(.numericText())
-                        Text("情绪值")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(width: 104, height: 104)
-
-                VStack(alignment: .leading, spacing: 7) {
-                    Label(snapshot?.label.nonEmpty ?? "等待数据", systemImage: sentimentSymbol(score))
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(accent)
-                    Text(sentimentVerdict(score))
-                        .font(.system(size: 24, weight: .bold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(decisionNarrative(score: score, breadth: breadth))
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(2)
-                }
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("市场情绪")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Label(snapshot?.label.nonEmpty ?? "等待数据", systemImage: sentimentSymbol(score))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
             }
 
-            GeometryReader { proxy in
-                if breadth.total > 0 {
-                    HStack(spacing: 3) {
-                        Capsule().fill(InvestmentDesign.gain).frame(width: proxy.size.width * breadth.upRatio)
-                        Capsule().fill(Color.secondary.opacity(0.25)).frame(width: proxy.size.width * breadth.flatRatio)
-                        Capsule().fill(InvestmentDesign.loss)
-                    }
-                } else {
-                    Capsule().fill(Color.secondary.opacity(0.16))
-                }
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                Text(score.map { String(Int($0.rounded())) } ?? "—")
+                    .font(.system(size: 50, weight: .medium, design: .rounded))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .tracking(-2)
+                    .contentTransition(.numericText())
+                Text("/ 100")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text(sentimentVerdict(score))
+                    .font(.system(size: 19, weight: .semibold))
+                    .multilineTextAlignment(.trailing)
             }
-            .frame(height: 7)
+
+            Text(decisionNarrative(score: score, breadth: breadth))
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+
+            VStack(spacing: 7) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.13))
+                        Capsule()
+                            .fill(InvestmentDesign.accent)
+                            .frame(width: proxy.size.width * min(max((score ?? 0) / 100, 0), 1))
+                    }
+                }
+                .frame(height: 4)
+                HStack {
+                    Text("冷静")
+                    Spacer()
+                    Text("均衡")
+                    Spacer()
+                    Text("活跃")
+                }
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(.tertiary)
+            }
 
             HStack(spacing: 0) {
-                heroMetric("上涨", value: breadth.total > 0 ? "\(Int((breadth.upRatio * 100).rounded()))%" : "—", tint: breadth.total > 0 ? InvestmentDesign.accent : .secondary)
+                heroMetric("上涨占比", value: breadth.total > 0 ? "\(Int((breadth.upRatio * 100).rounded()))%" : "—", tint: .primary)
                 heroDivider
-                heroMetric("赚钱效应", value: breadthEffectLabel(breadth), tint: breadth.total > 0 ? InvestmentDesign.accent : .secondary)
+                heroMetric("赚钱效应", value: breadthEffectLabel(breadth), tint: .primary)
                 heroDivider
-                heroMetric("估值位置", value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—", tint: InvestmentDesign.accent)
+                heroMetric("估值位置", value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—", tint: .primary)
             }
+            .padding(.top, 2)
         }
-        .padding(20)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.75)
-        }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(InvestmentDesign.surface)
     }
 
     private func heroMetric(_ title: String, value: String, tint: Color) -> some View {
         VStack(spacing: 4) {
             Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(tint)
             Text(title)
                 .font(.system(size: 10.5, weight: .medium))
@@ -426,26 +427,31 @@ struct RetailInvestorView: View {
     }
 
     private var marketPicker: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 0) {
             ForEach(SentimentMarket.allCases) { market in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {
                         selectedMarket = market
                     }
                 } label: {
-                    Text(market.title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(selectedMarket == market ? Color.white : Color.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background(selectedMarket == market ? InvestmentDesign.accent : InvestmentDesign.secondarySurface, in: Capsule())
+                    VStack(spacing: 9) {
+                        Text(market.title)
+                            .font(.system(size: 13, weight: selectedMarket == market ? .semibold : .regular))
+                            .foregroundStyle(selectedMarket == market ? Color.primary : Color.secondary)
+                        Capsule()
+                            .fill(selectedMarket == market ? InvestmentDesign.accent : Color.clear)
+                            .frame(width: 18, height: 2.5)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 18)
+        .padding(.top, 11)
+        .padding(.bottom, 8)
         .background(InvestmentDesign.surface)
         .accessibilityLabel("选择市场情绪")
     }
@@ -544,9 +550,8 @@ struct RetailInvestorView: View {
 
     private var sectorHighlights: some View {
         let leaders = Array(store.sectors.prefix(3))
-        let maxChange = max(leaders.map { abs($0.percentValue) }.max() ?? 0, 0.01)
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("板块涨幅排行")
                     .font(.system(size: 15, weight: .semibold))
@@ -564,24 +569,15 @@ struct RetailInvestorView: View {
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(index == 0 ? InvestmentDesign.accent : Color.secondary.opacity(0.58))
                             .frame(width: 14)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(sector.name)
-                                .font(.system(size: 13, weight: .semibold))
-                            GeometryReader { proxy in
-                                Capsule()
-                                    .fill(InvestmentDesign.accent.opacity(index == 0 ? 0.72 : 0.42))
-                                    .frame(width: max(10, proxy.size.width * abs(sector.percentValue) / maxChange))
-                            }
-                            .frame(height: 3)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(sector.name)
+                            .font(.system(size: 13, weight: .medium))
                         Spacer()
                         Text(RetailSentimentFormat.percent(sector.percentValue))
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(.primary)
                             .frame(width: 56, alignment: .trailing)
                     }
-                    .frame(height: 32)
+                    .frame(height: 38)
                     if index < leaders.count - 1 {
                         Divider().overlay(InvestmentDesign.divider).padding(.leading, 24)
                     }
@@ -598,13 +594,7 @@ struct RetailInvestorView: View {
             Divider().overlay(InvestmentDesign.divider)
             investorMoodCard
         }
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.75)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 16)
+        .background(InvestmentDesign.surface)
     }
 
     private var marketBreadthCard: some View {
@@ -762,6 +752,7 @@ struct RetailInvestorView: View {
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
+            .padding(.horizontal, 16)
             if store.investorMood?.items.isEmpty != false {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
