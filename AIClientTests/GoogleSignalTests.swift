@@ -129,10 +129,42 @@ final class GoogleSignalTests: XCTestCase {
         XCTAssertEqual(post.authorHandle, "@GoogleAI")
         XCTAssertEqual(post.displayContent, "Google 发布了新版本 & 更多功能。")
         XCTAssertEqual(post.xTweetID, "42")
+        XCTAssertFalse(post.needsXTranslation)
+    }
+
+    func testEnglishEvidenceUsesExistingXTranslationEligibility() throws {
+        let data = Data(
+            """
+            {
+              "id": 11,
+              "post_id": 495113,
+              "article_id": "43",
+              "title": "Google update",
+              "content": "Google released a new Gemini update.",
+              "language": "en",
+              "author_name": "Google AI",
+              "author_handle": "GoogleAI",
+              "avatar_url": "https://example.com/avatar.jpg",
+              "source_url": "https://x.com/GoogleAI/status/43",
+              "published_at": "2026-08-12T12:28:24+08:00"
+            }
+            """.utf8
+        )
+
+        let evidence = try JSONDecoder().decode(GoogleSignalEvidence.self, from: data)
+        let untranslated = try XCTUnwrap(evidence.previewPost)
+        let translated = try XCTUnwrap(evidence.previewPost(translation: "Google 发布了 Gemini 更新。"))
+
+        XCTAssertTrue(untranslated.needsXTranslation)
+        XCTAssertEqual(untranslated.xTweetID, "43")
+        XCTAssertEqual(translated.displayContent, "Google 发布了 Gemini 更新。")
+        XCTAssertFalse(translated.needsXTranslation)
     }
 
     func testDateParserSupportsFractionalSeconds() {
-        XCTAssertNotNil(GoogleSignalDateParser.date(from: "2026-08-12T12:18:05.130556+08:00"))
+        let date = GoogleSignalDateParser.date(from: "2026-08-12T12:18:05.130556+08:00")
+        XCTAssertNotNil(date)
         XCTAssertNotNil(GoogleSignalDateParser.date(from: "2026-08-12T08:18:08Z"))
+        XCTAssertTrue(GoogleSignalDatePresentation.detail(date).contains("8月12日"))
     }
 }

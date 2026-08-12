@@ -241,18 +241,21 @@ struct GoogleSignalEvidence: Decodable, Equatable, Identifiable {
         case publishedAt = "published_at"
     }
 
-    var previewPost: Post? {
+    var previewPost: Post? { previewPost(translation: nil) }
+
+    func previewPost(translation: String?) -> Post? {
         guard let postID = Int(exactly: postID) else { return nil }
+        let cleanTranslation = translation?.trimmingCharacters(in: .whitespacesAndNewlines)
         return Post(
             id: postID,
             title: title,
             text: content,
             summary: nil,
             content: content,
-            contentZH: language.lowercased().hasPrefix("zh") ? content : nil,
+            contentZH: language.lowercased().hasPrefix("zh") ? content : cleanTranslation,
             source: "x",
             formattedTime: publishedAt.flatMap {
-                GoogleSignalDateParser.date(from: $0)?.formatted(.relative(presentation: .named))
+                GoogleSignalDatePresentation.relative(GoogleSignalDateParser.date(from: $0))
             },
             weightReason: nil,
             finalScore: nil,
@@ -269,7 +272,43 @@ struct GoogleSignalEvidence: Decodable, Equatable, Identifiable {
             images: [],
             videos: [],
             feedRank: nil,
-            meta: nil
+            meta: .googleSignalX(language: language, rawText: content)
+        )
+    }
+}
+
+private extension PostMeta {
+    static func googleSignalX(language: String, rawText: String) -> PostMeta {
+        PostMeta(
+            metrics: nil,
+            lang: language,
+            urls: nil,
+            rawText: rawText,
+            noteText: nil,
+            inReplyToScreenName: nil,
+            inReplyToStatusID: nil,
+            replyContext: nil,
+            quotedTweet: nil,
+            photoCredit: nil,
+            zhihuRank: nil,
+            zhihuHeat: nil,
+            zhihuAnswers: nil,
+            zhihuFollowerCount: nil,
+            zhihuQuestionID: nil,
+            zhihuURL: nil,
+            zhihuAnswerExcerpt: nil,
+            zhihuAnswerContent: nil,
+            zhihuAnswerAuthor: nil,
+            zhihuAnswerVoteupCount: nil,
+            zhihuAnswerCommentCount: nil,
+            rssFeedName: nil,
+            rssArticleLink: nil,
+            flashCategory: nil,
+            flashSimilarityGroupId: nil,
+            flashSimilarityScore: nil,
+            flashSimilarCount: nil,
+            flashPlatformCount: nil,
+            flashPlatforms: nil
         )
     }
 }
@@ -285,6 +324,31 @@ enum GoogleSignalDateParser {
 
     static func date(from value: String) -> Date? {
         fractionalFormatter.date(from: value) ?? standardFormatter.date(from: value)
+    }
+}
+
+enum GoogleSignalDatePresentation {
+    private static let chineseLocale = Locale(identifier: "zh-Hans-CN")
+
+    static func relative(_ date: Date?) -> String? {
+        date?.formatted(
+            Date.RelativeFormatStyle(
+                presentation: .named,
+                locale: chineseLocale
+            )
+        )
+    }
+
+    static func detail(_ date: Date?) -> String {
+        guard let date else { return "时间未知" }
+        return date.formatted(
+            .dateTime
+                .locale(chineseLocale)
+                .month()
+                .day()
+                .hour()
+                .minute()
+        )
     }
 }
 
@@ -377,7 +441,6 @@ private final class GoogleSignalStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var errorMessage: String?
-    @Published private(set) var lastUpdated: Date?
 
     private let service: GoogleSignalService
     private var hasMore = false
@@ -421,14 +484,13 @@ private final class GoogleSignalStore: ObservableObject {
             }
             hasMore = page.hasMore
             nextCursor = page.nextCursor
-            lastUpdated = Date()
             errorMessage = nil
         } catch is CancellationError {
             return
         } catch {
             guard generation == activeGeneration else { return }
             if reset { events = [] }
-            errorMessage = "暂时无法读取 Google 信号，请稍后重试"
+            errorMessage = "暂时无法读取信号，请稍后重试"
         }
     }
 
@@ -453,12 +515,9 @@ struct GoogleSignalView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                content
-            }
-            .navigationTitle("Google 信号")
-            .navigationBarTitleDisplayMode(.inline)
+            content
+            .background(Color(uiColor: .systemBackground))
+            .toolbar(.hidden, for: .navigationBar)
             .refreshable {
                 await store.load(section: section, sentiment: sentiment, reset: true)
             }
@@ -480,7 +539,7 @@ struct GoogleSignalView: View {
 
     @ViewBuilder private var content: some View {
         if store.isLoading && store.events.isEmpty {
-            ProgressView("正在整理 Google 信号…")
+            ProgressView("正在整理信号…")
         } else if let errorMessage = store.errorMessage, store.events.isEmpty {
             ContentUnavailableView {
                 Label("信号暂不可用", systemImage: "antenna.radiowaves.left.and.right.slash")
@@ -493,10 +552,8 @@ struct GoogleSignalView: View {
             }
         } else {
             ScrollView {
-                LazyVStack(spacing: 14) {
-                    header
-                    sectionPicker
-                    sentimentFilters
+                LazyVStack(spacing: 0) {
+                    filters
 
                     if store.events.isEmpty {
                         ContentUnavailableView(
@@ -506,7 +563,7 @@ struct GoogleSignalView: View {
                         )
                         .padding(.top, 42)
                     } else {
-                        ForEach(store.events) { event in
+                        ForEach(Array(store.events.enumerated()), id: \.element.id) { index, event in
                             GoogleSignalEventCard(event: event) {
                                 selectedEvent = event
                             }
@@ -517,6 +574,10 @@ struct GoogleSignalView: View {
                                     sentiment: sentiment
                                 )
                             }
+                            if index < store.events.count - 1 {
+                                Divider()
+                                    .padding(.leading, 18)
+                            }
                         }
                     }
 
@@ -524,65 +585,33 @@ struct GoogleSignalView: View {
                         ProgressView().padding(.vertical, 16)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
                 .padding(.bottom, 28)
             }
+            .scrollIndicators(.hidden)
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Google 事件雷达")
-                        .font(.title2.bold())
-                    Text("从 X 动态中提炼事件、证据与后续进展")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+    private var filters: some View {
+        VStack(spacing: 10) {
+            Picker("信号视图", selection: $section) {
+                ForEach(GoogleSignalSection.allCases) { item in
+                    Text(item.title).tag(item)
                 }
-                Spacer(minLength: 12)
-                Label("实时", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.green)
             }
-            if let lastUpdated = store.lastUpdated {
-                Text("更新于 \(lastUpdated.formatted(.relative(presentation: .named)))")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.primary.opacity(0.07), lineWidth: 0.7)
-        }
-    }
+            .pickerStyle(.segmented)
 
-    private var sectionPicker: some View {
-        Picker("信号视图", selection: $section) {
-            ForEach(GoogleSignalSection.allCases) { item in
-                Text(item.title).tag(item)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    private var sentimentFilters: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(GoogleSignalSentimentFilter.allCases) { item in
                     Button {
                         sentiment = item
                     } label: {
                         Text(item.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(sentiment == item ? Color.white : Color.primary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(sentiment == item ? Color.accentColor : Color.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
                             .background(
-                                sentiment == item ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground),
+                                sentiment == item ? Color.accentColor.opacity(0.11) : Color.clear,
                                 in: Capsule()
                             )
                     }
@@ -590,7 +619,13 @@ struct GoogleSignalView: View {
                 }
             }
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
     }
 }
 
@@ -600,20 +635,23 @@ private struct GoogleSignalEventCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 13) {
-                HStack(spacing: 8) {
-                    signalBadge(event.factStatusTitle, color: event.factStatusColor)
-                    signalBadge(event.sentimentTitle, color: event.sentimentColor)
-                    Spacer()
-                    if !event.timeline.isEmpty {
-                        Label("有新进展", systemImage: "arrow.trianglehead.branch")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.blue)
-                    }
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(event.factStatusColor)
+                        .frame(width: 7, height: 7)
+                    Text(event.factStatusTitle)
+                    Text("·")
+                    Text(relativeTime)
+                    Spacer(minLength: 8)
+                    Text(event.sentimentTitle)
+                        .foregroundStyle(event.sentimentColor)
                 }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
 
                 Text(event.title)
-                    .font(.headline)
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -622,33 +660,29 @@ private struct GoogleSignalEventCard: View {
                     Text(event.reason)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if !event.priorityReasons.isEmpty {
-                    Text(event.priorityReasons.prefix(3).joined(separator: " · "))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.blue)
-                }
-
-                HStack(spacing: 12) {
-                    Label(relativeTime, systemImage: "clock")
-                    Label("\(event.memberCount) 条动态", systemImage: "text.bubble")
-                    Label("\(event.sourceCount) 个 X 账号", systemImage: "person.2")
+                HStack(spacing: 5) {
+                    Text("\(event.sourceCount) 个来源")
+                    Text("·")
+                    Text("\(event.memberCount) 条动态")
+                    if !event.timeline.isEmpty {
+                        Text("·")
+                        Label("有进展", systemImage: "arrow.trianglehead.branch")
+                            .foregroundStyle(.blue)
+                    }
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
                 }
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             }
-            .padding(16)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 15)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.7)
-            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
@@ -656,7 +690,7 @@ private struct GoogleSignalEventCard: View {
     }
 
     private var relativeTime: String {
-        event.firstSeenDate?.formatted(.relative(presentation: .named)) ?? "时间未知"
+        GoogleSignalDatePresentation.relative(event.latestSeenDate) ?? "时间未知"
     }
 }
 
@@ -725,10 +759,67 @@ private final class GoogleSignalEvidenceStore: ObservableObject {
     }
 }
 
+@MainActor
+private final class GoogleSignalXTranslationStore: ObservableObject {
+    @Published private(set) var translations: [String: String] = [:]
+    @Published private(set) var loadingTweetIDs: Set<String> = []
+
+    private let client: APIClient
+    private var failedTweetIDs: Set<String> = []
+
+    init(client: APIClient = APIClient(baseURL: ServerConfiguration.currentURL)) {
+        self.client = client
+    }
+
+    func translation(for sourceURL: String) -> String? {
+        guard let tweetID = Self.tweetID(from: sourceURL) else { return nil }
+        return translations[tweetID]
+    }
+
+    func isLoading(_ sourceURL: String) -> Bool {
+        guard let tweetID = Self.tweetID(from: sourceURL) else { return false }
+        return loadingTweetIDs.contains(tweetID)
+    }
+
+    func translateIfNeeded(sourceURL: String, language: String, original: String) async {
+        guard !language.lowercased().hasPrefix("zh"),
+              let tweetID = Self.tweetID(from: sourceURL),
+              translations[tweetID] == nil,
+              !loadingTweetIDs.contains(tweetID),
+              !failedTweetIDs.contains(tweetID) else { return }
+
+        loadingTweetIDs.insert(tweetID)
+        defer { loadingTweetIDs.remove(tweetID) }
+        do {
+            let response = try await client.fetchXTranslation(tweetID: tweetID)
+            guard !Task.isCancelled else { return }
+            let value = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, value != original else { return }
+            translations[tweetID] = value
+        } catch is CancellationError {
+            return
+        } catch {
+            failedTweetIDs.insert(tweetID)
+        }
+    }
+
+    nonisolated static func tweetID(from sourceURL: String) -> String? {
+        guard let url = URL(string: sourceURL) else { return nil }
+        let components = url.pathComponents
+        guard let statusIndex = components.firstIndex(of: "status"),
+              components.indices.contains(statusIndex + 1) else { return nil }
+        let value = components[statusIndex + 1]
+        return !value.isEmpty && value.allSatisfy(\.isNumber) ? value : nil
+    }
+}
+
 private struct GoogleSignalEventDetailView: View {
     let event: GoogleSignalEvent
     @StateObject private var evidenceStore: GoogleSignalEvidenceStore
+    @StateObject private var translationStore = GoogleSignalXTranslationStore()
     @Environment(\.dismiss) private var dismiss
+    @State private var showsRepresentativeOriginal = false
+    @State private var representativeExpanded = false
 
     init(event: GoogleSignalEvent) {
         self.event = event
@@ -738,16 +829,20 @@ private struct GoogleSignalEventDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     overview
-                    if !event.timeline.isEmpty { timeline }
+                    sectionDivider
                     representativeEvidence
+                    if !event.timeline.isEmpty {
+                        sectionDivider
+                        timeline
+                    }
+                    sectionDivider
                     evidenceList
                 }
-                .padding(18)
                 .padding(.bottom, 24)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(Color(uiColor: .systemBackground))
             .navigationTitle("信号详情")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -760,7 +855,7 @@ private struct GoogleSignalEventDetailView: View {
     }
 
     private var overview: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 signalBadge(event.factStatusTitle, color: event.factStatusColor)
                 signalBadge(event.sentimentTitle, color: event.sentimentColor)
@@ -777,67 +872,47 @@ private struct GoogleSignalEventDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Divider()
-
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
-                detailRow("首次发现", value: formattedDate(event.firstSeenDate))
-                detailRow("最后更新", value: formattedDate(event.latestSeenDate))
-                detailRow("相关动态", value: "\(event.memberCount) 条")
-                detailRow("涉及账号", value: "\(event.sourceCount) 个 X 账号")
-            }
+            Text("更新于 \(formattedDate(event.latestSeenDate)) · \(event.sourceCount) 个来源 · \(event.memberCount) 条动态")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
 
             if !event.companyTerms.isEmpty {
-                Text(event.companyTerms.prefix(6).map { "#\($0)" }.joined(separator: "  "))
+                Text(event.companyTerms.prefix(4).map { "#\($0)" }.joined(separator: "  "))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.blue)
             }
         }
-        .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
-    private func detailRow(_ title: String, value: String) -> some View {
-        GridRow {
-            Text(title).foregroundStyle(.secondary)
-            Text(value).frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .font(.subheadline)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 20)
     }
 
     private var timeline: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             sectionTitle("事件进展", icon: "arrow.trianglehead.branch")
             ForEach(event.timeline) { item in
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(spacing: 0) {
-                        Circle()
-                            .fill(item.direction == "previous" ? Color.secondary : Color.blue)
-                            .frame(width: 9, height: 9)
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.2))
-                            .frame(width: 1, height: 54)
-                    }
+                HStack(alignment: .top, spacing: 10) {
+                    Circle()
+                        .fill(item.direction == "previous" ? Color.secondary : Color.blue)
+                        .frame(width: 7, height: 7)
+                        .padding(.top, 6)
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(item.direction == "previous" ? "此前" : "后续")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
                         Text(item.title)
                             .font(.subheadline.weight(.semibold))
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(formattedDate(item.date))
+                        Text("\(item.direction == "previous" ? "此前" : "后续") · \(formattedDate(item.date))")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
             }
         }
-        .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 20)
     }
 
     private var representativeEvidence: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("代表性动态", icon: "quote.bubble")
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("核心动态", icon: "quote.bubble")
             HStack(spacing: 10) {
                 AvatarView(
                     url: URL(string: event.representativeAvatarURL),
@@ -851,35 +926,89 @@ private struct GoogleSignalEventDetailView: View {
                     if !event.representativeAuthor.isEmpty {
                         Text("@\(event.representativeAuthor.trimmingCharacters(in: CharacterSet(charactersIn: "@")))")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondary)
                     }
                 }
+                Spacer(minLength: 8)
+                if let url = URL(string: event.representativeSourceURL), !event.representativeSourceURL.isEmpty {
+                    Link(destination: url) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 32, height: 32)
+                            .background(Color.secondary.opacity(0.1), in: Circle())
+                    }
+                    .accessibilityLabel("查看原始动态")
+                }
+            }
+
+            if representativeTranslation != nil {
+                HStack(spacing: 5) {
+                    Image(systemName: "character.bubble")
+                    Text(showsRepresentativeOriginal ? "X 原文" : "X 自动翻译")
+                    Spacer()
+                    Button(showsRepresentativeOriginal ? "显示译文" : "显示原文") {
+                        showsRepresentativeOriginal.toggle()
+                    }
+                    .foregroundStyle(.blue)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if translationStore.isLoading(event.representativeSourceURL) {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("正在翻译为中文")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Text(representativeContent)
                 .font(.body)
                 .lineSpacing(3)
+                .lineLimit(representativeExpanded ? nil : 8)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let url = URL(string: event.representativeSourceURL), !event.representativeSourceURL.isEmpty {
-                Link(destination: url) {
-                    Label("查看原始动态", systemImage: "arrow.up.right.square")
-                        .font(.subheadline.weight(.semibold))
+            if representativeContent.count > 420 {
+                Button(representativeExpanded ? "收起" : "展开全文") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        representativeExpanded.toggle()
+                    }
                 }
+                .font(.subheadline.weight(.semibold))
             }
         }
-        .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 20)
+        .task(id: event.representativeSourceURL) {
+            guard storedRepresentativeTranslation == nil else { return }
+            await translationStore.translateIfNeeded(
+                sourceURL: event.representativeSourceURL,
+                language: event.language,
+                original: event.originalContent
+            )
+        }
+    }
+
+    private var storedRepresentativeTranslation: String? {
+        guard let value = event.contentZH?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
+    }
+
+    private var representativeTranslation: String? {
+        storedRepresentativeTranslation ?? translationStore.translation(for: event.representativeSourceURL)
     }
 
     private var representativeContent: String {
-        let translated = event.contentZH?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let translated, !translated.isEmpty { return translated }
-        return event.content
+        if !showsRepresentativeOriginal, let representativeTranslation {
+            return representativeTranslation
+        }
+        let original = event.originalContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return original.isEmpty ? event.content : original
     }
 
     private var evidenceList: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             sectionTitle("相关动态", icon: "text.bubble")
 
             if evidenceStore.isLoading && evidenceStore.items.isEmpty {
@@ -894,15 +1023,31 @@ private struct GoogleSignalEventDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 18)
             } else {
-                ForEach(evidenceStore.items) { item in
-                    if let post = item.previewPost {
+                ForEach(Array(evidenceStore.items.enumerated()), id: \.element.id) { index, item in
+                    let translation = translationStore.translation(for: item.sourceURL)
+                    if let post = item.previewPost(translation: translation) {
                         NavigationLink {
                             PostDetailView(post: post, presentedAsSheet: false)
                         } label: {
-                            GoogleSignalEvidenceRow(item: item)
+                            GoogleSignalEvidenceRow(
+                                item: item,
+                                text: translation ?? item.content,
+                                isTranslated: translation != nil
+                            )
                         }
                         .buttonStyle(.plain)
-                        .task { await evidenceStore.loadMoreIfNeeded(after: item) }
+                        .task {
+                            async let pagination: Void = evidenceStore.loadMoreIfNeeded(after: item)
+                            async let translation: Void = translationStore.translateIfNeeded(
+                                sourceURL: item.sourceURL,
+                                language: item.language,
+                                original: item.content
+                            )
+                            _ = await (pagination, translation)
+                        }
+                        if index < evidenceStore.items.count - 1 {
+                            Divider().padding(.leading, 46)
+                        }
                     }
                 }
                 if evidenceStore.isLoadingMore {
@@ -910,8 +1055,14 @@ private struct GoogleSignalEventDetailView: View {
                 }
             }
         }
-        .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 20)
+    }
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.08))
+            .frame(height: 8)
     }
 
     private func sectionTitle(_ title: String, icon: String) -> some View {
@@ -920,13 +1071,14 @@ private struct GoogleSignalEventDetailView: View {
     }
 
     private func formattedDate(_ date: Date?) -> String {
-        guard let date else { return "时间未知" }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        GoogleSignalDatePresentation.detail(date)
     }
 }
 
 private struct GoogleSignalEvidenceRow: View {
     let item: GoogleSignalEvidence
+    let text: String
+    let isTranslated: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -942,18 +1094,27 @@ private struct GoogleSignalEvidenceRow: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    if isTranslated {
+                        Image(systemName: "character.bubble")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("X 自动翻译")
+                    }
                 }
-                Text(item.content)
+                Text(text)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
                     .multilineTextAlignment(.leading)
                 if let value = item.publishedAt,
                    let date = GoogleSignalDateParser.date(from: value) {
-                    Text(date.formatted(.relative(presentation: .named)))
+                    HStack(spacing: 4) {
+                        if !item.authorHandle.isEmpty {
+                            Text("@\(item.authorHandle.trimmingCharacters(in: CharacterSet(charactersIn: "@")))")
+                            Text("·")
+                        }
+                        Text(GoogleSignalDatePresentation.relative(date) ?? "时间未知")
+                    }
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
