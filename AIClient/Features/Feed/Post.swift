@@ -427,7 +427,13 @@ struct Post: Codable, Identifiable, Hashable {
     var rssExcerptZH: String? = nil
 
     var displayTitle: String {
-        clean(rssTitleZH) ?? clean(contentZH) ?? clean(title) ?? clean(summary) ?? clean(text) ?? "无标题"
+        clean(rssTitleZH)
+            ?? rssServerLocalizedTitle
+            ?? clean(contentZH)
+            ?? clean(title)
+            ?? clean(summary)
+            ?? clean(text)
+            ?? "无标题"
     }
     var bilibiliTitle: String {
         if let title = clean(title), title.count <= 120 { return title }
@@ -536,9 +542,23 @@ struct Post: Codable, Identifiable, Hashable {
     }
 
     var needsRSSCardTranslation: Bool {
-        guard isRSS, clean(rssTitleZH) == nil, clean(contentZH) == nil,
+        guard isRSS, clean(rssTitleZH) == nil, rssServerLocalizedTitle == nil, clean(contentZH) == nil,
               let title = rssTranslationTitle else { return false }
         return !Self.containsHanCharacters(title)
+    }
+
+    /// The RSS localization pipeline stores its Chinese card headline in `summary`.
+    /// Prefer it immediately when the source title is still English.
+    var rssServerLocalizedTitle: String? {
+        guard isRSS,
+              let title = clean(title),
+              !Self.containsHanCharacters(title),
+              let summary = clean(summary),
+              Self.containsHanCharacters(summary) else { return nil }
+        let normalized = (htmlText(summary) ?? summary)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 
     var rssTranslationTitle: String? {
@@ -835,6 +855,9 @@ struct Post: Codable, Identifiable, Hashable {
     }
 
     var rssListContent: String {
+        if clean(rssExcerptZH) == nil, rssServerLocalizedTitle != nil {
+            return displayTitle
+        }
         let value = clean(rssExcerptZH)
             ?? htmlTextPreservingRSSInlineEmoji(contentZH)
             ?? htmlTextPreservingRSSInlineEmoji(content)
