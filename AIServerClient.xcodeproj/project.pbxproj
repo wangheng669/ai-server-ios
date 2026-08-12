@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
+		C17A00000000000000000004 /* CityNewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000005 /* CityNewsTests.swift */; };
 		AA1000000000000000000001 /* GoogleSignalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000002 /* GoogleSignalView.swift */; };
 		AA2000000000000000000001 /* GoogleSignalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000002 /* GoogleSignalTests.swift */; };
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
@@ -107,6 +109,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
+		C17A00000000000000000005 /* CityNewsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsTests.swift; sourceTree = "<group>"; };
 		AA1000000000000000000002 /* GoogleSignalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalView.swift; sourceTree = "<group>"; };
 		AA2000000000000000000002 /* GoogleSignalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalTests.swift; sourceTree = "<group>"; };
 		041A88D0726A910552794148 /* FamousHoldingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingDetailView.swift; sourceTree = "<group>"; };
@@ -183,6 +187,7 @@
 		287F9373E17FFE1FC50C15E6 /* AIClientTests */ = {
 			isa = PBXGroup;
 			children = (
+				C17A00000000000000000005 /* CityNewsTests.swift */,
 				AFDC2300DFD6141704CC0B16 /* CountryGDPRankingTests.swift */,
 				AA2000000000000000000002 /* GoogleSignalTests.swift */,
 				D9D7B5B9A81B19337F41D31D /* FamousHoldingsTests.swift */,
@@ -318,6 +323,7 @@
 		B1367CAD56FB51F5D9592501 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				C17A00000000000000000003 /* CityNews */,
 				2F30415263748596A7B8C9D0 /* Company */,
 				660608BC8DE73C89ED510152 /* Feed */,
 				AA1000000000000000000003 /* GoogleSignal */,
@@ -328,6 +334,14 @@
 				E77736FF57176FCF2FF2FFDD /* Server */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		C17A00000000000000000003 /* CityNews */ = {
+			isa = PBXGroup;
+			children = (
+				C17A00000000000000000002 /* CityNewsView.swift */,
+			);
+			path = CityNews;
 			sourceTree = "<group>";
 		};
 		2F30415263748596A7B8C9D0 /* Company */ = {
@@ -531,6 +545,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C17A00000000000000000004 /* CityNewsTests.swift in Sources */,
 				6EB37888E57023644BA4E8B0 /* CountryGDPRankingTests.swift in Sources */,
 				AA2000000000000000000001 /* GoogleSignalTests.swift in Sources */,
 				925FAFC4FD006E95D2EA124B /* FamousHoldingsTests.swift in Sources */,
@@ -548,6 +563,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C17A00000000000000000001 /* CityNewsView.swift in Sources */,
 				AA1000000000000000000001 /* GoogleSignalView.swift in Sources */,
 				0C1A2B3C4D5E6F708192A3B4 /* ChinaMacroView.swift in Sources */,
 				0E1F2A3B4C5D6E7F8091A2B3 /* InstitutionResearchView.swift in Sources */,
