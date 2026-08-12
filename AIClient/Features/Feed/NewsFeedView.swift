@@ -626,6 +626,18 @@ struct NewsFeedView: View {
                                 guard rootTabIsActive, source == .x, source == model.source else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
+                            .task(id: "\(rootTabIsActive)-youtube-prewarm-\(post.id)") {
+                                guard rootTabIsActive,
+                                      source == .youtube,
+                                      source == model.source,
+                                      index < 2,
+                                      let url = displayPost.linkURL else { return }
+                                await YouTubePlaybackSourceCache.shared.prewarm(
+                                    url: url,
+                                    title: displayPost.displayTitle,
+                                    baseURL: ServerConfiguration.currentURL
+                                )
+                            }
                         if source == .flash, index == 2, visiblePosts.count > 3 {
                             flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
                         } else if source == .wechat {
