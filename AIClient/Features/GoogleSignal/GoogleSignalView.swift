@@ -772,51 +772,19 @@ private struct GoogleSignalEventCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 9) {
-                Text(event.title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !event.reason.isEmpty {
-                    Text(event.reason)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 5) {
-                    Text(event.sentimentTitle)
-                        .foregroundStyle(event.sentimentColor)
-                    Text("·")
-                    Text(event.factStatusTitle)
-                    Text("·")
-                    Text(relativeTime)
-                    if !event.timeline.isEmpty {
-                        Spacer(minLength: 8)
-                        Label("有进展", systemImage: "arrow.trianglehead.branch")
-                            .foregroundStyle(.blue)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 15)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            Text(event.title)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityHint("查看事件进展和相关动态")
-    }
-
-    private var relativeTime: String {
-        GoogleSignalDatePresentation.relative(event.latestSeenDate) ?? "时间未知"
     }
 }
 
