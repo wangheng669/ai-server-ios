@@ -40,8 +40,18 @@ struct RetailInvestorView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     marketPicker
-                    if let message = selectedMarket == .korea ? store.koreaLeverageErrorMessage : store.errorMessage {
-                        errorBanner(message)
+                    if let message = selectedMarket == .china
+                        ? store.errorMessage
+                        : store.detailErrorMessage(for: selectedMarket) {
+                        errorBanner(message) {
+                            Task {
+                                if selectedMarket == .china {
+                                    await store.load(marketStore: marketStore, force: true)
+                                } else {
+                                    await store.loadDetails(for: selectedMarket, force: true)
+                                }
+                            }
+                        }
                             .padding(.horizontal, 16)
                     }
                     if selectedMarket == .korea {
@@ -178,9 +188,18 @@ struct RetailInvestorView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Label(snapshot?.label.nonEmpty ?? "等待数据", systemImage: sentimentSymbol(score))
+                if store.isLoadingDetails(for: selectedMarket) {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text(store.detailLoadingMessage(for: selectedMarket))
+                    }
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Label(snapshot?.label.nonEmpty ?? "等待数据", systemImage: sentimentSymbol(score))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(InvestmentDesign.accent)
+                }
             }
 
             HStack(alignment: .lastTextBaseline, spacing: 10) {
@@ -974,13 +993,20 @@ struct RetailInvestorView: View {
             .padding(.vertical, 12)
     }
 
-    private func errorBanner(_ message: String) -> some View {
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.system(size: 12.5))
-            .foregroundStyle(.orange)
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    private func errorBanner(_ message: String, retry: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12.5))
+                .foregroundStyle(.orange)
+            Spacer(minLength: 8)
+            Button("重试", action: retry)
+                .font(.system(size: 12, weight: .semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(InvestmentDesign.accent)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1305,6 +1331,7 @@ final class RetailSentimentStore {
     private var loaded = false
     private var loadedMarkets: Set<SentimentMarket> = []
     private var loadingMarkets: Set<SentimentMarket> = []
+    private var detailErrors: [SentimentMarket: String] = [:]
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -1322,6 +1349,33 @@ final class RetailSentimentStore {
         guard let breadth else { return 0 }
         let total = max(breadth.up + breadth.down + breadth.flat, 1)
         return CGFloat(breadth.down) / CGFloat(total)
+    }
+
+    func isLoadingDetails(for market: SentimentMarket) -> Bool {
+        loadingMarkets.contains(market)
+    }
+
+    func detailErrorMessage(for market: SentimentMarket) -> String? {
+        detailErrors[market]
+    }
+
+    func detailLoadingMessage(for market: SentimentMarket) -> String {
+        switch market {
+        case .china:
+            return "正在汇总数据"
+        case .hongKong:
+            if hongKongConstituents == nil { return "加载核心成分" }
+            if hongKongValuationHistory == nil { return "读取估值历史" }
+            if hongKongCharts.isEmpty { return "计算历史分位" }
+            return "生成情绪值"
+        case .unitedStates:
+            if unitedStatesConstituents == nil { return "加载核心成分" }
+            if unitedStatesValuationHistory == nil { return "读取估值历史" }
+            if unitedStatesCharts.isEmpty { return "计算历史分位" }
+            return "生成情绪值"
+        case .korea:
+            return "读取杠杆数据"
+        }
     }
 
     func snapshot(for market: SentimentMarket) -> SentimentSnapshot? {
@@ -1486,10 +1540,11 @@ final class RetailSentimentStore {
         if loadedMarkets.contains(market), !force { return }
         guard loadingMarkets.insert(market).inserted else { return }
         defer { loadingMarkets.remove(market) }
+        detailErrors[market] = nil
 
-        switch market {
+        let succeeded = switch market {
         case .china:
-            return
+            true
         case .hongKong:
             await loadHongKongDetails()
         case .unitedStates:
@@ -1498,64 +1553,85 @@ final class RetailSentimentStore {
             await loadKoreaLeverage(force: force)
         }
         guard !Task.isCancelled else { return }
-        loadedMarkets.insert(market)
+        if succeeded {
+            loadedMarkets.insert(market)
+        } else {
+            loadedMarkets.remove(market)
+            if detailErrors[market] == nil {
+                detailErrors[market] = "数据暂未完整返回"
+            }
+        }
     }
 
-    private func loadKoreaLeverage(force: Bool) async {
+    private func loadKoreaLeverage(force: Bool) async -> Bool {
         isLoadingKoreaLeverage = true
         defer { isLoadingKoreaLeverage = false }
         do {
             koreaLeverage = try await service.koreaLeverage(refresh: force)
             koreaLeverageErrorMessage = nil
+            detailErrors[.korea] = nil
+            return true
         } catch is CancellationError {
-            return
+            return false
         } catch {
             koreaLeverageErrorMessage = error.localizedDescription
+            detailErrors[.korea] = error.localizedDescription
+            return false
         }
     }
 
-    private func loadHongKongDetails() async {
+    private func loadHongKongDetails() async -> Bool {
         async let constituentsRequest = service.indexConstituents(symbol: "^HSI")
         async let valuationRequest = service.hongKongValuationHistory()
+        var requestError: String?
         do {
             hongKongConstituents = try await constituentsRequest
         } catch is CancellationError {
-            return
+            return false
         } catch {
-            if dashboard == nil { errorMessage = error.localizedDescription }
-        }
-        if let constituents = hongKongConstituents {
-            hongKongCharts = await loadHistoricalCharts(for: constituents.items)
+            requestError = error.localizedDescription
         }
         do {
             hongKongValuationHistory = try await valuationRequest
         } catch is CancellationError {
-            return
+            return false
         } catch {
-            if dashboard == nil { errorMessage = error.localizedDescription }
+            requestError = requestError ?? error.localizedDescription
         }
+        if let constituents = hongKongConstituents {
+            hongKongCharts = await loadHistoricalCharts(for: constituents.items)
+        }
+        guard !Task.isCancelled else { return false }
+        let succeeded = snapshot(for: .hongKong) != nil
+        detailErrors[.hongKong] = succeeded ? nil : (requestError ?? "港股历史分位暂不可用")
+        return succeeded
     }
 
-    private func loadUnitedStatesDetails() async {
+    private func loadUnitedStatesDetails() async -> Bool {
         async let constituentsRequest = service.indexConstituents(symbol: "^GSPC")
         async let valuationRequest = service.unitedStatesValuationHistory()
+        var requestError: String?
         do {
             unitedStatesConstituents = try await constituentsRequest
         } catch is CancellationError {
-            return
+            return false
         } catch {
-            if dashboard == nil { errorMessage = error.localizedDescription }
-        }
-        if let constituents = unitedStatesConstituents {
-            unitedStatesCharts = await loadHistoricalCharts(for: constituents.items)
+            requestError = error.localizedDescription
         }
         do {
             unitedStatesValuationHistory = try await valuationRequest
         } catch is CancellationError {
-            return
+            return false
         } catch {
-            if dashboard == nil { errorMessage = error.localizedDescription }
+            requestError = requestError ?? error.localizedDescription
         }
+        if let constituents = unitedStatesConstituents {
+            unitedStatesCharts = await loadHistoricalCharts(for: constituents.items)
+        }
+        guard !Task.isCancelled else { return false }
+        let succeeded = snapshot(for: .unitedStates) != nil
+        detailErrors[.unitedStates] = succeeded ? nil : (requestError ?? "美股历史分位暂不可用")
+        return succeeded
     }
 
     private func loadHistoricalCharts(for items: [MarketIndexConstituent]) async -> [MarketChart] {
