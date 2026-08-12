@@ -1017,6 +1017,7 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
     let error: String?
     let sections: [TodayWorldAdvancedReportSection]
     let sectionCount: Int
+    let groupCount: Int
     let systemCount: Int
     let sourceCharCount: Int
     let charCount: Int
@@ -1029,6 +1030,7 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case status, stage, error, sections, model
         case sectionCount = "section_count"
+        case groupCount = "group_count"
         case systemCount = "system_count"
         case sourceCharCount = "source_char_count"
         case charCount = "char_count"
@@ -1046,6 +1048,7 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
         let decodedSections = try container.decodeIfPresent([TodayWorldAdvancedReportSection].self, forKey: .sections) ?? []
         sections = decodedSections
         sectionCount = try container.decodeIfPresent(Int.self, forKey: .sectionCount) ?? decodedSections.count
+        groupCount = try container.decodeIfPresent(Int.self, forKey: .groupCount) ?? decodedSections.reduce(0) { $0 + $1.groups.count }
         systemCount = try container.decodeIfPresent(Int.self, forKey: .systemCount) ?? decodedSections.reduce(0) { $0 + $1.systems.count }
         sourceCharCount = try container.decodeIfPresent(Int.self, forKey: .sourceCharCount) ?? 0
         charCount = try container.decodeIfPresent(Int.self, forKey: .charCount) ?? 0
@@ -1064,13 +1067,30 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
 struct TodayWorldAdvancedReportSection: Decodable, Equatable, Identifiable {
     let sectionKey: String
     let sectionName: String
-    let systems: [TodayWorldAdvancedReportSystem]
+    let groups: [TodayWorldAdvancedReportGroup]
     var id: String { sectionKey }
+
+    var systems: [TodayWorldAdvancedReportSystem] {
+        groups.flatMap(\.systems)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case groups
+        case sectionKey = "section_key"
+        case sectionName = "section_name"
+    }
+}
+
+struct TodayWorldAdvancedReportGroup: Decodable, Equatable, Identifiable {
+    let groupKey: String
+    let groupName: String
+    let systems: [TodayWorldAdvancedReportSystem]
+    var id: String { groupKey }
 
     enum CodingKeys: String, CodingKey {
         case systems
-        case sectionKey = "section_key"
-        case sectionName = "section_name"
+        case groupKey = "group_key"
+        case groupName = "group_name"
     }
 }
 
