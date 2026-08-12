@@ -422,8 +422,13 @@ struct Post: Codable, Identifiable, Hashable {
     let videos: [PostVideo]?
     let feedRank: Int?
     let meta: PostMeta?
+    // Runtime-only card translations. The backend payload and offline cache remain unchanged.
+    var rssTitleZH: String? = nil
+    var rssExcerptZH: String? = nil
 
-    var displayTitle: String { clean(contentZH) ?? clean(title) ?? clean(summary) ?? clean(text) ?? "无标题" }
+    var displayTitle: String {
+        clean(rssTitleZH) ?? clean(contentZH) ?? clean(title) ?? clean(summary) ?? clean(text) ?? "无标题"
+    }
     var bilibiliTitle: String {
         if let title = clean(title), title.count <= 120 { return title }
         if let summary = clean(summary), summary.count <= 120 { return summary }
@@ -522,6 +527,44 @@ struct Post: Codable, Identifiable, Hashable {
             postLink: postLink, articlePostAt: articlePostAt, user: user,
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
         )
+    }
+    func replacingRSSCardTranslation(title: String, excerpt: String?) -> Post {
+        var translated = self
+        translated.rssTitleZH = clean(title)
+        translated.rssExcerptZH = clean(excerpt)
+        return translated
+    }
+
+    var needsRSSCardTranslation: Bool {
+        guard isRSS, clean(rssTitleZH) == nil, clean(contentZH) == nil,
+              let title = rssTranslationTitle else { return false }
+        return !Self.containsHanCharacters(title)
+    }
+
+    var rssTranslationTitle: String? {
+        clean(title) ?? clean(summary) ?? clean(text)
+    }
+
+    var rssTranslationExcerpt: String? {
+        let raw = clean(summary) ?? clean(text) ?? clean(content)
+        guard let raw else { return nil }
+        let normalized = (htmlText(String(raw.prefix(700))) ?? String(raw.prefix(700)))
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, !Self.isRSSPlaceholder(normalized) else { return nil }
+        let excerpt = String(normalized.prefix(420))
+        return excerpt + (normalized.count > excerpt.count || raw.count > 700 ? "…" : "")
+    }
+
+    private static func containsHanCharacters(_ value: String) -> Bool {
+        value.unicodeScalars.contains { (0x4E00...0x9FFF).contains(Int($0.value)) }
+    }
+
+    private static func isRSSPlaceholder(_ value: String) -> Bool {
+        let normalized = value
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        return ["in this article", "comments", "comment"].contains(normalized)
     }
     var truthFeedContent: String {
         guard let translated = htmlText(contentZH) else { return "翻译处理中" }
@@ -792,10 +835,12 @@ struct Post: Codable, Identifiable, Hashable {
     }
 
     var rssListContent: String {
-        let value = htmlTextPreservingRSSInlineEmoji(contentZH)
+        let value = clean(rssExcerptZH)
+            ?? htmlTextPreservingRSSInlineEmoji(contentZH)
             ?? htmlTextPreservingRSSInlineEmoji(content)
             ?? displayContent
-        return value.replacingOccurrences(of: #"\n{2,}"#, with: "\n", options: .regularExpression)
+        let normalized = value.replacingOccurrences(of: #"\n{2,}"#, with: "\n", options: .regularExpression)
+        return Self.isRSSPlaceholder(normalized) ? displayTitle : normalized
     }
 
     private func isInlineEmojiTag(_ tag: String, rawURL: String) -> Bool {

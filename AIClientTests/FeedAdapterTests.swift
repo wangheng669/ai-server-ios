@@ -2,6 +2,74 @@ import XCTest
 @testable import AIServerClient
 
 final class FeedAdapterTests: XCTestCase {
+    func testEnglishRSSCardRequestsChineseTranslation() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:12","title":"Markets fall as investors assess risk","summary":"Stocks moved lower in afternoon trading."}"#.utf8)
+        )
+
+        XCTAssertTrue(post.needsRSSCardTranslation)
+        XCTAssertEqual(post.rssTranslationTitle, "Markets fall as investors assess risk")
+        XCTAssertEqual(post.rssTranslationExcerpt, "Stocks moved lower in afternoon trading.")
+    }
+
+    func testChineseOrAlreadyTranslatedRSSCardSkipsTranslation() throws {
+        let chinese = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:12","title":"市场等待最新数据"}"#.utf8)
+        )
+        let translated = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":2,"source":"rss:12","title":"Markets wait for data","content_zh":"市场等待最新数据"}"#.utf8)
+        )
+
+        XCTAssertFalse(chinese.needsRSSCardTranslation)
+        XCTAssertFalse(translated.needsRSSCardTranslation)
+    }
+
+    func testRSSCardTranslationChangesOnlyListPresentation() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:12","title":"Original title","content":"Original article body"}"#.utf8)
+        )
+        let displayed = post.replacingRSSCardTranslation(title: "中文标题", excerpt: "中文摘要")
+
+        XCTAssertEqual(displayed.displayTitle, "中文标题")
+        XCTAssertEqual(displayed.rssListContent, "中文摘要")
+        XCTAssertEqual(displayed.displayContent, "Original article body")
+    }
+
+    func testRSSPlaceholderExcerptIsHidden() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:12","title":"Retailers invest in AI","content":"In this article"}"#.utf8)
+        )
+
+        XCTAssertNil(post.rssTranslationExcerpt)
+        XCTAssertEqual(post.rssListContent, post.displayTitle)
+    }
+
+    @MainActor
+    func testRSSCardTranslationPublishesIntoDisplayedPost() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":1,"source":"rss:12","title":"Markets fall","summary":"Stocks moved lower."}"#.utf8)
+        )
+        let model = NewsFeedViewModel(
+            source: .rss,
+            translateRSSCard: { title, excerpt in
+                XCTAssertEqual(title, "Markets fall")
+                XCTAssertEqual(excerpt, "Stocks moved lower.")
+                return RSSCardTranslation(title: "市场下跌", excerpt: "股市走低。")
+            }
+        )
+
+        await model.translateRSSPostIfNeeded(post)
+
+        XCTAssertEqual(model.postForDisplay(post).displayTitle, "市场下跌")
+        XCTAssertEqual(model.postForDisplay(post).rssListContent, "股市走低。")
+    }
+
     func testFeedDiskCacheBoundsPostsAndSeparatesServers() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
