@@ -36,6 +36,7 @@ struct CountryGDP: Decodable, Identifiable {
     let iso2Code: String
     let countryName: String
     let gdpCurrentUSD: Double
+    let gdpPerCapitaUSD: Double?
     let previousGDPCurrentUSD: Double?
     let gdpGrowthPercent: Double?
 
@@ -60,6 +61,7 @@ struct CountryGDP: Decodable, Identifiable {
         case iso2Code = "iso2_code"
         case countryName = "country_name"
         case gdpCurrentUSD = "gdp_current_usd"
+        case gdpPerCapitaUSD = "gdp_per_capita_usd"
         case previousGDPCurrentUSD = "previous_gdp_current_usd"
         case gdpGrowthPercent = "gdp_growth_percent"
     }
@@ -183,7 +185,6 @@ struct CountryGDPRankingView: View {
     @State private var ranking: CountryGDPRanking?
     @State private var isLoading = true
     @State private var loadFailed = false
-    @State private var searchText = ""
     @State private var selectedCountry: CountryGDPRoute?
 
     init(showsDetail: Binding<Bool>) {
@@ -197,17 +198,6 @@ struct CountryGDPRankingView: View {
         #else
         _category = State(initialValue: .countryGDP)
         #endif
-    }
-
-    private var visibleCountries: [CountryGDP] {
-        guard let countries = ranking?.countries else { return [] }
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return countries }
-        return countries.filter {
-            $0.localizedName.localizedCaseInsensitiveContains(query) ||
-            $0.countryName.localizedCaseInsensitiveContains(query) ||
-            $0.countryCode.localizedCaseInsensitiveContains(query)
-        }
     }
 
     var body: some View {
@@ -229,7 +219,6 @@ struct CountryGDPRankingView: View {
                             }
                             .background(InvestmentDesign.surface)
                             .scrollIndicators(.hidden)
-                            .scrollDismissesKeyboard(.interactively)
                             .refreshable { await load() }
                         } else if isLoading {
                             loadingState
@@ -297,9 +286,6 @@ struct CountryGDPRankingView: View {
     private func rankingSection(_ ranking: CountryGDPRanking) -> some View {
         VStack(spacing: 0) {
             rankingHeader(ranking)
-            searchField
-                .padding(.horizontal, InvestmentDesign.pageInset)
-                .padding(.bottom, 14)
             Divider().overlay(InvestmentDesign.divider)
             countries(ranking)
         }
@@ -307,25 +293,19 @@ struct CountryGDPRankingView: View {
 
     @ViewBuilder
     private func countries(_ ranking: CountryGDPRanking) -> some View {
-        if visibleCountries.isEmpty {
-            ContentUnavailableView("没有匹配的国家", systemImage: "magnifyingglass")
-                .frame(maxWidth: .infinity)
-                .frame(height: 220)
-        } else {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(visibleCountries.enumerated()), id: \.element.id) { index, country in
-                    Button {
-                        selectedCountry = CountryGDPRoute(country: country)
-                    } label: {
-                        countryRow(country)
-                    }
-                    .buttonStyle(.plain)
+        LazyVStack(spacing: 0) {
+            ForEach(Array(ranking.countries.enumerated()), id: \.element.id) { index, country in
+                Button {
+                    selectedCountry = CountryGDPRoute(country: country)
+                } label: {
+                    countryRow(country)
+                }
+                .buttonStyle(.plain)
 
-                    if index < visibleCountries.count - 1 {
-                        Divider()
-                            .overlay(InvestmentDesign.divider)
-                            .padding(.leading, 52)
-                    }
+                if index < ranking.countries.count - 1 {
+                    Divider()
+                        .overlay(InvestmentDesign.divider)
+                        .padding(.leading, 58)
                 }
             }
         }
@@ -357,7 +337,7 @@ struct CountryGDPRankingView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                         HStack(spacing: 8) {
-                            Text(leader.flag).font(.system(size: 24))
+                            FlatCountryFlag(iso2Code: leader.iso2Code, width: 34, height: 23)
                             Text(leader.localizedName)
                                 .font(.system(size: 20, weight: .bold))
                         }
@@ -373,6 +353,11 @@ struct CountryGDPRankingView: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(growth >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
                         }
+                        if let perCapita = leader.gdpPerCapitaUSD {
+                            Text("人均 \(CountryGDPFormat.perCapita(perCapita))")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -386,35 +371,12 @@ struct CountryGDPRankingView: View {
         }
     }
 
-    private var searchField: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("搜索国家或地区", text: $searchText)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .font(.subheadline)
-        .padding(.horizontal, 12)
-        .frame(height: 36)
-        .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-    }
-
     private func rankingHeader(_ ranking: CountryGDPRanking) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text("国家与地区")
                 .font(.headline)
             Spacer()
-            Text(searchText.isEmpty ? "\(ranking.countries.count) 个经济体" : "\(visibleCountries.count) 个结果")
+            Text("\(ranking.countries.count) 个经济体")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -425,11 +387,7 @@ struct CountryGDPRankingView: View {
 
     private func countryRow(_ country: CountryGDP) -> some View {
         HStack(spacing: 10) {
-            rankBadge(country.rank)
-
-            Text(country.flag)
-                .font(.system(size: 22))
-                .frame(width: 30)
+            FlatCountryFlag(iso2Code: country.iso2Code, width: 32, height: 22)
 
             Text(country.localizedName)
                 .font(.body.weight(.semibold))
@@ -441,7 +399,15 @@ struct CountryGDPRankingView: View {
                     .monospacedDigit()
                     .minimumScaleFactor(0.75)
                     .lineLimit(1)
-                changeSummary(country)
+                HStack(spacing: 6) {
+                    if let perCapita = country.gdpPerCapitaUSD {
+                        Text("人均 \(CountryGDPFormat.perCapita(perCapita))")
+                            .foregroundStyle(.secondary)
+                    }
+                    changeSummary(country)
+                }
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
@@ -452,14 +418,6 @@ struct CountryGDPRankingView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(country))
-    }
-
-    private func rankBadge(_ rank: Int) -> some View {
-        Text("\(rank)")
-            .font(.system(size: 13, weight: rank <= 3 ? .bold : .regular, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(rank <= 3 ? InvestmentDesign.accent : Color.secondary)
-            .frame(width: 26)
     }
 
     @ViewBuilder
@@ -485,6 +443,9 @@ struct CountryGDPRankingView: View {
         if let growth = country.gdpGrowthPercent {
             text += "，同比\(growth >= 0 ? "增长" : "下降")\(abs(growth).formatted(.number.precision(.fractionLength(1))))%"
         }
+        if let perCapita = country.gdpPerCapitaUSD {
+            text += "，人均 GDP \(CountryGDPFormat.perCapita(perCapita))"
+        }
         return text
     }
 
@@ -493,7 +454,7 @@ struct CountryGDPRankingView: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "checkmark.shield.fill")
                     .foregroundStyle(InvestmentDesign.accent)
-                Text("数据来自世界银行 \(ranking.metric)，按数据库中的 \(ranking.year) 年现价美元值排序。点击查看原始口径。")
+                Text("数据来自世界银行 GDP 总量与人均 GDP 指标，按数据库中的 \(ranking.year) 年现价美元总量排序。点击查看原始口径。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
@@ -558,6 +519,43 @@ struct CountryGDPRankingView: View {
     }
 }
 
+struct FlatCountryFlag: View {
+    let iso2Code: String
+    let width: CGFloat
+    let height: CGFloat
+
+    private var imageURL: URL? {
+        let code = iso2Code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard code.count == 2 else { return nil }
+        return MediaURL.image("https://flagcdn.com/w80/\(code).png")
+    }
+
+    var body: some View {
+        ZStack {
+            Color(uiColor: .secondarySystemBackground)
+
+            AsyncImage(url: imageURL) { phase in
+                if case let .success(image) = phase {
+                    image
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    Image(systemName: "flag.fill")
+                        .font(.system(size: min(width, height) * 0.42, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 2.5, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.5)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 enum GlobalRankingCategory: String, CaseIterable, Identifiable {
     case countryGDP = "国家 GDP"
     case globalAssets = "全球资产"
@@ -591,6 +589,10 @@ enum CountryGDPFormat {
             return String(format: "%.0f 亿美元", value / 100_000_000)
         }
         return value.formatted(.currency(code: "USD").precision(.fractionLength(0)))
+    }
+
+    static func perCapita(_ value: Double) -> String {
+        "$" + value.formatted(.number.grouping(.automatic).precision(.fractionLength(0)))
     }
 
     static func accessible(_ value: Double) -> String {

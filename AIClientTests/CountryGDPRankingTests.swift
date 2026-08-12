@@ -59,6 +59,7 @@ final class CountryGDPRankingTests: XCTestCase {
               "iso2_code": "CN",
               "country_name": "China",
               "gdp_current_usd": 18729668435848,
+              "gdp_per_capita_usd": 13303.1,
               "previous_gdp_current_usd": 17729668435848,
               "gdp_growth_percent": 5.64
             }]
@@ -74,11 +75,13 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(payload.data.countries.first?.flag, "🇨🇳")
         XCTAssertEqual(payload.data.countries.first?.rankChange, 1)
         XCTAssertEqual(payload.data.countries.first?.gdpGrowthPercent, 5.64)
+        XCTAssertEqual(payload.data.countries.first?.gdpPerCapitaUSD, 13_303.1)
     }
 
     func testFormatsTrillionAndBillionValues() {
         XCTAssertEqual(CountryGDPFormat.compact(29_298_013_000_000), "29.30 万亿美元")
         XCTAssertEqual(CountryGDPFormat.compact(917_767_106_146), "9178 亿美元")
+        XCTAssertEqual(CountryGDPFormat.perCapita(89_105.7), "$89,106")
     }
 
     func testDecodesCountryHistory() throws {
