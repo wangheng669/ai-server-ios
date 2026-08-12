@@ -5,6 +5,49 @@ struct MarketDashboardResponse: Decodable {
     let data: MarketDashboard
 }
 
+enum CommodityLogoKind: String, CaseIterable {
+    case gold
+    case crudeOil
+    case copper
+    case silver
+    case naturalGas
+    case corn
+
+    init?(symbol: String) {
+        switch symbol.uppercased() {
+        case "GC1!": self = .gold
+        case "CL1!": self = .crudeOil
+        case "HG1!": self = .copper
+        case "SI1!": self = .silver
+        case "NG1!": self = .naturalGas
+        case "ZC1!": self = .corn
+        default: return nil
+        }
+    }
+
+    var monogram: String {
+        switch self {
+        case .gold: "Au"
+        case .crudeOil: "WTI"
+        case .copper: "Cu"
+        case .silver: "Ag"
+        case .naturalGas: "NG"
+        case .corn: "ZC"
+        }
+    }
+
+    var accessibilityName: String {
+        switch self {
+        case .gold: "黄金"
+        case .crudeOil: "原油"
+        case .copper: "铜"
+        case .silver: "白银"
+        case .naturalGas: "天然气"
+        case .corn: "玉米"
+        }
+    }
+}
+
 struct MarketDashboard: Codable {
     let dataContract: String
     let definitionVersion: String?
