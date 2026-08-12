@@ -506,8 +506,9 @@ private final class GoogleSignalStore: ObservableObject {
 
 struct GoogleSignalView: View {
     @StateObject private var store = GoogleSignalStore()
-    @State private var section: GoogleSignalSection = .highlights
-    @State private var sentiment: GoogleSignalSentimentFilter = .all
+    @Binding var section: GoogleSignalSection
+    @Binding var sentiment: GoogleSignalSentimentFilter
+    @Binding var showsFilters: Bool
     @State private var selectedEvent: GoogleSignalEvent?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -525,6 +526,12 @@ struct GoogleSignalView: View {
         .sheet(item: $selectedEvent) { event in
             GoogleSignalEventDetailView(event: event)
                 .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
+        .sheet(isPresented: $showsFilters) {
+            GoogleSignalFilterSheet(section: $section, sentiment: $sentiment)
+                .presentationDetents([.height(310)])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
@@ -553,8 +560,6 @@ struct GoogleSignalView: View {
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    filters
-
                     if store.events.isEmpty {
                         ContentUnavailableView(
                             section.emptyTitle,
@@ -590,41 +595,110 @@ struct GoogleSignalView: View {
             .scrollIndicators(.hidden)
         }
     }
+}
 
-    private var filters: some View {
-        VStack(spacing: 10) {
-            Picker("信号视图", selection: $section) {
-                ForEach(GoogleSignalSection.allCases) { item in
-                    Text(item.title).tag(item)
-                }
+struct GoogleSignalFilterButton: View {
+    let section: GoogleSignalSection
+    let sentiment: GoogleSignalSentimentFilter
+    @Binding var showsFilters: Bool
+
+    var body: some View {
+        Button {
+            showsFilters = true
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "line.3.horizontal.decrease")
+                Text(filterSummary)
+                Image(systemName: "chevron.up")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
             }
-            .pickerStyle(.segmented)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 15)
+            .frame(height: 42)
+            .background(.regularMaterial, in: Capsule())
+            .overlay {
+                Capsule().stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.horizontal, 12)
+        .accessibilityLabel("筛选，当前为\(filterSummary)")
+    }
 
-            HStack(spacing: 6) {
-                ForEach(GoogleSignalSentimentFilter.allCases) { item in
-                    Button {
-                        sentiment = item
-                    } label: {
-                        Text(item.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(sentiment == item ? Color.accentColor : Color.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(
-                                sentiment == item ? Color.accentColor.opacity(0.11) : Color.clear,
-                                in: Capsule()
-                            )
-                    }
-                    .buttonStyle(.plain)
+    private var filterSummary: String {
+        sentiment == .all ? section.title : "\(section.title) · \(sentiment.title)"
+    }
+}
+
+private struct GoogleSignalFilterSheet: View {
+    @Binding var section: GoogleSignalSection
+    @Binding var sentiment: GoogleSignalSentimentFilter
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 24) {
+                filterGroup(
+                    "内容",
+                    items: GoogleSignalSection.allCases,
+                    selection: $section,
+                    title: \.title
+                )
+                filterGroup(
+                    "倾向",
+                    items: GoogleSignalSentimentFilter.allCases,
+                    selection: $sentiment,
+                    title: \.title
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .navigationTitle("筛选")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: .bottom) {
-            Divider()
+    }
+
+    private func filterGroup<Item: Identifiable & Hashable>(
+        _ groupTitle: String,
+        items: [Item],
+        selection: Binding<Item>,
+        title: KeyPath<Item, String>
+    ) -> some View where Item.ID == Item {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(groupTitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ForEach(items) { item in
+                    Button {
+                        selection.wrappedValue = item
+                    } label: {
+                        Text(item[keyPath: title])
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(selection.wrappedValue == item ? Color.white : Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                            .background(
+                                selection.wrappedValue == item
+                                    ? Color.accentColor
+                                    : Color(uiColor: .secondarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selection.wrappedValue == item ? .isSelected : [])
+                }
+            }
         }
     }
 }
@@ -636,20 +710,6 @@ private struct GoogleSignalEventCard: View {
     var body: some View {
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(event.factStatusColor)
-                        .frame(width: 7, height: 7)
-                    Text(event.factStatusTitle)
-                    Text("·")
-                    Text(relativeTime)
-                    Spacer(minLength: 8)
-                    Text(event.sentimentTitle)
-                        .foregroundStyle(event.sentimentColor)
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-
                 Text(event.title)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
@@ -666,11 +726,14 @@ private struct GoogleSignalEventCard: View {
                 }
 
                 HStack(spacing: 5) {
-                    Text("\(event.sourceCount) 个来源")
+                    Text(event.sentimentTitle)
+                        .foregroundStyle(event.sentimentColor)
                     Text("·")
-                    Text("\(event.memberCount) 条动态")
+                    Text(event.factStatusTitle)
+                    Text("·")
+                    Text(relativeTime)
                     if !event.timeline.isEmpty {
-                        Text("·")
+                        Spacer(minLength: 8)
                         Label("有进展", systemImage: "arrow.trianglehead.branch")
                             .foregroundStyle(.blue)
                     }

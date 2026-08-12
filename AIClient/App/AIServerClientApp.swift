@@ -206,6 +206,9 @@ private struct EditorialRootView: View {
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var lastResearchTab: EditorialTab = .investment
     @State private var presentedExternalLink: InAppBrowserDestination?
+    @State private var signalSection: GoogleSignalSection = .highlights
+    @State private var signalSentiment: GoogleSignalSentimentFilter = .all
+    @State private var showsSignalFilters = false
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -268,7 +271,11 @@ private struct EditorialRootView: View {
                     TodayWorldView(showsDetail: $worldShowsDetail)
                 }
                 tabContent(.signal) {
-                    GoogleSignalView()
+                    GoogleSignalView(
+                        section: $signalSection,
+                        sentiment: $signalSentiment,
+                        showsFilters: $showsSignalFilters
+                    )
                 }
                 tabContent(.observation) {
                     NewsFeedView(
@@ -308,6 +315,14 @@ private struct EditorialRootView: View {
         .inAppBrowserCover(item: $presentedExternalLink)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
+                if selectedTab == .signal {
+                    GoogleSignalFilterButton(
+                        section: signalSection,
+                        sentiment: signalSentiment,
+                        showsFilters: $showsSignalFilters
+                    )
+                }
+
                 if let deploymentStatus {
                     DeploymentStatusTip(
                         snapshot: deploymentStatus,
