@@ -1015,7 +1015,8 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
     let status: String
     let stage: String?
     let error: String?
-    let systems: [TodayWorldAdvancedReportSystem]
+    let sections: [TodayWorldAdvancedReportSection]
+    let sectionCount: Int
     let systemCount: Int
     let sourceCharCount: Int
     let charCount: Int
@@ -1026,7 +1027,8 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
     let completedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case status, stage, error, systems, model
+        case status, stage, error, sections, model
+        case sectionCount = "section_count"
         case systemCount = "system_count"
         case sourceCharCount = "source_char_count"
         case charCount = "char_count"
@@ -1041,8 +1043,10 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
         stage = try container.decodeIfPresent(String.self, forKey: .stage)
         error = try container.decodeIfPresent(String.self, forKey: .error)
-        systems = try container.decodeIfPresent([TodayWorldAdvancedReportSystem].self, forKey: .systems) ?? []
-        systemCount = try container.decodeIfPresent(Int.self, forKey: .systemCount) ?? systems.count
+        let decodedSections = try container.decodeIfPresent([TodayWorldAdvancedReportSection].self, forKey: .sections) ?? []
+        sections = decodedSections
+        sectionCount = try container.decodeIfPresent(Int.self, forKey: .sectionCount) ?? decodedSections.count
+        systemCount = try container.decodeIfPresent(Int.self, forKey: .systemCount) ?? decodedSections.reduce(0) { $0 + $1.systems.count }
         sourceCharCount = try container.decodeIfPresent(Int.self, forKey: .sourceCharCount) ?? 0
         charCount = try container.decodeIfPresent(Int.self, forKey: .charCount) ?? 0
         compressionRatio = try container.decodeIfPresent(Double.self, forKey: .compressionRatio)
@@ -1050,6 +1054,23 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
         totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
         costCNY = try container.decodeIfPresent(Double.self, forKey: .costCNY)
         completedAt = try container.decodeIfPresent(String.self, forKey: .completedAt)
+    }
+
+    var systems: [TodayWorldAdvancedReportSystem] {
+        sections.flatMap(\.systems)
+    }
+}
+
+struct TodayWorldAdvancedReportSection: Decodable, Equatable, Identifiable {
+    let sectionKey: String
+    let sectionName: String
+    let systems: [TodayWorldAdvancedReportSystem]
+    var id: String { sectionKey }
+
+    enum CodingKeys: String, CodingKey {
+        case systems
+        case sectionKey = "section_key"
+        case sectionName = "section_name"
     }
 }
 
