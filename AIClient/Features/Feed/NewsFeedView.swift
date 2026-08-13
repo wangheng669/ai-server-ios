@@ -1722,9 +1722,6 @@ private final class EmbeddedWebViewModel: ObservableObject {
             let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
                 cookieStore.getAllCookies { continuation.resume(returning: $0) }
             }
-            var request = URLRequest(url: URL(string: "https://weibo.com/")!)
-            request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
-            request.setValue("https://weibo.com/", forHTTPHeaderField: "Referer")
             let configuration = URLSessionConfiguration.ephemeral
             let cookieStorage = HTTPCookieStorage()
             cookies.forEach(cookieStorage.setCookie)
@@ -1732,31 +1729,39 @@ private final class EmbeddedWebViewModel: ObservableObject {
             configuration.httpShouldSetCookies = true
             let session = URLSession(configuration: configuration)
             defer { isFetchingAvatar = false }
-            guard let (data, _) = try? await session.data(for: request),
-                  let html = String(data: data, encoding: .utf8) else { return }
 
-            if let displayName = jsonString(named: "screen_name", in: html) {
+            var configRequest = URLRequest(url: URL(string: "https://m.weibo.cn/api/config")!)
+            configureWeiboAccountRequest(&configRequest)
+            guard let (configData, _) = try? await session.data(for: configRequest),
+                  let uid = WeiboAccountAPIParser.accountUID(from: configData) else { return }
+
+            var components = URLComponents(string: "https://m.weibo.cn/api/container/getIndex")!
+            components.queryItems = [
+                URLQueryItem(name: "type", value: "uid"),
+                URLQueryItem(name: "value", value: uid)
+            ]
+            guard let profileURL = components.url else { return }
+            var profileRequest = URLRequest(url: profileURL)
+            configureWeiboAccountRequest(&profileRequest)
+            guard let (profileData, _) = try? await session.data(for: profileRequest),
+                  let profile = WeiboAccountAPIParser.profile(from: profileData) else { return }
+
+            if let displayName = profile.displayName {
                 weiboDisplayName = displayName
                 WeiboSessionCookieStore.store(displayName: displayName)
             }
-            let avatarFields = ["avatar_hd", "avatar_large", "profile_image_url"]
-            for field in avatarFields {
-                guard let value = jsonString(named: field, in: html),
-                      !value.localizedCaseInsensitiveContains("default_avatar"),
-                      let url = URL(string: value) else { continue }
-                weiboAvatarURL = url
-                WeiboSessionCookieStore.store(avatarURL: url)
-                break
-            }
+            weiboAvatarURL = profile.avatarURL
+            WeiboSessionCookieStore.store(avatarURL: profile.avatarURL)
         }
     }
 
-    private func jsonString(named field: String, in source: String) -> String? {
-        guard let marker = source.range(of: "\"\(field)\":\"") else { return nil }
-        let remainder = source[marker.upperBound...]
-        guard let end = remainder.firstIndex(of: "\"") else { return nil }
-        return remainder[..<end]
-            .replacingOccurrences(of: #"\/"#, with: "/")
+    private func configureWeiboAccountRequest(_ request: inout URLRequest) {
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+            forHTTPHeaderField: "User-Agent"
+        )
+        request.setValue("https://m.weibo.cn/", forHTTPHeaderField: "Referer")
+        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
     }
 }
 
