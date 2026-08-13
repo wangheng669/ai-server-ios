@@ -429,7 +429,7 @@ struct PostDetailView: View {
             Text("文章")
                 .font(.system(size: 17, weight: .semibold))
 
-            HStack(spacing: 8) {
+            HStack {
                 Button { dismiss() } label: {
                     Image(systemName: dismissIconName)
                         .font(.system(size: 18, weight: .semibold))
@@ -440,17 +440,6 @@ struct PostDetailView: View {
                 .accessibilityLabel(dismissAccessibilityLabel)
 
                 Spacer(minLength: 0)
-
-                if let link = post.linkURL {
-                    ShareLink(item: link) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("分享")
-                }
             }
         }
         .foregroundStyle(.primary)
@@ -577,12 +566,7 @@ struct PostDetailView: View {
             .accessibilityLabel(isRSSBookmarked ? "取消收藏" : "收藏")
 
             if let link = post.linkURL {
-                ShareLink(item: link) {
-                    Label("分享", systemImage: "square.and.arrow.up")
-                        .frame(minWidth: 58)
-                }
-
-                Spacer(minLength: 4)
+                Spacer(minLength: 8)
 
                 Button { openOriginal() } label: {
                     Label("阅读原文", systemImage: "safari")
@@ -1026,12 +1010,6 @@ struct PostDetailView: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 8)
-            Image(systemName: "dot.radiowaves.left.and.right")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 30, height: 30)
-                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
         }
         .padding(12)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
