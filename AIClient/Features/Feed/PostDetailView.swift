@@ -82,7 +82,7 @@ struct PostDetailView: View {
     }
 
     private var usesCustomDismissControl: Bool {
-        post.isNewYorkTimes
+        post.isRSS
             || isWeChatArticle
             || ["知乎", "Truth", "雪球"].contains(post.sourceName)
             || post.isYouTube
@@ -113,8 +113,8 @@ struct PostDetailView: View {
         }
         .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) || isWeChatArticle ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar((post.isNewYorkTimes || isWeChatArticle || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS) ? .hidden : .visible, for: .navigationBar)
-        .navigationBarBackButtonHidden(post.isNewYorkTimes || isWeChatArticle || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube || post.isWeiboRSS)
+        .toolbar((post.isRSS || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
+        .navigationBarBackButtonHidden(post.isRSS || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube)
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
@@ -131,6 +131,8 @@ struct PostDetailView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if post.isWeiboRSS {
                 weiboBottomBar
+            } else if isGenericRSSDetail {
+                rssBottomBar
             }
         }
         .toolbar {
@@ -152,16 +154,6 @@ struct PostDetailView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                     }
-                }
-            } else if post.isRSS && !post.isNewYorkTimes && !isWeChatArticle {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isRSSBookmarked.toggle()
-                        RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
-                    } label: {
-                        Image(systemName: isRSSBookmarked ? "bookmark.fill" : "bookmark")
-                    }
-                    .accessibilityLabel(isRSSBookmarked ? "取消收藏" : "收藏")
                 }
             }
         }
@@ -376,36 +368,96 @@ struct PostDetailView: View {
     }
 
     private var rssDetail: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                rssSourceHeader
+        VStack(spacing: 0) {
+            rssDetailHeader
 
-                Text(post.displayTitle)
-                    .font(.system(size: 30, weight: .bold, design: .serif))
-                    .lineSpacing(4)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    rssSourceHeader
 
-                if post.summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-                   post.summary != post.displayTitle {
-                    Text(post.summary ?? "")
-                        .font(.system(size: 18, design: .serif))
-                        .foregroundStyle(.secondary)
+                    Text(post.displayTitle)
+                        .font(.system(size: 29, weight: .bold))
+                        .tracking(-0.45)
                         .lineSpacing(5)
-                }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 22)
 
-                rssMetadata
+                    if let summary = rssDetailSummary {
+                        Text(summary)
+                            .font(.system(size: 17))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(6)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 14)
+                    }
 
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
-                        rssArticleBlock(block, isWeChat: false)
+                    rssMetadata
+                        .padding(.top, 18)
+
+                    Divider()
+                        .padding(.vertical, 24)
+
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
+                            rssArticleBlock(block, isWeChat: false)
+                        }
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 38)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 36)
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var isGenericRSSDetail: Bool {
+        post.isRSS && !post.isNewYorkTimes && !isWeChatArticle && !post.isWeiboRSS
+    }
+
+    private var rssDetailSummary: String? {
+        guard let summary = post.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !summary.isEmpty,
+              summary != post.displayTitle,
+              summary != post.displayContent else { return nil }
+        return summary
+    }
+
+    private var rssDetailHeader: some View {
+        ZStack {
+            Text("文章")
+                .font(.system(size: 17, weight: .semibold))
+
+            HStack(spacing: 8) {
+                Button { dismiss() } label: {
+                    Image(systemName: dismissIconName)
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(dismissAccessibilityLabel)
+
+                Spacer(minLength: 0)
+
+                if let link = post.linkURL {
+                    ShareLink(item: link) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("分享")
+                }
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 6)
+        .frame(height: 50)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider().opacity(0.7) }
     }
 
     private var isWeChatArticle: Bool {
@@ -482,24 +534,73 @@ struct PostDetailView: View {
         switch block {
         case .paragraph(let text, let emojis):
             if emojis.isEmpty {
-                Text(text)
-                    .font(.system(size: isWeChat ? 17 : 19, design: isWeChat ? .default : .serif))
+                Text(rssReaderParagraphText(text))
+                    .font(.system(size: isWeChat ? 17 : 18))
                     .foregroundStyle(isWeChat ? Color(uiColor: .label).opacity(0.9) : .primary)
-                    .lineSpacing(isWeChat ? 8 : 9)
+                    .lineSpacing(isWeChat ? 8 : 8)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 InlineEmojiText(
-                    text: text,
+                    text: rssReaderParagraphText(text),
                     emojis: emojis,
-                    fontSize: isWeChat ? 17 : 19,
-                    lineSpacing: isWeChat ? 8 : 9
+                    fontSize: isWeChat ? 17 : 18,
+                    lineSpacing: 8
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .image(let url):
-            WeChatArticleImage(url: url)
+            if isWeChat {
+                WeChatArticleImage(url: url)
+            } else {
+                RSSArticleImage(url: url)
+            }
         }
+    }
+
+    private func rssReaderParagraphText(_ text: String) -> String {
+        RSSReaderParagraphFormatter.text(text)
+    }
+
+    private var rssBottomBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                isRSSBookmarked.toggle()
+                RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
+            } label: {
+                Label(
+                    isRSSBookmarked ? "已收藏" : "收藏",
+                    systemImage: isRSSBookmarked ? "bookmark.fill" : "bookmark"
+                )
+                .frame(minWidth: 68)
+            }
+            .accessibilityLabel(isRSSBookmarked ? "取消收藏" : "收藏")
+
+            if let link = post.linkURL {
+                ShareLink(item: link) {
+                    Label("分享", systemImage: "square.and.arrow.up")
+                        .frame(minWidth: 58)
+                }
+
+                Spacer(minLength: 4)
+
+                Button { openOriginal() } label: {
+                    Label("阅读原文", systemImage: "safari")
+                        .font(.system(size: 15, weight: .semibold))
+                        .padding(.horizontal, 17)
+                        .frame(height: 38)
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .background(Color.primary, in: Capsule())
+                }
+                .accessibilityLabel("打开原文")
+            }
+        }
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 16)
+        .frame(height: 58)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider().opacity(0.65) }
     }
 
     private var weChatBottomBar: some View {
@@ -915,26 +1016,39 @@ struct PostDetailView: View {
     }
 
     private var rssSourceHeader: some View {
-        HStack(spacing: 10) {
-            AvatarView(url: post.avatarURL, name: post.sourceName, size: 36)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(post.sourceName)
+        HStack(spacing: 11) {
+            AvatarView(url: post.rssCardAvatarURL, name: post.rssCardSourceName, size: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(post.rssCardSourceName)
                     .font(.system(size: 16, weight: .semibold))
-                Text("RSS · 原生阅读")
-                    .font(.system(size: 13))
+                    .lineLimit(1)
+                Text("RSS 订阅")
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 8)
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
         }
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var rssMetadata: some View {
-        HStack(spacing: 7) {
-            if post.authorName != "RSS" { Text(post.authorName) }
-            if let time = post.formattedTime { Text("· \(time)") }
-            Text("· 图文")
+        HStack(spacing: 8) {
+            if post.authorName != "RSS", post.authorName != post.rssCardSourceName {
+                Label(post.authorName, systemImage: "person")
+                    .lineLimit(1)
+            }
+            if let time = post.formattedTime {
+                Label(time, systemImage: "clock")
+                    .lineLimit(1)
+            }
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: 13))
         .foregroundStyle(.secondary)
     }
 
@@ -3558,6 +3672,19 @@ private enum TruthBookmarkStore {
     }
 }
 
+enum RSSReaderParagraphFormatter {
+    static func text(_ value: String) -> String {
+        value
+            .replacingOccurrences(
+                of: #"(?m)^\s*\[![^\]]+\]\+?\s*$"#,
+                with: "",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 private enum RSSBookmarkStore {
     private static let key = "rss.bookmarkedPostIDs"
 
@@ -3573,6 +3700,36 @@ private enum RSSBookmarkStore {
             ids.remove(postID)
         }
         UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+}
+
+private struct RSSArticleImage: View {
+    let url: URL
+    @State private var aspectRatio: CGFloat = 4 / 3
+
+    private var availableWidth: CGFloat {
+        max(UIScreen.main.bounds.width - 40, 240)
+    }
+
+    private var displayHeight: CGFloat {
+        min(max(availableWidth / max(aspectRatio, 0.35), 150), 520)
+    }
+
+    var body: some View {
+        RemoteImage(
+            url: url,
+            height: displayHeight,
+            cornerRadius: 12,
+            contentMode: .fit,
+            onImageLoaded: { image in
+                guard image.size.width > 0, image.size.height > 0 else { return }
+                aspectRatio = image.size.width / image.size.height
+            }
+        )
+        .frame(maxWidth: .infinity)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .animation(.easeOut(duration: 0.16), value: aspectRatio)
     }
 }
 

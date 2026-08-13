@@ -729,6 +729,13 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(image.isLikelyInlineEmoji)
     }
 
+    func testRSSReaderHidesMarkdownCalloutMarkers() {
+        XCTAssertEqual(
+            RSSReaderParagraphFormatter.text("English introduction.\n\n[!quote]+\n\n中文正文。"),
+            "English introduction.\n\n中文正文。"
+        )
+    }
+
     func testRSSFeedsResponseDecodesPaginationMetadata() throws {
         let data = #"{"data":{"feeds":[]},"meta":{"pagination":{"page":1,"size":20,"total":125}}}"#
             .data(using: .utf8)!
