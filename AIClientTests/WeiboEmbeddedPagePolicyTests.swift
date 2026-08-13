@@ -140,6 +140,33 @@ final class WeiboEmbeddedPagePolicyTests: XCTestCase {
         XCTAssertNil(WeiboSessionCookieStore.avatarURL(defaults: defaults))
     }
 
+    func testParsesLoggedInAccountUIDFromMobileConfig() throws {
+        let data = try XCTUnwrap(#"{"ok":1,"data":{"login":true,"uid":"5224669593"}}"#.data(using: .utf8))
+
+        XCTAssertEqual(WeiboAccountAPIParser.accountUID(from: data), "5224669593")
+    }
+
+    func testAnonymousMobileConfigHasNoAccountUID() throws {
+        let data = try XCTUnwrap(#"{"ok":1,"data":{"login":false,"uid":0}}"#.data(using: .utf8))
+
+        XCTAssertNil(WeiboAccountAPIParser.accountUID(from: data))
+    }
+
+    func testParsesPreferredAvatarFromMobileProfile() throws {
+        let data = try XCTUnwrap(
+            #"{"ok":1,"data":{"userInfo":{"screen_name":"测试账号","profile_image_url":"https://example.com/small.jpg","avatar_hd":"https://example.com/large.jpg"}}}"#
+                .data(using: .utf8)
+        )
+
+        XCTAssertEqual(
+            WeiboAccountAPIParser.profile(from: data),
+            WeiboAccountProfile(
+                displayName: "测试账号",
+                avatarURL: try XCTUnwrap(URL(string: "https://example.com/large.jpg"))
+            )
+        )
+    }
+
     private func makeCookie(name: String, domain: String) throws -> HTTPCookie {
         try XCTUnwrap(
             HTTPCookie(properties: [
