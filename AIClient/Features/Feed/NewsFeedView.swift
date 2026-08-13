@@ -735,12 +735,32 @@ struct NewsFeedView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
+            .overlay {
                 if source == .rss, model.source == .rss {
-                    rssSourceSelector
+                    ZStack(alignment: .bottomTrailing) {
+                        if showsAllRSSSources {
+                            Color.black.opacity(0.001)
+                                .ignoresSafeArea()
+                                .contentShape(Rectangle())
+                                .onTapGesture { closeRSSSourceMenu() }
+                        }
+
+                        VStack(alignment: .trailing, spacing: 8) {
+                            if showsAllRSSSources {
+                                rssSourceMenu
+                                    .transition(
+                                        .scale(scale: 0.92, anchor: .bottomTrailing)
+                                            .combined(with: .opacity)
+                                    )
+                            }
+
+                            rssSourceSelector
+                        }
                         .padding(.trailing, 16)
                         .padding(.bottom, 70)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
@@ -906,7 +926,7 @@ struct NewsFeedView: View {
             .foregroundStyle(isSelected ? Color.white : Color.primary)
             .padding(.leading, 7)
             .padding(.trailing, 12)
-            .frame(height: 42)
+            .frame(height: 40)
             .background(
                 isSelected ? Color(red: 0.03, green: 0.69, blue: 0.35) : Color(uiColor: .secondarySystemBackground),
                 in: Capsule()
@@ -925,37 +945,68 @@ struct NewsFeedView: View {
 
     private var rssSourceSelector: some View {
         rssSourcePickerTrigger
-            .sheet(isPresented: $showsAllRSSSources) {
-                NavigationStack {
-                    List {
+    }
+
+    private var rssSourceMenu: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField("搜索来源", text: $rssSourceSearch)
+                    .font(.system(size: 14))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                if !rssSourceSearch.isEmpty {
+                    Button {
+                        rssSourceSearch = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("清除搜索")
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(spacing: 0) {
                         rssSourcePickerRow(id: nil, name: "全部 RSS", iconURL: nil)
+                            .id("rss-source-all")
 
                         ForEach(filteredRSSFeeds) { feed in
+                            Divider().padding(.leading, 50)
                             rssSourcePickerRow(
                                 id: feed.id,
                                 name: feed.name,
                                 iconURL: feed.iconURL
                             )
-                        }
-                    }
-                    .listStyle(.plain)
-                    .navigationTitle("选择来源")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .searchable(
-                        text: $rssSourceSearch,
-                        placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "搜索 RSS 来源"
-                    )
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("完成") { showsAllRSSSources = false }
+                            .id("rss-source-\(feed.id)")
                         }
                     }
                 }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .onDisappear { rssSourceSearch = "" }
+                .onAppear {
+                    guard let selectedID = model.selectedRSSFeedID else { return }
+                    DispatchQueue.main.async {
+                        proxy.scrollTo("rss-source-\(selectedID)", anchor: .center)
+                    }
+                }
             }
+        }
+        .frame(width: 276, height: 276)
+        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(uiColor: .separator).opacity(0.22), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 7)
+        .accessibilityElement(children: .contain)
     }
 
     private var filteredRSSFeeds: [RSSFeedSource] {
@@ -967,7 +1018,15 @@ struct NewsFeedView: View {
 
     private var rssSourcePickerTrigger: some View {
         let selectedFeed = model.rssFeeds.first { $0.id == model.selectedRSSFeedID }
-        return Button { showsAllRSSSources = true } label: {
+        return Button {
+            withAnimation(.snappy(duration: 0.22)) {
+                if showsAllRSSSources {
+                    closeRSSSourceMenu()
+                } else {
+                    showsAllRSSSources = true
+                }
+            }
+        } label: {
             HStack(spacing: 7) {
                 if let selectedFeed {
                     AvatarView(
@@ -986,7 +1045,7 @@ struct NewsFeedView: View {
                     Text("全部来源")
                 }
 
-                Image(systemName: "chevron.up.chevron.down")
+                Image(systemName: showsAllRSSSources ? "chevron.down" : "chevron.up")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
             }
@@ -1005,6 +1064,12 @@ struct NewsFeedView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("选择 RSS 来源")
         .accessibilityValue(selectedFeed?.name ?? "全部 RSS")
+        .accessibilityAddTraits(showsAllRSSSources ? .isSelected : [])
+    }
+
+    private func closeRSSSourceMenu() {
+        showsAllRSSSources = false
+        rssSourceSearch = ""
     }
 
     private func rssSourcePickerRow(
@@ -1015,13 +1080,13 @@ struct NewsFeedView: View {
         let isSelected = model.selectedRSSFeedID == id
         return Button {
             Task { await model.selectRSSFeed(id) }
-            showsAllRSSSources = false
+            closeRSSSourceMenu()
         } label: {
-            HStack(spacing: 12) {
-                rssSourceIcon(url: iconURL, name: name, size: 30)
+            HStack(spacing: 10) {
+                rssSourceIcon(url: iconURL, name: name, size: 24)
 
                 Text(name)
-                    .font(.system(size: 16))
+                    .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
@@ -1033,7 +1098,8 @@ struct NewsFeedView: View {
                         .foregroundStyle(.tint)
                 }
             }
-            .frame(minHeight: 38)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
