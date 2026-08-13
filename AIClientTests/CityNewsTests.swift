@@ -28,6 +28,50 @@ final class CityNewsTests: XCTestCase {
         assertGeometry(in: CityNewsMockData.root)
     }
 
+    func testJourneyDrillsInPlaceAndReturnsToAnyAncestor() throws {
+        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
+        let shenzhen = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen"))
+        var journey = CityRegionJourney()
+
+        XCTAssertTrue(journey.enter(guangdong))
+        XCTAssertTrue(journey.enter(shenzhen))
+        XCTAssertEqual(journey.current.id, "shenzhen")
+        XCTAssertEqual(journey.regionIDs, ["guangdong", "shenzhen"])
+        XCTAssertEqual(journey.trail.map(\.name), ["全国", "广东省", "深圳市"])
+
+        XCTAssertTrue(journey.returnTo(guangdong))
+        XCTAssertEqual(journey.current.id, "guangdong")
+        XCTAssertEqual(journey.regionIDs, ["guangdong"])
+
+        XCTAssertTrue(journey.returnTo(CityNewsMockData.root))
+        XCTAssertEqual(journey.current.id, "china")
+        XCTAssertFalse(journey.canGoBack)
+    }
+
+    func testJourneyRejectsInvalidOrRepeatedDrillDown() throws {
+        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
+        let zhejiang = try XCTUnwrap(CityNewsMockData.region(withID: "zhejiang"))
+        let district = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen-440305"))
+        var journey = CityRegionJourney()
+
+        XCTAssertFalse(journey.enter(district))
+        XCTAssertTrue(journey.enter(guangdong))
+        XCTAssertFalse(journey.enter(guangdong))
+        XCTAssertFalse(journey.enter(zhejiang))
+        XCTAssertEqual(journey.regionIDs, ["guangdong"])
+    }
+
+    func testDistrictCanSwitchToASiblingWithoutAddingAnotherLevel() throws {
+        var journey = CityRegionJourney(path: CityNewsMockData.path(to: "shenzhen-440305"))
+        let futian = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen-440304"))
+
+        XCTAssertEqual(journey.contextualRegions.map(\.name), ["南山区", "福田区", "罗湖区", "宝安区"])
+        XCTAssertTrue(journey.selectPeer(futian))
+        XCTAssertEqual(journey.current.name, "福田区")
+        XCTAssertEqual(journey.regionIDs, ["guangdong", "shenzhen", "shenzhen-440304"])
+        XCTAssertFalse(journey.selectPeer(futian))
+    }
+
     private func assertContent(in region: CityRegion, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertFalse(region.introduction.isEmpty, "\(region.name) 缺少简介", file: file, line: line)
         XCTAssertFalse(region.facts.isEmpty, "\(region.name) 缺少事实标签", file: file, line: line)

@@ -35,9 +35,64 @@ struct CityRegion: Identifiable, Hashable {
     let facts: [String]
     let news: [CityRegionNews]
     let children: [CityRegion]
+}
 
-    var introductionTitle: String { "\(name)简介" }
-    var newsTitle: String { "\(name) · 今日新闻" }
+struct CityRegionJourney: Equatable {
+    private(set) var regionIDs: [String]
+
+    init(path: [CityRegion] = []) {
+        regionIDs = path.map(\.id)
+    }
+
+    var path: [CityRegion] { regionIDs.compactMap(CityNewsMockData.region(withID:)) }
+    var current: CityRegion { path.last ?? CityNewsMockData.root }
+    var trail: [CityRegion] { [CityNewsMockData.root] + path }
+    var parent: CityRegion? { trail.dropLast().last }
+    var canGoBack: Bool { !regionIDs.isEmpty }
+    var contextualRegions: [CityRegion] {
+        if !current.children.isEmpty { return current.children }
+        return current.level == .district ? parent?.children ?? [] : []
+    }
+
+    @discardableResult
+    mutating func enter(_ region: CityRegion) -> Bool {
+        guard current.children.contains(where: { $0.id == region.id }) else { return false }
+        regionIDs.append(region.id)
+        return true
+    }
+
+    @discardableResult
+    mutating func selectPeer(_ region: CityRegion) -> Bool {
+        guard region.id != current.id,
+              let parent,
+              parent.children.contains(where: { $0.id == region.id }),
+              !regionIDs.isEmpty
+        else { return false }
+        regionIDs[regionIDs.count - 1] = region.id
+        return true
+    }
+
+    @discardableResult
+    mutating func returnTo(_ region: CityRegion) -> Bool {
+        if region.id == CityNewsMockData.root.id {
+            guard !regionIDs.isEmpty else { return false }
+            regionIDs.removeAll()
+            return true
+        }
+
+        guard let index = regionIDs.firstIndex(of: region.id), index < regionIDs.count - 1 else {
+            return false
+        }
+        regionIDs = Array(regionIDs.prefix(through: index))
+        return true
+    }
+
+    @discardableResult
+    mutating func goBack() -> Bool {
+        guard !regionIDs.isEmpty else { return false }
+        regionIDs.removeLast()
+        return true
+    }
 }
 
 enum CityNewsMockData {
@@ -118,6 +173,22 @@ enum CityNewsMockData {
     static func path(to regionID: String) -> [CityRegion] {
         findPath(in: root, targetID: regionID) ?? []
     }
+
+    static func region(withID regionID: String) -> CityRegion? {
+        regionIndex[regionID]
+    }
+
+    private static let regionIndex: [String: CityRegion] = {
+        var result: [String: CityRegion] = [:]
+
+        func collect(_ region: CityRegion) {
+            result[region.id] = region
+            region.children.forEach(collect)
+        }
+
+        collect(root)
+        return result
+    }()
 
     private static func findPath(in region: CityRegion, targetID: String) -> [CityRegion]? {
         for child in region.children {
@@ -233,116 +304,397 @@ enum CityNewsMockData {
 }
 
 struct CityNewsView: View {
-    @State private var path: [CityRegion]
-    private let directlyPresentedPreviewRegion: CityRegion?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var journey: CityRegionJourney
+    @State private var transitionDirection: CityRegionTransitionDirection = .deeper
 
     init() {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--city-district-preview") {
-            _path = State(initialValue: CityNewsMockData.path(to: "shenzhen-440305"))
-            directlyPresentedPreviewRegion = nil
+            _journey = State(initialValue: CityRegionJourney(path: CityNewsMockData.path(to: "shenzhen-440305")))
         } else if arguments.contains("--city-city-preview") {
-            _path = State(initialValue: CityNewsMockData.path(to: "shenzhen"))
-            directlyPresentedPreviewRegion = nil
+            _journey = State(initialValue: CityRegionJourney(path: CityNewsMockData.path(to: "shenzhen")))
         } else if arguments.contains("--city-province-preview") {
-            _path = State(initialValue: [])
-            directlyPresentedPreviewRegion = CityNewsMockData.path(to: "guangdong").last
+            _journey = State(initialValue: CityRegionJourney(path: CityNewsMockData.path(to: "guangdong")))
         } else {
-            _path = State(initialValue: [])
-            directlyPresentedPreviewRegion = nil
+            _journey = State(initialValue: CityRegionJourney())
         }
         #else
-        _path = State(initialValue: [])
-        directlyPresentedPreviewRegion = nil
+        _journey = State(initialValue: CityRegionJourney())
         #endif
     }
 
     var body: some View {
-        Group {
-            if let directlyPresentedPreviewRegion {
-                NavigationStack {
-                    CityRegionPage(region: directlyPresentedPreviewRegion)
+        let region = journey.current
+        let contextualRegions = journey.contextualRegions
+
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id(CityNewsScrollAnchor.top)
+
+                    CityRegionHeader(
+                        region: region,
+                        trail: journey.trail,
+                        direction: transitionDirection,
+                        canGoBack: journey.canGoBack,
+                        onBack: goBack,
+                        onSelectTrail: returnTo
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+
+                    CityRegionMapStage(
+                        region: region,
+                        selectableRegions: contextualRegions,
+                        direction: transitionDirection,
+                        canGoBack: journey.canGoBack,
+                        onSelect: selectRegion,
+                        onSwipeBack: goBack
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+
+                    if !contextualRegions.isEmpty {
+                        CityRegionChildrenSection(
+                            region: region,
+                            regions: contextualRegions,
+                            selectedRegionID: region.children.isEmpty ? region.id : nil,
+                            direction: transitionDirection,
+                            onSelect: selectRegion
+                        )
+                        .padding(.top, 18)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+
+                    CityRegionIntroduction(region: region, direction: transitionDirection)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 24)
+
+                    CityRegionNewsSection(region: region, direction: transitionDirection)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 28)
+                        .padding(.bottom, 30)
                 }
-            } else {
-                NavigationStack(path: $path) {
-                    CityRegionPage(region: CityNewsMockData.root)
-                        .navigationDestination(for: CityRegion.self) { region in
-                            CityRegionPage(region: region)
-                        }
+                .animation(reduceMotion ? nil : .smooth(duration: 0.34, extraBounce: 0), value: region.id)
+            }
+            .scrollIndicators(.hidden)
+            .background(CityNewsDesign.canvas)
+            .onChange(of: region.id) { _, _ in
+                if reduceMotion {
+                    proxy.scrollTo(CityNewsScrollAnchor.top, anchor: .top)
+                } else {
+                    withAnimation(.smooth(duration: 0.34, extraBounce: 0)) {
+                        proxy.scrollTo(CityNewsScrollAnchor.top, anchor: .top)
+                    }
                 }
             }
         }
         .tint(CityNewsDesign.accent)
+        .sensoryFeedback(.selection, trigger: region.id)
+        .accessibilityIdentifier("city-region-screen")
+    }
+
+    private var navigationAnimation: Animation? {
+        reduceMotion ? nil : .snappy(duration: 0.46, extraBounce: 0.04)
+    }
+
+    private func enter(_ region: CityRegion) {
+        transitionDirection = .deeper
+        withAnimation(navigationAnimation) {
+            _ = journey.enter(region)
+        }
+    }
+
+    private func selectRegion(_ region: CityRegion) {
+        if journey.current.children.contains(where: { $0.id == region.id }) {
+            enter(region)
+            return
+        }
+
+        transitionDirection = .lateral
+        withAnimation(navigationAnimation) {
+            _ = journey.selectPeer(region)
+        }
+    }
+
+    private func returnTo(_ region: CityRegion) {
+        transitionDirection = .back
+        withAnimation(navigationAnimation) {
+            _ = journey.returnTo(region)
+        }
+    }
+
+    private func goBack() {
+        transitionDirection = .back
+        withAnimation(navigationAnimation) {
+            _ = journey.goBack()
+        }
     }
 }
 
 private enum CityNewsDesign {
-    static let accent = Color(red: 0.83, green: 0.26, blue: 0.18)
-    static let accentSoft = accent.opacity(0.10)
-    static let canvas = Color(uiColor: .systemGroupedBackground)
-    static let surface = Color(uiColor: .systemBackground)
-    static let divider = Color(uiColor: .separator).opacity(0.35)
+    static let accent = InvestmentDesign.accent
+    static let accentSoft = accent.opacity(0.09)
+    static let canvas = Color(uiColor: .systemBackground)
+    static let secondarySurface = Color(uiColor: .secondarySystemBackground)
+    static let divider = Color(uiColor: .separator).opacity(0.24)
+    static let mapGradient = LinearGradient(
+        colors: [
+            Color(uiColor: .secondarySystemBackground),
+            accent.opacity(0.075)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
-private struct CityRegionPage: View {
+private struct CityPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private enum CityRegionTransitionDirection {
+    case deeper
+    case back
+    case lateral
+
+    var title: AnyTransition {
+        switch self {
+        case .deeper:
+            .asymmetric(
+                insertion: .move(edge: .bottom).combined(with: .opacity),
+                removal: .move(edge: .top).combined(with: .opacity)
+            )
+        case .back:
+            .asymmetric(
+                insertion: .move(edge: .top).combined(with: .opacity),
+                removal: .move(edge: .bottom).combined(with: .opacity)
+            )
+        case .lateral:
+            .opacity
+        }
+    }
+
+    var map: AnyTransition {
+        switch self {
+        case .deeper:
+            .asymmetric(
+                insertion: .scale(scale: 0.88).combined(with: .opacity),
+                removal: .scale(scale: 1.08).combined(with: .opacity)
+            )
+        case .back:
+            .asymmetric(
+                insertion: .scale(scale: 1.08).combined(with: .opacity),
+                removal: .scale(scale: 0.88).combined(with: .opacity)
+            )
+        case .lateral:
+            .asymmetric(
+                insertion: .scale(scale: 0.96).combined(with: .opacity),
+                removal: .scale(scale: 1.04).combined(with: .opacity)
+            )
+        }
+    }
+
+    var content: AnyTransition {
+        switch self {
+        case .deeper:
+            .asymmetric(
+                insertion: .move(edge: .bottom).combined(with: .opacity),
+                removal: .opacity
+            )
+        case .back:
+            .asymmetric(
+                insertion: .move(edge: .top).combined(with: .opacity),
+                removal: .opacity
+            )
+        case .lateral:
+            .opacity
+        }
+    }
+}
+
+private enum CityNewsScrollAnchor {
+    static let top = "city-region-top"
+}
+
+private struct CityRegionHeader: View {
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @AccessibilityFocusState private var isCurrentTitleFocused: Bool
+
     let region: CityRegion
+    let trail: [CityRegion]
+    let direction: CityRegionTransitionDirection
+    let canGoBack: Bool
+    let onBack: () -> Void
+    let onSelectTrail: (CityRegion) -> Void
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                CityRegionBreadcrumb(region: region)
-                CityRegionMapCard(region: region)
-                CityRegionIntroductionCard(region: region)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("城市观察", systemImage: "location.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(CityNewsDesign.accent)
+                    .textCase(.uppercase)
+                    .tracking(0.8)
 
-                if !region.children.isEmpty {
-                    CityRegionChildrenSection(region: region)
+                Spacer()
+
+                Text("今日 · \(region.news.count) 条")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if canGoBack {
+                    Button(action: onBack) {
+                        Image(systemName: "arrow.up.left")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                            .background(CityNewsDesign.secondarySurface, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(CityPressStyle())
+                    .accessibilityLabel("返回上一级地区")
+                    .accessibilityHint("在当前页面展开上一级内容")
                 }
-
-                CityRegionNewsSection(region: region)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+
+            ZStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(region.name)
+                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityFocused($isCurrentTitleFocused)
+                        .accessibilityIdentifier("city-current-title")
+                    Text(([region.level.rawValue] + region.facts).joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .id(region.id)
+                .transition(direction.title)
+            }
+            .task(id: region.id) {
+                guard voiceOverEnabled else { return }
+                await Task.yield()
+                isCurrentTitleFocused = true
+            }
+
+            if trail.count > 1 {
+                CityRegionBreadcrumb(trail: trail, onSelect: onSelectTrail)
+                    .transition(.opacity)
+            }
         }
-        .background(CityNewsDesign.canvas)
-        .navigationTitle(region.name)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 private struct CityRegionBreadcrumb: View {
-    let region: CityRegion
+    let trail: [CityRegion]
+    let onSelect: (CityRegion) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "location.fill")
-                .font(.caption2)
-                .foregroundStyle(CityNewsDesign.accent)
-            Text(region.level.rawValue)
-            Text("/")
-            Text(region.name)
-                .foregroundStyle(.primary)
+        ScrollView(.horizontal) {
+            HStack(spacing: 7) {
+                ForEach(Array(trail.enumerated()), id: \.element.id) { index, item in
+                    if index > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    if item.id == trail.last?.id {
+                        Text(item.name)
+                            .foregroundStyle(.primary)
+                            .fontWeight(.semibold)
+                            .padding(.vertical, 7)
+                    } else {
+                        Button {
+                            onSelect(item)
+                        } label: {
+                            Text(item.name)
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(CityPressStyle())
+                        .foregroundStyle(.secondary)
+                        .accessibilityHint("在当前页面返回到\(item.name)")
+                        .accessibilityIdentifier("city-breadcrumb-\(item.id)")
+                    }
+                }
+            }
+            .font(.caption)
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .accessibilityElement(children: .combine)
+        .scrollIndicators(.hidden)
     }
 }
 
-private struct CityRegionMapCard: View {
+private struct CityRegionMapStage: View {
     let region: CityRegion
+    let selectableRegions: [CityRegion]
+    let direction: CityRegionTransitionDirection
+    let canGoBack: Bool
+    let onSelect: (CityRegion) -> Void
+    let onSwipeBack: () -> Void
 
     var body: some View {
-        CityAdministrativeMap(region: region)
-        .frame(height: region.level == .country ? 226 : 206)
-        .frame(maxWidth: .infinity)
-        .background(CityNewsDesign.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(CityNewsDesign.divider, lineWidth: 0.6)
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(CityNewsDesign.mapGradient)
+
+            Circle()
+                .fill(CityNewsDesign.accent.opacity(0.055))
+                .frame(width: 170, height: 170)
+                .offset(x: 62, y: 74)
+                .allowsHitTesting(false)
+
+            ZStack {
+                CityAdministrativeMap(
+                    region: region,
+                    selectableRegions: selectableRegions,
+                    onSelect: onSelect
+                )
+                    .id(region.id)
+                    .transition(direction.map)
+            }
+            .padding(12)
+
+            Label(
+                region.children.isEmpty ? "当前区域" : "轻点地名进入",
+                systemImage: region.children.isEmpty ? "mappin.circle.fill" : "hand.tap.fill"
+            )
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(12)
+            .allowsHitTesting(false)
         }
-        .accessibilityLabel("\(region.name)行政区地图")
+        .frame(height: region.level == .country ? 240 : 220)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 0.7)
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { value in
+                    guard canGoBack,
+                          value.translation.width > 72,
+                          abs(value.translation.height) < abs(value.translation.width) * 0.65
+                    else { return }
+                    onSwipeBack()
+                }
+        )
     }
 }
 
@@ -423,10 +775,14 @@ struct CityMapRepository {
 
 private struct CityAdministrativeMap: View {
     let region: CityRegion
+    let selectableRegions: [CityRegion]
+    let onSelect: (CityRegion) -> Void
 
     private var features: [CityMapFeature] { CityMapRepository.shared.features(for: region) }
-    private var childByAdcode: [Int: CityRegion] { Dictionary(uniqueKeysWithValues: region.children.map { ($0.adcode, $0) }) }
-    private var availableAdcodes: Set<Int> { Set(region.children.map(\.adcode)) }
+    private var regionByAdcode: [Int: CityRegion] {
+        Dictionary(uniqueKeysWithValues: selectableRegions.map { ($0.adcode, $0) })
+    }
+    private var availableAdcodes: Set<Int> { Set(selectableRegions.map(\.adcode)) }
 
     var body: some View {
         GeometryReader { geometry in
@@ -449,13 +805,25 @@ private struct CityAdministrativeMap: View {
 
                     ForEach(markerFeatures) { feature in
                         if let coordinate = feature.labelCoordinate {
-                            if let child = childByAdcode[feature.id] {
-                                NavigationLink(value: child) {
-                                    mapLabel(feature.properties.name, selected: false)
+                            if let selectableRegion = regionByAdcode[feature.id] {
+                                if selectableRegion.id == region.id {
+                                    mapLabel(feature.properties.name, selected: true)
+                                        .position(projection.point(for: coordinate))
+                                        .accessibilityLabel("\(selectableRegion.name)，当前区域")
+                                } else {
+                                    Button {
+                                        onSelect(selectableRegion)
+                                    } label: {
+                                        mapLabel(feature.properties.name, selected: false)
+                                            .frame(minWidth: 44, minHeight: 44)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(CityPressStyle())
+                                    .position(projection.point(for: coordinate))
+                                    .accessibilityLabel(selectableRegion.name)
+                                    .accessibilityHint("在当前页面展开\(selectableRegion.name)")
+                                    .accessibilityIdentifier("city-region-\(selectableRegion.id)")
                                 }
-                                .buttonStyle(.plain)
-                                .position(projection.point(for: coordinate))
-                                .accessibilityHint("进入并查看\(child.name)简介和新闻")
                             } else {
                                 mapLabel(feature.properties.name, selected: true)
                                     .position(projection.point(for: coordinate))
@@ -467,7 +835,7 @@ private struct CityAdministrativeMap: View {
                         Spacer()
                         HStack {
                             Spacer()
-                            Text("行政区边界 · 原型数据")
+                            Text("行政边界")
                                 .font(.system(size: 8))
                                 .foregroundStyle(.tertiary)
                         }
@@ -481,7 +849,7 @@ private struct CityAdministrativeMap: View {
     }
 
     private var markerFeatures: [CityMapFeature] {
-        if region.children.isEmpty {
+        if selectableRegions.isEmpty {
             return features.filter { $0.id == region.adcode }
         }
         return features.filter { availableAdcodes.contains($0.id) }
@@ -489,18 +857,22 @@ private struct CityAdministrativeMap: View {
 
     private func fillColor(for feature: CityMapFeature) -> Color {
         if feature.id == region.adcode { return CityNewsDesign.accent.opacity(0.78) }
-        if availableAdcodes.contains(feature.id) { return CityNewsDesign.accent.opacity(0.32) }
-        return Color.secondary.opacity(0.13)
+        if availableAdcodes.contains(feature.id) { return CityNewsDesign.accent.opacity(0.42) }
+        return Color.secondary.opacity(0.11)
     }
 
     private func mapLabel(_ text: String, selected: Bool) -> some View {
         Text(text.replacingOccurrences(of: "省", with: "").replacingOccurrences(of: "市", with: ""))
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(selected ? .white : CityNewsDesign.accent)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .background(selected ? CityNewsDesign.accent : Color.white.opacity(0.94), in: Capsule())
-            .overlay { Capsule().stroke(CityNewsDesign.accent.opacity(0.35), lineWidth: 0.5) }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .background(
+                selected ? CityNewsDesign.accent : CityNewsDesign.secondarySurface.opacity(0.96),
+                in: Capsule()
+            )
+            .overlay { Capsule().stroke(CityNewsDesign.accent.opacity(0.24), lineWidth: 0.6) }
+            .shadow(color: .black.opacity(selected ? 0 : 0.06), radius: 4, y: 2)
     }
 }
 
@@ -560,134 +932,159 @@ private struct CityMapProjection {
     }
 }
 
-private struct CityRegionIntroductionCard: View {
+private struct CityRegionIntroduction: View {
     let region: CityRegion
+    let direction: CityRegionTransitionDirection
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Label(region.introductionTitle, systemImage: "info.circle.fill")
-                .font(.headline)
-                .foregroundStyle(.primary)
+        ZStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("城市速写")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(CityNewsDesign.accent)
+                    .tracking(0.8)
 
-            Text(region.introduction)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(region.introduction)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Divider()
-
-            HStack(spacing: 8) {
-                ForEach(region.facts, id: \.self) { fact in
-                    Text(fact)
-                    if fact != region.facts.last {
-                        Circle().fill(.tertiary).frame(width: 3, height: 3)
+                HStack(spacing: 8) {
+                    ForEach(region.facts, id: \.self) { fact in
+                        Text(fact)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .frame(minHeight: 28)
+                            .background(CityNewsDesign.secondarySurface, in: Capsule())
                     }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Rectangle()
+                    .fill(CityNewsDesign.divider)
+                    .frame(height: 0.5)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .padding(14)
-        .background(CityNewsDesign.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(CityNewsDesign.divider, lineWidth: 0.6)
+            .id(region.id)
+            .transition(direction.content)
         }
     }
 }
 
 private struct CityRegionChildrenSection: View {
     let region: CityRegion
-
-    private let columns = [GridItem(.adaptive(minimum: 102), spacing: 8)]
+    let regions: [CityRegion]
+    let selectedRegionID: String?
+    let direction: CityRegionTransitionDirection
+    let onSelect: (CityRegion) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(region.level.childTitle ?? "")
-                .font(.headline)
+        ZStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(region.level.childTitle ?? "同城区域")
+                        .font(.headline)
+                    Spacer()
+                    Text("\(regions.count) 个\(selectedRegionID == nil ? "可选地区" : "同城区域")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 20)
 
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                ForEach(region.children) { child in
-                    NavigationLink(value: child) {
-                        HStack(spacing: 5) {
-                            Text(child.name)
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.bold))
-                        }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 11)
-                        .frame(height: 40)
-                        .background(CityNewsDesign.surface, in: RoundedRectangle(cornerRadius: 11))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 11)
-                                .stroke(CityNewsDesign.divider, lineWidth: 0.6)
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 8) {
+                        ForEach(regions) { child in
+                            let isSelected = child.id == selectedRegionID
+                            Button {
+                                onSelect(child)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Circle()
+                                        .fill(CityNewsDesign.accent)
+                                        .frame(width: 5, height: 5)
+                                    Text(child.name)
+                                        .lineLimit(1)
+                                    Image(systemName: isSelected ? "checkmark" : "arrow.down.right")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(CityNewsDesign.accent)
+                                }
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 44)
+                                .background(
+                                    isSelected ? CityNewsDesign.accentSoft : CityNewsDesign.secondarySurface,
+                                    in: Capsule()
+                                )
+                                .overlay {
+                                    Capsule()
+                                        .stroke(
+                                            isSelected ? CityNewsDesign.accent.opacity(0.16) : Color.primary.opacity(0.045),
+                                            lineWidth: 0.6
+                                        )
+                                }
+                            }
+                            .buttonStyle(CityPressStyle())
+                            .accessibilityHint(isSelected ? "当前区域" : "在当前页面展开\(child.name)")
+                            .accessibilityIdentifier("city-region-list-\(child.id)")
+                            .accessibilityAddTraits(isSelected ? .isSelected : [])
                         }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("进入并查看\(child.name)简介和新闻")
+                    .padding(.horizontal, 20)
                 }
+                .scrollIndicators(.hidden)
             }
+            .id(region.id)
+            .transition(direction.content)
         }
     }
 }
 
 private struct CityRegionNewsSection: View {
     let region: CityRegion
+    let direction: CityRegionTransitionDirection
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(region.newsTitle)
-                    .font(.title3.weight(.bold))
-                Spacer()
-                Text("\(region.news.count)条更新")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        ZStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("今日动态")
+                        .font(.title3.weight(.bold))
+                    Spacer()
+                    Text(region.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-            VStack(spacing: 0) {
-                ForEach(Array(region.news.enumerated()), id: \.element.id) { index, item in
-                    CityRegionNewsRow(item: item, isLead: index == 0)
-                    if index < region.news.count - 1 {
-                        Divider().padding(.leading, index == 0 ? 94 : 0)
+                VStack(spacing: 0) {
+                    ForEach(Array(region.news.enumerated()), id: \.element.id) { index, item in
+                        CityRegionNewsRow(item: item)
+                        if index < region.news.count - 1 {
+                            Rectangle()
+                                .fill(CityNewsDesign.divider)
+                                .frame(height: 0.5)
+                                .padding(.leading, 50)
+                        }
                     }
                 }
             }
-            .padding(14)
-            .background(CityNewsDesign.surface, in: RoundedRectangle(cornerRadius: 16))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(CityNewsDesign.divider, lineWidth: 0.6)
-            }
+            .id(region.id)
+            .transition(direction.content)
         }
     }
 }
 
 private struct CityRegionNewsRow: View {
     let item: CityRegionNews
-    let isLead: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            if isLead {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(
-                            LinearGradient(
-                                colors: [CityNewsDesign.accentSoft, Color.blue.opacity(0.12)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    Image(systemName: item.symbol)
-                        .font(.system(size: 27))
-                        .foregroundStyle(CityNewsDesign.accent)
-                }
-                .frame(width: 82, height: 76)
-            }
+            Image(systemName: item.symbol)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(CityNewsDesign.accent)
+                .frame(width: 38, height: 38)
+                .background(CityNewsDesign.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.title)
@@ -695,7 +1092,7 @@ private struct CityRegionNewsRow: View {
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(item.summary)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 Text("\(item.source)  ·  \(item.relativeTime)")
@@ -704,7 +1101,7 @@ private struct CityRegionNewsRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
     }
 }
