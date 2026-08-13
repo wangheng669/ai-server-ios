@@ -24,6 +24,11 @@ if ! git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
   echo "Preflight merge base remains unavailable after bounded deepening." >&2
   exit 1
 fi
+app_changed=$(
+  ./ci/classify-ios-test-scope.sh \
+    < <(git diff --name-only origin/main "$source_sha") \
+    | awk -F= '$1 == "app_changed" { print $2 }'
+)
 preflight_started_epoch=$workflow_started_epoch
 preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finished.XXXXXX")
 
@@ -40,11 +45,6 @@ device_warm_started_epoch=$(date +%s)
 device_warm_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-warm-finished.XXXXXX")
 (
   status=0
-  app_changed=$(
-    ./ci/classify-ios-test-scope.sh \
-      < <(git diff --name-only origin/main "$source_sha") \
-      | awk -F= '$1 == "app_changed" { print $2 }'
-  )
   if [[ "$app_changed" == true && -n "${DEVICE_UDID:-}" ]]; then
     ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
     if ! ./ci/probe-ios-device.sh; then
@@ -64,7 +64,16 @@ device_warm_pid=$!
 prepare_started_epoch=$(date +%s)
 prepare_metrics_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-prepare-metrics.XXXXXX")
 export IOS_PREPARE_METRICS_FILE="$prepare_metrics_file"
-./ci/prepare-central-runner.sh
+if [[ "$app_changed" == true ]]; then
+  ./ci/prepare-central-runner.sh
+else
+  echo "Configuration-only change; skipping Xcode dependency and build cache warming."
+  {
+    echo "dependency_seconds=0"
+    echo "device_build_warm_seconds=0"
+    echo "simulator_warm_seconds=0"
+  } > "$prepare_metrics_file"
+fi
 
 prepare_duration_seconds=$(($(date +%s) - prepare_started_epoch))
 dependency_seconds=0
@@ -100,6 +109,9 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     echo "IOS_PREFLIGHT_SECONDS=$preflight_duration_seconds"
     echo "IOS_PREPARE_SECONDS=$prepare_duration_seconds"
     echo "IOS_DEVICE_WARM_SECONDS=$device_warm_duration_seconds"
+    echo "IOS_DEPENDENCY_SECONDS=$dependency_seconds"
+    echo "IOS_DEVICE_BUILD_WARM_SECONDS=$device_build_warm_seconds"
+    echo "IOS_SIMULATOR_WARM_SECONDS=$simulator_warm_seconds"
     echo "IOS_WORKFLOW_STARTED_EPOCH=$workflow_started_epoch"
   } >> "$GITHUB_ENV"
 fi
