@@ -1517,6 +1517,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
     weak var webView: WKWebView?
     private var returnURL: URL?
     private var isFetchingAvatar = false
+    private var isLoggingOut = false
 
     func reload() {
         requiresWeiboAuthentication = false
@@ -1529,6 +1530,8 @@ private final class EmbeddedWebViewModel: ObservableObject {
 
     func beginWeiboLogin() {
         guard let webView else { return }
+        WeiboSessionCookieStore.allowPersistence()
+        isLoggingOut = false
         if let current = webView.url, !isWeiboLoginURL(current) { rememberReturnURL(current) }
         isAuthenticating = true
         requiresWeiboAuthentication = false
@@ -1553,15 +1556,17 @@ private final class EmbeddedWebViewModel: ObservableObject {
     }
 
     func refreshWeiboSession(from cookieStore: WKHTTPCookieStore, persist: Bool = false) {
+        let isLoggingOutSnapshot = isLoggingOut
         cookieStore.getAllCookies { [weak self] cookies in
-            let authenticationNames: Set<String> = ["SUB", "SUBP", "WBPSESS"]
-            let isLoggedIn = cookies.contains { cookie in
-                authenticationNames.contains(cookie.name) &&
-                (cookie.domain.lowercased().contains("weibo") || cookie.domain.lowercased().contains("sina"))
-            }
+            let isLoggedIn = !isLoggingOutSnapshot &&
+                WeiboEmbeddedPagePolicy.containsAuthenticatedSession(in: cookies)
+            let shouldPersist = persist && WeiboEmbeddedPagePolicy.shouldPersistSession(
+                cookies: cookies,
+                isLoggingOut: isLoggingOutSnapshot
+            )
             Task { @MainActor in
                 self?.isWeiboLoggedIn = isLoggedIn
-                if persist, isLoggedIn {
+                if shouldPersist {
                     WeiboSessionCookieStore.store(cookies: cookies)
                 }
             }
@@ -1571,6 +1576,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
     func logoutWeibo() {
         guard let webView else { return }
         isAuthenticating = false
+        isLoggingOut = true
         isWeiboLoggedIn = false
         requiresWeiboAuthentication = false
         weiboAvatarURL = nil
@@ -1579,7 +1585,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
         WeiboSessionCookieStore.clear()
 
         let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-        cookieStore.getAllCookies { cookies in
+        cookieStore.getAllCookies { [weak self, weak webView] cookies in
             let sessionCookies = cookies.filter { cookie in
                 let domain = cookie.domain.lowercased()
                 return domain.contains("weibo") || domain.contains("sina")
@@ -1590,7 +1596,9 @@ private final class EmbeddedWebViewModel: ObservableObject {
                 cookieStore.delete(cookie) { group.leave() }
             }
             group.notify(queue: .main) {
-                webView.reload()
+                self?.isLoggingOut = false
+                WeiboSessionCookieStore.clear()
+                webView?.reload()
             }
         }
     }
@@ -1697,7 +1705,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
         // back to the hot-search list while the user is browsing photos.
         webView.allowsBackForwardNavigationGestures = !Self.isWeiboURL(url)
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
-        context.coordinator.observe(webView)
+        context.coordinator.observe(webView, observesWeiboSession: Self.isWeiboURL(url))
         model.webView = webView
         if preparedWebView != nil {
             context.coordinator.adoptLoaded(url, in: webView)
@@ -1909,9 +1917,10 @@ private struct EmbeddedWebView: UIViewRepresentable {
         webView.uiDelegate = nil
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
         private let model: EmbeddedWebViewModel
         private var progressObservation: NSKeyValueObservation?
+        private var observedWeiboCookieStore: WKHTTPCookieStore?
         private var pageInspectionTask: Task<Void, Never>?
         private var didBeginLoad = false
 
@@ -1919,12 +1928,18 @@ private struct EmbeddedWebView: UIViewRepresentable {
             self.model = model
         }
 
-        func observe(_ webView: WKWebView) {
+        func observe(_ webView: WKWebView, observesWeiboSession: Bool) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.initial, .new]) { [weak model] webView, _ in
                 Task { @MainActor in
                     model?.estimatedProgress = webView.estimatedProgress
                     model?.isLoading = webView.estimatedProgress < 1
                 }
+            }
+            if observesWeiboSession {
+                let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+                observedWeiboCookieStore = cookieStore
+                cookieStore.add(self)
+                model.refreshWeiboSession(from: cookieStore, persist: true)
             }
         }
 
@@ -1952,10 +1967,21 @@ private struct EmbeddedWebView: UIViewRepresentable {
         }
 
         func stopObserving() {
+            if let observedWeiboCookieStore {
+                model.refreshWeiboSession(from: observedWeiboCookieStore, persist: true)
+                observedWeiboCookieStore.remove(self)
+                self.observedWeiboCookieStore = nil
+            }
             pageInspectionTask?.cancel()
             pageInspectionTask = nil
             progressObservation?.invalidate()
             progressObservation = nil
+        }
+
+        func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+            Task { @MainActor [weak model] in
+                model?.refreshWeiboSession(from: cookieStore, persist: true)
+            }
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -1972,7 +1998,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
                 model.isLoading = false
                 model.captureAccountAvatar(from: webView)
                 let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-                model.refreshWeiboSession(from: cookieStore, persist: !model.isAuthenticating)
+                model.refreshWeiboSession(from: cookieStore, persist: true)
                 model.fetchAccountAvatar(from: cookieStore)
                 inspectWeiboPage(webView)
             }
@@ -2090,7 +2116,7 @@ private struct StoredWebCookie: Codable {
     }
 }
 
-private enum WeiboSessionCookieStore {
+enum WeiboSessionCookieStore {
     private static let defaultsKey = "weibo.session.cookies"
     private static let environmentKey = "WEIBO_COOKIES_JSON"
     private static let displayNameDefaultsKey = "weibo.session.displayName"
@@ -2102,37 +2128,59 @@ private enum WeiboSessionCookieStore {
         return UserDefaults.standard.string(forKey: displayNameDefaultsKey)
     }
 
-    static func store(displayName: String) {
-        UserDefaults.standard.set(displayName, forKey: displayNameDefaultsKey)
+    static func store(displayName: String, defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: logoutSuppressedKey) else { return }
+        defaults.set(displayName, forKey: displayNameDefaultsKey)
     }
 
-    static func store(cookies: [HTTPCookie]) {
+    static func store(cookies: [HTTPCookie], defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: logoutSuppressedKey) else { return }
+        guard let data = archivedData(for: cookies) else { return }
+        defaults.set(data, forKey: defaultsKey)
+    }
+
+    static func archivedData(for cookies: [HTTPCookie]) -> Data? {
         let weiboCookies = cookies.filter { cookie in
             let domain = cookie.domain.lowercased()
             return domain.contains("weibo") || domain.contains("sina")
         }
         guard !weiboCookies.isEmpty,
-              let data = try? JSONEncoder().encode(weiboCookies.map(StoredWebCookie.init(cookie:))) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
-        UserDefaults.standard.set(false, forKey: logoutSuppressedKey)
+              let data = try? JSONEncoder().encode(weiboCookies.map(StoredWebCookie.init(cookie:))) else { return nil }
+        return data
     }
 
-    static func importFromEnvironmentIfPresent() {
-        guard !UserDefaults.standard.bool(forKey: logoutSuppressedKey) else { return }
-        if let displayName = ProcessInfo.processInfo.environment[displayNameEnvironmentKey],
+    static func restoredCookies(from data: Data) -> [HTTPCookie] {
+        guard let cookies = try? JSONDecoder().decode([StoredWebCookie].self, from: data) else { return [] }
+        return cookies.compactMap(\.httpCookie)
+    }
+
+    static func allowPersistence(defaults: UserDefaults = .standard) {
+        defaults.set(false, forKey: logoutSuppressedKey)
+    }
+
+    static func importFromEnvironmentIfPresent(
+        defaults: UserDefaults = .standard,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        guard !defaults.bool(forKey: logoutSuppressedKey) else { return }
+        if let displayName = environment[displayNameEnvironmentKey],
            !displayName.isEmpty {
-            store(displayName: displayName)
+            store(displayName: displayName, defaults: defaults)
         }
-        guard let raw = ProcessInfo.processInfo.environment[environmentKey],
+        guard let raw = environment[environmentKey],
               let data = raw.data(using: .utf8),
               (try? JSONDecoder().decode([StoredWebCookie].self, from: data)) != nil else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        defaults.set(data, forKey: defaultsKey)
     }
 
-    static func clear() {
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
-        UserDefaults.standard.removeObject(forKey: displayNameDefaultsKey)
-        UserDefaults.standard.set(true, forKey: logoutSuppressedKey)
+    static func clear(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: defaultsKey)
+        defaults.removeObject(forKey: displayNameDefaultsKey)
+        defaults.set(true, forKey: logoutSuppressedKey)
+    }
+
+    static func storedCookiesData(defaults: UserDefaults = .standard) -> Data? {
+        defaults.data(forKey: defaultsKey)
     }
 
     @MainActor
@@ -2180,7 +2228,7 @@ private enum WeiboSessionCookieStore {
 
     private static func importedOrStoredData() -> Data? {
         importFromEnvironmentIfPresent()
-        return UserDefaults.standard.data(forKey: defaultsKey)
+        return storedCookiesData()
     }
 }
 
