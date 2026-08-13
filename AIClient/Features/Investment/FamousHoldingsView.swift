@@ -33,6 +33,7 @@ struct FamousHoldingsView: View {
     @Binding var showsDetail: Bool
     @State private var selectedIndex = 0
     @State private var selectedDetail: HoldingDetailRoute?
+    @State private var isManagerSelectorExpanded = false
 
     private var managers: [FamousHoldingsManager] {
         (store.holdings?.managers ?? []).sorted { managerPriority($0.key) < managerPriority($1.key) }
@@ -53,7 +54,15 @@ struct FamousHoldingsView: View {
                 }
 
                 if managers.count > 1 {
-                    managerMenu
+                    if isManagerSelectorExpanded {
+                        Color.black.opacity(0.08)
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture { closeManagerSelector() }
+                            .transition(.opacity)
+                    }
+
+                    managerSelector
                         .padding(.trailing, 16)
                         .padding(.bottom, 16)
                 }
@@ -104,46 +113,118 @@ struct FamousHoldingsView: View {
         .task(id: manager.key) { await store.loadDetail(managerKey: manager.key) }
     }
 
-    private var managerMenu: some View {
-        Menu {
-            ForEach(Array(managers.enumerated()), id: \.element.key) { index, manager in
-                Button {
-                    selectManager(at: index)
-                } label: {
-                    Label(
-                        manager.displayName,
-                        systemImage: index == selectedIndex ? "checkmark.circle.fill" : "person.crop.circle"
+    private var managerSelector: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            if isManagerSelectorExpanded {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(Array(managers.enumerated()), id: \.element.key) { index, manager in
+                            managerOption(manager, at: index)
+                        }
+                    }
+                    .padding(7)
+                }
+                .scrollIndicators(.hidden)
+                .frame(width: 252)
+                .frame(maxHeight: 356)
+                .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(HoldingsPalette.divider, lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.16), radius: 24, y: 10)
+                .transition(
+                    .asymmetric(
+                        insertion: .scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.96, anchor: .bottomTrailing).combined(with: .opacity)
                     )
-                }
+                )
             }
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
+                    isManagerSelectorExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if managers.indices.contains(selectedIndex) {
+                        InvestorPortraitImage(manager: managers[selectedIndex], contentMode: .fill)
+                            .frame(width: 34, height: 34)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.34), lineWidth: 1))
+                    } else {
+                        Image(systemName: "person.2.fill")
+                            .frame(width: 34, height: 34)
+                    }
+
+                    Text("选择")
+                        .font(.system(size: 13, weight: .bold))
+
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(isManagerSelectorExpanded ? 180 : 0))
+                }
+                .foregroundStyle(.white)
+                .padding(.leading, 6)
+                .padding(.trailing, 13)
+                .frame(height: 46)
+                .background(HoldingsPalette.purple, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: HoldingsPalette.purple.opacity(0.28), radius: 12, y: 6)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("选择投资人")
+            .accessibilityValue(isManagerSelectorExpanded ? "已展开" : "已收起")
+        }
+        .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isManagerSelectorExpanded)
+    }
+
+    private func managerOption(_ manager: FamousHoldingsManager, at index: Int) -> some View {
+        Button {
+            selectManager(at: index)
         } label: {
-            HStack(spacing: 8) {
-                if managers.indices.contains(selectedIndex) {
-                    InvestorPortraitImage(manager: managers[selectedIndex], contentMode: .fill)
-                        .frame(width: 34, height: 34)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.34), lineWidth: 1))
-                } else {
-                    Image(systemName: "person.2.fill")
-                        .frame(width: 34, height: 34)
+            HStack(spacing: 11) {
+                InvestorPortraitImage(manager: manager, contentMode: .fill)
+                    .frame(width: 40, height: 40)
+                    .clipShape(Circle())
+                    .overlay {
+                        Circle().stroke(
+                            index == selectedIndex ? HoldingsPalette.purple.opacity(0.65) : HoldingsPalette.divider,
+                            lineWidth: index == selectedIndex ? 2 : 1
+                        )
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(manager.displayName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(manager.institutionName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                Text("选择")
-                    .font(.system(size: 13, weight: .bold))
+                Spacer(minLength: 6)
 
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .bold))
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(HoldingsPalette.purple, in: Circle())
+                    .opacity(index == selectedIndex ? 1 : 0)
             }
-            .foregroundStyle(.white)
-            .padding(.leading, 6)
-            .padding(.trailing, 13)
-            .frame(height: 46)
-            .background(HoldingsPalette.purple, in: Capsule())
-            .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
-            .shadow(color: HoldingsPalette.purple.opacity(0.28), radius: 12, y: 6)
+            .padding(.horizontal, 10)
+            .frame(height: 56)
+            .background(
+                index == selectedIndex ? HoldingsPalette.purple.opacity(0.09) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("选择投资人")
+        .accessibilityLabel("\(manager.displayName)，\(manager.institutionName)")
+        .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
     }
 
     private func hero(_ manager: FamousHoldingsManager) -> some View {
@@ -616,8 +697,15 @@ struct FamousHoldingsView: View {
     private func selectManager(at index: Int) {
         guard managers.indices.contains(index) else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-        withAnimation(.easeInOut(duration: 0.22)) {
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
             selectedIndex = index
+            isManagerSelectorExpanded = false
+        }
+    }
+
+    private func closeManagerSelector() {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
+            isManagerSelectorExpanded = false
         }
     }
 
