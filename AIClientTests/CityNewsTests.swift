@@ -65,11 +65,34 @@ final class CityNewsTests: XCTestCase {
         var journey = CityRegionJourney(path: CityNewsMockData.path(to: "shenzhen-440305"))
         let futian = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen-440304"))
 
-        XCTAssertEqual(journey.contextualRegions.map(\.name), ["南山区", "福田区", "罗湖区", "宝安区"])
+        XCTAssertEqual(journey.mapScope.name, "深圳市")
+        XCTAssertEqual(journey.mapRegions.map(\.name), ["南山区", "福田区", "罗湖区", "宝安区"])
+        XCTAssertEqual(journey.selectedMapRegionID, "shenzhen-440305")
         XCTAssertTrue(journey.selectPeer(futian))
         XCTAssertEqual(journey.current.name, "福田区")
         XCTAssertEqual(journey.regionIDs, ["guangdong", "shenzhen", "shenzhen-440304"])
+        XCTAssertEqual(journey.mapScope.name, "深圳市")
+        XCTAssertEqual(journey.selectedMapRegionID, "shenzhen-440304")
         XCTAssertFalse(journey.selectPeer(futian))
+    }
+
+    func testMapScopeOnlyChangesWhenTheGeographicViewportChanges() throws {
+        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
+        let shenzhen = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen"))
+        let nanshan = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen-440305"))
+        var journey = CityRegionJourney()
+
+        XCTAssertEqual(journey.mapScope.id, "china")
+        XCTAssertTrue(journey.enter(guangdong))
+        XCTAssertEqual(journey.mapScope.id, "guangdong")
+        XCTAssertTrue(journey.enter(shenzhen))
+        XCTAssertEqual(journey.mapScope.id, "shenzhen")
+        XCTAssertTrue(journey.enter(nanshan))
+        XCTAssertEqual(journey.mapScope.id, "shenzhen")
+        XCTAssertEqual(journey.selectedMapRegionID, nanshan.id)
+        XCTAssertTrue(journey.goBack())
+        XCTAssertEqual(journey.mapScope.id, "shenzhen")
+        XCTAssertNil(journey.selectedMapRegionID)
     }
 
     private func assertContent(in region: CityRegion, file: StaticString = #filePath, line: UInt = #line) {
