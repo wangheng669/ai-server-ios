@@ -3514,8 +3514,8 @@ struct NewsCardView: View {
     private var rssCard: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
-                AvatarView(url: post.avatarURL, name: post.authorName, size: 25)
-                Text(post.authorName)
+                AvatarView(url: post.rssCardAvatarURL, name: post.rssCardSourceName, size: 25)
+                Text(post.rssCardSourceName)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.blue)
                     .lineLimit(1)
