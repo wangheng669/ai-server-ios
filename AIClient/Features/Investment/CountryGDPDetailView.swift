@@ -5,6 +5,7 @@ struct CountryGDPRoute: Hashable, Identifiable {
     let countryCode: String
     let iso2Code: String
     let countryName: String
+    let gdpPerCapitaUSD: Double?
 
     var id: String { countryCode }
 
@@ -12,8 +13,8 @@ struct CountryGDPRoute: Hashable, Identifiable {
         countryCode = country.countryCode
         iso2Code = country.iso2Code
         countryName = country.localizedName
+        gdpPerCapitaUSD = country.gdpPerCapitaUSD
     }
-
 }
 
 struct CountryGDPHistoryResponse: Decodable {
@@ -74,17 +75,17 @@ struct CountryGDPDetailView: View {
             if let history {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                    hero(history)
+                        hero(history)
                             .padding(.horizontal, InvestmentDesign.pageInset)
-                            .padding(.top, 14)
-                            .padding(.bottom, 18)
+                            .padding(.top, 20)
+                            .padding(.bottom, 24)
 
                         metricStrip(history)
                             .padding(.horizontal, InvestmentDesign.pageInset)
-                            .padding(.bottom, 26)
+                            .padding(.bottom, 34)
 
                         trendSection(history)
-                            .padding(.bottom, 28)
+                            .padding(.bottom, 36)
 
                         annualHistory(history)
 
@@ -118,7 +119,7 @@ struct CountryGDPDetailView: View {
                 .padding(InvestmentDesign.pageInset)
             }
         }
-        .background(GDPDesign.porcelain)
+        .background(InvestmentDesign.surface)
         .safeAreaInset(edge: .top, spacing: 0) {
             detailHeader
         }
@@ -128,22 +129,22 @@ struct CountryGDPDetailView: View {
 
     private var detailHeader: some View {
         HStack {
-            Text("经济概览")
-                .font(.system(size: 16, weight: .semibold))
+            Text("国家 GDP")
+                .font(.headline)
             Spacer()
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 32, height: 32)
                     .background(Color(uiColor: .tertiarySystemFill), in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("关闭")
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
-        .frame(height: 52)
-        .background(GDPDesign.porcelain)
+        .frame(height: 50)
+        .background(InvestmentDesign.surface)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(InvestmentDesign.divider)
@@ -152,13 +153,13 @@ struct CountryGDPDetailView: View {
     }
 
     private func hero(_ history: CountryGDPHistory?) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .center, spacing: 11) {
-                FlatCountryFlag(iso2Code: route.iso2Code, width: 42, height: 28)
+                FlatCountryFlag(iso2Code: route.iso2Code, width: 46, height: 31)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(localizedName)
-                        .font(.title3.bold())
-                    Text("\(route.countryCode)  ·  名义 GDP")
+                        .font(.title2.bold())
+                    Text("\(route.countryCode) · 世界银行")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.tertiary)
                         .tracking(0.3)
@@ -166,13 +167,16 @@ struct CountryGDPDetailView: View {
             }
 
             if let latest = history?.points.last {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("GDP 总量")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text(CountryGDPFormat.compact(latest.gdpCurrentUSD))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .font(.system(size: 38, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                        .minimumScaleFactor(0.78)
+                        .minimumScaleFactor(0.7)
                         .lineLimit(1)
-                    Text(verbatim: "\(latest.year) 年 · 现价美元")
+                    Text(verbatim: "\(latest.year) 年 · 现价美元口径")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -182,27 +186,29 @@ struct CountryGDPDetailView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func metricStrip(_ history: CountryGDPHistory) -> some View {
         let latest = history.points.last
         let previous = history.points.dropLast().last
-        let period = history.points.first.map { "\($0.year)–\(latest?.year ?? $0.year)" } ?? "—"
         let growth = latest.flatMap { latest in
             previous.flatMap { $0.gdpCurrentUSD > 0 ? (latest.gdpCurrentUSD / $0.gdpCurrentUSD - 1) * 100 : nil }
         }
         return HStack(spacing: 0) {
-            metricCell("全球排名", latest.map { "第 \($0.rank) 名" } ?? "—", tint: InvestmentDesign.accent)
-            metricDivider
+            metricCell("全球位次", latest.map { "\($0.rank)" } ?? "—", tint: .primary)
             metricCell(
                 "同比变化",
                 growth.map { "\($0 >= 0 ? "+" : "")\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "—",
                 tint: (growth ?? 0) >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss
             )
-            metricDivider
-            metricCell("数据区间", period, tint: .primary)
+            metricCell(
+                "人均 GDP",
+                route.gdpPerCapitaUSD.map(CountryGDPFormat.perCapita) ?? "—",
+                tint: .primary
+            )
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 16)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(InvestmentDesign.divider)
@@ -216,24 +222,19 @@ struct CountryGDPDetailView: View {
     }
 
     private func metricCell(_ label: String, _ value: String, tint: Color) -> some View {
-        VStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(tint)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private var metricDivider: some View {
-        Rectangle()
-            .fill(InvestmentDesign.divider)
-            .frame(width: 0.5, height: 34)
+        .accessibilityElement(children: .combine)
     }
 
     private func annualRow(_ point: CountryGDPHistoryPoint, isLatest: Bool) -> some View {
@@ -241,7 +242,7 @@ struct CountryGDPDetailView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(point.year))
                     .font(.body.weight(isLatest ? .semibold : .regular))
-                Text("全球第 \(point.rank) 名")
+                Text("全球位次 \(point.rank)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -262,11 +263,11 @@ struct CountryGDPDetailView: View {
         let yMaximum = chartMaximum(history)
         let yTicks = chartTicks(maximum: yMaximum)
 
-        return VStack(alignment: .leading, spacing: 18) {
+        return VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("长期走势")
-                        .font(.headline)
+                    Text("GDP 走势")
+                        .font(.title3.bold())
                     Text(verbatim: "\(history.points.first?.year ?? 0)–\(history.points.last?.year ?? 0) · 现价美元")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -360,7 +361,7 @@ struct CountryGDPDetailView: View {
                         .accessibilityHint("在图表上左右滑动查看不同年份")
                 }
             }
-            .frame(height: 208)
+            .frame(height: 230)
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
     }
@@ -420,14 +421,14 @@ struct CountryGDPDetailView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("历年数据")
-                    .font(.headline)
+                    .font(.title3.bold())
                 Spacer()
                 Text("\(history.points.count) 年")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, InvestmentDesign.pageInset)
-            .padding(.bottom, 10)
+            .padding(.bottom, 12)
 
             LazyVStack(spacing: 0) {
                 ForEach(Array(history.points.reversed().enumerated()), id: \.element.id) { index, point in
@@ -439,7 +440,6 @@ struct CountryGDPDetailView: View {
                     }
                 }
             }
-            .background(InvestmentDesign.surface)
         }
     }
 
