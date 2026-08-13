@@ -71,6 +71,7 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
     }
 
     var preferredAvatarURL: URL? {
+        guard avatarStatus?.lowercased() != "fallback" else { return nil }
         if let avatar, !avatar.isEmpty,
            let url = URL(string: avatar, relativeTo: ServerConfiguration.currentURL)?.absoluteURL {
             return url
