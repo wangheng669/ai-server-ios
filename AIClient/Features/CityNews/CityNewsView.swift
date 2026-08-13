@@ -308,6 +308,7 @@ struct CityNewsView: View {
     @State private var displayedRegion: CityRegion
     @State private var transitionIntent: CityRegionTransitionIntent?
     @State private var detailsOpacity = 1.0
+    @State private var detailsInteractionEnabled = true
     @State private var contentTask: Task<Void, Never>?
 
     init() {
@@ -356,7 +357,7 @@ struct CityNewsView: View {
                     reduceMotion: reduceMotion,
                     onSelect: selectRegion
                 )
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
                 .padding(.top, 12)
 
                 if !journey.mapRegions.isEmpty {
@@ -370,15 +371,30 @@ struct CityNewsView: View {
                 }
 
                 CityRegionDetails(region: displayedRegion)
-                    .opacity(detailsOpacity)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
-                    .padding(.bottom, 72)
+                .opacity(detailsOpacity)
+                .allowsHitTesting(detailsInteractionEnabled)
+                .accessibilityHidden(!detailsInteractionEnabled)
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 72)
             }
         }
         .scrollIndicators(.hidden)
+        .clipped()
         .background(CityNewsDesign.canvas)
         .tint(CityNewsDesign.accent)
+        .overlay(alignment: .top) {
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    CityNewsDesign.canvas
+                        .frame(height: geometry.safeAreaInsets.top)
+                        .contentShape(Rectangle())
+                    Spacer(minLength: 0)
+                        .allowsHitTesting(false)
+                }
+            }
+            .accessibilityHidden(true)
+        }
         .sensoryFeedback(.selection, trigger: region.id)
         .accessibilityIdentifier("city-region-screen")
         .onAppear { settleContentImmediately() }
@@ -441,6 +457,8 @@ struct CityNewsView: View {
     private func refreshContent(to region: CityRegion, after delay: TimeInterval) {
         contentTask?.cancel()
         let phaseDuration = reduceMotion ? 0.07 : 0.1
+        let fadeInDuration = reduceMotion ? 0.07 : 0.14
+        detailsInteractionEnabled = false
 
         contentTask = Task { @MainActor in
             if delay > 0 {
@@ -453,9 +471,12 @@ struct CityNewsView: View {
             try? await Task.sleep(for: .seconds(phaseDuration))
             guard !Task.isCancelled else { return }
             displayedRegion = region
-            withAnimation(.easeIn(duration: reduceMotion ? 0.07 : 0.14)) {
+            withAnimation(.easeIn(duration: fadeInDuration)) {
                 detailsOpacity = 1
             }
+            try? await Task.sleep(for: .seconds(fadeInDuration))
+            guard !Task.isCancelled else { return }
+            detailsInteractionEnabled = true
         }
     }
 
@@ -467,6 +488,7 @@ struct CityNewsView: View {
         withTransaction(transaction) {
             displayedRegion = journey.current
             detailsOpacity = 1
+            detailsInteractionEnabled = true
         }
     }
 }
@@ -655,7 +677,7 @@ private struct CityRegionMapStage: View {
                 reduceMotion: reduceMotion,
                 onSelect: onSelect
             )
-            .padding(12)
+            .padding(4)
 
             Image(systemName: selectedRegionID == nil ? "hand.tap.fill" : "mappin.circle.fill")
                 .font(.system(size: 12, weight: .medium))
@@ -665,7 +687,7 @@ private struct CityRegionMapStage: View {
                 .padding(12)
                 .accessibilityHidden(true)
         }
-        .frame(height: 232)
+        .frame(height: 312)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
@@ -909,6 +931,8 @@ private struct CityMapCamera: View {
 }
 
 private struct CityAdministrativeMap: View {
+    @ScaledMetric(relativeTo: .caption2) private var scaledMapLabelSize: CGFloat = 9
+
     let scope: CityRegion
     let selectedRegionID: String?
     let selectableRegions: [CityRegion]
@@ -981,19 +1005,7 @@ private struct CityAdministrativeMap: View {
                         }
                     }
 
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            Text("行政边界")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .padding(8)
-                    .allowsHitTesting(false)
                 }
-                .padding(8)
             }
         }
     }
@@ -1035,7 +1047,7 @@ private struct CityAdministrativeMap: View {
 
     private func mapLabel(_ text: String, selected: Bool) -> some View {
         Text(text.replacingOccurrences(of: "省", with: "").replacingOccurrences(of: "市", with: ""))
-            .font(.system(size: 9, weight: .semibold))
+            .font(.system(size: min(max(scaledMapLabelSize, 9), 14), weight: .semibold))
             .foregroundStyle(selected ? .white : CityNewsDesign.accent)
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
@@ -1106,56 +1118,53 @@ private struct CityMapProjection {
 }
 
 private struct CityRegionDetails: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expandedSection: CityRegionDetailSection?
+
     let region: CityRegion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("城市速写")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(CityNewsDesign.accent)
-                    .tracking(0.8)
+        VStack(alignment: .leading, spacing: 12) {
+            disclosureCard(
+                section: .overview,
+                title: "城市速写",
+                subtitle: "概况与 \(region.facts.count) 项关键数据",
+                symbol: "text.alignleft"
+            ) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(region.introduction)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                Text(region.introduction)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            ForEach(region.facts, id: \.self) { fact in
+                                factLabel(fact)
+                            }
+                        }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(region.facts, id: \.self) { fact in
-                            factLabel(fact)
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(region.facts, id: \.self) { fact in
+                                factLabel(fact)
+                            }
                         }
                     }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(region.facts, id: \.self) { fact in
-                            factLabel(fact)
-                        }
-                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                Rectangle()
-                    .fill(CityNewsDesign.divider)
-                    .frame(height: 0.5)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+                .accessibilityIdentifier("city-details-overview-content")
             }
-            VStack(alignment: .leading, spacing: 12) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline) {
-                        newsHeading
-                        Spacer()
-                        regionLabel
-                    }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        newsHeading
-                        regionLabel
-                    }
-                }
-
+            disclosureCard(
+                section: .news,
+                title: "今日动态",
+                subtitle: "\(region.name) · \(region.news.count) 条",
+                symbol: "newspaper"
+            ) {
                 VStack(spacing: 0) {
                     ForEach(Array(region.news.enumerated()), id: \.element.id) { index, item in
                         CityRegionNewsRow(item: item)
@@ -1167,6 +1176,9 @@ private struct CityRegionDetails: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+                .accessibilityIdentifier("city-details-news-content")
             }
         }
     }
@@ -1176,19 +1188,92 @@ private struct CityRegionDetails: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .frame(minHeight: 28)
-            .background(CityNewsDesign.secondarySurface, in: Capsule())
+            .background(Color.primary.opacity(0.055), in: Capsule())
     }
 
-    private var newsHeading: some View {
-        Text("今日动态")
-            .font(.title3.weight(.bold))
+    private func disclosureCard<Content: View>(
+        section: CityRegionDetailSection,
+        title: String,
+        subtitle: String,
+        symbol: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isExpanded = expandedSection == section
+
+        return VStack(spacing: 0) {
+            Button {
+                toggle(section)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(CityNewsDesign.accent)
+                        .frame(width: 36, height: 36)
+                        .background(CityNewsDesign.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .frame(width: 44, height: 44)
+                }
+                .padding(.leading, 14)
+                .padding(.trailing, 8)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(CityPressStyle())
+            .accessibilityLabel("\(title)，\(subtitle)")
+            .accessibilityValue(isExpanded ? "已展开" : "已收起")
+            .accessibilityHint(isExpanded ? "收起\(title)" : "展开\(title)")
+            .accessibilityIdentifier("city-details-\(section.rawValue)-toggle")
+
+            if isExpanded {
+                Rectangle()
+                    .fill(CityNewsDesign.divider)
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 16)
+
+                content()
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .background(CityNewsDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.primary.opacity(0.045), lineWidth: 0.7)
+        }
     }
 
-    private var regionLabel: some View {
-        Text(region.name)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+    private func toggle(_ section: CityRegionDetailSection) {
+        let changes = {
+            expandedSection = expandedSection == section ? nil : section
+        }
+        if reduceMotion {
+            changes()
+        } else {
+            withAnimation(.smooth(duration: 0.28, extraBounce: 0)) {
+                changes()
+            }
+        }
     }
+
+}
+
+private enum CityRegionDetailSection: String, Hashable {
+    case overview
+    case news
 }
 
 private struct CityRegionPicker: View {
