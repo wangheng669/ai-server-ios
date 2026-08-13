@@ -33,7 +33,6 @@ struct FamousHoldingsView: View {
     @Binding var showsDetail: Bool
     @State private var selectedIndex = 0
     @State private var selectedDetail: HoldingDetailRoute?
-    @State private var showsManagerSelector = false
 
     private var managers: [FamousHoldingsManager] {
         (store.holdings?.managers ?? []).sorted { managerPriority($0.key) < managerPriority($1.key) }
@@ -41,42 +40,18 @@ struct FamousHoldingsView: View {
 
     var body: some View {
         NavigationStack {
-            GeometryReader { proxy in
-                ZStack(alignment: .bottomTrailing) {
-                    Group {
-                        if managers.indices.contains(selectedIndex) {
-                            let manager = managers[selectedIndex]
-                            overview(store.managerDetails[manager.key] ?? manager)
-                        } else if store.isLoading {
-                            ProgressView("正在读取公开持仓披露").foregroundStyle(.secondary)
-                        } else {
-                            unavailableView
-                        }
-                    }
-
-                    if managers.count > 1 {
-                        if showsManagerSelector {
-                            Color.black.opacity(0.08)
-                                .ignoresSafeArea()
-                                .contentShape(Rectangle())
-                                .onTapGesture { dismissManagerSelector() }
-                                .transition(.opacity)
-
-                            managerSelectorPanel(maxWidth: min(310, proxy.size.width - 32))
-                                .padding(.trailing, 16)
-                                .padding(.bottom, 72)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-
-                        managerSelectorButton
-                            .padding(.trailing, 16)
-                            .padding(.bottom, 16)
-                    }
+            Group {
+                if managers.indices.contains(selectedIndex) {
+                    let manager = managers[selectedIndex]
+                    overview(store.managerDetails[manager.key] ?? manager)
+                } else if store.isLoading {
+                    ProgressView("正在读取公开持仓披露").foregroundStyle(.secondary)
+                } else {
+                    unavailableView
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(HoldingsPalette.canvas.ignoresSafeArea())
-                .animation(.snappy(duration: 0.24), value: showsManagerSelector)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(HoldingsPalette.canvas.ignoresSafeArea())
             .task {
                 await store.load()
                 #if DEBUG
@@ -109,6 +84,9 @@ struct FamousHoldingsView: View {
     private func overview(_ manager: FamousHoldingsManager) -> some View {
         ScrollView {
             VStack(spacing: InvestmentDesign.sectionSpacing) {
+                if managers.count > 1 {
+                    managerRail
+                }
                 hero(manager)
                 filingSummary(manager)
                 filingInsights(manager)
@@ -121,17 +99,80 @@ struct FamousHoldingsView: View {
         .task(id: manager.key) { await store.loadDetail(managerKey: manager.key) }
     }
 
+    private var managerRail: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("投资人")
+                    .font(.system(size: 15, weight: .bold))
+                Text("\(managers.count) 位")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("点击切换")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 18)
+
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 8) {
+                    ForEach(Array(managers.enumerated()), id: \.element.key) { index, manager in
+                        Button { selectManager(at: index) } label: {
+                            HStack(spacing: 9) {
+                                InvestorPortraitImage(manager: manager, contentMode: .fill)
+                                    .frame(width: 42, height: 42)
+                                    .clipShape(Circle())
+                                    .overlay {
+                                        Circle().stroke(
+                                            index == selectedIndex ? HoldingsPalette.purple : HoldingsPalette.divider,
+                                            lineWidth: index == selectedIndex ? 2 : 1
+                                        )
+                                    }
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(manager.displayName)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text(shortInstitutionName(manager))
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(index == selectedIndex ? HoldingsPalette.purple : .secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .frame(width: 148, height: 58, alignment: .leading)
+                            .background(
+                                index == selectedIndex ? HoldingsPalette.purple.opacity(0.09) : HoldingsPalette.card,
+                                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                    .stroke(index == selectedIndex ? HoldingsPalette.purple.opacity(0.38) : HoldingsPalette.divider)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(manager.displayName)，\(manager.institutionName)")
+                        .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .padding(.top, 14)
+    }
+
     private func hero(_ manager: FamousHoldingsManager) -> some View {
-        VStack(spacing: 13) {
+        VStack(spacing: 15) {
             HStack(alignment: .center, spacing: 15) {
                 InvestorPortraitImage(manager: manager, contentMode: .fill)
-                    .frame(width: 68, height: 68)
-                    .background(HoldingsPalette.purple.opacity(0.14), in: Circle())
+                    .frame(width: 76, height: 76)
                     .clipShape(Circle())
-                    .overlay(Circle().stroke(HoldingsPalette.purple.opacity(0.25), lineWidth: 1))
+                    .overlay(Circle().stroke(HoldingsPalette.purple.opacity(0.30), lineWidth: 1))
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("当前关注")
+                    Text("公开持仓追踪")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(HoldingsPalette.purple)
                         .padding(.horizontal, 9)
@@ -157,23 +198,46 @@ struct FamousHoldingsView: View {
                 .foregroundStyle(.primary)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 18)
 
-            HStack {
-                pageProgress
-                Spacer()
-                Text("共 \(managers.count) 位投资人")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.secondary)
+            Button { selectedDetail = HoldingDetailRoute(managerKey: manager.key) } label: {
+                HStack(spacing: 6) {
+                    Text("查看完整持仓与变动")
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(HoldingsPalette.purple)
+                .padding(.horizontal, 13)
+                .frame(height: 38)
+                .background(HoldingsPalette.purple.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
             }
-            .padding(.horizontal, 18)
+            .buttonStyle(.plain)
         }
-        .padding(.top, 18)
-        .padding(.bottom, 14)
+        .padding(16)
         .frame(maxWidth: .infinity)
-        .background(HoldingsPalette.card)
+        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
+                .stroke(HoldingsPalette.divider)
+        }
+        .padding(.horizontal, 16)
         .accessibilityAction(named: "下一个人物") { moveManager(by: 1) }
         .accessibilityAction(named: "上一个人物") { moveManager(by: -1) }
+    }
+
+    private func shortInstitutionName(_ manager: FamousHoldingsManager) -> String {
+        switch manager.key {
+        case "ark": "ARK"
+        case "berkshire": "伯克希尔"
+        case "duanyongping": "H&H"
+        case "lilu": "喜马拉雅资本"
+        case "danbin": "东方港湾"
+        case "bridgewater": "桥水"
+        case "soros": "索罗斯基金"
+        case "sunmasayoshi": "软银"
+        default:
+            manager.institutionName
+        }
     }
 
     private func filingSummary(_ manager: FamousHoldingsManager) -> some View {
@@ -248,10 +312,9 @@ struct FamousHoldingsView: View {
                     Text("变化最大").font(.system(size: 16, weight: .bold))
                     Image(systemName: "info.circle").font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer()
-                    Button { selectedDetail = HoldingDetailRoute(managerKey: manager.key) } label: {
-                        HStack(spacing: 3) { Text("查看更多"); Image(systemName: "chevron.right") }
-                    }
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(HoldingsPalette.purple)
+                    Text("权重变化")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
                 let topChanges = Array(manager.changes.sorted { abs($0.weightChangePct) > abs($1.weightChangePct) }.prefix(3))
                 ForEach(Array(topChanges.enumerated()), id: \.element.id) { index, change in
@@ -360,8 +423,12 @@ struct FamousHoldingsView: View {
         switch manager.key {
         case "ark": "Cathie Wood"
         case "berkshire": "Warren Buffett"
+        case "duanyongping": "Duan Yongping"
+        case "lilu": "Li Lu"
+        case "danbin": "Dan Bin"
         case "bridgewater": "Ray Dalio"
         case "soros": "George Soros"
+        case "sunmasayoshi": "Masayoshi Son"
         default: manager.displayName
         }
     }
@@ -372,16 +439,6 @@ struct FamousHoldingsView: View {
         case "CRCL", "COIN", "HOOD", "SQ": "金融科技"
         case "AVGO", "AMD", "NVDA": "半导体"
         default: sectorName(displaySymbol(change))
-        }
-    }
-
-    private var pageProgress: some View {
-        HStack(spacing: 5) {
-            ForEach(managers.indices, id: \.self) { index in
-                Capsule()
-                    .fill(index == selectedIndex ? HoldingsPalette.purple : Color.secondary.opacity(0.18))
-                    .frame(width: index == selectedIndex ? 22 : 14, height: 2)
-            }
         }
     }
 
@@ -588,105 +645,11 @@ struct FamousHoldingsView: View {
         .padding(.top, 9)
     }
 
-    private var managerSelectorButton: some View {
-        Button {
-            showsManagerSelector.toggle()
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: showsManagerSelector ? "xmark" : "person.2.fill")
-                    .font(.system(size: 13, weight: .bold))
-                Text(showsManagerSelector ? "收起" : "选择")
-                    .font(.system(size: 14, weight: .bold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .frame(height: 46)
-            .background(HoldingsPalette.purple, in: Capsule())
-            .overlay {
-                Capsule().stroke(.white.opacity(0.18), lineWidth: 1)
-            }
-            .shadow(color: HoldingsPalette.purple.opacity(0.3), radius: 12, y: 6)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(showsManagerSelector ? "收起投资人选择" : "选择投资人")
-        .zIndex(2)
-    }
-
-    private func managerSelectorPanel(maxWidth: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("选择投资人")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 8)
-
-            ForEach(Array(managers.enumerated()), id: \.element.key) { index, manager in
-                Button {
-                    selectManager(at: index)
-                } label: {
-                    HStack(spacing: 11) {
-                        InvestorPortraitImage(manager: manager, contentMode: .fill)
-                            .frame(width: 38, height: 38)
-                            .background(HoldingsPalette.purple.opacity(0.12), in: Circle())
-                            .clipShape(Circle())
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(manager.displayName)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.primary)
-                            Text(manager.institutionName)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer(minLength: 8)
-
-                        if index == selectedIndex {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 24, height: 24)
-                                .background(HoldingsPalette.purple, in: Circle())
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 56)
-                    .background(
-                        index == selectedIndex ? HoldingsPalette.purple.opacity(0.08) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(manager.displayName)，\(manager.institutionName)")
-                .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
-            }
-        }
-        .padding(6)
-        .frame(width: maxWidth)
-        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(HoldingsPalette.divider, lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.16), radius: 24, y: 10)
-        .zIndex(1)
-    }
-
     private func selectManager(at index: Int) {
         guard managers.indices.contains(index) else { return }
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.easeInOut(duration: 0.22)) {
             selectedIndex = index
-            showsManagerSelector = false
-        }
-    }
-
-    private func dismissManagerSelector() {
-        withAnimation(.easeOut(duration: 0.18)) {
-            showsManagerSelector = false
         }
     }
 
@@ -793,15 +756,21 @@ private struct InvestorPortraitImage: View {
     @State private var image: UIImage?
 
     var body: some View {
-        Group {
+        ZStack {
+            Circle()
+                .fill(InvestorPortraitLoader.placeholderColor(for: manager).gradient)
+
+            Text(InvestorPortraitLoader.monogram(for: manager))
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+
             if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
-            } else {
-                Color.clear
             }
         }
+        .clipped()
         .task(id: manager.key) {
-            image = nil
+            image = InvestorPortraitLoader.bundledImage(for: manager)
             let loaded = await InvestorPortraitLoader.load(manager)
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.16)) { image = loaded }
@@ -812,7 +781,15 @@ private struct InvestorPortraitImage: View {
 enum InvestorPortraitLoader {
     @MainActor
     static func load(_ manager: FamousHoldingsManager) async -> UIImage? {
-        await ImageLoader.load(url(for: manager), targetSize: targetSize)
+        if let remoteImage = await ImageLoader.load(url(for: manager), targetSize: targetSize) {
+            return remoteImage
+        }
+        return bundledImage(for: manager)
+    }
+
+    @MainActor
+    static func bundledImage(for manager: FamousHoldingsManager) -> UIImage? {
+        UIImage(named: bundledAssetName(for: manager.key))
     }
 
     @MainActor
@@ -836,6 +813,38 @@ enum InvestorPortraitLoader {
         let value = manager.portraitUrl.flatMap { $0.isEmpty ? nil : $0 }
             ?? "/img/sec13f/\(manager.key).webp"
         return URL(string: value, relativeTo: ServerConfiguration.currentURL)?.absoluteURL
+    }
+
+    static func monogram(for manager: FamousHoldingsManager) -> String {
+        let compact = manager.displayName
+            .replacingOccurrences(of: "·", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        return String(compact.prefix(2))
+    }
+
+    static func placeholderColor(for manager: FamousHoldingsManager) -> Color {
+        let colors: [Color] = [
+            HoldingsPalette.purple,
+            HoldingsPalette.teal,
+            HoldingsPalette.orange,
+            HoldingsPalette.pink
+        ]
+        let value = manager.key.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return colors[value % colors.count]
+    }
+
+    private static func bundledAssetName(for key: String) -> String {
+        switch key {
+        case "ark": "InvestorPortraitARK"
+        case "berkshire": "InvestorPortraitBerkshire"
+        case "duanyongping": "InvestorPortraitDuanYongping"
+        case "lilu": "InvestorPortraitLiLu"
+        case "danbin": "InvestorPortraitDanBin"
+        case "bridgewater": "InvestorPortraitBridgewater"
+        case "soros": "InvestorPortraitSoros"
+        case "sunmasayoshi": "InvestorPortraitMasayoshiSon"
+        default: ""
+        }
     }
 }
 
