@@ -100,12 +100,15 @@ struct FamousHoldingsView: View {
 
     private func overview(_ manager: FamousHoldingsManager) -> some View {
         ScrollView {
-            VStack(spacing: InvestmentDesign.sectionSpacing) {
+            VStack(spacing: 0) {
                 hero(manager)
+                sectionDivider
                 filingSummary(manager)
+                sectionDivider
                 filingInsights(manager)
                 footer(manager)
             }
+            .background(HoldingsPalette.card)
             .padding(.bottom, 18)
         }
         .scrollIndicators(.hidden)
@@ -228,10 +231,10 @@ struct FamousHoldingsView: View {
     }
 
     private func hero(_ manager: FamousHoldingsManager) -> some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 18) {
             HStack(alignment: .center, spacing: 15) {
                 InvestorPortraitImage(manager: manager, contentMode: .fill)
-                    .frame(width: 76, height: 76)
+                    .frame(width: 72, height: 72)
                     .clipShape(Circle())
                     .overlay(Circle().stroke(HoldingsPalette.purple.opacity(0.30), lineWidth: 1))
 
@@ -265,26 +268,24 @@ struct FamousHoldingsView: View {
 
             Button { selectedDetail = HoldingDetailRoute(managerKey: manager.key) } label: {
                 HStack(spacing: 6) {
-                    Text("查看完整持仓与变动")
+                    Text("完整持仓")
                     Spacer()
-                    Image(systemName: "arrow.up.right")
+                    Text("查看全部 \(manager.positionsCount) 只")
+                        .fontWeight(.regular)
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(HoldingsPalette.purple)
-                .padding(.horizontal, 13)
-                .frame(height: 38)
-                .background(HoldingsPalette.purple.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .padding(16)
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 16)
         .frame(maxWidth: .infinity)
-        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
-                .stroke(HoldingsPalette.divider)
-        }
-        .padding(.horizontal, 16)
         .accessibilityAction(named: "下一个人物") { moveManager(by: 1) }
         .accessibilityAction(named: "上一个人物") { moveManager(by: -1) }
     }
@@ -299,22 +300,16 @@ struct FamousHoldingsView: View {
             summaryDivider
             summaryItem("持仓总市值", dollarValue(manager.totalValueUsd), "dollarsign.circle.fill")
         }
-        .padding(.vertical, 15)
-        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
-                .stroke(HoldingsPalette.divider)
-        }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 18)
     }
 
     private func summaryItem(_ title: String, _ value: String, _ icon: String) -> some View {
         VStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(HoldingsPalette.purple)
-                .frame(width: 30, height: 30)
-                .background(HoldingsPalette.purple.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+                .frame(height: 15)
             Text(value)
                 .font(.system(size: 14, weight: .bold))
                 .monospacedDigit()
@@ -330,15 +325,18 @@ struct FamousHoldingsView: View {
     }
 
     private func filingInsights(_ manager: FamousHoldingsManager) -> some View {
-        VStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 15) {
                 HStack {
-                    Text("本季度动作分布").font(.system(size: 16, weight: .bold))
-                    Image(systemName: "info.circle").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("本季度动作").font(.system(size: 16, weight: .bold))
+                    Spacer()
+                    Text("共 \(manager.summary.new + manager.summary.increased + manager.summary.decreased + manager.summary.exited) 次变动")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 18) {
-                    actionDonut(manager.summary).frame(width: 138, height: 138)
-                    VStack(spacing: 11) {
+                HStack(spacing: 16) {
+                    actionDonut(manager.summary).frame(width: 120, height: 120)
+                    VStack(spacing: 10) {
                         filingActionRow("新建仓", manager.summary.new, HoldingsPalette.blue, manager.summary)
                         filingActionRow("增持", manager.summary.increased, HoldingsPalette.green, manager.summary)
                         filingActionRow("减持", manager.summary.decreased, HoldingsPalette.orange, manager.summary)
@@ -346,22 +344,17 @@ struct FamousHoldingsView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                Text("基于持仓变动数量，占比合计 100%")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
             }
-            .padding(18)
-            .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
-                    .stroke(HoldingsPalette.divider)
-            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+
+            sectionDivider
 
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text("变化最大").font(.system(size: 16, weight: .bold))
-                    Image(systemName: "info.circle").font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer()
-                    Text("权重变化")
+                    Text("按权重变化排序")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -375,14 +368,15 @@ struct FamousHoldingsView: View {
                 Text("仅显示本季度权重变化绝对值最大的 3 只持仓")
                     .font(.system(size: 9)).foregroundStyle(.secondary)
             }
-            .padding(18)
-            .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
-                    .stroke(HoldingsPalette.divider)
-            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
         }
-        .padding(.horizontal, 16)
+    }
+
+    private var sectionDivider: some View {
+        Divider()
+            .overlay(HoldingsPalette.divider)
+            .padding(.horizontal, 20)
     }
 
     private func actionDonut(_ summary: FamousHoldingsSummary) -> some View {
@@ -690,8 +684,9 @@ struct FamousHoldingsView: View {
         }
         .font(.system(size: 8))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 18)
-        .padding(.top, 9)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .overlay(alignment: .top) { sectionDivider }
     }
 
     private func selectManager(at index: Int) {
