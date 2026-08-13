@@ -985,7 +985,7 @@ struct NewsFeedView: View {
                             rssSourcePickerRow(
                                 id: feed.id,
                                 name: feed.name,
-                                iconURL: feed.iconURL
+                                iconURL: feed.preferredAvatarURL
                             )
                             .id("rss-source-\(feed.id)")
                         }
@@ -1030,7 +1030,7 @@ struct NewsFeedView: View {
             HStack(spacing: 7) {
                 if let selectedFeed {
                     AvatarView(
-                        url: selectedFeed.iconURL,
+                        url: selectedFeed.preferredAvatarURL,
                         name: selectedFeed.name,
                         size: 24,
                         rejectsUpscaledImages: true
@@ -1083,7 +1083,7 @@ struct NewsFeedView: View {
             closeRSSSourceMenu()
         } label: {
             HStack(spacing: 10) {
-                rssSourceIcon(url: iconURL, name: name, size: 24)
+                rssSourceIcon(url: iconURL, name: name, size: 24, isAggregate: id == nil)
 
                 Text(name)
                     .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
@@ -1107,10 +1107,13 @@ struct NewsFeedView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    @ViewBuilder private func rssSourceIcon(url: URL?, name: String, size: CGFloat) -> some View {
-        if let url {
-            AvatarView(url: url, name: name, size: size, rejectsUpscaledImages: true)
-        } else {
+    @ViewBuilder private func rssSourceIcon(
+        url: URL?,
+        name: String,
+        size: CGFloat,
+        isAggregate: Bool
+    ) -> some View {
+        if isAggregate {
             Circle()
                 .fill(Color(uiColor: .tertiarySystemFill))
                 .frame(width: size, height: size)
@@ -1119,6 +1122,8 @@ struct NewsFeedView: View {
                         .font(.system(size: size * 0.38, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
+        } else {
+            AvatarView(url: url, name: name, size: size, rejectsUpscaledImages: true)
         }
     }
 
