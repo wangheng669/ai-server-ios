@@ -284,7 +284,7 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
         case .japan: ["^N225"]
         case .korea: ["^KS11"]
         case .europe: ["^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]
-        case .commodity: ["GC1!", "CL1!", "HG1!", "SI1!", "NG1!", "ZC1!"]
+        case .commodity: ["GC1!", "CL1!", "HG1!", "SI1!", "NG1!", "ZC1!", "LE1!", "GF1!", "HE1!"]
         case .crypto: ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT", "BINANCE:SOLUSDT", "BINANCE:BNBUSDT", "BINANCE:XRPUSDT", "BINANCE:DOGEUSDT"]
         }
     }
@@ -4191,10 +4191,15 @@ private struct CommodityLogo: View {
                 .fill(Color.white.opacity(0.14))
                 .frame(width: size * 0.72, height: size * 0.72)
                 .offset(x: size * 0.25, y: size * 0.24)
-            Text(kind.monogram)
-                .font(.system(size: size * (kind == .crudeOil ? 0.25 : 0.32), weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.72)
+            if kind.isLivestock {
+                Text(kind.logoText)
+                    .font(.system(size: size * 0.52))
+            } else {
+                Text(kind.logoText)
+                    .font(.system(size: size * (kind == .crudeOil ? 0.25 : 0.32), weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .minimumScaleFactor(0.72)
+            }
         }
         .frame(width: size, height: size)
         .overlay {
@@ -4219,6 +4224,12 @@ private struct CommodityLogo: View {
             [Color(red: 0.24, green: 0.67, blue: 0.96), Color(red: 0.10, green: 0.32, blue: 0.72)]
         case .corn:
             [Color(red: 0.64, green: 0.76, blue: 0.20), Color(red: 0.23, green: 0.48, blue: 0.15)]
+        case .liveCattle:
+            [Color(red: 0.73, green: 0.49, blue: 0.27), Color(red: 0.35, green: 0.20, blue: 0.12)]
+        case .feederCattle:
+            [Color(red: 0.38, green: 0.63, blue: 0.45), Color(red: 0.15, green: 0.34, blue: 0.22)]
+        case .leanHogs:
+            [Color(red: 0.94, green: 0.53, blue: 0.61), Color(red: 0.68, green: 0.23, blue: 0.34)]
         }
     }
 }

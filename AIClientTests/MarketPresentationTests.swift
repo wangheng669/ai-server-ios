@@ -490,11 +490,14 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testCommodityLogoKindsCoverDashboardSymbols() {
-        let symbols = ["GC1!", "CL1!", "HG1!", "SI1!", "NG1!", "ZC1!"]
+        let symbols = ["GC1!", "CL1!", "HG1!", "SI1!", "NG1!", "ZC1!", "LE1!", "GF1!", "HE1!"]
         let kinds = symbols.compactMap(CommodityLogoKind.init(symbol:))
 
         XCTAssertEqual(kinds.count, symbols.count)
-        XCTAssertEqual(Set(kinds.map(\.monogram)), Set(["Au", "WTI", "Cu", "Ag", "NG", "ZC"]))
+        XCTAssertEqual(Set(kinds.map(\.logoText)), Set(["Au", "WTI", "Cu", "Ag", "NG", "ZC", "🐂", "🐄", "🐖"]))
+        XCTAssertTrue(CommodityLogoKind(symbol: "LE1!")?.isLivestock == true)
+        XCTAssertTrue(CommodityLogoKind(symbol: "GF1!")?.isLivestock == true)
+        XCTAssertTrue(CommodityLogoKind(symbol: "HE1!")?.isLivestock == true)
         XCTAssertNil(CommodityLogoKind(symbol: "ES1!"))
     }
 
