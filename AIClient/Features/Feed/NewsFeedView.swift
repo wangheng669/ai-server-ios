@@ -537,8 +537,6 @@ struct NewsFeedView: View {
                 LazyVStack(spacing: 0) {
                     Color.clear.frame(height: topInset).id("feed-top")
                     if source == .rss {
-                        rssSourceFilterBar
-                        Divider().opacity(0.55)
                         if model.isLoadingRSSSelection {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
@@ -737,6 +735,14 @@ struct NewsFeedView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if source == .rss, model.source == .rss {
+                    rssSourceSelector
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 70)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
             .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
             .alert("页面加载失败", isPresented: Binding(
                 get: { webOpenError != nil },
@@ -917,11 +923,8 @@ struct NewsFeedView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var rssSourceFilterBar: some View {
+    private var rssSourceSelector: some View {
         rssSourcePickerTrigger
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color(uiColor: .systemBackground))
             .sheet(isPresented: $showsAllRSSSources) {
                 NavigationStack {
                     List {
@@ -965,38 +968,39 @@ struct NewsFeedView: View {
     private var rssSourcePickerTrigger: some View {
         let selectedFeed = model.rssFeeds.first { $0.id == model.selectedRSSFeedID }
         return Button { showsAllRSSSources = true } label: {
-            HStack(spacing: 8) {
-                HStack(spacing: 5) {
-                    Image(systemName: "clock")
-                    Text(model.selectedRSSFeedID == nil ? "最新发布 · 仅看 \(rssQualityThreshold.formatted(.number.precision(.fractionLength(1))))+" : "最新发布")
+            HStack(spacing: 7) {
+                if let selectedFeed {
+                    AvatarView(
+                        url: selectedFeed.iconURL,
+                        name: selectedFeed.name,
+                        size: 24,
+                        rejectsUpscaledImages: true
+                    )
+                    Text(selectedFeed.name)
+                        .lineLimit(1)
+                        .frame(maxWidth: 150)
+                } else {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text("全部来源")
                 }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
 
-                Spacer(minLength: 12)
-
-                HStack(spacing: 6) {
-                    if let selectedFeed {
-                        AvatarView(
-                            url: selectedFeed.iconURL,
-                            name: selectedFeed.name,
-                            size: 22,
-                            rejectsUpscaledImages: true
-                        )
-                        Text(selectedFeed.name)
-                            .lineLimit(1)
-                    } else {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                        Text("来源")
-                    }
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.blue)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
             }
-            .frame(height: 36)
-            .contentShape(Rectangle())
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(.regularMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color(uiColor: .separator).opacity(0.22), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("选择 RSS 来源")
