@@ -2043,9 +2043,16 @@ private struct EmbeddedWebView: UIViewRepresentable {
 
         func adoptLoaded(_ url: URL, in webView: WKWebView) {
             didBeginLoad = true
-            model.rememberReturnURL(webView.url ?? url)
+            let loadedURL = webView.url ?? url
+            model.rememberReturnURL(loadedURL)
             model.estimatedProgress = 1
             model.isLoading = false
+            if isWeiboHost(loadedURL.host) {
+                let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+                model.refreshWeiboSession(from: cookieStore, persist: true)
+                model.fetchAccountAvatar(from: cookieStore)
+                model.captureAccountAvatar(from: webView)
+            }
             inspectWeiboPage(webView)
         }
 
