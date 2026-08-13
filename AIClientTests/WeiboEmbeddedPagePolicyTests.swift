@@ -112,6 +112,34 @@ final class WeiboEmbeddedPagePolicyTests: XCTestCase {
         XCTAssertNotNil(WeiboSessionCookieStore.storedCookiesData(defaults: defaults))
     }
 
+    func testAvatarURLPersistsAcrossWebPageRecreationAndClearsOnLogout() throws {
+        let suiteName = "weibo-avatar-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let avatarURL = try XCTUnwrap(URL(string: "https://tvax.example.com/avatar.jpg"))
+
+        WeiboSessionCookieStore.allowPersistence(defaults: defaults)
+        WeiboSessionCookieStore.store(avatarURL: avatarURL, defaults: defaults)
+
+        XCTAssertEqual(WeiboSessionCookieStore.avatarURL(defaults: defaults), avatarURL)
+
+        WeiboSessionCookieStore.clear(defaults: defaults)
+
+        XCTAssertNil(WeiboSessionCookieStore.avatarURL(defaults: defaults))
+    }
+
+    func testNonHTTPAvatarURLIsNotPersisted() throws {
+        let suiteName = "weibo-avatar-scheme-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let avatarURL = try XCTUnwrap(URL(string: "file:///tmp/avatar.jpg"))
+
+        WeiboSessionCookieStore.allowPersistence(defaults: defaults)
+        WeiboSessionCookieStore.store(avatarURL: avatarURL, defaults: defaults)
+
+        XCTAssertNil(WeiboSessionCookieStore.avatarURL(defaults: defaults))
+    }
+
     private func makeCookie(name: String, domain: String) throws -> HTTPCookie {
         try XCTUnwrap(
             HTTPCookie(properties: [

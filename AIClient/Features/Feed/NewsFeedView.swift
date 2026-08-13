@@ -1579,7 +1579,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
     @Published var isAuthenticating = false
     @Published var isWeiboLoggedIn = false
     @Published var requiresWeiboAuthentication = false
-    @Published var weiboAvatarURL: URL?
+    @Published var weiboAvatarURL: URL? = WeiboSessionCookieStore.storedAvatarURL
     @Published var weiboDisplayName: String? = WeiboSessionCookieStore.storedDisplayName
     var weiboAccountInitial: String? {
         weiboDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init)?.uppercased()
@@ -1698,11 +1698,13 @@ private final class EmbeddedWebViewModel: ObservableObject {
                 if let name = profile["displayName"] as? String, !name.isEmpty {
                     self?.weiboDisplayName = name
                     self?.isWeiboLoggedIn = true
+                    WeiboSessionCookieStore.store(displayName: name)
                 }
                 if let raw = profile["avatar"] as? String,
                    !raw.localizedCaseInsensitiveContains("default_avatar"),
                    let url = URL(string: raw) {
                     self?.weiboAvatarURL = url
+                    WeiboSessionCookieStore.store(avatarURL: url)
                 }
             }
         }
@@ -1738,6 +1740,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
                       !value.localizedCaseInsensitiveContains("default_avatar"),
                       let url = URL(string: value) else { continue }
                 weiboAvatarURL = url
+                WeiboSessionCookieStore.store(avatarURL: url)
                 break
             }
         }
@@ -2189,6 +2192,7 @@ private struct StoredWebCookie: Codable {
 enum WeiboSessionCookieStore {
     private static let defaultsKey = "weibo.session.cookies"
     private static let environmentKey = "WEIBO_COOKIES_JSON"
+    private static let avatarURLDefaultsKey = "weibo.session.avatarURL"
     private static let displayNameDefaultsKey = "weibo.session.displayName"
     private static let displayNameEnvironmentKey = "WEIBO_DISPLAY_NAME"
     private static let logoutSuppressedKey = "weibo.session.logoutSuppressed"
@@ -2196,6 +2200,22 @@ enum WeiboSessionCookieStore {
     static var storedDisplayName: String? {
         importFromEnvironmentIfPresent()
         return UserDefaults.standard.string(forKey: displayNameDefaultsKey)
+    }
+
+    static var storedAvatarURL: URL? {
+        avatarURL(defaults: .standard)
+    }
+
+    static func avatarURL(defaults: UserDefaults = .standard) -> URL? {
+        guard let value = defaults.string(forKey: avatarURLDefaultsKey) else { return nil }
+        return URL(string: value)
+    }
+
+    static func store(avatarURL: URL, defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: logoutSuppressedKey),
+              let scheme = avatarURL.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else { return }
+        defaults.set(avatarURL.absoluteString, forKey: avatarURLDefaultsKey)
     }
 
     static func store(displayName: String, defaults: UserDefaults = .standard) {
@@ -2245,6 +2265,7 @@ enum WeiboSessionCookieStore {
 
     static func clear(defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: defaultsKey)
+        defaults.removeObject(forKey: avatarURLDefaultsKey)
         defaults.removeObject(forKey: displayNameDefaultsKey)
         defaults.set(true, forKey: logoutSuppressedKey)
     }
