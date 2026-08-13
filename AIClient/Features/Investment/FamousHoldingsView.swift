@@ -33,6 +33,7 @@ struct FamousHoldingsView: View {
     @Binding var showsDetail: Bool
     @State private var selectedIndex = 0
     @State private var selectedDetail: HoldingDetailRoute?
+    @State private var showsManagerSelector = false
 
     private var managers: [FamousHoldingsManager] {
         (store.holdings?.managers ?? []).sorted { managerPriority($0.key) < managerPriority($1.key) }
@@ -40,19 +41,41 @@ struct FamousHoldingsView: View {
 
     var body: some View {
         NavigationStack {
-            GeometryReader { _ in
-                Group {
-                    if managers.indices.contains(selectedIndex) {
-                        let manager = managers[selectedIndex]
-                        overview(store.managerDetails[manager.key] ?? manager)
-                    } else if store.isLoading {
-                        ProgressView("正在读取公开持仓披露").foregroundStyle(.secondary)
-                    } else {
-                        unavailableView
+            GeometryReader { proxy in
+                ZStack(alignment: .bottomTrailing) {
+                    Group {
+                        if managers.indices.contains(selectedIndex) {
+                            let manager = managers[selectedIndex]
+                            overview(store.managerDetails[manager.key] ?? manager)
+                        } else if store.isLoading {
+                            ProgressView("正在读取公开持仓披露").foregroundStyle(.secondary)
+                        } else {
+                            unavailableView
+                        }
+                    }
+
+                    if managers.count > 1 {
+                        if showsManagerSelector {
+                            Color.black.opacity(0.08)
+                                .ignoresSafeArea()
+                                .contentShape(Rectangle())
+                                .onTapGesture { dismissManagerSelector() }
+                                .transition(.opacity)
+
+                            managerSelectorPanel(maxWidth: min(310, proxy.size.width - 32))
+                                .padding(.trailing, 16)
+                                .padding(.bottom, 72)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+
+                        managerSelectorButton
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 16)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(HoldingsPalette.canvas.ignoresSafeArea())
+                .animation(.snappy(duration: 0.24), value: showsManagerSelector)
             }
             .task {
                 await store.load()
@@ -95,7 +118,6 @@ struct FamousHoldingsView: View {
         }
         .scrollIndicators(.hidden)
         .refreshable { await store.load(force: true) }
-        .simultaneousGesture(managerSwipeGesture)
         .task(id: manager.key) { await store.loadDetail(managerKey: manager.key) }
     }
 
@@ -140,16 +162,9 @@ struct FamousHoldingsView: View {
             HStack {
                 pageProgress
                 Spacer()
-                if managers.indices.contains(selectedIndex + 1) {
-                    let next = managers[selectedIndex + 1]
-                    HStack(spacing: 4) {
-                        Text("下一位")
-                        Text(next.displayName).fontWeight(.semibold)
-                        Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold))
-                    }
-                    .font(.system(size: 9))
+                Text("共 \(managers.count) 位投资人")
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
-                }
             }
             .padding(.horizontal, 18)
         }
@@ -573,11 +588,105 @@ struct FamousHoldingsView: View {
         .padding(.top, 9)
     }
 
-    private var managerSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 20).onEnded { value in
-            let translation = value.predictedEndTranslation
-            guard abs(translation.width) > abs(translation.height), abs(translation.width) > 48 else { return }
-            moveManager(by: translation.width < 0 ? 1 : -1)
+    private var managerSelectorButton: some View {
+        Button {
+            showsManagerSelector.toggle()
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: showsManagerSelector ? "xmark" : "person.2.fill")
+                    .font(.system(size: 13, weight: .bold))
+                Text(showsManagerSelector ? "收起" : "选择")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .frame(height: 46)
+            .background(HoldingsPalette.purple, in: Capsule())
+            .overlay {
+                Capsule().stroke(.white.opacity(0.18), lineWidth: 1)
+            }
+            .shadow(color: HoldingsPalette.purple.opacity(0.3), radius: 12, y: 6)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(showsManagerSelector ? "收起投资人选择" : "选择投资人")
+        .zIndex(2)
+    }
+
+    private func managerSelectorPanel(maxWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("选择投资人")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+
+            ForEach(Array(managers.enumerated()), id: \.element.key) { index, manager in
+                Button {
+                    selectManager(at: index)
+                } label: {
+                    HStack(spacing: 11) {
+                        InvestorPortraitImage(manager: manager, contentMode: .fill)
+                            .frame(width: 38, height: 38)
+                            .background(HoldingsPalette.purple.opacity(0.12), in: Circle())
+                            .clipShape(Circle())
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(manager.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Text(manager.institutionName)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        if index == selectedIndex {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 24, height: 24)
+                                .background(HoldingsPalette.purple, in: Circle())
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 56)
+                    .background(
+                        index == selectedIndex ? HoldingsPalette.purple.opacity(0.08) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(manager.displayName)，\(manager.institutionName)")
+                .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
+            }
+        }
+        .padding(6)
+        .frame(width: maxWidth)
+        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(HoldingsPalette.divider, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 24, y: 10)
+        .zIndex(1)
+    }
+
+    private func selectManager(at index: Int) {
+        guard managers.indices.contains(index) else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(.easeInOut(duration: 0.22)) {
+            selectedIndex = index
+            showsManagerSelector = false
+        }
+    }
+
+    private func dismissManagerSelector() {
+        withAnimation(.easeOut(duration: 0.18)) {
+            showsManagerSelector = false
         }
     }
 
