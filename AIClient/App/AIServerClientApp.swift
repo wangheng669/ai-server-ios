@@ -213,6 +213,7 @@ private struct EditorialRootView: View {
     @State private var signalSection: GoogleSignalSection = .highlights
     @State private var signalSentiment: GoogleSignalSentimentFilter = .all
     @State private var showsSignalFilters = false
+    @State private var dismissedDeploymentIdentity: String?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -238,7 +239,9 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
             ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) { return nil }
         #endif
-        return deploymentPreview ?? deploymentStore.snapshot
+        let value = deploymentPreview ?? deploymentStore.snapshot
+        guard value?.identity != dismissedDeploymentIdentity else { return nil }
+        return value
     }
 
     private var hidesRootTabBar: Bool {
@@ -334,7 +337,11 @@ private struct EditorialRootView: View {
                     DeploymentStatusTip(
                         snapshot: deploymentStatus,
                         initiallyExpanded: deploymentPreview != nil &&
-                            ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview")
+                            ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview"),
+                        onDismiss: {
+                            dismissedDeploymentIdentity = deploymentStatus.identity
+                            deploymentStore.dismissFailure(deploymentStatus)
+                        }
                     )
                     .id(deploymentStatus.identity)
                     .padding(.horizontal, 12)

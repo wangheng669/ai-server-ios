@@ -125,4 +125,35 @@ final class DeploymentStatusTests: XCTestCase {
 
         XCTAssertEqual(snapshot.completionIdentity, "1234567-installed")
     }
+
+    @MainActor
+    func testDismissedFailureStaysHiddenUntilANewFailureArrives() throws {
+        let suiteName = "DeploymentStatusTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = DeploymentStatusStore(defaults: defaults)
+        let failure = DeploymentStatusSnapshot(
+            phase: .failed,
+            commit: "1234567",
+            updatedAt: Date(),
+            stage: "install-failed"
+        )
+
+        store.apply(failure)
+        XCTAssertEqual(store.snapshot, failure)
+
+        store.dismissFailure(failure)
+        XCTAssertNil(store.snapshot)
+        store.apply(failure)
+        XCTAssertNil(store.snapshot)
+
+        let laterFailure = DeploymentStatusSnapshot(
+            phase: .failed,
+            commit: "7654321",
+            updatedAt: Date(),
+            stage: "build-failed"
+        )
+        store.apply(laterFailure)
+        XCTAssertEqual(store.snapshot, laterFailure)
+    }
 }

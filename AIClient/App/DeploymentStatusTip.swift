@@ -144,6 +144,7 @@ final class DeploymentStatusStore: ObservableObject {
     private var snapshotTask: Task<Void, Never>?
     private var dismissalTask: Task<Void, Never>?
     private static let acknowledgedCompletionKey = "iosDeploymentAcknowledgedCompletion"
+    static let acknowledgedFailureKey = "iosDeploymentAcknowledgedFailure"
     private static let successDisplayDuration: Duration = .seconds(3)
 
     init(
@@ -179,6 +180,14 @@ final class DeploymentStatusStore: ObservableObject {
         realtimeClient = nil
     }
 
+    func dismissFailure(_ value: DeploymentStatusSnapshot) {
+        guard case .failed = value.phase else { return }
+        defaults.set(value.identity, forKey: Self.acknowledgedFailureKey)
+        if snapshot?.identity == value.identity {
+            snapshot = nil
+        }
+    }
+
     private func loadSnapshot() async {
         let url = baseURL.appending(path: "api/ios/v1/system/ios-deployment")
         do {
@@ -195,7 +204,7 @@ final class DeploymentStatusStore: ObservableObject {
         }
     }
 
-    private func apply(_ value: DeploymentStatusSnapshot) {
+    func apply(_ value: DeploymentStatusSnapshot) {
         dismissalTask?.cancel()
         dismissalTask = nil
         guard value.isVisible() else {
@@ -217,16 +226,27 @@ final class DeploymentStatusStore: ObservableObject {
             }
             return
         }
+        if case .failed = value.phase,
+           defaults.string(forKey: Self.acknowledgedFailureKey) == value.identity {
+            snapshot = nil
+            return
+        }
         snapshot = value
     }
 }
 
 struct DeploymentStatusTip: View {
     let snapshot: DeploymentStatusSnapshot
+    let onDismiss: () -> Void
     @State private var isExpanded: Bool
 
-    init(snapshot: DeploymentStatusSnapshot, initiallyExpanded: Bool = false) {
+    init(
+        snapshot: DeploymentStatusSnapshot,
+        initiallyExpanded: Bool = false,
+        onDismiss: @escaping () -> Void = {},
+    ) {
         self.snapshot = snapshot
+        self.onDismiss = onDismiss
         _isExpanded = State(initialValue: initiallyExpanded)
     }
 
@@ -241,6 +261,8 @@ struct DeploymentStatusTip: View {
                 compactTip
                     .allowsHitTesting(false)
                     .accessibilityLabel(snapshot.detail)
+            } else if case .failed = snapshot.phase {
+                failedCompactTip
             } else {
                 Button {
                     withAnimation(.snappy(duration: 0.24)) { isExpanded.toggle() }
@@ -254,7 +276,51 @@ struct DeploymentStatusTip: View {
         .frame(maxWidth: 352)
     }
 
+    private var failedCompactTip: some View {
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.snappy(duration: 0.24)) { isExpanded.toggle() }
+            } label: {
+                compactContent
+                    .padding(.leading, 14)
+                    .padding(.trailing, 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "收起自动更新状态" : "查看自动更新状态，\(snapshot.detail)")
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, height: 48)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭更新失败提示")
+        }
+        .frame(height: 48)
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(snapshot.tint.opacity(0.22), lineWidth: 0.75)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+    }
+
     private var compactTip: some View {
+        compactContent
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+            .frame(maxWidth: .infinity)
+            .background(.regularMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(snapshot.tint.opacity(0.22), lineWidth: 0.75)
+            }
+            .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+    }
+
+    private var compactContent: some View {
         HStack(spacing: 10) {
             statusIndicator
 
@@ -276,15 +342,7 @@ struct DeploymentStatusTip: View {
                     .foregroundStyle(snapshot.tint)
             }
         }
-        .padding(.horizontal, 14)
-        .frame(height: 48)
         .frame(maxWidth: .infinity)
-        .background(.regularMaterial, in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(snapshot.tint.opacity(0.22), lineWidth: 0.75)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
     }
 
     private var statusIndicator: some View {
@@ -317,7 +375,11 @@ struct DeploymentStatusTip: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer(minLength: 12)
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) { isExpanded = false }
+                    if case .failed = snapshot.phase {
+                        onDismiss()
+                    } else {
+                        withAnimation(.snappy(duration: 0.2)) { isExpanded = false }
+                    }
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .semibold))
