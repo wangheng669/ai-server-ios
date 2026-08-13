@@ -303,6 +303,7 @@ struct DeploymentStatusTip: View {
         .overlay {
             Capsule()
                 .stroke(snapshot.tint.opacity(0.22), lineWidth: 0.75)
+                .allowsHitTesting(false)
         }
         .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
     }
