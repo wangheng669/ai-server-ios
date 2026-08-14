@@ -514,6 +514,19 @@ private struct InlineEmojiTextView: UIViewRepresentable {
     let textColor: UIColor
     let allowsTextSelection: Bool
 
+    final class Coordinator {
+        var text: String?
+        var emojis: [WeiboInlineEmoji] = []
+        var imageURLs: Set<URL> = []
+        var fontSize: CGFloat?
+        var lineSpacing: CGFloat?
+        var maximumNumberOfLines: Int?
+        var textColor: UIColor?
+        var allowsTextSelection: Bool?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
         view.backgroundColor = .clear
@@ -528,12 +541,33 @@ private struct InlineEmojiTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
+        let imageURLs = Set(images.keys)
+        let coordinator = context.coordinator
+        let needsUpdate = coordinator.text != text
+            || coordinator.emojis != emojis
+            || coordinator.imageURLs != imageURLs
+            || coordinator.fontSize != fontSize
+            || coordinator.lineSpacing != lineSpacing
+            || coordinator.maximumNumberOfLines != maximumNumberOfLines
+            || coordinator.textColor != textColor
+            || coordinator.allowsTextSelection != allowsTextSelection
+        guard needsUpdate else { return }
+
         view.isSelectable = allowsTextSelection
         view.isUserInteractionEnabled = allowsTextSelection
         view.textContainer.maximumNumberOfLines = maximumNumberOfLines
         view.textContainer.lineBreakMode = maximumNumberOfLines > 0 ? .byTruncatingTail : .byWordWrapping
         view.attributedText = attributedText
         view.accessibilityLabel = text
+
+        coordinator.text = text
+        coordinator.emojis = emojis
+        coordinator.imageURLs = imageURLs
+        coordinator.fontSize = fontSize
+        coordinator.lineSpacing = lineSpacing
+        coordinator.maximumNumberOfLines = maximumNumberOfLines
+        coordinator.textColor = textColor
+        coordinator.allowsTextSelection = allowsTextSelection
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
