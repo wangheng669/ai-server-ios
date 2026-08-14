@@ -1,20 +1,22 @@
 import SwiftUI
 
 private enum HoldingDetailFilter: String, CaseIterable, Identifiable {
-    case all = "全部记录"
+    case current = "当前持仓"
     case new = "新建仓"
     case increased = "增持"
     case decreased = "减持"
+    case unchanged = "未变动"
     case exited = "清仓"
 
     var id: Self { self }
 
     func matches(_ action: FamousHoldingAction) -> Bool {
         switch self {
-        case .all: true
+        case .current: action != .exited
         case .new: action == .new
         case .increased: action == .increased
         case .decreased: action == .decreased
+        case .unchanged: action == .unchanged
         case .exited: action == .exited
         }
     }
@@ -24,16 +26,25 @@ struct FamousHoldingDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let manager: FamousHoldingsManager
     let store: FamousHoldingsStore
-    @State private var filter = HoldingDetailFilter.all
+    @State private var filter = HoldingDetailFilter.current
 
     private var resolvedManager: FamousHoldingsManager {
         store.managerDetails[manager.key] ?? manager
     }
 
     private var changes: [FamousHoldingChange] {
-        resolvedManager.changes
-            .filter { filter.matches($0.action) }
-            .sorted { $0.weightPct > $1.weightPct }
+        let records: [FamousHoldingChange]
+        if filter == .exited {
+            records = resolvedManager.exitedPositions ?? resolvedManager.changes.filter { $0.action == .exited }
+        } else {
+            let positions = resolvedManager.positions ?? resolvedManager.changes.filter { $0.action != .exited }
+            records = filter == .current ? positions : positions.filter { filter.matches($0.action) }
+        }
+        return records.sorted {
+            filter == .exited
+                ? ($0.previousValueUsd ?? $0.valueUsd) > ($1.previousValueUsd ?? $1.valueUsd)
+                : $0.valueUsd > $1.valueUsd
+        }
     }
 
     var body: some View {
@@ -49,12 +60,9 @@ struct FamousHoldingDetailView: View {
                     } else {
                         ForEach(Array(changes.enumerated()), id: \.element.id) { index, change in
                             holdingRow(change)
-                            if index < changes.count - 1 || (filter == .all && resolvedManager.positionsCount > changes.count) {
+                            if index < changes.count - 1 {
                                 Divider().overlay(HoldingsPalette.divider).padding(.leading, 72)
                             }
-                        }
-                        if filter == .all, resolvedManager.positionsCount > changes.count {
-                            otherHoldingsRow
                         }
                     }
                     footer
@@ -125,13 +133,13 @@ struct FamousHoldingDetailView: View {
 
     private var listHeader: some View {
         HStack {
-            Text(filter == .all ? "持仓变动" : filter.rawValue)
+            Text(filter == .exited ? "清仓记录" : filter.rawValue)
                 .font(.system(size: 15, weight: .semibold))
             Text("\(changes.count) 条")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer()
-            Text("按持仓市值从高到低")
+            Text(filter == .exited ? "按上期市值从高到低" : "按持仓市值从高到低")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.tertiary)
         }
@@ -165,10 +173,12 @@ struct FamousHoldingDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .trailing, spacing: 5) {
-                Text(percent(change.weightPct))
+                Text(filter == .exited ? percent(change.previousWeightPct) : percent(change.weightPct))
                     .font(.system(size: 15, weight: .semibold))
                     .monospacedDigit()
-                Text(compactUSD(change.valueUsd))
+                Text(filter == .exited
+                     ? "上期 \(compactUSD(change.previousValueUsd ?? change.valueUsd))"
+                     : compactUSD(change.valueUsd))
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -180,48 +190,26 @@ struct FamousHoldingDetailView: View {
     }
 
     private func actionLabel(_ change: FamousHoldingChange) -> String {
+        if change.action == .unchanged { return change.action.title }
         let arrow = change.weightChangePct >= 0 ? "↑" : "↓"
         return "\(arrow) \(change.action.title) \(percent(abs(change.weightChangePct)))"
     }
 
     private func filterCount(_ item: HoldingDetailFilter) -> Int {
-        if item == .all { return resolvedManager.changes.count }
-        return resolvedManager.changes.count { item.matches($0.action) }
-    }
-
-    private var otherHoldingsRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 40, height: 40)
-                .background(Color.secondary.opacity(0.08), in: Circle())
-            VStack(alignment: .leading, spacing: 4) {
-                Text("其余持仓汇总")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("未逐项展示的 \(resolvedManager.positionsCount - changes.count) 只持仓")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(percent(otherWeight))
-                    .font(.system(size: 14, weight: .semibold))
-                Text(compactUSD(otherValue))
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 20)
-        .frame(height: 72)
-        .background(Color.secondary.opacity(0.035))
+        if item == .current { return resolvedManager.positions?.count ?? resolvedManager.positionsCount }
+        if item == .exited { return resolvedManager.exitedPositions?.count ?? resolvedManager.summary.exited }
+        return (resolvedManager.positions ?? resolvedManager.changes).count { item.matches($0.action) }
     }
 
     private var footer: some View {
         HStack {
             Text("数据来源：SEC 13F 申报")
             Spacer()
-            Text("货币单位：USD")
+            if let holdingsCount = resolvedManager.holdingsCount, holdingsCount != resolvedManager.positionsCount {
+                Text("USD · 原始 \(holdingsCount) 条 · 合并 \(resolvedManager.positionsCount) 只")
+            } else {
+                Text("货币单位：USD")
+            }
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -229,10 +217,4 @@ struct FamousHoldingDetailView: View {
         .padding(.vertical, 20)
     }
 
-    private var disclosedWeight: Double {
-        resolvedManager.changes.reduce(0) { $0 + max(0, $1.weightPct) }
-    }
-
-    private var otherWeight: Double { max(0, 100 - min(disclosedWeight, 100)) }
-    private var otherValue: Double { resolvedManager.totalValueUsd * otherWeight / 100 }
 }

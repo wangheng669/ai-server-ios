@@ -611,7 +611,7 @@ struct FamousHoldingsView: View {
             }
             .padding(.leading, 12)
             .padding(.bottom, 5)
-            ForEach(Array(manager.changes.sorted { $0.weightPct > $1.weightPct }.prefix(10))) { change in
+            ForEach(Array(currentPositions(manager).sorted { $0.weightPct > $1.weightPct }.prefix(10))) { change in
                 HStack(spacing: 6) {
                     HoldingsCompanyLogo(path: change.companyLogo, symbol: displaySymbol(change), color: actionColor(change.action), size: 20)
                     Text(displaySymbol(change))
@@ -721,9 +721,13 @@ struct FamousHoldingsView: View {
         manager.changes.reduce(0) { $0 + $1.weightChangePct }
     }
 
+    private func currentPositions(_ manager: FamousHoldingsManager) -> [FamousHoldingChange] {
+        manager.positions ?? manager.changes.filter { $0.action != .exited }
+    }
+
     private func sectorData(_ manager: FamousHoldingsManager) -> [HoldingSector] {
         var totals: [String: Double] = [:]
-        for change in manager.changes {
+        for change in currentPositions(manager) {
             totals[sectorName(displaySymbol(change)), default: 0] += max(0, change.weightPct)
         }
         let known = min(totals.values.reduce(0, +), 100)
@@ -942,6 +946,7 @@ func actionColor(_ action: FamousHoldingAction) -> Color {
     case .increased: HoldingsPalette.green
     case .decreased: HoldingsPalette.orange
     case .exited: HoldingsPalette.red
+    case .unchanged: .secondary
     }
 }
 

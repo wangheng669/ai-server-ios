@@ -19,6 +19,7 @@ struct FamousHoldingsSummary: Codable {
     let increased: Int
     let decreased: Int
     let exited: Int
+    let unchanged: Int?
 }
 
 struct FamousHoldingsManager: Codable, Identifiable {
@@ -29,16 +30,20 @@ struct FamousHoldingsManager: Codable, Identifiable {
     let portraitUrl: String?
     let reportDate: String
     let filingDate: String
+    let holdingsCount: Int?
     let positionsCount: Int
     let totalValueUsd: Double
     let summary: FamousHoldingsSummary
     let changesCount: Int
     let changes: [FamousHoldingChange]
+    let positions: [FamousHoldingChange]?
+    let exitedPositions: [FamousHoldingChange]?
 
     var id: String { key }
 }
 
 struct FamousHoldingChange: Codable, Identifiable {
+    private let recordId: String?
     let symbol: String?
     let name: String
     let companyLogo: String?
@@ -47,8 +52,16 @@ struct FamousHoldingChange: Codable, Identifiable {
     let weightPct: Double
     let weightChangePct: Double
     let valueUsd: Double
+    let previousValueUsd: Double?
 
-    var id: String { "\(symbol ?? name)-\(action.rawValue)" }
+    var id: String {
+        recordId ?? "\(symbol ?? name)-\(action.rawValue)-\(weightPct)-\(valueUsd)"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case recordId = "id"
+        case symbol, name, companyLogo, action, previousWeightPct, weightPct, weightChangePct, valueUsd, previousValueUsd
+    }
 }
 
 enum FamousHoldingAction: String, Codable {
@@ -56,6 +69,7 @@ enum FamousHoldingAction: String, Codable {
     case increased
     case decreased
     case exited
+    case unchanged
 
     var title: String {
         switch self {
@@ -63,6 +77,7 @@ enum FamousHoldingAction: String, Codable {
         case .increased: "增持"
         case .decreased: "减持"
         case .exited: "清仓"
+        case .unchanged: "未变动"
         }
     }
 }
