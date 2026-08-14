@@ -873,8 +873,14 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     func testHiddenFeedChromeRemovesHeaderReservation() {
-        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: false), 53)
+        XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: false), 0)
         XCTAssertEqual(FeedChromeLayout.headerReservationHeight(isHidden: true), 0)
+    }
+
+    func testXueqiuDetailKeepsRootChromeVisible() {
+        XCTAssertFalse(FeedDetailChromePolicy.hidesRootChrome(isPresented: true, isXueqiu: true))
+        XCTAssertTrue(FeedDetailChromePolicy.hidesRootChrome(isPresented: true, isXueqiu: false))
+        XCTAssertFalse(FeedDetailChromePolicy.hidesRootChrome(isPresented: false, isXueqiu: false))
     }
 
     func testFilteredPaginationTaskAdvancesWithRawTail() {
