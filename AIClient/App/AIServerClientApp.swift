@@ -497,21 +497,12 @@ private struct EditorialRootView: View {
 private struct ResearchSectionSelector: View {
     @Binding var selection: EditorialTab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isExpanded = false
 
     var body: some View {
-        Menu {
-            ForEach(EditorialTab.researchTabs, id: \.self) { tab in
-                Button {
-                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0)) {
-                        selection = tab
-                    }
-                } label: {
-                    Label(
-                        tab.sectionTitle,
-                        systemImage: selection == tab ? "checkmark" : tab.researchSelectorIcon
-                    )
-                }
-                .accessibilityAddTraits(selection == tab ? .isSelected : [])
+        Button {
+            withAnimation(expansionAnimation) {
+                isExpanded.toggle()
             }
         } label: {
             HStack(spacing: 8) {
@@ -521,23 +512,88 @@ private struct ResearchSectionSelector: View {
                 Text(selection.sectionTitle)
                     .font(.system(size: 15, weight: .semibold))
 
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 10, weight: .heavy))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
-            .foregroundStyle(InvestmentDesign.accent)
+            .foregroundStyle(.white)
             .padding(.horizontal, 14)
-            .frame(minWidth: 108, minHeight: 46)
-            .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .frame(minWidth: 112, minHeight: 48)
+            .background(InvestmentDesign.accent, in: RoundedRectangle(cornerRadius: 16))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.primary.opacity(0.14), lineWidth: 0.7)
+                    .stroke(Color.white.opacity(0.24), lineWidth: 0.8)
             }
             .contentShape(Rectangle())
-            .shadow(color: Color.black.opacity(0.10), radius: 10, y: 4)
+            .shadow(color: InvestmentDesign.accent.opacity(0.26), radius: 12, y: 5)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("切换研究栏目，当前为\(selection.sectionTitle)")
+        .accessibilityValue(isExpanded ? "已展开" : "已收起")
+        .overlay(alignment: .bottomTrailing) {
+            if isExpanded {
+                VStack(alignment: .trailing, spacing: 8) {
+                    ForEach(EditorialTab.researchTabs, id: \.self) { tab in
+                        option(tab)
+                    }
+                }
+                .offset(y: -56)
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .scale(scale: 0.94, anchor: .bottomTrailing))
+                        .combined(with: .opacity)
+                )
+                .zIndex(1)
+            }
+        }
+        .zIndex(10)
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    private var expansionAnimation: Animation? {
+        reduceMotion ? nil : .snappy(duration: 0.26, extraBounce: 0.08)
+    }
+
+    private func option(_ tab: EditorialTab) -> some View {
+        let isSelected = selection == tab
+
+        return Button {
+            withAnimation(expansionAnimation) {
+                selection = tab
+                isExpanded = false
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: tab.researchSelectorIcon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 22)
+
+                Text(tab.sectionTitle)
+                    .font(.system(size: 15, weight: .semibold))
+
+                Circle()
+                    .fill(isSelected ? Color.white : Color.clear)
+                    .frame(width: 5, height: 5)
+            }
+            .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.82))
+            .padding(.horizontal, 14)
+            .frame(width: 132, height: 46, alignment: .leading)
+            .background(
+                isSelected ? InvestmentDesign.accent : Color(uiColor: .systemBackground),
+                in: RoundedRectangle(cornerRadius: 15)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(
+                        isSelected ? InvestmentDesign.accent : Color.primary.opacity(0.12),
+                        lineWidth: 0.8
+                    )
+            }
+            .shadow(color: Color.black.opacity(isSelected ? 0.12 : 0.09), radius: 10, y: 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
