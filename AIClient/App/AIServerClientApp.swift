@@ -160,7 +160,7 @@ private enum EditorialTab: Hashable {
     var sectionTitle: String {
         switch self {
         case .signal: "信号"
-        case .observation: "观点"
+        case .observation: "动态"
         case .company: "公司"
         case .people: "人物"
         case .world: "今日"
@@ -292,11 +292,9 @@ private struct EditorialRootView: View {
 
     private var groupedRootTabs: [EditorialTab]? {
         switch selectedTab {
-        case .signal, .observation:
-            [.observation, .signal]
         case .investment, .company, .people:
             [.investment, .company, .people]
-        case .world, .learning, .city:
+        case .world, .signal, .observation, .learning, .city:
             nil
         }
     }
@@ -537,12 +535,7 @@ private struct RootNavigationBar: View {
     var body: some View {
         HStack(spacing: 0) {
             item(.world, title: "今日", icon: "globe")
-            item(
-                dynamicTarget,
-                selectedTabs: [.signal, .observation],
-                title: "观点",
-                icon: "list.bullet.rectangle"
-            )
+            intelligenceItem
             item(
                 researchTarget,
                 selectedTabs: [.investment, .company, .people],
@@ -564,6 +557,43 @@ private struct RootNavigationBar: View {
         .padding(.bottom, 2)
     }
 
+    private var intelligenceItem: some View {
+        let isSelected = selection == .observation || selection == .signal
+        let currentTab = isSelected ? selection : dynamicTarget
+        let icon = currentTab == .signal ? "waveform.path.ecg" : "list.bullet.rectangle"
+
+        return Menu {
+            Button {
+                select(.observation)
+            } label: {
+                Label("动态", systemImage: "list.bullet.rectangle")
+            }
+
+            Button {
+                select(.signal)
+            } label: {
+                Label("信号", systemImage: "waveform.path.ecg")
+            }
+        } label: {
+            itemLabel(title: "情报", icon: icon, isSelected: isSelected)
+        } primaryAction: {
+            let destination: EditorialTab
+            switch selection {
+            case .observation:
+                destination = .signal
+            case .signal:
+                destination = .observation
+            default:
+                destination = dynamicTarget
+            }
+            select(destination)
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("情报，当前\(currentTab.sectionTitle)")
+        .accessibilityHint(isSelected ? "轻点切换动态和信号，长按选择" : "轻点打开，长按选择动态或信号")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
     private func item(
         _ tab: EditorialTab,
         selectedTabs: [EditorialTab] = [],
@@ -573,42 +603,50 @@ private struct RootNavigationBar: View {
         let isSelected = selection == tab || selectedTabs.contains(selection)
 
         return Button {
-            withAnimation(reduceMotion ? nil : .snappy(duration: 0.24, extraBounce: 0.04)) {
-                selection = tab
-            }
+            select(tab)
         } label: {
-            VStack(spacing: 2) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
-                    .symbolRenderingMode(.monochrome)
-
-                Text(title)
-                    .font(.system(size: 10, weight: isSelected ? .medium : .regular))
-
-                Circle()
-                    .fill(isSelected ? InvestmentDesign.accent : Color.clear)
-                    .frame(width: 3, height: 3)
-            }
-            .foregroundStyle(
-                isSelected
-                    ? InvestmentDesign.accent
-                    : Color.primary.opacity(0.68)
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .background {
-                if isSelected {
-                    Capsule()
-                        .fill(InvestmentDesign.accent.opacity(0.1))
-                        .matchedGeometryEffect(id: "root-tab-selection", in: selectionAnimation)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                }
-            }
+            itemLabel(title: title, icon: icon, isSelected: isSelected)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func select(_ tab: EditorialTab) {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.24, extraBounce: 0.04)) {
+            selection = tab
+        }
+    }
+
+    private func itemLabel(title: String, icon: String, isSelected: Bool) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
+                .symbolRenderingMode(.monochrome)
+
+            Text(title)
+                .font(.system(size: 10, weight: isSelected ? .medium : .regular))
+
+            Circle()
+                .fill(isSelected ? InvestmentDesign.accent : Color.clear)
+                .frame(width: 3, height: 3)
+        }
+        .foregroundStyle(
+            isSelected
+                ? InvestmentDesign.accent
+                : Color.primary.opacity(0.68)
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .background {
+            if isSelected {
+                Capsule()
+                    .fill(InvestmentDesign.accent.opacity(0.1))
+                    .matchedGeometryEffect(id: "root-tab-selection", in: selectionAnimation)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+            }
+        }
     }
 }
 
