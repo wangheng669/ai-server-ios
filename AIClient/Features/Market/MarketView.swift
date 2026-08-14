@@ -11,6 +11,7 @@ private enum MarketStyle {
     static let accent = InvestmentDesign.accent
     static let chartTransition = Animation.smooth(duration: 0.6)
     static let purple = accent
+    static let pageSpacing: CGFloat = 10
 }
 
 private struct MarketDetailRoute: Identifiable, Equatable {
@@ -132,6 +133,13 @@ private struct MarketHomeView: View {
                     }
                     .frame(height: 1)
                     .id("market-top")
+
+                    MarketRegionPicker(selection: $selectedMarket)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 10)
+                        .padding(.bottom, 12)
+                        .background(MarketStyle.surface)
+
                     ZStack {
                         MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
                             .id(selectedMarket)
@@ -139,7 +147,7 @@ private struct MarketHomeView: View {
                     }
                     .animation(.easeInOut(duration: 0.18), value: selectedMarket)
 
-                    VStack(spacing: 0) {
+                    VStack(spacing: MarketStyle.pageSpacing) {
                         if let error = regionalHealthMessage {
                             MarketErrorBanner(
                                 message: error,
@@ -164,7 +172,7 @@ private struct MarketHomeView: View {
                                 .id("market-map")
                         }
                     }
-                    .padding(.top, 8)
+                    .padding(.top, MarketStyle.pageSpacing)
                     // Keep the final market rows clear of the floating root navigation capsule.
                     .padding(.bottom, 76)
                     .background(MarketStyle.canvas)
@@ -200,15 +208,6 @@ private struct MarketHomeView: View {
                 proxy.scrollTo("market-structure", anchor: .top)
             }
             #endif
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                GeometryReader { geometry in
-                    MarketRegionPicker(selection: $selectedMarket)
-                        .frame(width: max(0, geometry.size.width - 28))
-                        .padding(.leading, 14)
-                        .padding(.vertical, 8)
-                }
-                .frame(height: 66)
-            }
         }
     }
 
@@ -978,44 +977,46 @@ private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(MarketRegion.allCases) { region in
                 regionButton(region)
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 7)
+        .padding(4)
         .frame(maxWidth: .infinity)
-        .frame(height: 50)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17))
-        .overlay {
-            RoundedRectangle(cornerRadius: 17)
-                .stroke(Color.primary.opacity(0.10), lineWidth: 0.8)
-        }
-        .shadow(color: Color.black.opacity(0.10), radius: 12, y: 5)
+        .frame(height: 42)
+        .background(MarketStyle.canvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
     private func regionButton(_ region: MarketRegion) -> some View {
         let isSelected = selection == region
         let weight: Font.Weight = isSelected ? .semibold : .medium
         let foreground = isSelected ? MarketStyle.accent : Color.secondary
-        let indicator = isSelected ? MarketStyle.accent : Color.clear
 
         return Button {
             withAnimation(.easeOut(duration: 0.18)) {
                 selection = region
             }
         } label: {
-            VStack(spacing: 7) {
-                Text(region.rawValue)
-                    .font(.system(size: 13, weight: weight))
-                    .lineLimit(1)
-                Capsule().fill(indicator).frame(width: 28, height: 2.5)
-            }
-            .foregroundStyle(foreground)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 46)
-            .contentShape(Rectangle())
+            Text(region.rawValue)
+                .font(.system(size: 13, weight: weight))
+                .lineLimit(1)
+                .foregroundStyle(foreground)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 34)
+                .background(
+                    isSelected ? MarketStyle.surface : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .overlay {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(MarketStyle.divider, lineWidth: 0.5)
+                    }
+                }
+                .shadow(color: isSelected ? Color.black.opacity(0.05) : .clear, radius: 3, y: 1)
+                .contentShape(Rectangle())
         }
         .id(region)
         .buttonStyle(.plain)
@@ -1113,6 +1114,8 @@ private struct MarketIndexTable: View {
 
         }
         .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(MarketStyle.surface)
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             guard region != .commodity else { return }
