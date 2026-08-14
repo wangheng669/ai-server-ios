@@ -239,6 +239,7 @@ struct DeploymentStatusTip: View {
     let snapshot: DeploymentStatusSnapshot
     let onDismiss: () -> Void
     @State private var isExpanded: Bool
+    @GestureState private var dragTranslation: CGSize = .zero
 
     init(
         snapshot: DeploymentStatusSnapshot,
@@ -274,6 +275,30 @@ struct DeploymentStatusTip: View {
             }
         }
         .frame(width: 280, alignment: .leading)
+        .contentShape(Rectangle())
+        .offset(x: dragTranslation.width, y: min(0, dragTranslation.height))
+        .opacity(dragOpacity)
+        .simultaneousGesture(dismissGesture)
+        .accessibilityAction(named: "关闭提示", onDismiss)
+    }
+
+    private var dragOpacity: Double {
+        let distance = max(abs(dragTranslation.width), max(0, -dragTranslation.height))
+        return 1 - min(0.55, distance / 260)
+    }
+
+    private var dismissGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .updating($dragTranslation) { value, state, _ in
+                state = CGSize(width: value.translation.width, height: min(0, value.translation.height))
+            }
+            .onEnded { value in
+                let projected = value.predictedEndTranslation
+                let swipedSideways = abs(projected.width) >= 72
+                let swipedUp = projected.height <= -48
+                guard swipedSideways || swipedUp else { return }
+                onDismiss()
+            }
     }
 
     private var failedCompactTip: some View {
