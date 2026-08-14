@@ -134,17 +134,15 @@ private struct MarketHomeView: View {
                     .frame(height: 1)
                     .id("market-top")
 
-                    MarketRegionPicker(selection: $selectedMarket)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 10)
-                        .padding(.bottom, 12)
-                        .background(MarketStyle.surface)
-
-                    ZStack {
+                    ZStack(alignment: .topTrailing) {
                         MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
                             .id(selectedMarket)
                             .transition(.opacity)
+                        MarketRegionPicker(selection: $selectedMarket)
+                            .padding(.top, 14)
+                            .padding(.trailing, 8)
                     }
+                    .background(MarketStyle.surface)
                     .animation(.easeInOut(duration: 0.18), value: selectedMarket)
 
                     VStack(spacing: MarketStyle.pageSpacing) {
@@ -348,6 +346,7 @@ private struct MarketTerminalHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             heroStatusHeader
+                .padding(.trailing, 58)
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
                 VStack(alignment: .leading, spacing: 8) {
@@ -355,6 +354,7 @@ private struct MarketTerminalHero: View {
                     heroPriceAndChart
                 }
                 .foregroundStyle(.primary)
+                .padding(.trailing, 58)
             }
             .buttonStyle(MarketPressStyle())
             .accessibilityLabel(heroAccessibilityLabel)
@@ -526,10 +526,9 @@ private struct MarketTerminalHero: View {
                 .dynamicTypeSize(.large)
             }
         } else {
-            HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
                 sessionStatus
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
+                Group {
                     Text(heroDateLabel)
                     MarketLiveStatus(store: store)
                 }
@@ -977,15 +976,13 @@ private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
 
     var body: some View {
-        HStack(spacing: 4) {
+        VStack(spacing: 1) {
             ForEach(MarketRegion.allCases) { region in
                 regionButton(region)
-                    .frame(maxWidth: .infinity)
             }
         }
-        .padding(4)
-        .frame(maxWidth: .infinity)
-        .frame(height: 42)
+        .padding(3)
+        .frame(width: 50)
         .background(MarketStyle.canvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
@@ -1003,8 +1000,7 @@ private struct MarketRegionPicker: View {
                 .font(.system(size: 13, weight: weight))
                 .lineLimit(1)
                 .foregroundStyle(foreground)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 34)
+                .frame(width: 44, height: 26)
                 .background(
                     isSelected ? MarketStyle.surface : Color.clear,
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
