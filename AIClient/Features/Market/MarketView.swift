@@ -146,7 +146,6 @@ private struct MarketHomeView: View {
                                 isRetrying: store.isRetrying
                             ) { await store.refresh() }
                         }
-                        MarketRegionPicker(selection: $selectedMarket)
                         MarketIndexTable(
                             region: selectedMarket,
                             store: store,
@@ -201,6 +200,15 @@ private struct MarketHomeView: View {
                 proxy.scrollTo("market-structure", anchor: .top)
             }
             #endif
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                GeometryReader { geometry in
+                    MarketRegionPicker(selection: $selectedMarket)
+                        .frame(width: max(0, geometry.size.width - 28))
+                        .padding(.leading, 14)
+                        .padding(.vertical, 8)
+                }
+                .frame(height: 66)
+            }
         }
     }
 
@@ -970,24 +978,24 @@ private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 4) {
-                    ForEach(MarketRegion.allCases) { region in
-                        regionButton(region, proxy: proxy)
-                    }
-                }
-                .padding(.horizontal, 18)
-            }
-            .scrollIndicators(.hidden)
-            .onChange(of: selection) { _, region in
-                withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(region, anchor: .center) }
+        HStack(spacing: 0) {
+            ForEach(MarketRegion.allCases) { region in
+                regionButton(region)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .overlay(alignment: .bottom) { Divider().opacity(0.5).padding(.horizontal, 18) }
+        .padding(.horizontal, 7)
+        .frame(maxWidth: .infinity)
+        .frame(height: 50)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17)
+                .stroke(Color.primary.opacity(0.10), lineWidth: 0.8)
+        }
+        .shadow(color: Color.black.opacity(0.10), radius: 12, y: 5)
     }
 
-    private func regionButton(_ region: MarketRegion, proxy: ScrollViewProxy) -> some View {
+    private func regionButton(_ region: MarketRegion) -> some View {
         let isSelected = selection == region
         let weight: Font.Weight = isSelected ? .semibold : .medium
         let foreground = isSelected ? MarketStyle.accent : Color.secondary
@@ -996,16 +1004,18 @@ private struct MarketRegionPicker: View {
         return Button {
             withAnimation(.easeOut(duration: 0.18)) {
                 selection = region
-                proxy.scrollTo(region, anchor: .center)
             }
         } label: {
-            VStack(spacing: 9) {
-                Text(region.rawValue).font(.subheadline.weight(weight))
-                Capsule().fill(indicator).frame(width: 34, height: 2.5)
+            VStack(spacing: 7) {
+                Text(region.rawValue)
+                    .font(.system(size: 13, weight: weight))
+                    .lineLimit(1)
+                Capsule().fill(indicator).frame(width: 28, height: 2.5)
             }
             .foregroundStyle(foreground)
-            .frame(width: 54)
-            .frame(minHeight: 48)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 46)
+            .contentShape(Rectangle())
         }
         .id(region)
         .buttonStyle(.plain)
