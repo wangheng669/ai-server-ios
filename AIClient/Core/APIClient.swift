@@ -580,19 +580,20 @@ struct APIClient {
     }
 
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
-        let response = try await fetchArticlePreview(url: url)
+        let response = try await fetchArticlePreview(url: url, preferRemote: true)
         if let article = NewYorkTimesArticleParser.extract(from: response.data.content) { return article }
-        let paragraphs = response.data.textContent
-            .components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map(NewYorkTimesArticleBlock.paragraph)
-        guard !paragraphs.isEmpty else { throw APIError.decoding(NYTimesArticleError.bodyMissing) }
-        return NewYorkTimesArticle(blocks: paragraphs)
+        guard let article = NewYorkTimesArticle.storedText(response.data.textContent) else {
+            throw APIError.decoding(NYTimesArticleError.bodyMissing)
+        }
+        return article
     }
 
-    func fetchArticlePreview(url: URL) async throws -> ArticlePreviewResponse {
-        guard let previewURL = Self.articlePreviewURL(for: url, baseURL: baseURL) else { throw APIError.invalidURL }
+    func fetchArticlePreview(url: URL, preferRemote: Bool = false) async throws -> ArticlePreviewResponse {
+        guard let previewURL = Self.articlePreviewURL(
+            for: url,
+            baseURL: baseURL,
+            preferRemote: preferRemote
+        ) else { throw APIError.invalidURL }
         return try await get(previewURL)
     }
 
@@ -626,11 +627,19 @@ struct APIClient {
         return response.article
     }
 
-    static func articlePreviewURL(for articleURL: URL, baseURL: URL) -> URL? {
+    static func articlePreviewURL(
+        for articleURL: URL,
+        baseURL: URL,
+        preferRemote: Bool = false
+    ) -> URL? {
         var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/preview"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = [
+        var queryItems: [URLQueryItem] = [
             .init(name: "url", value: articleURL.absoluteString),
         ]
+        if preferRemote {
+            queryItems.append(.init(name: "prefer_remote", value: "true"))
+        }
+        parts?.queryItems = queryItems
         return parts?.url
     }
 

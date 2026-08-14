@@ -440,12 +440,18 @@ final class NewsFeedViewModel: ObservableObject {
                     // The list endpoint intentionally truncates content. Always
                     // read the raw database row before publishing a tappable card.
                     let detail = try await fetchPostDetail(post.id)
-                    if let article = (detail.contentZH ?? detail.content).flatMap(NewYorkTimesArticle.storedText) {
-                        return (index, detail, article)
+                    let hasStoredArticle = (detail.contentZH ?? detail.content)
+                        .flatMap(NewYorkTimesArticle.storedText) != nil
+                    guard let link = detail.linkURL ?? post.linkURL else {
+                        guard hasStoredArticle else { throw APIError.invalidURL }
+                        return (index, detail, nil)
                     }
-                    guard let link = detail.linkURL ?? post.linkURL else { throw APIError.invalidURL }
-                    let article = try await fetchNewYorkTimesArticle(link)
-                    return (index, detail, article)
+                    do {
+                        return (index, detail, try await fetchNewYorkTimesArticle(link))
+                    } catch {
+                        guard hasStoredArticle else { throw error }
+                        return (index, detail, nil)
+                    }
                 }
             }
 

@@ -198,7 +198,10 @@ final class FeedAdapterTests: XCTestCase {
                 )
             },
             fetchNewYorkTimesArticle: { url in
-                NewYorkTimesArticle(blocks: [.paragraph("不应使用网页预览 \(url.lastPathComponent)。")])
+                NewYorkTimesArticle(blocks: [
+                    .paragraph("网页结构化正文 \(url.lastPathComponent)。"),
+                    .image(url: URL(string: "https://example.com/\(url.lastPathComponent).jpg")!, caption: "图注", credit: "署名")
+                ])
             }
         )
 
@@ -207,7 +210,10 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.posts.count, feedPosts.count)
         XCTAssertTrue(model.posts.allSatisfy {
             model.preloadedNewYorkTimesArticle(for: $0.id) == NewYorkTimesArticle(
-                blocks: [.paragraph("数据库完整正文 \($0.id)。这是正文的第二段。")]
+                blocks: [
+                    .paragraph("网页结构化正文 \($0.id)。"),
+                    .image(url: URL(string: "https://example.com/\($0.id).jpg")!, caption: "图注", credit: "署名")
+                ]
             )
         })
     }
@@ -230,7 +236,10 @@ final class FeedAdapterTests: XCTestCase {
                 )
             },
             fetchNewYorkTimesArticle: { url in
-                NewYorkTimesArticle(blocks: [.paragraph("不应使用网页预览 \(url.lastPathComponent)。")])
+                NewYorkTimesArticle(blocks: [
+                    .paragraph("网页结构化正文 \(url.lastPathComponent)。"),
+                    .image(url: URL(string: "https://example.com/\(url.lastPathComponent).jpg")!, caption: nil, credit: nil)
+                ])
             }
         )
 
@@ -239,10 +248,37 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.selectedRSSPosts.count, feedPosts.count)
         XCTAssertTrue(model.selectedRSSPosts.allSatisfy {
             model.preloadedNewYorkTimesArticle(for: $0.id) == NewYorkTimesArticle(
-                blocks: [.paragraph("数据库完整正文 \($0.id)。这是正文的第二段。")]
+                blocks: [
+                    .paragraph("网页结构化正文 \($0.id)。"),
+                    .image(url: URL(string: "https://example.com/\($0.id).jpg")!, caption: nil, credit: nil)
+                ]
             )
         })
         XCTAssertFalse(model.isLoadingRSSSelection)
+    }
+
+    @MainActor
+    func testNewYorkTimesPrefetchKeepsStoredBodyAvailableWhenRemotePreviewFails() async throws {
+        let feedPost = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":7,"source":"rss:47","title":"Article 7","post_link":"https://example.com/7"}"#.utf8)
+        )
+        let model = NewsFeedViewModel(
+            source: .newYorkTimes,
+            fetchPosts: { _, _, _ in [feedPost] },
+            fetchPostDetail: { _ in
+                try JSONDecoder().decode(
+                    Post.self,
+                    from: Data(#"{"id":7,"source":"rss:47","content":"数据库正文第一句。 数据库正文第二句。","post_link":"https://example.com/7"}"#.utf8)
+                )
+            },
+            fetchNewYorkTimesArticle: { _ in throw URLError(.timedOut) }
+        )
+
+        await model.refresh()
+
+        XCTAssertNil(model.preloadedNewYorkTimesArticle(for: 7))
+        XCTAssertEqual(model.posts.first?.content, "数据库正文第一句。 数据库正文第二句。")
     }
 
     @MainActor
@@ -1237,14 +1273,23 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.rssListContent, "正文\n结尾")
     }
 
-    func testNewYorkTimesArticleUsesServerPreviewEndpoint() throws {
+    func testNewYorkTimesArticleUsesRemoteServerPreviewEndpoint() throws {
         let article = try XCTUnwrap(URL(string: "https://www.nytimes.com/2026/07/19/example.html"))
         let base = try XCTUnwrap(URL(string: "https://api.wanghengai.xin"))
-        let url = try XCTUnwrap(APIClient.articlePreviewURL(for: article, baseURL: base))
+        let url = try XCTUnwrap(APIClient.articlePreviewURL(for: article, baseURL: base, preferRemote: true))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
 
         XCTAssertEqual(components.path, "/api/ios/v1/post/preview")
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, article.absoluteString)
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "prefer_remote" })?.value, "true")
+    }
+
+    func testGenericArticlePreviewStillUsesPersistedCache() throws {
+        let article = try XCTUnwrap(URL(string: "https://example.com/article"))
+        let base = try XCTUnwrap(URL(string: "https://api.wanghengai.xin"))
+        let url = try XCTUnwrap(APIClient.articlePreviewURL(for: article, baseURL: base))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+
         XCTAssertNil(components.queryItems?.first(where: { $0.name == "prefer_remote" }))
     }
 
