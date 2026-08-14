@@ -599,6 +599,19 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testYouTubeRequestsCompleteTwoColumnPages() async {
+        var requestedLimit = 0
+        let model = NewsFeedViewModel(source: .youtube) { _, limit, _ in
+            requestedLimit = limit
+            return []
+        }
+
+        await model.refresh()
+
+        XCTAssertEqual(requestedLimit, 10)
+    }
+
+    @MainActor
     func testFlashRequestsEnoughPostsForClientSideFilters() async {
         var requestedLimit = 0
         let model = NewsFeedViewModel(source: .flash) { _, limit, _ in

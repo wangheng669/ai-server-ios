@@ -752,6 +752,7 @@ final class NewsFeedViewModel: ObservableObject {
         case .wechat, .weibo, .douyin, .baidu, .truth: 20
         case .flash: 20
         case .x: 10
+        case .youtube: 10
         default: defaultPageSize
         }
     }
