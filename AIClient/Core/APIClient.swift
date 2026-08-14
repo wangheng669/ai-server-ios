@@ -29,7 +29,8 @@ struct APIClient {
         page: Int,
         limit: Int = 20,
         source: FeedSource,
-        flashCategory: String? = nil
+        flashCategory: String? = nil,
+        youtubePerson: String? = nil
     ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin, .baidu:
@@ -50,6 +51,8 @@ struct APIClient {
             return try await fetchXueqiuPosts(page: page, limit: limit)
         case .wechat:
             return try await fetchWeChatPosts(page: page, limit: limit)
+        case .youtube:
+            return try await fetchYouTubePosts(page: page, limit: limit, person: youtubePerson)
         default:
             return try await fetchRegularPosts(page: page, limit: limit, source: source)
         }
@@ -232,9 +235,6 @@ struct APIClient {
     }
 
     private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
-        if source == .youtube {
-            return try await fetchYouTubePosts(page: page, limit: limit)
-        }
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
         var queryItems = Self.regularPostQueryItems(page: page, limit: limit, source: source)

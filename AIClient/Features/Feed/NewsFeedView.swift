@@ -43,6 +43,25 @@ private enum WeiboSection: String, CaseIterable, Identifiable {
     var title: String { self == .hot ? "热搜" : "关注" }
 }
 
+private enum YouTubePersonFilter: String, CaseIterable, Identifiable {
+    case all = ""
+    case wangZhian = "王志安"
+    case chaiJing = "柴静"
+    case xiaodao = "小岛大浪吹"
+
+    var id: Self { self }
+    var title: String { self == .all ? "全部" : rawValue }
+    var shortTitle: String {
+        switch self {
+        case .all: "全"
+        case .wangZhian: "王"
+        case .chaiJing: "柴"
+        case .xiaodao: "岛"
+        }
+    }
+    var person: String? { self == .all ? nil : rawValue }
+}
+
 enum FeedChromeLayout {
     static let headerHeight: CGFloat = 0
     static let sourceSelectorSpacing: CGFloat = 12
@@ -113,6 +132,7 @@ struct NewsFeedView: View {
     @State private var showsAllRSSSources = false
     @State private var rssSourceSearch = ""
     @State private var isSourceSelectorExpanded = false
+    @State private var isYouTubePersonSelectorExpanded = false
     @State private var isSourceContentVisible = true
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -141,19 +161,25 @@ struct NewsFeedView: View {
                     .opacity(isSourceContentVisible ? 1 : 0.15)
                     .scaleEffect(isSourceContentVisible ? 1 : 0.997)
 
-                if isSourceSelectorExpanded {
+                if isSourceSelectorExpanded || isYouTubePersonSelectorExpanded {
                     Color.black.opacity(0.045)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
-                        .onTapGesture { closeSourceSelector() }
+                        .onTapGesture { closeSelectors() }
                         .gesture(
                             DragGesture(minimumDistance: 4)
-                                .onChanged { _ in closeSourceSelector() }
+                                .onChanged { _ in closeSelectors() }
                         )
                         .transition(.opacity)
                 }
 
-                sourceSelector
+                HStack(alignment: .bottom, spacing: 8) {
+                    if model.source == .youtube {
+                        youtubePersonSelector
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                    }
+                    sourceSelector
+                }
                     .padding(.trailing, 16)
                     .padding(
                         .bottom,
@@ -310,6 +336,7 @@ struct NewsFeedView: View {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(.smooth(duration: 0.22)) {
+                    isYouTubePersonSelectorExpanded = false
                     isSourceSelectorExpanded.toggle()
                 }
             } label: {
@@ -327,6 +354,76 @@ struct NewsFeedView: View {
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isSourceSelectorExpanded)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.source)
+    }
+
+    private var youtubePersonSelector: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isYouTubePersonSelectorExpanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(YouTubePersonFilter.allCases) { option in
+                        let isSelected = model.selectedYouTubePerson == option.person
+                        Button {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            isYouTubePersonSelectorExpanded = false
+                            Task { await model.selectYouTubePerson(option.person) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(option.shortTitle)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                                    .background(InvestmentDesign.accent.opacity(isSelected ? 0.13 : 0.05), in: Circle())
+                                Text(option.title)
+                                    .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                                    .lineLimit(1)
+                                Spacer(minLength: 4)
+                                if isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(InvestmentDesign.accent)
+                                }
+                            }
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 10)
+                            .frame(width: 132, height: 40)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(4)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
+                .transition(.scale(scale: 0.94, anchor: .bottomLeading).combined(with: .opacity))
+            }
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.smooth(duration: 0.22)) {
+                    isSourceSelectorExpanded = false
+                    isYouTubePersonSelectorExpanded.toggle()
+                }
+            } label: {
+                Text(currentYouTubePersonFilter.shortTitle)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay(Circle().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("选择 YouTube 用户，当前\(currentYouTubePersonFilter.title)")
+            .accessibilityValue(isYouTubePersonSelectorExpanded ? "已展开" : "已收起")
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isYouTubePersonSelectorExpanded)
+    }
+
+    private var currentYouTubePersonFilter: YouTubePersonFilter {
+        YouTubePersonFilter.allCases.first { $0.person == model.selectedYouTubePerson } ?? .all
     }
 
     private func sourceOption(_ source: FeedSource) -> some View {
@@ -355,6 +452,13 @@ struct NewsFeedView: View {
     private func closeSourceSelector() {
         withAnimation(.smooth(duration: 0.20)) {
             isSourceSelectorExpanded = false
+        }
+    }
+
+    private func closeSelectors() {
+        withAnimation(.smooth(duration: 0.20)) {
+            isSourceSelectorExpanded = false
+            isYouTubePersonSelectorExpanded = false
         }
     }
 
