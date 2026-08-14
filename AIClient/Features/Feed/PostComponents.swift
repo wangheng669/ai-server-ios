@@ -5,6 +5,29 @@ import AVKit
 import CryptoKit
 import WebKit
 
+struct DetailSheetCloseButton: View {
+    let action: () -> Void
+    var accessibilityLabel = "关闭详情"
+
+    var body: some View {
+        Button(action: action) {
+            Label("关闭", systemImage: "xmark")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .background(.regularMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 struct InAppBrowserDestination: Identifiable, Equatable {
     let url: URL
     var id: String { url.absoluteString }
@@ -43,6 +66,10 @@ struct InAppBrowserSheet: View {
             }
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: close, accessibilityLabel: "关闭网页详情")
+                .padding(16)
+        }
         .accessibilityIdentifier("in-app-browser")
         .accessibilityAction(.escape) { close() }
     }

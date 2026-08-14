@@ -948,10 +948,9 @@ private struct GoogleSignalEventDetailView: View {
             .background(Color(uiColor: .systemBackground))
             .navigationTitle("信号详情")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭信号详情")
+                    .padding(16)
             }
             .task { await evidenceStore.load(reset: true) }
         }

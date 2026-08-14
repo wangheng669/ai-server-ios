@@ -120,6 +120,10 @@ struct CountryGDPDetailView: View {
             }
         }
         .background(InvestmentDesign.surface)
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭国家 GDP 详情")
+                .padding(16)
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             detailHeader
         }
@@ -132,15 +136,6 @@ struct CountryGDPDetailView: View {
             Text("国家 GDP")
                 .font(.headline)
             Spacer()
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 32)
-                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, InvestmentDesign.pageInset)
         .frame(height: 50)

@@ -115,16 +115,24 @@ struct YouTubeVideoDetailView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottomTrailing) {
+            if presentedAsSheet {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
+                    .padding(16)
+            }
+        }
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { dismiss() } label: {
-                    Image(systemName: presentedAsSheet ? "xmark" : "chevron.left")
+            if !presentedAsSheet {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .accessibilityLabel("返回")
                 }
-                .accessibilityLabel(presentedAsSheet ? "关闭视频详情" : "返回")
             }
         }
         .task(id: video.id) {
