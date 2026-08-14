@@ -1146,10 +1146,9 @@ private struct InvestorVideoInterpretationSheet: View {
             }
             .navigationTitle("视频解读")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }
-                }
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频解读")
+                    .padding(16)
             }
         }
         .task(id: item.id) { await interpret() }

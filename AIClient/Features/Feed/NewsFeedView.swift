@@ -1554,15 +1554,13 @@ private struct EmbeddedWebPage: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .background(InteractivePopGestureEnabler())
-        .toolbar {
+        .overlay(alignment: .bottomTrailing) {
             if presentedAsSheet {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("关闭网页详情")
-                }
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
+                    .padding(16)
             }
+        }
+        .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
                     hotTopicMark

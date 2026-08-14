@@ -2557,6 +2557,10 @@ private struct MarketIndexDetailView: View {
             }
         }
         .contentShape(Rectangle())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭行情详情")
+                .padding(16)
+        }
         .simultaneousGesture(oneHandDismissGesture)
         .accessibilityHint("在详情内容区域向下滑动即可收起")
         .toolbar(.hidden, for: .navigationBar)
@@ -2609,13 +2613,7 @@ private struct MarketIndexDetailView: View {
 
     private var detailNavigation: some View {
         HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 44, height: 44, alignment: .leading)
-            }
-            .accessibilityLabel("关闭行情详情")
-            Spacer()
+            Spacer(minLength: 0)
             ShareLink(item: shareText) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 20, weight: .medium))
@@ -3076,10 +3074,9 @@ struct CompanyValuationHistorySheet: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("PE 历史变化")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭 PE 历史详情")
+                    .padding(16)
             }
         }
         .task(id: route.symbol) { await load() }

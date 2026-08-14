@@ -1111,25 +1111,9 @@ private struct LearningVideoLessonDetailView: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.58), in: Circle())
-                    .overlay {
-                        Circle().stroke(.white.opacity(0.18), lineWidth: 0.8)
-                    }
-                    .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭视频详情")
-            .padding(.leading, 14)
-            .padding(.top, 6)
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
+                .padding(16)
         }
         .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)

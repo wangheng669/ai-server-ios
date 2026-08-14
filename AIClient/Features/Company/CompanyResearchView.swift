@@ -412,6 +412,13 @@ struct CompanyResearchView: View {
         .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemGroupedBackground))
         .background(CompanyScrollBounceConfigurator())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(
+                action: { presentedCompany = nil },
+                accessibilityLabel: "关闭公司详情"
+            )
+            .padding(16)
+        }
         .sheet(item: $presentedValuation) { route in
             valuationHistorySheet(route)
         }
