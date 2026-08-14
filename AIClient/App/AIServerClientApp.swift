@@ -563,16 +563,14 @@ private struct RootNavigationBar: View {
         let icon = currentTab == .signal ? "waveform.path.ecg" : "list.bullet.rectangle"
 
         return Menu {
-            Button {
-                select(.observation)
-            } label: {
+            Picker("情报视图", selection: Binding(
+                get: { currentTab },
+                set: { select($0) }
+            )) {
                 Label("动态", systemImage: "list.bullet.rectangle")
-            }
-
-            Button {
-                select(.signal)
-            } label: {
+                    .tag(EditorialTab.observation)
                 Label("信号", systemImage: "waveform.path.ecg")
+                    .tag(EditorialTab.signal)
             }
         } label: {
             itemLabel(title: "情报", icon: icon, isSelected: isSelected)
