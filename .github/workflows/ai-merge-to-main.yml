@@ -75,6 +75,11 @@ jobs:
           IOS_DEVICE_STABILITY_ATTEMPTS: 3
           IOS_DEVICE_STABILITY_INTERVAL_SECONDS: 5
         run: |
+          ./ci/git-fetch-origin.sh \
+            --no-tags \
+            --depth=64 \
+            origin \
+            main:refs/remotes/origin/main
           ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
           ./ci/prepare-central-runner-parallel.sh
 
