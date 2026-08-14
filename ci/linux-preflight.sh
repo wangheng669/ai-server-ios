@@ -37,7 +37,7 @@ if git diff --name-only "$merge_base"...HEAD -- ci/sign-and-install-ios.sh ci/te
   bash ci/test-sign-and-install-ios.sh
 fi
 
-if git diff --name-only "$merge_base"...HEAD -- ci/classify-ios-test-scope.sh ci/test-classify-ios-test-scope.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
+if git diff --name-only "$merge_base"...HEAD -- ci/classify-ios-test-scope.sh ci/is-low-risk-ios-diff.sh ci/test-classify-ios-test-scope.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
   bash ci/test-classify-ios-test-scope.sh
 fi
 

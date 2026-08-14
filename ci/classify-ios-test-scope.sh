@@ -23,7 +23,9 @@ done
 test_scope=none
 if [[ "$app_changed" == true ]]; then
   test_scope=full
-  if [[ "$feed_only" == true ]]; then
+  if [[ "${IOS_LOW_RISK_CHANGE:-false}" == true ]]; then
+    test_scope=build
+  elif [[ "$feed_only" == true ]]; then
     test_scope=feed
   fi
 fi
