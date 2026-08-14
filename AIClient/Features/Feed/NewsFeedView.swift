@@ -270,24 +270,27 @@ struct NewsFeedView: View {
         VStack(alignment: .trailing, spacing: 8) {
             if isSourceSelectorExpanded {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: 1) {
                         ForEach(FeedSource.allCases) { source in
                             sourceOption(source)
                         }
                     }
-                    .padding(5)
+                    .padding(4)
                 }
                 .scrollIndicators(.hidden)
-                .frame(width: 214)
-                .frame(maxHeight: 360)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(width: 184)
+                .frame(maxHeight: 344)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
                 }
                 .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
                 .transition(
-                    .move(edge: .bottom).combined(with: .opacity)
+                    .asymmetric(
+                        insertion: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.97, anchor: .bottomTrailing).combined(with: .opacity)
+                    )
                 )
             }
 
@@ -297,30 +300,26 @@ struct NewsFeedView: View {
                     isSourceSelectorExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 7) {
+                HStack(spacing: 4) {
                     sourceIcon(model.source)
                         .frame(width: 24, height: 24)
 
-                    Text(model.source.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isSourceSelectorExpanded ? 180 : 0))
                 }
                 .foregroundStyle(.primary)
-                .padding(.leading, 10)
-                .padding(.trailing, 11)
-                .frame(height: 40)
+                .padding(.leading, 8)
+                .padding(.trailing, 9)
+                .frame(height: 38)
                 .background(.regularMaterial, in: Capsule())
                 .overlay(Capsule().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.09), radius: 10, y: 4)
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("选择观点来源")
+            .accessibilityLabel("选择观点来源，当前\(model.source.title)")
             .accessibilityValue(isSourceSelectorExpanded ? "已展开" : "已收起")
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isSourceSelectorExpanded)
@@ -336,24 +335,24 @@ struct NewsFeedView: View {
                 selectSourceFromTap(source)
             }
         } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: 7) {
                 sourceIcon(source)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 24, height: 24)
 
                 Text(source.title)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(.primary)
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 4)
 
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(InvestmentDesign.accent)
-                    .frame(width: 16, height: 16)
+                    .frame(width: 14, height: 14)
                     .opacity(isSelected ? 1 : 0)
             }
-            .padding(.horizontal, 9)
-            .frame(height: 44)
+            .padding(.horizontal, 8)
+            .frame(height: 40)
             .background(
                 isSelected ? InvestmentDesign.accent.opacity(0.07) : Color.clear,
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
