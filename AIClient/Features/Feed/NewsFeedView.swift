@@ -251,7 +251,11 @@ struct NewsFeedView: View {
                 isPresented: post != nil,
                 isXueqiu: post?.isXueqiu == true
             )
-            if post == nil { preparedWebViews.removeAll() }
+            if post == nil {
+                isFeedChromeHidden = false
+                hidesTabBar = false
+                preparedWebViews.removeAll()
+            }
         }
         .task(id: notificationPostID) {
             guard let postID = notificationPostID else { return }
