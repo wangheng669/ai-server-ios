@@ -357,6 +357,23 @@ private struct EditorialRootView: View {
             return .handled
         })
         .inAppBrowserCover(item: $presentedExternalLink)
+        .overlay(alignment: .topLeading) {
+            if let deploymentStatus {
+                DeploymentStatusTip(
+                    snapshot: deploymentStatus,
+                    initiallyExpanded: deploymentPreview != nil &&
+                        ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview"),
+                    onDismiss: {
+                        dismissedDeploymentIdentity = deploymentStatus.identity
+                        deploymentStore.dismissFailure(deploymentStatus)
+                    }
+                )
+                .id(deploymentStatus.identity)
+                .padding(.leading, 12)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
                 if selectedTab == .signal {
@@ -365,20 +382,6 @@ private struct EditorialRootView: View {
                         sentiment: signalSentiment,
                         showsFilters: $showsSignalFilters
                     )
-                }
-
-                if let deploymentStatus {
-                    DeploymentStatusTip(
-                        snapshot: deploymentStatus,
-                        initiallyExpanded: deploymentPreview != nil &&
-                            ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview"),
-                        onDismiss: {
-                            dismissedDeploymentIdentity = deploymentStatus.identity
-                            deploymentStore.dismissFailure(deploymentStatus)
-                        }
-                    )
-                    .id(deploymentStatus.identity)
-                    .padding(.horizontal, 12)
                 }
 
                 if !hidesRootTabBar {
