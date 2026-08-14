@@ -575,79 +575,30 @@ struct NewsFeedView: View {
                             .padding(.vertical, 36)
                         }
                     }
-                    ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
-                        let displayPost = model.postForDisplay(post)
-                        NewsCardView(
-                            post: displayPost,
-                            usesWeChatStyle: source == .wechat,
-                            isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
-                            isExpandedFlash: expandedFlashIDs.contains(post.id),
-                            onOpen: { openPost(displayPost) },
-                            onOpenLink: { presentedXueqiuLink = InAppBrowserDestination(url: $0) }
-                        )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .modifier(ConditionalTapGestureModifier(
-                                isEnabled: !post.isXueqiu && !(post.sourceName == "X" && !post.videoURLs.isEmpty)
+                    Group {
+                        if source == .youtube {
+                            LazyVGrid(
+                                columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: 2),
+                                alignment: .leading,
+                                spacing: 8
                             ) {
-                                if post.isFlash {
-                                    withAnimation(.easeInOut(duration: 0.22)) {
-                                        if expandedFlashIDs.contains(post.id) {
-                                            expandedFlashIDs.remove(post.id)
-                                        } else {
-                                            expandedFlashIDs.insert(post.id)
-                                        }
-                                    }
-                                } else {
-                                    openPost(displayPost)
-                                }
-                            })
-                            .overlay {
-                                if openingWebPostID == post.id {
-                                    HStack(spacing: 8) {
-                                        if let source = FeedSource(rawValue: post.source ?? "") {
-                                            Image(source == .weibo ? "WeiboMark" : "TikTokMark")
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(width: 18, height: 18)
-                                        }
-                                        ProgressView().controlSize(.small)
-                                        Text("正在准备页面")
-                                            .font(.system(size: 13, weight: .medium))
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .background(.regularMaterial, in: Capsule())
-                                    .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-                                    .allowsHitTesting(false)
+                                ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
+                                    feedPostCell(source: source, post: post, index: index, posts: posts)
                                 }
                             }
-                            .task(id: "\(rootTabIsActive)-translate-\(post.id)") {
-                                guard rootTabIsActive, source == .x, source == model.source else { return }
-                                await model.translateXPostIfNeeded(post)
-                            }
-                            .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
-                                await model.translateRSSPostIfNeeded(post)
-                            }
-                            .task(id: "\(rootTabIsActive)-youtube-prewarm-\(post.id)") {
-                                guard rootTabIsActive,
-                                      source == .youtube,
-                                      source == model.source,
-                                      index < 2,
-                                      let url = displayPost.linkURL else { return }
-                                await YouTubePlaybackSourceCache.shared.prewarm(
-                                    url: url,
-                                    title: displayPost.displayTitle,
-                                    baseURL: ServerConfiguration.currentURL
-                                )
-                            }
-                        if source == .flash, index == 2, visiblePosts.count > 3 {
-                            flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
-                        } else if source == .wechat {
-                            Color.clear.frame(height: 10)
+                            .padding(8)
                         } else {
-                            Divider().opacity(source == .flash ? 0.42 : 0.6)
-                                .padding(.leading, source == .flash ? 84 : 0)
+                            ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
+                                feedPostCell(source: source, post: post, index: index, posts: posts)
+                                if source == .flash, index == 2, visiblePosts.count > 3 {
+                                    flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
+                                } else if source == .wechat {
+                                    Color.clear.frame(height: 10)
+                                } else {
+                                    Divider().opacity(source == .flash ? 0.42 : 0.6)
+                                        .padding(.leading, source == .flash ? 84 : 0)
+                                }
+                            }
                         }
                     }
                     if let tail = visiblePosts.last {
@@ -746,6 +697,79 @@ struct NewsFeedView: View {
             } message: {
                 Text(webOpenError ?? "请稍后重试")
             }
+        }
+    }
+
+    private func feedPostCell(
+        source: FeedSource,
+        post: Post,
+        index: Int,
+        posts: [Post]
+    ) -> some View {
+        let displayPost = model.postForDisplay(post)
+        return NewsCardView(
+            post: displayPost,
+            usesWeChatStyle: source == .wechat,
+            isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
+            isExpandedFlash: expandedFlashIDs.contains(post.id),
+            onOpen: { openPost(displayPost) },
+            onOpenLink: { presentedXueqiuLink = InAppBrowserDestination(url: $0) }
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .modifier(ConditionalTapGestureModifier(
+            isEnabled: !post.isXueqiu && !(post.sourceName == "X" && !post.videoURLs.isEmpty)
+        ) {
+            if post.isFlash {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    if expandedFlashIDs.contains(post.id) {
+                        expandedFlashIDs.remove(post.id)
+                    } else {
+                        expandedFlashIDs.insert(post.id)
+                    }
+                }
+            } else {
+                openPost(displayPost)
+            }
+        })
+        .overlay {
+            if openingWebPostID == post.id {
+                HStack(spacing: 8) {
+                    if let source = FeedSource(rawValue: post.source ?? "") {
+                        Image(source == .weibo ? "WeiboMark" : "TikTokMark")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
+                    }
+                    ProgressView().controlSize(.small)
+                    Text("正在准备页面")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+                .allowsHitTesting(false)
+            }
+        }
+        .task(id: "\(rootTabIsActive)-translate-\(post.id)") {
+            guard rootTabIsActive, source == .x, source == model.source else { return }
+            await model.translateXPostIfNeeded(post)
+        }
+        .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
+            await model.translateRSSPostIfNeeded(post)
+        }
+        .task(id: "\(rootTabIsActive)-youtube-prewarm-\(post.id)") {
+            guard rootTabIsActive,
+                  source == .youtube,
+                  source == model.source,
+                  index < 2,
+                  let url = displayPost.linkURL else { return }
+            await YouTubePlaybackSourceCache.shared.prewarm(
+                url: url,
+                title: displayPost.displayTitle,
+                baseURL: ServerConfiguration.currentURL
+            )
         }
     }
 
@@ -3470,7 +3494,7 @@ struct NewsCardView: View {
             if let cover = post.youtubeCoverURL {
                 RemoteImage(
                     url: cover,
-                    height: max(UIScreen.main.bounds.width - 28, 240) * 9 / 16,
+                    height: max((UIScreen.main.bounds.width - 44) / 2, 120) * 9 / 16,
                     cornerRadius: 9,
                     contentMode: .fill
                 )
@@ -3485,13 +3509,13 @@ struct NewsCardView: View {
             }
 
             Text(post.displayTitle)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .lineSpacing(2)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
 
             HStack(spacing: 8) {
-                AvatarView(url: post.avatarURL, name: post.authorName, size: 28)
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 24)
                 Text(post.authorName)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
@@ -3505,8 +3529,8 @@ struct NewsCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
