@@ -449,7 +449,7 @@ jobs:
           exit 1
 
       - name: Report merge failure
-        if: ${{ failure() && steps.local_install.outcome != 'failure' }}
+        if: ${{ failure() && steps.local_install.outcome != 'failure' && steps.central_prepare.outputs.device_gate_failed != 'true' }}
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
