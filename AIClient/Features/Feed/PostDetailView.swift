@@ -413,7 +413,13 @@ struct PostDetailView: View {
     }
 
     private var isGenericRSSDetail: Bool {
-        post.isRSS && !post.isNewYorkTimes && !isWeChatArticle && !post.isWeiboRSS
+        post.isRSS
+            && !post.isNewYorkTimes
+            && !isWeChatArticle
+            && !post.isBilibili
+            && !post.isYouTube
+            && !post.isXueqiu
+            && !post.isWeiboRSS
     }
 
     private var rssDetailSummary: String? {
