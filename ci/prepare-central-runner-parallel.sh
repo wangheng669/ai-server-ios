@@ -24,11 +24,16 @@ if ! git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
   echo "Preflight merge base remains unavailable after bounded deepening." >&2
   exit 1
 fi
-app_changed=$(
-  ./ci/classify-ios-test-scope.sh \
-    < <(git diff --name-only origin/main "$source_sha") \
-    | awk -F= '$1 == "app_changed" { print $2 }'
+low_risk_change=false
+if ./ci/is-low-risk-ios-diff.sh origin/main "$source_sha"; then
+  low_risk_change=true
+fi
+scope=$(
+  IOS_LOW_RISK_CHANGE="$low_risk_change" ./ci/classify-ios-test-scope.sh \
+    < <(git diff --name-only origin/main "$source_sha")
 )
+app_changed=$(awk -F= '$1 == "app_changed" { print $2 }' <<<"$scope")
+test_scope=$(awk -F= '$1 == "test_scope" { print $2 }' <<<"$scope")
 preflight_started_epoch=$workflow_started_epoch
 preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finished.XXXXXX")
 
@@ -65,7 +70,8 @@ prepare_started_epoch=$(date +%s)
 prepare_metrics_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-prepare-metrics.XXXXXX")
 export IOS_PREPARE_METRICS_FILE="$prepare_metrics_file"
 if [[ "$app_changed" == true ]]; then
-  ./ci/prepare-central-runner.sh
+  IOS_SKIP_SIMULATOR_WARM=$([[ "$test_scope" == build ]] && echo true || echo false) \
+    ./ci/prepare-central-runner.sh
 else
   echo "Configuration-only change; skipping Xcode dependency and build cache warming."
   {
