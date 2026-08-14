@@ -6,7 +6,7 @@ if [[ "${1:-}" == --stdin ]]; then
 elif (($# == 2)); then
   while IFS= read -r changed_path; do
     case "$changed_path" in
-      AIClient/*.swift|AIClient/**/*.swift) ;;
+      AIClient/*.swift) ;;
       *) exit 1 ;;
     esac
   done < <(git diff --name-only "$1"..."$2")
