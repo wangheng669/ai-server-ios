@@ -6,10 +6,27 @@ private struct RootTabIsActiveKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+private struct RootBottomChromeHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+private struct RootBottomChromeHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 extension EnvironmentValues {
     var rootTabIsActive: Bool {
         get { self[RootTabIsActiveKey.self] }
         set { self[RootTabIsActiveKey.self] = newValue }
+    }
+
+    var rootBottomChromeHeight: CGFloat {
+        get { self[RootBottomChromeHeightKey.self] }
+        set { self[RootBottomChromeHeightKey.self] = newValue }
     }
 }
 @MainActor
@@ -213,6 +230,7 @@ private struct EditorialRootView: View {
     @State private var signalSection: GoogleSignalSection = .highlights
     @State private var signalSentiment: GoogleSignalSentimentFilter = .all
     @State private var showsSignalFilters = false
+    @State private var rootBottomChromeHeight: CGFloat = 0
     @State private var dismissedDeploymentIdentity: String?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
@@ -315,6 +333,7 @@ private struct EditorialRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .environment(\.rootBottomChromeHeight, rootBottomChromeHeight)
         .environment(\.openURL, OpenURLAction { url in
             guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
                 return .systemAction
@@ -356,11 +375,22 @@ private struct EditorialRootView: View {
                 }
             }
             .padding(.bottom, -13)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: RootBottomChromeHeightPreferenceKey.self,
+                        value: max(0, proxy.size.height)
+                    )
+                }
+            }
             .animation(
                 reduceMotion ? nil : .smooth(duration: 0.22, extraBounce: 0),
                 value: deploymentStatus?.identity
             )
             .background(.clear)
+        }
+        .onPreferenceChange(RootBottomChromeHeightPreferenceKey.self) { height in
+            rootBottomChromeHeight = height
         }
         .overlay {
             if selectedTab == .signal, showsSignalFilters {

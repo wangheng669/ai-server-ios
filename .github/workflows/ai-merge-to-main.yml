@@ -75,6 +75,11 @@ jobs:
           IOS_DEVICE_STABILITY_ATTEMPTS: 3
           IOS_DEVICE_STABILITY_INTERVAL_SECONDS: 5
         run: |
+          ./ci/git-fetch-origin.sh \
+            --no-tags \
+            --depth=64 \
+            origin \
+            main:refs/remotes/origin/main
           ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
           ./ci/prepare-central-runner-parallel.sh
 
@@ -122,7 +127,11 @@ jobs:
               main \
               "$SOURCE_BRANCH"
           fi
-          ./ci/classify-ios-test-scope.sh \
+          low_risk_change=false
+          if ./ci/is-low-risk-ios-diff.sh origin/main "$SOURCE_SHA"; then
+            low_risk_change=true
+          fi
+          IOS_LOW_RISK_CHANGE="$low_risk_change" ./ci/classify-ios-test-scope.sh \
             < <(git diff --name-only origin/main..."$SOURCE_SHA") \
             >> "$GITHUB_OUTPUT"
 
@@ -219,6 +228,10 @@ jobs:
         run: |
           set -euo pipefail
           test_scope='${{ steps.merge.outputs.test_scope }}'
+          if [[ "$test_scope" == build ]] && ! ./ci/is-low-risk-ios-diff.sh HEAD^1 HEAD; then
+            echo "Merged tree is no longer a pure cache-key version bump; restoring full simulator tests."
+            test_scope=full
+          fi
           test_label="Complete iOS tests"
           test_stage=full-testing
           test_arguments=()
@@ -226,6 +239,9 @@ jobs:
             test_label="Feed-focused iOS tests"
             test_stage=targeted-testing
             test_arguments=(-only-testing:AIClientTests/FeedAdapterTests)
+          elif [[ "$test_scope" == build ]]; then
+            test_label="Signed device build verification"
+            test_stage=build-verification
           fi
           test_action='test'
           prewarmed_sha_file="$IOS_BUILD_CACHE_ROOT/central-merge-simulator/prewarmed-source-sha"
@@ -284,19 +300,24 @@ jobs:
           build_pid=$!
 
           set +e
-          ./ci/run-timed-step.sh "$test_label" \
-            ./ci/with-ios-simulator-lock.sh \
-              --label "central merge tests $GITHUB_RUN_ID" \
-              -- xcodebuild "$test_action" \
-              -project AIServerClient.xcodeproj \
-              -scheme AIServerClient \
-              -destination 'platform=iOS Simulator,name=iPhone 16e' \
-              -collect-test-diagnostics never \
-              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
-              -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-              ${test_arguments[@]+"${test_arguments[@]}"} \
-              CODE_SIGNING_ALLOWED=NO
-          test_status=$?
+          test_status=0
+          if [[ "$test_scope" == build ]]; then
+            echo "Low-risk App change; signed build verification replaces shared simulator tests."
+          else
+            ./ci/run-timed-step.sh "$test_label" \
+              ./ci/with-ios-simulator-lock.sh \
+                --label "central merge tests $GITHUB_RUN_ID" \
+                -- xcodebuild "$test_action" \
+                -project AIServerClient.xcodeproj \
+                -scheme AIServerClient \
+                -destination 'platform=iOS Simulator,name=iPhone 16e' \
+                -collect-test-diagnostics never \
+                -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
+                -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
+                ${test_arguments[@]+"${test_arguments[@]}"} \
+                CODE_SIGNING_ALLOWED=NO
+            test_status=$?
+          fi
           wait "$build_pid"
           wait_status=$?
           set -e

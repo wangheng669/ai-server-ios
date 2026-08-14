@@ -603,6 +603,24 @@ final class NewsFeedViewModel: ObservableObject {
             "rss_article_link": "https://xueqiu.com/990001",
             "metrics": {"replies": 12, "likes": 34}
           }
+        }, {
+          "id": 990002,
+          "source": "xueqiu",
+          "content": "这是带有[滴汗]表情的雪球正文，用于验证正文区域首次点击。",
+          "formatted_time": "1分钟前",
+          "post_link": "https://xueqiu.com/990002",
+          "user": {"user_name": "表情文章用户", "user_screen_name": "表情文章用户"},
+          "images": [{
+            "url": "https://assets.imedao.com/ugc/images/face/emoji_13_coldsweat.png?v=1",
+            "height": 24,
+            "alt_text": "[滴汗]",
+            "kind": "inline_emoji"
+          }],
+          "meta": {
+            "rss_feed_name": "雪球-表情文章用户",
+            "rss_article_link": "https://xueqiu.com/990002",
+            "metrics": {"replies": 5, "likes": 8}
+          }
         }]
         """#
         return (try? JSONDecoder().decode([Post].self, from: Data(json.utf8))) ?? []
