@@ -800,6 +800,7 @@ struct NewsFeedView: View {
     }
 
     private func openPost(_ post: Post) {
+        guard selectedPost?.id != post.id else { return }
         guard let source = FeedSource(rawValue: post.source ?? ""),
               source == .weibo || source == .douyin,
               let url = post.linkURL else {
@@ -3019,6 +3020,8 @@ struct NewsCardView: View {
             .font(.system(size: 15.5))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen?() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -3050,7 +3053,6 @@ struct NewsCardView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .onTapGesture { onOpen?() }
 
             if let emoji = post.xueqiuStandaloneInlineEmoji {
                 InlineEmojiImage(emoji: emoji)
