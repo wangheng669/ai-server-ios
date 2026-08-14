@@ -104,7 +104,6 @@ struct NewsFeedView: View {
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
     @State private var preparedWebViews: [Int: WKWebView] = [:]
-    @State private var presentedXueqiuLink: InAppBrowserDestination?
     @State private var showsAllRSSSources = false
     @State private var rssSourceSearch = ""
     @Namespace private var sourceSelectionAnimation
@@ -161,7 +160,6 @@ struct NewsFeedView: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
-        .inAppBrowserCover(item: $presentedXueqiuLink)
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
                 model.startRealtime()
@@ -580,8 +578,7 @@ struct NewsFeedView: View {
                             usesWeChatStyle: source == .wechat,
                             isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
                             isExpandedFlash: expandedFlashIDs.contains(post.id),
-                            onOpen: { openPost(displayPost) },
-                            onOpenLink: { presentedXueqiuLink = InAppBrowserDestination(url: $0) }
+                            onOpen: { openPost(displayPost) }
                         )
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -2797,7 +2794,6 @@ struct NewsCardView: View {
     var isFeaturedBilibili = false
     var isExpandedFlash = false
     var onOpen: (() -> Void)?
-    var onOpenLink: ((URL) -> Void)?
     var body: some View {
         if post.isHotTopic { hotTopicCard }
         else if post.isFlash { flashCard }
@@ -3008,20 +3004,22 @@ struct NewsCardView: View {
                 )
             }
 
-            HStack(spacing: 0) {
-                Label("分享", systemImage: "square.and.arrow.up")
-                Spacer()
-                xueqiuMetric("bubble.left", post.meta?.metrics?.replies)
-                Spacer()
-                xueqiuMetric("hand.thumbsup", post.meta?.metrics?.likes)
-                Spacer()
-                Image(systemName: "ellipsis")
+            Button { onOpen?() } label: {
+                HStack(spacing: 0) {
+                    Label("分享", systemImage: "square.and.arrow.up")
+                    Spacer()
+                    xueqiuMetric("bubble.left", post.meta?.metrics?.replies)
+                    Spacer()
+                    xueqiuMetric("hand.thumbsup", post.meta?.metrics?.likes)
+                    Spacer()
+                    Image(systemName: "ellipsis")
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .font(.system(size: 15.5))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 4)
-            .contentShape(Rectangle())
-            .onTapGesture { onOpen?() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -3032,50 +3030,57 @@ struct NewsCardView: View {
 
     private var xueqiuTextContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 9) {
-                AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
-                Text(post.authorName)
-                    .font(.system(size: 15.5, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.18))
-                    .fixedSize()
-                if let time = post.formattedTime {
-                    Text("修改于\(time)")
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(Color(uiColor: .tertiaryLabel))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Button { onOpen?() } label: {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 9) {
+                        AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
+                        Text(post.authorName)
+                            .font(.system(size: 15.5, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.18))
+                            .fixedSize()
+                        if let time = post.formattedTime {
+                            Text("修改于\(time)")
+                                .font(.system(size: 13.5))
+                                .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let emoji = post.xueqiuStandaloneInlineEmoji {
-                InlineEmojiImage(emoji: emoji)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if !post.xueqiuBodyInlineEmojis.isEmpty {
-                InlineEmojiText(
-                    text: post.xueqiuBodyContent,
-                    emojis: post.xueqiuBodyInlineEmojis,
-                    fontSize: 17,
-                    lineSpacing: 8,
-                    maximumNumberOfLines: post.hasXueqiuFeedMedia ? 5 : 8
-                )
+                    if let emoji = post.xueqiuStandaloneInlineEmoji {
+                        InlineEmojiImage(emoji: emoji)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if !post.xueqiuBodyInlineEmojis.isEmpty {
+                        InlineEmojiText(
+                            text: post.xueqiuBodyContent,
+                            emojis: post.xueqiuBodyInlineEmojis,
+                            fontSize: 17,
+                            lineSpacing: 8,
+                            maximumNumberOfLines: post.hasXueqiuFeedMedia ? 5 : 8
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
+                            .font(.system(size: 17))
+                            .lineSpacing(8)
+                            .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
-                    .environment(\.openURL, xueqiuLinkOpenAction)
-                    .font(.system(size: 17))
-                    .lineSpacing(8)
-                    .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("打开雪球帖子详情")
 
             if !post.xueqiuBodyImageURLs.isEmpty {
                 PostMediaGrid(
@@ -3089,14 +3094,17 @@ struct NewsCardView: View {
 
             if let quoteBody = post.xueqiuQuoteBody {
                 VStack(alignment: .leading, spacing: 12) {
-                    (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
-                        .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
-                        .environment(\.openURL, xueqiuLinkOpenAction)
-                        .font(.system(size: 15.5))
-                        .lineSpacing(6)
-                        .lineLimit(5)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { onOpen?() } label: {
+                        (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
+                            .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
+                            .font(.system(size: 15.5))
+                            .lineSpacing(6)
+                            .lineLimit(5)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
 
                     if !post.xueqiuQuoteImageURLs.isEmpty {
                         PostMediaGrid(
@@ -3108,12 +3116,17 @@ struct NewsCardView: View {
                         )
                     }
 
-                    HStack(spacing: 4) {
-                        Text("相关讨论")
-                        if let replies = post.meta?.metrics?.replies, replies > 0 {
-                            Text(replies.formattedFeedCount)
+                    Button { onOpen?() } label: {
+                        HStack(spacing: 4) {
+                            Text("相关讨论")
+                            if let replies = post.meta?.metrics?.replies, replies > 0 {
+                                Text(replies.formattedFeedCount)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 }
@@ -3124,9 +3137,6 @@ struct NewsCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture { onOpen?() }
-        .zIndex(1)
     }
 
     private func xueqiuMetric(_ icon: String, _ value: Int?) -> some View {
@@ -3152,6 +3162,9 @@ struct NewsCardView: View {
         }
 
         var searchLocation = 0
+        // Keep link styling in the timeline without attaching AttributedString.Link.
+        // Linked Text installs its own recognizer and consumes the first tap even
+        // outside the linked range; links remain interactive in PostDetailView.
         for link in links where !link.label.isEmpty {
             let searchRange = NSRange(location: searchLocation, length: nsValue.length - searchLocation)
             let range = nsValue.range(of: link.label, options: [], range: searchRange)
@@ -3161,17 +3174,9 @@ struct NewsCardView: View {
                   let upper = AttributedString.Index(stringRange.upperBound, within: attributed) else { continue }
             attributed[lower..<upper].foregroundColor = .blue
             attributed[lower..<upper].underlineStyle = .single
-            attributed[lower..<upper].link = link.url
             searchLocation = range.location + range.length
         }
         return Text(attributed)
-    }
-
-    private var xueqiuLinkOpenAction: OpenURLAction {
-        OpenURLAction { url in
-            onOpenLink?(url)
-            return .handled
-        }
     }
 
     private var truthCard: some View {
