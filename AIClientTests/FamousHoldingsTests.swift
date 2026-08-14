@@ -85,24 +85,39 @@ final class FamousHoldingsTests: XCTestCase {
 
     func testCalculatesPortfolioValueIncreaseIncludingNewAndExitedPositions() throws {
         let manager = try decodeManager(
-            totalValueUsd: 1_200,
+            totalValueUsd: 1_500,
+            summary: "\"new\":1,\"increased\":1,\"decreased\":0,\"exited\":1,\"unchanged\":1",
             changes: """
             {"id":"current:1","symbol":"ONE","name":"One","action":"increased","previousWeightPct":90,"weightPct":83.3,"weightChangePct":-6.7,"valueUsd":1000,"previousValueUsd":900},
             {"id":"current:2","symbol":"NEW","name":"New","action":"new","previousWeightPct":0,"weightPct":16.7,"weightChangePct":16.7,"valueUsd":200,"previousValueUsd":0},
             {"id":"exited:3","symbol":"OUT","name":"Out","action":"exited","previousWeightPct":10,"weightPct":0,"weightChangePct":-10,"valueUsd":0,"previousValueUsd":100}
+            """,
+            positions: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"increased","previousWeightPct":72,"weightPct":66.7,"weightChangePct":-5.3,"valueUsd":1000,"previousValueUsd":900},
+            {"id":"current:2","symbol":"NEW","name":"New","action":"new","previousWeightPct":0,"weightPct":13.3,"weightChangePct":13.3,"valueUsd":200,"previousValueUsd":0},
+            {"id":"current:3","symbol":"SAME","name":"Same","action":"unchanged","previousWeightPct":20,"weightPct":20,"weightChangePct":0,"valueUsd":300,"previousValueUsd":250}
+            """,
+            exitedPositions: """
+            {"id":"exited:3","symbol":"OUT","name":"Out","action":"exited","previousWeightPct":8,"weightPct":0,"weightChangePct":-8,"valueUsd":0,"previousValueUsd":100}
             """
         )
 
         let change = try XCTUnwrap(manager.valueChangeFromPreviousReport)
-        XCTAssertEqual(change.amountUsd, 200, accuracy: 0.001)
+        XCTAssertEqual(change.amountUsd, 250, accuracy: 0.001)
         XCTAssertEqual(change.percent, 20, accuracy: 0.001)
     }
 
-    func testCalculatesPortfolioValueDecrease() throws {
+    func testCalculatesPortfolioValueDecreaseWithUnchangedAndExitedPositions() throws {
         let manager = try decodeManager(
             totalValueUsd: 800,
+            summary: "\"new\":0,\"increased\":0,\"decreased\":0,\"exited\":1,\"unchanged\":1",
             changes: """
-            {"id":"current:1","symbol":"ONE","name":"One","action":"decreased","previousWeightPct":90,"weightPct":100,"weightChangePct":10,"valueUsd":800,"previousValueUsd":900},
+            {"id":"exited:2","symbol":"OUT","name":"Out","action":"exited","previousWeightPct":10,"weightPct":0,"weightChangePct":-10,"valueUsd":0,"previousValueUsd":100}
+            """,
+            positions: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"unchanged","previousWeightPct":90,"weightPct":100,"weightChangePct":10,"valueUsd":800,"previousValueUsd":900}
+            """,
+            exitedPositions: """
             {"id":"exited:2","symbol":"OUT","name":"Out","action":"exited","previousWeightPct":10,"weightPct":0,"weightChangePct":-10,"valueUsd":0,"previousValueUsd":100}
             """
         )
@@ -115,7 +130,11 @@ final class FamousHoldingsTests: XCTestCase {
     func testOmitsPortfolioValueChangeWhenPreviousValueIsIncomplete() throws {
         let manager = try decodeManager(
             totalValueUsd: 800,
+            summary: "\"new\":0,\"increased\":0,\"decreased\":1,\"exited\":0,\"unchanged\":0",
             changes: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"decreased","previousWeightPct":100,"weightPct":100,"weightChangePct":0,"valueUsd":800}
+            """,
+            positions: """
             {"id":"current:1","symbol":"ONE","name":"One","action":"decreased","previousWeightPct":100,"weightPct":100,"weightChangePct":0,"valueUsd":800}
             """
         )
@@ -123,8 +142,64 @@ final class FamousHoldingsTests: XCTestCase {
         XCTAssertNil(manager.valueChangeFromPreviousReport)
     }
 
-    private func decodeManager(totalValueUsd: Double, changes: String) throws -> FamousHoldingsManager {
+    func testOmitsPortfolioValueChangeUntilCompletePositionsLoad() throws {
+        let manager = try decodeManager(
+            totalValueUsd: 800,
+            summary: "\"new\":0,\"increased\":0,\"decreased\":1,\"exited\":0,\"unchanged\":1",
+            changes: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"decreased","previousWeightPct":50,"weightPct":50,"weightChangePct":0,"valueUsd":400,"previousValueUsd":500}
+            """,
+            positions: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"decreased","previousWeightPct":50,"weightPct":50,"weightChangePct":0,"valueUsd":400,"previousValueUsd":500}
+            """,
+            positionsCount: 2
+        )
+
+        XCTAssertNil(manager.valueChangeFromPreviousReport)
+    }
+
+    func testOmitsPortfolioValueChangeWhenExitedPositionsAreMissing() throws {
+        let manager = try decodeManager(
+            totalValueUsd: 800,
+            summary: "\"new\":0,\"increased\":0,\"decreased\":0,\"exited\":1,\"unchanged\":1",
+            changes: """
+            {"id":"exited:2","symbol":"OUT","name":"Out","action":"exited","previousWeightPct":10,"weightPct":0,"weightChangePct":-10,"valueUsd":0,"previousValueUsd":100}
+            """,
+            positions: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"unchanged","previousWeightPct":90,"weightPct":100,"weightChangePct":10,"valueUsd":800,"previousValueUsd":900}
+            """,
+            exitedPositions: ""
+        )
+
+        XCTAssertNil(manager.valueChangeFromPreviousReport)
+    }
+
+    func testOmitsPortfolioValueChangeWhenPositionsDoNotMatchReportedTotal() throws {
+        let manager = try decodeManager(
+            totalValueUsd: 800,
+            summary: "\"new\":0,\"increased\":0,\"decreased\":0,\"exited\":0,\"unchanged\":1",
+            changes: "",
+            positions: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"unchanged","previousWeightPct":100,"weightPct":100,"weightChangePct":0,"valueUsd":700,"previousValueUsd":900}
+            """
+        )
+
+        XCTAssertNil(manager.valueChangeFromPreviousReport)
+    }
+
+    private func decodeManager(
+        totalValueUsd: Double,
+        summary: String,
+        changes: String,
+        positions: String? = nil,
+        exitedPositions: String? = "",
+        positionsCount: Int? = nil
+    ) throws -> FamousHoldingsManager {
         let changesCount = changes.split(separator: "}").count { $0.contains("\"action\"") }
+        let inferredPositionsCount = positions?.split(separator: "}").count { $0.contains("\"action\"") } ?? 0
+        let decodedPositionsCount = positionsCount ?? inferredPositionsCount
+        let positionsField = positions.map { ",\"positions\":[\($0)]" } ?? ""
+        let exitedPositionsField = exitedPositions.map { ",\"exitedPositions\":[\($0)]" } ?? ""
         let data = Data(
             """
             {
@@ -134,11 +209,11 @@ final class FamousHoldingsTests: XCTestCase {
               "institutionName":"测试机构",
               "reportDate":"2026-03-31",
               "filingDate":"2026-05-12",
-              "positionsCount":\(changesCount),
+              "positionsCount":\(decodedPositionsCount),
               "totalValueUsd":\(totalValueUsd),
-              "summary":{"new":0,"increased":0,"decreased":0,"exited":0,"unchanged":0},
+              "summary":{\(summary)},
               "changesCount":\(changesCount),
-              "changes":[\(changes)]
+              "changes":[\(changes)]\(positionsField)\(exitedPositionsField)
             }
             """.utf8
         )
