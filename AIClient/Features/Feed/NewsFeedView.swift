@@ -44,7 +44,7 @@ private enum WeiboSection: String, CaseIterable, Identifiable {
 }
 
 enum FeedChromeLayout {
-    static let headerHeight: CGFloat = 53
+    static let headerHeight: CGFloat = 0
 
     static func headerReservationHeight(isHidden: Bool) -> CGFloat {
         isHidden ? 0 : headerHeight
@@ -58,6 +58,12 @@ enum FeedPaginationLayout {
         usesFilteredPagination: Bool
     ) -> Int {
         usesFilteredPagination ? rawTailID ?? visibleTailID : visibleTailID
+    }
+}
+
+enum FeedDetailChromePolicy {
+    static func hidesRootChrome(isPresented: Bool, isXueqiu: Bool) -> Bool {
+        isPresented && !isXueqiu
     }
 }
 
@@ -106,7 +112,7 @@ struct NewsFeedView: View {
     @State private var preparedWebViews: [Int: WKWebView] = [:]
     @State private var showsAllRSSSources = false
     @State private var rssSourceSearch = ""
-    @Namespace private var sourceSelectionAnimation
+    @State private var isSourceSelectorExpanded = false
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -127,14 +133,28 @@ struct NewsFeedView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
+            ZStack {
                 content
-                feedHeader
-                    .zIndex(1)
+
+                if isSourceSelectorExpanded {
+                    Color.black.opacity(0.08)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeSourceSelector() }
+                        .transition(.opacity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Spacer(minLength: 0)
+                    sourceSelector
+                }
+                .padding(.trailing, 16)
+                .padding(.bottom, 50)
+            }
         }
         .sheet(item: $selectedPost) { post in
             NavigationStack {
@@ -178,7 +198,10 @@ struct NewsFeedView: View {
             }
         }
         .onChange(of: selectedPost, initial: true) { _, post in
-            showsDetail = post != nil
+            showsDetail = FeedDetailChromePolicy.hidesRootChrome(
+                isPresented: post != nil,
+                isXueqiu: post?.isXueqiu == true
+            )
             if post == nil { preparedWebViews.removeAll() }
         }
         .task(id: notificationPostID) {
@@ -237,86 +260,107 @@ struct NewsFeedView: View {
         }
     }
 
-    private var feedHeader: some View {
-        VStack(spacing: 0) {
-            sourceBar
-            Divider().opacity(0.55)
-        }
-        .frame(height: FeedChromeLayout.headerHeight)
-        .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: .bottom) {
-            if model.isSwitchingSource {
-                ProgressView()
-                    .progressViewStyle(.linear)
-                    .tint(.blue)
-            }
-        }
-        .offset(y: isFeedChromeHidden ? -FeedChromeLayout.headerHeight : 0)
-        .opacity(isFeedChromeHidden ? 0 : 1)
-        .allowsHitTesting(!isFeedChromeHidden)
-        .accessibilityHidden(isFeedChromeHidden)
-        .animation(.easeOut(duration: 0.18), value: isFeedChromeHidden)
-    }
-
-    private var sourceBar: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(FeedSource.allCases) { source in
-                        sourceButton(source)
-                            .id(source.id)
+    private var sourceSelector: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            if isSourceSelectorExpanded {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(FeedSource.allCases) { source in
+                            sourceOption(source)
+                        }
                     }
+                    .padding(7)
                 }
-                .padding(.leading, 10)
-                .padding(.trailing, 4)
-            }
-            .onAppear {
-                DispatchQueue.main.async {
-                    proxy.scrollTo(model.source.id, anchor: .center)
+                .scrollIndicators(.hidden)
+                .frame(width: 252)
+                .frame(maxHeight: 420)
+                .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(InvestmentDesign.divider, lineWidth: 1)
                 }
+                .shadow(color: .black.opacity(0.16), radius: 24, y: 10)
+                .transition(
+                    .asymmetric(
+                        insertion: .scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.96, anchor: .bottomTrailing).combined(with: .opacity)
+                    )
+                )
             }
-            .onChange(of: model.source) { _, source in
-                withAnimation(.snappy) {
-                    proxy.scrollTo(source.id, anchor: .center)
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
+                    isSourceSelectorExpanded.toggle()
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    sourceIcon(model.source)
+                        .frame(width: 34, height: 34)
+
+                    Text("选择")
+                        .font(.system(size: 13, weight: .bold))
+
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(isSourceSelectorExpanded ? 180 : 0))
+                }
+                .foregroundStyle(.white)
+                .padding(.leading, 6)
+                .padding(.trailing, 13)
+                .frame(height: 46)
+                .background(InvestmentDesign.accent, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: InvestmentDesign.accent.opacity(0.28), radius: 12, y: 6)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("选择观点来源")
+            .accessibilityValue(isSourceSelectorExpanded ? "已展开" : "已收起")
         }
-        .frame(height: 52)
-        .background(Color.clear)
-        .animation(.snappy(duration: 0.25), value: model.source)
+        .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSourceSelectorExpanded)
     }
 
-    private func sourceButton(_ source: FeedSource) -> some View {
+    private func sourceOption(_ source: FeedSource) -> some View {
         let isSelected = model.source == source
         return Button {
-            selectSourceFromTap(source)
+            if !isSelected { selectSourceFromTap(source) }
+            closeSourceSelector()
         } label: {
-            VStack(spacing: 4) {
-                if isSelected && source == .zhihu {
-                    Text("知乎")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.blue)
-                        .frame(width: 32, height: 22)
-                } else {
-                    sourceIcon(source)
-                        .opacity(isSelected ? 1 : 0.78)
-                        .scaleEffect(isSelected ? 1 : 0.94)
-                }
-                if isSelected {
-                    Capsule()
-                        .fill(source == .truth ? Color.red : Color.blue)
-                        .frame(width: 18, height: 2)
-                        .matchedGeometryEffect(id: "source-selection", in: sourceSelectionAnimation)
-                } else {
-                    Color.clear.frame(width: 18, height: 2)
-                }
+            HStack(spacing: 11) {
+                sourceIcon(source)
+                    .frame(width: 40, height: 40)
+                    .background(InvestmentDesign.secondarySurface, in: Circle())
+
+                Text(source.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 6)
+
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(InvestmentDesign.accent, in: Circle())
+                    .opacity(isSelected ? 1 : 0)
             }
-            .frame(width: 42, height: 50)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .frame(height: 56)
+            .background(
+                isSelected ? InvestmentDesign.accent.opacity(0.09) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(source.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func closeSourceSelector() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            isSourceSelectorExpanded = false
+        }
     }
 
     @ViewBuilder private func sourceIcon(_ source: FeedSource) -> some View {
