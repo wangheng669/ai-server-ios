@@ -1,4 +1,3 @@
-import Charts
 import SwiftUI
 import UIKit
 
@@ -103,9 +102,13 @@ struct FamousHoldingsView: View {
             VStack(spacing: 0) {
                 hero(manager)
                 sectionDivider
-                filingSummary(manager)
+                portfolioSnapshot(manager)
                 sectionDivider
-                filingInsights(manager)
+                coreHoldings(manager)
+                sectionDivider
+                quarterlyActivity(manager)
+                sectionDivider
+                majorChanges(manager)
                 footer(manager)
             }
             .background(HoldingsPalette.card)
@@ -150,28 +153,20 @@ struct FamousHoldingsView: View {
                     isManagerSelectorExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 8) {
-                    if managers.indices.contains(selectedIndex) {
-                        InvestorPortraitImage(manager: managers[selectedIndex], contentMode: .fill)
-                            .frame(width: 34, height: 34)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(.white.opacity(0.34), lineWidth: 1))
-                    } else {
-                        Image(systemName: "person.2.fill")
-                            .frame(width: 34, height: 34)
-                    }
+                HStack(spacing: 6) {
+                    Image(systemName: "person.2.fill")
+                        .font(.system(size: 12, weight: .semibold))
 
-                    Text("选择")
-                        .font(.system(size: 13, weight: .bold))
+                    Text("切换")
+                        .font(.system(size: 12, weight: .bold))
 
                     Image(systemName: "chevron.up")
                         .font(.system(size: 10, weight: .bold))
                         .rotationEffect(.degrees(isManagerSelectorExpanded ? 180 : 0))
                 }
                 .foregroundStyle(.white)
-                .padding(.leading, 6)
-                .padding(.trailing, 13)
-                .frame(height: 46)
+                .padding(.horizontal, 13)
+                .frame(height: 40)
                 .background(HoldingsPalette.purple, in: Capsule())
                 .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
                 .shadow(color: HoldingsPalette.purple.opacity(0.28), radius: 12, y: 6)
@@ -231,146 +226,305 @@ struct FamousHoldingsView: View {
     }
 
     private func hero(_ manager: FamousHoldingsManager) -> some View {
-        VStack(spacing: 18) {
-            HStack(alignment: .center, spacing: 15) {
-                InvestorPortraitImage(manager: manager, contentMode: .fill)
-                    .frame(width: 72, height: 72)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(HoldingsPalette.purple.opacity(0.30), lineWidth: 1))
+        HStack(alignment: .center, spacing: 13) {
+            InvestorPortraitImage(manager: manager, contentMode: .fill)
+                .frame(width: 58, height: 58)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(HoldingsPalette.purple.opacity(0.30), lineWidth: 1))
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("公开持仓追踪")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(HoldingsPalette.purple)
-                        .padding(.horizontal, 9)
-                        .frame(height: 19)
-                        .background(HoldingsPalette.purple.opacity(0.10), in: Capsule())
-                    HStack(spacing: 6) {
-                        Text(manager.displayName).font(.system(size: 21, weight: .semibold))
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(HoldingsPalette.indigo)
-                    }
-                    Text(englishName(manager))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 5) {
-                        Text(manager.institutionName).lineLimit(1)
-                        Text("·")
-                        Text("SEC 13F")
-                    }
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(manager.displayName)
+                        .font(.system(size: 20, weight: .bold))
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(HoldingsPalette.indigo)
                 }
-                .foregroundStyle(.primary)
-                Spacer(minLength: 0)
+                Text("\(englishName(manager)) · \(manager.institutionName)")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(quarterLabel(manager.reportDate))
+                    Text("披露 \(compactDate(manager.filingDate))")
+                    Text("SEC 13F")
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button { selectedDetail = HoldingDetailRoute(managerKey: manager.key) } label: {
-                HStack(spacing: 6) {
-                    Text("完整持仓")
-                    Spacer()
-                    Text("查看全部 \(manager.positionsCount) 只")
-                        .fontWeight(.regular)
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
+                VStack(spacing: 4) {
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("全部")
+                        .font(.system(size: 10, weight: .semibold))
                 }
-                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(HoldingsPalette.purple)
-                .contentShape(Rectangle())
+                .frame(width: 48, height: 48)
+                .background(HoldingsPalette.purple.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("查看 \(manager.displayName) 的全部持仓")
         }
         .padding(.horizontal, 20)
-        .padding(.top, 20)
-        .padding(.bottom, 16)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
         .accessibilityAction(named: "下一个人物") { moveManager(by: 1) }
         .accessibilityAction(named: "上一个人物") { moveManager(by: -1) }
     }
 
-    private func filingSummary(_ manager: FamousHoldingsManager) -> some View {
-        HStack(spacing: 0) {
-            summaryItem("报告期", quarterLabel(manager.reportDate), "calendar")
-            summaryDivider
-            summaryItem("披露日期", manager.filingDate, "calendar.badge.clock")
-            summaryDivider
-            summaryItem("持仓数量", "\(manager.positionsCount) 只", "chart.pie.fill")
-            summaryDivider
-            summaryItem("持仓总市值", dollarValue(manager.totalValueUsd), "dollarsign.circle.fill")
+    private func portfolioSnapshot(_ manager: FamousHoldingsManager) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 0) {
+                snapshotMetric("持仓市值", dollarValue(manager.totalValueUsd), nil)
+                summaryDivider
+                snapshotMetric("持仓数量", "\(manager.positionsCount) 只", nil)
+                summaryDivider
+                snapshotMetric("前十集中度", percent(topTenConcentration(manager)), concentrationCaption(manager))
+                summaryDivider
+                snapshotMetric("季度变动", "\(manager.changesCount) 只", activityCaption(manager.summary))
+            }
+
+            sectorAllocation(manager)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 18)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
     }
 
-    private func summaryItem(_ title: String, _ value: String, _ icon: String) -> some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(HoldingsPalette.purple)
-                .frame(height: 15)
+    private func snapshotMetric(_ title: String, _ value: String, _ caption: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 15, weight: .bold))
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(title).font(.system(size: 9)).foregroundStyle(.secondary)
+                .minimumScaleFactor(0.62)
+            if let caption {
+                Text(caption)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(HoldingsPalette.purple)
+                    .lineLimit(1)
+            }
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 49, alignment: .leading)
+    }
+
+    private func sectorAllocation(_ manager: FamousHoldingsManager) -> some View {
+        let sectors = Array(sectorData(manager).prefix(4))
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("行业配置")
+                    .font(.system(size: 11.5, weight: .semibold))
+                Spacer()
+                ForEach(sectors) { sector in
+                    HStack(spacing: 3) {
+                        Circle().fill(sector.color).frame(width: 5, height: 5)
+                        Text("\(sector.name) \(percent(sector.value))")
+                    }
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            GeometryReader { proxy in
+                HStack(spacing: 2) {
+                    ForEach(sectors) { sector in
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(sector.color)
+                            .frame(width: max(3, proxy.size.width * sector.value / 100))
+                    }
+                }
+            }
+            .frame(height: 8)
+            .clipShape(Capsule())
+        }
+    }
+
+    private func coreHoldings(_ manager: FamousHoldingsManager) -> some View {
+        let positions = Array(currentPositions(manager).sorted { $0.weightPct > $1.weightPct }.prefix(5))
+        return VStack(spacing: 0) {
+            sectionHeader(
+                title: "核心持仓",
+                detail: "前 5 · 共 \(manager.positionsCount) 只",
+                action: { selectedDetail = HoldingDetailRoute(managerKey: manager.key) }
+            )
+
+            ForEach(Array(positions.enumerated()), id: \.element.id) { index, position in
+                compactHoldingRow(position, rank: index + 1)
+                if index < positions.count - 1 {
+                    Divider().overlay(HoldingsPalette.divider).padding(.leading, 60)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    private func compactHoldingRow(_ position: FamousHoldingChange, rank: Int) -> some View {
+        let changeColor = changeTint(position)
+        return HStack(spacing: 9) {
+            Text("\(rank)")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 11)
+            HoldingsCompanyLogo(
+                path: position.companyLogo,
+                symbol: displaySymbol(position),
+                color: actionColor(position.action),
+                size: 30
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displaySymbol(position))
+                    .font(.system(size: 12.5, weight: .bold))
+                Text(chineseCompanyName(position))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            holdingValue("权重", percent(position.weightPct), .primary, width: 54)
+            holdingValue("市值", compactDollarValue(position.valueUsd), .primary, width: 61)
+            holdingValue("变动", signedPercent(position.weightChangePct), changeColor, width: 54)
+        }
+        .frame(minHeight: 46)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func holdingValue(_ title: String, _ value: String, _ color: Color, width: CGFloat) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(value)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(color)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Text(title)
+                .font(.system(size: 8.5))
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: width, alignment: .trailing)
+    }
+
+    private func quarterlyActivity(_ manager: FamousHoldingsManager) -> some View {
+        VStack(spacing: 10) {
+            sectionHeader(title: "季度动作", detail: "按变动持仓数量", action: nil)
+            HStack(spacing: 0) {
+                activityMetric("新建仓", manager.summary.new, HoldingsPalette.blue, manager.summary)
+                summaryDivider
+                activityMetric("增持", manager.summary.increased, HoldingsPalette.green, manager.summary)
+                summaryDivider
+                activityMetric("减持", manager.summary.decreased, HoldingsPalette.orange, manager.summary)
+                summaryDivider
+                activityMetric("清仓", manager.summary.exited, HoldingsPalette.pink, manager.summary)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    private func activityMetric(
+        _ title: String,
+        _ value: Int,
+        _ color: Color,
+        _ summary: FamousHoldingsSummary
+    ) -> some View {
+        let total = max(1, summary.new + summary.increased + summary.decreased + summary.exited)
+        return VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(title).font(.system(size: 9.5)).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text("\(value)")
+                    .font(.system(size: 16, weight: .bold))
+                    .monospacedDigit()
+                Text(percent(Double(value) / Double(total) * 100))
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(color)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+
+    private func majorChanges(_ manager: FamousHoldingsManager) -> some View {
+        let changes = Array(manager.changes.sorted { abs($0.weightChangePct) > abs($1.weightChangePct) }.prefix(5))
+        return VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "主要调仓", detail: "按权重变化排序", action: nil)
+            ForEach(Array(changes.enumerated()), id: \.element.id) { index, change in
+                biggestChangeRow(change)
+                if index < changes.count - 1 {
+                    Divider().overlay(HoldingsPalette.divider).padding(.leading, 52)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private func sectionHeader(title: String, detail: String, action: (() -> Void)?) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.primary)
+            Spacer()
+            if let action {
+                Button(action: action) {
+                    HStack(spacing: 4) {
+                        Text(detail)
+                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            } else {
+                Text(detail)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.system(size: 9.5, weight: .medium))
+    }
+
+    private func topTenConcentration(_ manager: FamousHoldingsManager) -> Double {
+        currentPositions(manager)
+            .sorted { $0.weightPct > $1.weightPct }
+            .prefix(10)
+            .reduce(0) { $0 + $1.weightPct }
+    }
+
+    private func concentrationCaption(_ manager: FamousHoldingsManager) -> String {
+        guard let leader = currentPositions(manager).max(by: { $0.weightPct < $1.weightPct }) else { return "暂无持仓" }
+        return "首位 \(percent(leader.weightPct))"
+    }
+
+    private func activityCaption(_ summary: FamousHoldingsSummary) -> String {
+        let additions = summary.new + summary.increased
+        let reductions = summary.decreased + summary.exited
+        if additions == reductions { return "增减平衡" }
+        return additions > reductions ? "增配偏多" : "减配偏多"
+    }
+
+    private func compactDate(_ value: String) -> String {
+        let parts = value.split(separator: "-")
+        guard parts.count == 3 else { return value }
+        return "\(parts[1])-\(parts[2])"
+    }
+
+    private func compactDollarValue(_ value: Double) -> String {
+        if value >= 1_000_000_000 { return String(format: "$%.1fB", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "$%.0fM", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "$%.0fK", value / 1_000) }
+        return String(format: "$%.0f", value)
     }
 
     private var summaryDivider: some View {
         Rectangle().fill(HoldingsPalette.divider).frame(width: 1, height: 34)
-    }
-
-    private func filingInsights(_ manager: FamousHoldingsManager) -> some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 15) {
-                HStack {
-                    Text("本季度动作").font(.system(size: 16, weight: .bold))
-                    Spacer()
-                    Text("共 \(manager.summary.new + manager.summary.increased + manager.summary.decreased + manager.summary.exited) 次变动")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                HStack(spacing: 16) {
-                    actionDonut(manager.summary).frame(width: 120, height: 120)
-                    VStack(spacing: 10) {
-                        filingActionRow("新建仓", manager.summary.new, HoldingsPalette.blue, manager.summary)
-                        filingActionRow("增持", manager.summary.increased, HoldingsPalette.green, manager.summary)
-                        filingActionRow("减持", manager.summary.decreased, HoldingsPalette.orange, manager.summary)
-                        filingActionRow("清仓", manager.summary.exited, HoldingsPalette.pink, manager.summary)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
-
-            sectionDivider
-
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("变化最大").font(.system(size: 16, weight: .bold))
-                    Spacer()
-                    Text("按权重变化排序")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                let topChanges = Array(manager.changes.sorted { abs($0.weightChangePct) > abs($1.weightChangePct) }.prefix(3))
-                ForEach(Array(topChanges.enumerated()), id: \.element.id) { index, change in
-                    biggestChangeRow(change)
-                    if index < topChanges.count - 1 {
-                        Divider().overlay(HoldingsPalette.divider).padding(.leading, 52)
-                    }
-                }
-                Text("仅显示本季度权重变化绝对值最大的 3 只持仓")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
-        }
     }
 
     private var sectionDivider: some View {
@@ -379,50 +533,6 @@ struct FamousHoldingsView: View {
             .padding(.horizontal, 20)
     }
 
-    private func actionDonut(_ summary: FamousHoldingsSummary) -> some View {
-        let values = [
-            ("新建仓", summary.new, HoldingsPalette.blue),
-            ("增持", summary.increased, HoldingsPalette.green),
-            ("减持", summary.decreased, HoldingsPalette.orange),
-            ("清仓", summary.exited, HoldingsPalette.pink)
-        ]
-        let total = summary.new + summary.increased + summary.decreased + summary.exited
-        return ZStack {
-            Chart(Array(values.enumerated()), id: \.offset) { _, item in
-                SectorMark(angle: .value("数量", item.1), innerRadius: .ratio(0.62), angularInset: 1.5)
-                    .foregroundStyle(item.2)
-                    .cornerRadius(2)
-            }
-            .chartLegend(.hidden)
-            VStack(spacing: 1) {
-                Text("\(total)")
-                    .font(.system(size: 21, weight: .bold))
-                    .monospacedDigit()
-                Text("总变动")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func filingActionRow(_ title: String, _ value: Int, _ color: Color, _ summary: FamousHoldingsSummary) -> some View {
-        let total = max(1, summary.new + summary.increased + summary.decreased + summary.exited)
-        let share = Double(value) / Double(total)
-        return HStack(spacing: 8) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(title).font(.system(size: 12))
-            Spacer(minLength: 4)
-            Text("\(value) 只")
-                .font(.system(size: 12, weight: .semibold))
-                .monospacedDigit()
-                .frame(width: 44, alignment: .trailing)
-            Text(percent(share * 100))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .frame(width: 40, alignment: .trailing)
-        }
-    }
 
     private func biggestChangeRow(_ change: FamousHoldingChange) -> some View {
         let tint = changeTint(change)
@@ -485,197 +595,6 @@ struct FamousHoldingsView: View {
         }
     }
 
-    private func actionBand(_ summary: FamousHoldingsSummary) -> some View {
-        HStack(spacing: 0) {
-            actionMetric("新建仓", summary.new, HoldingsPalette.blue)
-            bandDivider
-            actionMetric("增持", summary.increased, HoldingsPalette.green)
-            bandDivider
-            actionMetric("减持", summary.decreased, HoldingsPalette.orange)
-            bandDivider
-            actionMetric("清仓", summary.exited, HoldingsPalette.red)
-        }
-        .padding(.vertical, 8)
-        .overlay(alignment: .top) { Divider().overlay(HoldingsPalette.divider) }
-        .overlay(alignment: .bottom) { Divider().overlay(HoldingsPalette.divider) }
-        .padding(.horizontal, 14)
-    }
-
-    private var bandDivider: some View {
-        Rectangle().fill(HoldingsPalette.divider).frame(width: 1, height: 50)
-    }
-
-    private func actionMetric(_ title: String, _ value: Int, _ color: Color) -> some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 5) {
-                Circle().fill(color).frame(width: 6, height: 6)
-                Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
-            }
-            Text(String(value))
-                .font(.system(size: 22, weight: .medium, design: .serif))
-                .monospacedDigit()
-            Text("占比 \(percent(actionShare(value)))")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(color)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func valueBand(_ manager: FamousHoldingsManager) -> some View {
-        HStack(spacing: 12) {
-            Text("总持仓市值（USD）")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-            Text(dollarValue(manager.totalValueUsd))
-                .font(.system(size: 20, weight: .medium, design: .serif))
-                .monospacedDigit()
-            Rectangle().fill(HoldingsPalette.divider).frame(width: 1, height: 24)
-            Text("较上期变化")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-            Text(signedPercent(totalChange(manager)))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(HoldingsPalette.purple)
-                .monospacedDigit()
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 44)
-        .overlay(alignment: .bottom) { Divider().overlay(HoldingsPalette.divider) }
-    }
-
-    private func analysis(_ manager: FamousHoldingsManager) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            distribution(manager)
-                .frame(width: 154)
-            Rectangle().fill(HoldingsPalette.divider).frame(width: 1, height: 235)
-            topHoldings(manager)
-                .frame(maxWidth: .infinity)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-    }
-
-    private func distribution(_ manager: FamousHoldingsManager) -> some View {
-        let sectors = sectorData(manager)
-        return VStack(alignment: .leading, spacing: 7) {
-            Text("持仓分布").font(.system(size: 14, weight: .semibold))
-            ZStack {
-                Chart(sectors) { sector in
-                    SectorMark(
-                        angle: .value("占比", sector.value),
-                        innerRadius: .ratio(0.66),
-                        angularInset: 1.2
-                    )
-                    .foregroundStyle(sector.color)
-                }
-                .chartLegend(.hidden)
-                VStack(spacing: 2) {
-                    Text("共 \(manager.positionsCount) 只")
-                        .font(.system(size: 13, weight: .medium))
-                    Text(dollarValue(manager.totalValueUsd))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 112, height: 112)
-            ForEach(sectors.prefix(5)) { sector in
-                HStack(spacing: 5) {
-                    Circle().fill(sector.color).frame(width: 6, height: 6)
-                    Text(sector.name).lineLimit(1)
-                    Spacer()
-                    Text(percent(sector.value)).monospacedDigit()
-                }
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .frame(width: 128)
-            }
-            Divider().overlay(HoldingsPalette.divider).frame(width: 128)
-            HStack {
-                Text("本期变动")
-                Spacer()
-                Text("\(manager.changesCount) 只").foregroundStyle(HoldingsPalette.purple)
-            }
-            .font(.system(size: 9))
-            .foregroundStyle(.secondary)
-            .frame(width: 128)
-        }
-    }
-
-    private func topHoldings(_ manager: FamousHoldingsManager) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("前十大持仓").font(.system(size: 14, weight: .semibold))
-                Spacer()
-                Text("持仓占比").font(.system(size: 9)).foregroundStyle(.secondary)
-            }
-            .padding(.leading, 12)
-            .padding(.bottom, 5)
-            ForEach(Array(currentPositions(manager).sorted { $0.weightPct > $1.weightPct }.prefix(10))) { change in
-                HStack(spacing: 6) {
-                    HoldingsCompanyLogo(path: change.companyLogo, symbol: displaySymbol(change), color: actionColor(change.action), size: 20)
-                    Text(displaySymbol(change))
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 35, alignment: .leading)
-                    Text(chineseCompanyName(change))
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 2)
-                    Text(percent(change.weightPct))
-                        .font(.system(size: 9, weight: .medium))
-                        .monospacedDigit()
-                }
-                .frame(height: 19)
-                .padding(.leading, 12)
-                .overlay(alignment: .bottom) { Divider().overlay(HoldingsPalette.divider).padding(.leading, 12) }
-            }
-            Button { selectedDetail = HoldingDetailRoute(managerKey: manager.key) } label: {
-                HStack {
-                    Text("查看全部持仓")
-                    Spacer()
-                    Image(systemName: "arrow.right").font(.system(size: 8))
-                }
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(HoldingsPalette.purple)
-                .padding(.leading, 12)
-                .frame(height: 23)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func sectorBar(_ manager: FamousHoldingsManager) -> some View {
-        let sectors = sectorData(manager)
-        return VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text("行业配置").font(.system(size: 13, weight: .semibold))
-                Text("（按市值占比）").font(.system(size: 9)).foregroundStyle(.secondary)
-                Spacer()
-                Text("前五行业").font(.system(size: 9)).foregroundStyle(.secondary)
-            }
-            GeometryReader { proxy in
-                HStack(spacing: 0) {
-                    ForEach(sectors) { sector in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(sector.name).lineLimit(1)
-                            Text(percent(sector.value))
-                        }
-                        .font(.system(size: 8, weight: .medium))
-                        .padding(.horizontal, 5)
-                        .frame(width: proxy.size.width * sector.value / 100, height: 39, alignment: .leading)
-                        .background(sector.color.opacity(0.76))
-                        .clipped()
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-            }
-            .frame(height: 39)
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 10)
-    }
-
     private func footer(_ manager: FamousHoldingsManager) -> some View {
         HStack {
             Text("数据来源：13F 申报文件")
@@ -710,17 +629,6 @@ struct FamousHoldingsView: View {
         withAnimation(.easeInOut(duration: 0.22)) { selectedIndex = next }
     }
 
-    private func actionShare(_ value: Int) -> Double {
-        guard managers.indices.contains(selectedIndex) else { return 0 }
-        let summary = managers[selectedIndex].summary
-        let total = summary.new + summary.increased + summary.decreased + summary.exited
-        return total == 0 ? 0 : Double(value) / Double(total) * 100
-    }
-
-    private func totalChange(_ manager: FamousHoldingsManager) -> Double {
-        manager.changes.reduce(0) { $0 + $1.weightChangePct }
-    }
-
     private func currentPositions(_ manager: FamousHoldingsManager) -> [FamousHoldingChange] {
         manager.positions ?? manager.changes.filter { $0.action != .exited }
     }
@@ -734,9 +642,9 @@ struct FamousHoldingsView: View {
         totals["其他", default: 0] += max(0, 100 - known)
         let colors: [String: Color] = [
             "信息技术": HoldingsPalette.purple,
-            "非必需消费": HoldingsPalette.blue,
+            "非必需消费": HoldingsPalette.orange,
             "医疗保健": HoldingsPalette.teal,
-            "金融": HoldingsPalette.orange,
+            "金融": HoldingsPalette.pink,
             "通信服务": HoldingsPalette.green,
             "其他": .gray
         ]
