@@ -1138,6 +1138,7 @@ struct PostDetailView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) { xueqiuDetailBottomBar }
+        .accessibilityIdentifier("xueqiu-post-detail-\(post.id)")
     }
 
     private var xueqiuDetailAuthor: some View {
