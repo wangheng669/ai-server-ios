@@ -234,6 +234,7 @@ struct KnowledgeConceptDetailSheet: View {
     let cards: [KnowledgeConceptCard]
     let initialID: String
 
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedID: String
     @State private var wikipediaEntity: WikipediaEntity?
     @State private var selectedDetent: PresentationDetent = .medium
@@ -266,6 +267,10 @@ struct KnowledgeConceptDetailSheet: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .background(KnowledgeConceptPalette.paper.ignoresSafeArea())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭概念详情")
+                .padding(16)
+        }
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.visible)
         .presentationContentInteraction(.resizes)

@@ -72,6 +72,10 @@ struct FamousHoldingDetailView: View {
             .background(HoldingsPalette.card)
         }
         .background(HoldingsPalette.canvas.ignoresSafeArea())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭持仓详情")
+                .padding(16)
+        }
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadDetail(managerKey: manager.key) }
     }
@@ -92,13 +96,6 @@ struct FamousHoldingDetailView: View {
                 .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .bold))
-                    .frame(width: 36, height: 36)
-                    .background(Color.secondary.opacity(0.10), in: Circle())
-            }
-            .accessibilityLabel("关闭持仓详情")
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 20)

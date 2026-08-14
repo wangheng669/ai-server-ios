@@ -41,6 +41,10 @@ struct LearningDetailView: View {
             }
         }
         .background(LearningDetailPalette.canvas.ignoresSafeArea())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭学习详情")
+                .padding(16)
+        }
         .toolbar(.hidden, for: .navigationBar)
         .background(InteractivePopGestureEnabler())
         .simultaneousGesture(edgeBackGesture)
@@ -49,19 +53,6 @@ struct LearningDetailView: View {
 
     private var detailBar: some View {
         HStack(spacing: 12) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 40, height: 40)
-                    .background(LearningDetailPalette.surface, in: Circle())
-                    .overlay {
-                        Circle().stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
-                    }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭学习详情")
-
             VStack(alignment: .leading, spacing: 2) {
                 Text("股票入门路径")
                     .font(.system(size: 13, weight: .semibold))

@@ -118,6 +118,13 @@ struct PostDetailView: View {
                 xueqiuBrowserOverlay(destination)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if presentedAsSheet {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
+                    .padding(.trailing, 16)
+                    .padding(.bottom, sheetCloseBottomPadding)
+            }
+        }
         .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) || isWeChatArticle ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar((post.isRSS || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
@@ -142,14 +149,6 @@ struct PostDetailView: View {
             }
         }
         .toolbar {
-            if presentedAsSheet && !usesCustomDismissControl {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("关闭动态详情")
-                }
-            }
             if post.isBilibili {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if let link = post.linkURL {
@@ -213,6 +212,11 @@ struct PostDetailView: View {
         } message: {
             Text(speechErrorMessage ?? "请稍后重试")
         }
+    }
+
+    private var sheetCloseBottomPadding: CGFloat {
+        post.isWeiboRSS || isWeChatArticle || isGenericRSSDetail
+            || ["知乎", "Truth", "雪球"].contains(post.sourceName) ? 72 : 16
     }
 
     @ViewBuilder
@@ -321,6 +325,9 @@ struct PostDetailView: View {
                     .frame(width: 44, height: 44)
             }
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer(minLength: 0)
 
@@ -450,6 +457,9 @@ struct PostDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(dismissAccessibilityLabel)
+                .opacity(presentedAsSheet ? 0 : 1)
+                .disabled(presentedAsSheet)
+                .accessibilityHidden(presentedAsSheet)
 
                 Spacer(minLength: 0)
             }
@@ -514,6 +524,9 @@ struct PostDetailView: View {
                     .frame(width: 44, height: 44)
             }
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer(minLength: 0)
             Text(post.sourceName)
@@ -800,6 +813,9 @@ struct PostDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(dismissAccessibilityLabel)
+                .opacity(presentedAsSheet ? 0 : 1)
+                .disabled(presentedAsSheet)
+                .accessibilityHidden(presentedAsSheet)
 
                 Spacer()
 
@@ -1450,6 +1466,9 @@ struct PostDetailView: View {
             }
             .foregroundStyle(.primary)
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer()
             Text("Truth")
@@ -1618,6 +1637,9 @@ struct PostDetailView: View {
             }
             .foregroundStyle(.primary)
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             HStack(spacing: 5) {
                 Text("知乎")
@@ -2263,6 +2285,9 @@ struct PostDetailView: View {
                     .frame(width: 40, height: 48)
             }
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer()
             Text("帖子")
