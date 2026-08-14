@@ -40,6 +40,30 @@ struct FamousHoldingsManager: Codable, Identifiable {
     let exitedPositions: [FamousHoldingChange]?
 
     var id: String { key }
+
+    var valueChangeFromPreviousReport: FamousHoldingsValueChange? {
+        guard changes.count == changesCount,
+              !changes.isEmpty,
+              changes.allSatisfy({ $0.previousValueUsd != nil }) else {
+            return nil
+        }
+
+        let previousTotalValueUsd = changes.reduce(0) { partialResult, change in
+            partialResult + (change.previousValueUsd ?? 0)
+        }
+        guard previousTotalValueUsd > 0 else { return nil }
+
+        let amountUsd = totalValueUsd - previousTotalValueUsd
+        return FamousHoldingsValueChange(
+            amountUsd: amountUsd,
+            percent: amountUsd / previousTotalValueUsd * 100
+        )
+    }
+}
+
+struct FamousHoldingsValueChange: Equatable {
+    let amountUsd: Double
+    let percent: Double
 }
 
 struct FamousHoldingChange: Codable, Identifiable {
