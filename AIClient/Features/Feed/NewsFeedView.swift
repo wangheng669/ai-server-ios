@@ -374,82 +374,86 @@ struct NewsFeedView: View {
     }
 
     private var youtubePersonSelector: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            if isYouTubePersonSelectorExpanded {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("选择用户")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 7)
-                        .padding(.bottom, 1)
-
-                    ForEach(YouTubePersonFilter.allCases) { option in
-                        let isSelected = model.selectedYouTubePerson == option.person
-                        Button {
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            isYouTubePersonSelectorExpanded = false
-                            Task { await model.selectYouTubePerson(option.person) }
-                        } label: {
-                            HStack(spacing: 11) {
-                                youtubePersonAvatar(option, size: 36)
-                                Text(option.title)
-                                    .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
-                                    .lineLimit(1)
-                                Spacer(minLength: 4)
-                                if isSelected {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(InvestmentDesign.accent)
-                                }
-                            }
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 9)
-                            .frame(width: 176, height: 49)
-                            .background(
-                                isSelected ? InvestmentDesign.accent.opacity(0.08) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            )
-                            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(4)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.smooth(duration: 0.22)) {
+                isSourceSelectorExpanded = false
+                isYouTubePersonSelectorExpanded.toggle()
+            }
+        } label: {
+            youtubePersonAvatar(currentYouTubePersonFilter, size: 38)
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: Circle())
                 .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
+                    Circle().stroke(
+                        model.selectedYouTubePerson == nil
+                            ? InvestmentDesign.divider.opacity(0.9)
+                            : InvestmentDesign.accent.opacity(0.65),
+                        lineWidth: model.selectedYouTubePerson == nil ? 0.5 : 1.5
+                    )
                 }
-                .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("选择 YouTube 用户，当前\(currentYouTubePersonFilter.title)")
+        .accessibilityValue(isYouTubePersonSelectorExpanded ? "已展开" : "已收起")
+        .overlay(alignment: .bottomTrailing) {
+            if isYouTubePersonSelectorExpanded {
+                youtubePersonMenu
+                    .offset(y: -52)
                 .transition(.scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity))
             }
-
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.smooth(duration: 0.22)) {
-                    isSourceSelectorExpanded = false
-                    isYouTubePersonSelectorExpanded.toggle()
-                }
-            } label: {
-                youtubePersonAvatar(currentYouTubePersonFilter, size: 38)
-                    .frame(width: 44, height: 44)
-                    .background(.regularMaterial, in: Circle())
-                    .overlay {
-                        Circle().stroke(
-                            model.selectedYouTubePerson == nil
-                                ? InvestmentDesign.divider.opacity(0.9)
-                                : InvestmentDesign.accent.opacity(0.65),
-                            lineWidth: model.selectedYouTubePerson == nil ? 0.5 : 1.5
-                        )
-                    }
-                    .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("选择 YouTube 用户，当前\(currentYouTubePersonFilter.title)")
-            .accessibilityValue(isYouTubePersonSelectorExpanded ? "已展开" : "已收起")
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isYouTubePersonSelectorExpanded)
+    }
+
+    private var youtubePersonMenu: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("选择用户")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 7)
+                .padding(.bottom, 1)
+
+            ForEach(YouTubePersonFilter.allCases) { option in
+                let isSelected = model.selectedYouTubePerson == option.person
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    isYouTubePersonSelectorExpanded = false
+                    Task { await model.selectYouTubePerson(option.person) }
+                } label: {
+                    HStack(spacing: 11) {
+                        youtubePersonAvatar(option, size: 36)
+                        Text(option.title)
+                            .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(InvestmentDesign.accent)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 9)
+                    .frame(width: 176, height: 49)
+                    .background(
+                        isSelected ? InvestmentDesign.accent.opacity(0.08) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
     }
 
     private var currentYouTubePersonFilter: YouTubePersonFilter {
