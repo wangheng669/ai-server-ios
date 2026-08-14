@@ -278,7 +278,7 @@ struct NewsFeedView: View {
                     .padding(4)
                 }
                 .scrollIndicators(.hidden)
-                .frame(width: 184)
+                .frame(width: 54)
                 .frame(maxHeight: 344)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
@@ -300,23 +300,13 @@ struct NewsFeedView: View {
                     isSourceSelectorExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 4) {
-                    sourceIcon(model.source)
-                        .frame(width: 24, height: 24)
-
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isSourceSelectorExpanded ? 180 : 0))
-                }
-                .foregroundStyle(.primary)
-                .padding(.leading, 8)
-                .padding(.trailing, 9)
-                .frame(height: 38)
-                .background(.regularMaterial, in: Capsule())
-                .overlay(Capsule().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
-                .contentShape(Capsule())
+                sourceIcon(model.source)
+                    .frame(width: 24, height: 24)
+                    .frame(width: 44, height: 44)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay(Circle().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("选择观点来源，当前\(model.source.title)")
@@ -335,29 +325,14 @@ struct NewsFeedView: View {
                 selectSourceFromTap(source)
             }
         } label: {
-            HStack(spacing: 7) {
-                sourceIcon(source)
-                    .frame(width: 24, height: 24)
-
-                Text(source.title)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(.primary)
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .frame(width: 14, height: 14)
-                    .opacity(isSelected ? 1 : 0)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 40)
-            .background(
-                isSelected ? InvestmentDesign.accent.opacity(0.07) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            sourceIcon(source)
+                .frame(width: 24, height: 24)
+                .frame(width: 44, height: 44)
+                .background(
+                    isSelected ? InvestmentDesign.accent.opacity(0.07) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(source.title)
