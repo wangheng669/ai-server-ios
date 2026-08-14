@@ -45,9 +45,14 @@ private enum WeiboSection: String, CaseIterable, Identifiable {
 
 enum FeedChromeLayout {
     static let headerHeight: CGFloat = 0
+    static let sourceSelectorSpacing: CGFloat = 12
 
     static func headerReservationHeight(isHidden: Bool) -> CGFloat {
         isHidden ? 0 : headerHeight
+    }
+
+    static func sourceSelectorBottomPadding(rootBottomChromeHeight: CGFloat) -> CGFloat {
+        max(0, rootBottomChromeHeight) + sourceSelectorSpacing
     }
 }
 
@@ -116,6 +121,7 @@ struct NewsFeedView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.rootBottomChromeHeight) private var rootBottomChromeHeight
     private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
     private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
     private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
@@ -133,7 +139,7 @@ struct NewsFeedView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottomTrailing) {
                 content
 
                 if isSourceSelectorExpanded {
@@ -143,18 +149,19 @@ struct NewsFeedView: View {
                         .onTapGesture { closeSourceSelector() }
                         .transition(.opacity)
                 }
+
+                sourceSelector
+                    .padding(.trailing, 16)
+                    .padding(
+                        .bottom,
+                        FeedChromeLayout.sourceSelectorBottomPadding(
+                            rootBottomChromeHeight: rootBottomChromeHeight
+                        )
+                    )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack {
-                    Spacer(minLength: 0)
-                    sourceSelector
-                }
-                .padding(.trailing, 16)
-                .padding(.bottom, 50)
-            }
         }
         .sheet(item: $selectedPost) { post in
             NavigationStack {
