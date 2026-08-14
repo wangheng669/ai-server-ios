@@ -269,15 +269,24 @@ struct NewsFeedView: View {
     private var sourceSelector: some View {
         VStack(alignment: .trailing, spacing: 8) {
             if isSourceSelectorExpanded {
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(FeedSource.allCases) { source in
-                            sourceOption(source)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 1) {
+                            ForEach(FeedSource.allCases) { source in
+                                sourceOption(source)
+                                    .id(source)
+                            }
+                        }
+                        .padding(4)
+                    }
+                    .scrollIndicators(.hidden)
+                    .onAppear {
+                        Task { @MainActor in
+                            await Task.yield()
+                            proxy.scrollTo(model.source, anchor: .center)
                         }
                     }
-                    .padding(4)
                 }
-                .scrollIndicators(.hidden)
                 .frame(width: 54)
                 .frame(maxHeight: 344)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
