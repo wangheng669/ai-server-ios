@@ -42,15 +42,32 @@ struct FamousHoldingsManager: Codable, Identifiable {
     var id: String { key }
 
     var valueChangeFromPreviousReport: FamousHoldingsValueChange? {
-        guard changes.count == changesCount,
-              !changes.isEmpty,
-              changes.allSatisfy({ $0.previousValueUsd != nil }) else {
+        guard let positions,
+              let exitedPositions,
+              positions.count == positionsCount,
+              exitedPositions.count == summary.exited,
+              positions.count(where: { $0.action == .new }) == summary.new,
+              positions.count(where: { $0.action == .increased }) == summary.increased,
+              positions.count(where: { $0.action == .decreased }) == summary.decreased,
+              summary.unchanged.map({ unchangedCount in
+                  positions.count(where: { $0.action == .unchanged }) == unchangedCount
+              }) ?? true,
+              positions.allSatisfy({ $0.action != .exited && $0.previousValueUsd != nil }),
+              exitedPositions.allSatisfy({ $0.action == .exited && $0.previousValueUsd != nil }) else {
             return nil
         }
 
-        let previousTotalValueUsd = changes.reduce(0) { partialResult, change in
+        let currentTotalValueUsd = positions.reduce(0) { $0 + $1.valueUsd }
+        let currentTotalTolerance = max(1, abs(totalValueUsd) * 0.000_000_001)
+        guard abs(currentTotalValueUsd - totalValueUsd) <= currentTotalTolerance else { return nil }
+
+        let previousCurrentPositionsValueUsd = positions.reduce(0) { partialResult, change in
             partialResult + (change.previousValueUsd ?? 0)
         }
+        let previousExitedPositionsValueUsd = exitedPositions.reduce(0) { partialResult, change in
+            partialResult + (change.previousValueUsd ?? 0)
+        }
+        let previousTotalValueUsd = previousCurrentPositionsValueUsd + previousExitedPositionsValueUsd
         guard previousTotalValueUsd > 0 else { return nil }
 
         let amountUsd = totalValueUsd - previousTotalValueUsd
