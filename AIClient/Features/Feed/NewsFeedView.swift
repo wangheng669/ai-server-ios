@@ -3111,7 +3111,8 @@ struct NewsCardView: View {
                     emojis: post.xueqiuBodyInlineEmojis,
                     fontSize: 17,
                     lineSpacing: 8,
-                    maximumNumberOfLines: post.hasXueqiuFeedMedia ? 5 : 8
+                    maximumNumberOfLines: post.hasXueqiuFeedMedia ? 5 : 8,
+                    allowsTextSelection: false
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
