@@ -146,6 +146,10 @@ struct NewsFeedView: View {
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture { closeSourceSelector() }
+                        .gesture(
+                            DragGesture(minimumDistance: 4)
+                                .onChanged { _ in closeSourceSelector() }
+                        )
                         .transition(.opacity)
                 }
 
