@@ -374,7 +374,7 @@ struct NewsFeedView: View {
     }
 
     private var youtubePersonSelector: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .trailing, spacing: 8) {
             if isYouTubePersonSelectorExpanded {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("选择用户")
@@ -422,7 +422,7 @@ struct NewsFeedView: View {
                         .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
                 }
                 .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
-                .transition(.scale(scale: 0.94, anchor: .bottomLeading).combined(with: .opacity))
+                .transition(.scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity))
             }
 
             Button {
