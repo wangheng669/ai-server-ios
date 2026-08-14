@@ -10,6 +10,8 @@ classify_low_risk() {
 }
 
 [[ "$(classify docs/README.md .github/workflows/example.yml)" == $'app_changed=false\ntest_scope=none' ]]
+[[ "$(classify ci/prepare-central-runner.sh ci/prepare-central-runner-parallel.sh ci/report-ios-deployment.sh)" == $'app_changed=false\ntest_scope=none' ]]
+[[ "$(classify ci/sign-and-install-ios.sh)" == $'app_changed=true\ntest_scope=full' ]]
 [[ "$(classify AIClient/Features/Feed/NewsFeedView.swift AIClientTests/FeedAdapterTests.swift)" == $'app_changed=true\ntest_scope=feed' ]]
 [[ "$(classify AIClient/Core/APIClient.swift)" == $'app_changed=true\ntest_scope=full' ]]
 [[ "$(classify AIClient/Features/Feed/NewsFeedView.swift AIClient/Core/APIClient.swift)" == $'app_changed=true\ntest_scope=full' ]]
