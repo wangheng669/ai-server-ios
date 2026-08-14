@@ -4,6 +4,7 @@ import WebKit
 
 struct PostDetailView: View {
     private let presentedAsSheet: Bool
+    private let shouldRefreshNewYorkTimesArticle: Bool
     @State private var post: Post
     @State private var player: AVPlayer?
     @State private var detectedVideoAspectRatio: CGFloat?
@@ -67,6 +68,7 @@ struct PostDetailView: View {
         presentedAsSheet: Bool = false
     ) {
         self.presentedAsSheet = presentedAsSheet
+        self.shouldRefreshNewYorkTimesArticle = post.isNewYorkTimes && preloadedNewYorkTimesArticle == nil
         let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
             ? (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
             : nil)
@@ -2764,28 +2766,31 @@ struct PostDetailView: View {
     }
 
     private func loadNewYorkTimesDetail() async {
-        guard !post.isSynthetic, let link = post.linkURL else {
+        guard !post.isSynthetic else {
             isLoadingNewYorkTimesBody = false
             return
         }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
 
-        // The feed already carries the article body. Render it immediately and
-        // keep network refreshes and Wikipedia enrichment off the first-paint path.
-        if newYorkTimesArticle != nil {
+        // A preloaded article has already gone through the remote NYT parser.
+        // Direct/deep-link navigation may only have database text, so show that
+        // immediately and replace it with the structured article when available.
+        if !shouldRefreshNewYorkTimesArticle {
             isLoadingNewYorkTimesBody = false
         } else {
-            if let detail = try? await client.fetchPost(id: post.id) {
-                post = detail
-            }
+            if let detail = try? await client.fetchPost(id: post.id) { post = detail }
             guard !Task.isCancelled else { return }
-            let storedArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
-            if let storedArticle {
-                newYorkTimesArticle = storedArticle
-            } else {
-                newYorkTimesArticle = try? await client.fetchNewYorkTimesArticle(url: link)
+
+            if newYorkTimesArticle == nil {
+                newYorkTimesArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
             }
             isLoadingNewYorkTimesBody = false
+
+            if let link = post.linkURL,
+               let remoteArticle = try? await client.fetchNewYorkTimesArticle(url: link),
+               !Task.isCancelled {
+                newYorkTimesArticle = remoteArticle
+            }
         }
 
         guard !Task.isCancelled, let article = newYorkTimesArticle else { return }
