@@ -170,6 +170,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isLoadingMoreWeChatSelection = false
     @Published private(set) var canLoadMoreWeChatSelection = true
     @Published private(set) var selectedFlashCategory: String?
+    @Published private(set) var selectedYouTubePerson: String?
     @Published var errorMessage: String?
     @Published var source: FeedSource {
         didSet { UserDefaults.standard.set(source.rawValue, forKey: "feed.source") }
@@ -187,6 +188,7 @@ final class NewsFeedViewModel: ObservableObject {
     private var activeRefreshID: UUID?
     private let fetchPosts: (Int, Int, FeedSource) async throws -> [Post]
     private let fetchFlashPosts: (Int, Int, String?) async throws -> [Post]
+    private let fetchYouTubePosts: (Int, Int, String?) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let translateRSSCard: (String, String?) async throws -> RSSCardTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
@@ -209,6 +211,7 @@ final class NewsFeedViewModel: ObservableObject {
         source initialSource: FeedSource? = nil,
         fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
+        fetchYouTubePosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
         translateRSSCard: ((String, String?) async throws -> RSSCardTranslation)? = nil,
         fetchRSSFeeds: (() async throws -> [RSSFeedSource])? = nil,
@@ -272,6 +275,22 @@ final class NewsFeedViewModel: ObservableObject {
                     limit: limit,
                     source: .flash,
                     flashCategory: category
+                )
+            }
+        }
+        if let fetchYouTubePosts {
+            self.fetchYouTubePosts = fetchYouTubePosts
+        } else if let fetchPosts {
+            self.fetchYouTubePosts = { page, limit, _ in
+                try await fetchPosts(page, limit, .youtube)
+            }
+        } else {
+            self.fetchYouTubePosts = { page, limit, person in
+                try await client.fetchPosts(
+                    page: page,
+                    limit: limit,
+                    source: .youtube,
+                    youtubePerson: person
                 )
             }
         }
@@ -428,6 +447,19 @@ final class NewsFeedViewModel: ObservableObject {
         page = 1
         canLoadMore = true
         cache[.flash] = nil
+        await refresh()
+    }
+
+    func selectYouTubePerson(_ person: String?) async {
+        let normalized = person?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selection = normalized?.isEmpty == false ? normalized : nil
+        guard source == .youtube, selectedYouTubePerson != selection else { return }
+        selectedYouTubePerson = selection
+        posts = []
+        pendingRealtimePosts = []
+        page = 1
+        canLoadMore = true
+        cache[.youtube] = nil
         await refresh()
     }
 
@@ -686,7 +718,7 @@ final class NewsFeedViewModel: ObservableObject {
     func select(_ next: FeedSource) {
         guard next != source else { return }
         pendingRealtimePosts = []
-        if !isSwitchingSource {
+        if !isSwitchingSource, source != .youtube || selectedYouTubePerson == nil {
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         }
         source = next
@@ -719,7 +751,9 @@ final class NewsFeedViewModel: ObservableObject {
         // Returning to a cached channel must preserve the exact feed snapshot.
         // Pull-to-refresh remains available when the user wants fresh content.
         guard !isLoading, posts.isEmpty || isSwitchingSource else { return }
-        await restoreDiskSnapshotIfNeeded(source: source, flashCategory: selectedFlashCategory)
+        if source != .youtube || selectedYouTubePerson == nil {
+            await restoreDiskSnapshotIfNeeded(source: source, flashCategory: selectedFlashCategory)
+        }
         await refresh()
     }
 
@@ -780,6 +814,7 @@ final class NewsFeedViewModel: ObservableObject {
         let refreshID = UUID()
         let requestedSource = source
         let requestedFlashCategory = selectedFlashCategory
+        let requestedYouTubePerson = selectedYouTubePerson
         let completesSourceSwitch = isSwitchingSource
         activeRefreshID = refreshID
         isLoading = true
@@ -796,14 +831,17 @@ final class NewsFeedViewModel: ObservableObject {
                 1,
                 limit: pageSize,
                 source: requestedSource,
-                flashCategory: requestedFlashCategory
+                flashCategory: requestedFlashCategory,
+                youtubePerson: requestedYouTubePerson
             )
             guard source == requestedSource,
                   selectedFlashCategory == requestedFlashCategory,
+                  selectedYouTubePerson == requestedYouTubePerson,
                   activeRefreshID == refreshID else { return }
             await FeedPresentationPrewarmer.shared.warm(result)
             guard source == requestedSource,
                   selectedFlashCategory == requestedFlashCategory,
+                  selectedYouTubePerson == requestedYouTubePerson,
                   activeRefreshID == refreshID else { return }
             posts = result
             pendingRealtimePosts = []
@@ -832,6 +870,7 @@ final class NewsFeedViewModel: ObservableObject {
               !isLoading else { return }
         let requestedSource = source
         let requestedFlashCategory = selectedFlashCategory
+        let requestedYouTubePerson = selectedYouTubePerson
         let pageSize = pageSize(for: requestedSource)
         isLoadingMore = true
         defer { isLoadingMore = false }
@@ -840,11 +879,14 @@ final class NewsFeedViewModel: ObservableObject {
                 page + 1,
                 limit: pageSize,
                 source: requestedSource,
-                flashCategory: requestedFlashCategory
+                flashCategory: requestedFlashCategory,
+                youtubePerson: requestedYouTubePerson
             )
-            guard source == requestedSource, selectedFlashCategory == requestedFlashCategory else { return }
+            guard source == requestedSource, selectedFlashCategory == requestedFlashCategory,
+                  selectedYouTubePerson == requestedYouTubePerson else { return }
             await FeedPresentationPrewarmer.shared.warm(result)
-            guard source == requestedSource, selectedFlashCategory == requestedFlashCategory else { return }
+            guard source == requestedSource, selectedFlashCategory == requestedFlashCategory,
+                  selectedYouTubePerson == requestedYouTubePerson else { return }
             let ids = Set(posts.map(\.id))
             posts += result.filter { !ids.contains($0.id) }
             page += 1
@@ -862,7 +904,8 @@ final class NewsFeedViewModel: ObservableObject {
         _ page: Int,
         limit: Int,
         source: FeedSource,
-        flashCategory: String? = nil
+        flashCategory: String? = nil,
+        youtubePerson: String? = nil
     ) async throws -> [Post] {
         var lastError: Error?
         for attempt in 0..<2 {
@@ -870,6 +913,8 @@ final class NewsFeedViewModel: ObservableObject {
                 let result: [Post]
                 if source == .flash {
                     result = try await fetchFlashPosts(page, limit, flashCategory)
+                } else if source == .youtube {
+                    result = try await fetchYouTubePosts(page, limit, youtubePerson)
                 } else {
                     result = try await fetchPosts(page, limit, source)
                 }
@@ -947,6 +992,7 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func persistCurrentSnapshot() {
+        guard source != .youtube || selectedYouTubePerson == nil else { return }
         let snapshot = FeedDiskSnapshot(
             schemaVersion: 1,
             savedAt: Date(),

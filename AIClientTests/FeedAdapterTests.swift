@@ -346,6 +346,25 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(query["person"], "柴静")
     }
 
+    @MainActor
+    func testYouTubePersonSelectionIsSentToDedicatedLoader() async {
+        var people: [String?] = []
+        let model = NewsFeedViewModel(
+            source: .youtube,
+            fetchPosts: { _, _, _ in [] },
+            fetchYouTubePosts: { _, _, person in
+                people.append(person)
+                return []
+            }
+        )
+
+        await model.selectYouTubePerson("柴静")
+
+        XCTAssertEqual(model.selectedYouTubePerson, "柴静")
+        XCTAssertEqual(people.count, 1)
+        XCTAssertEqual(people[0], "柴静")
+    }
+
     func testWeChatRequestsAllScoresFromMaobidaoFeed() {
         let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .wechat)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
