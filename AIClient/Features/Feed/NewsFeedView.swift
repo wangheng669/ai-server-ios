@@ -3685,14 +3685,6 @@ struct NewsCardView: View {
                     cornerRadius: 9,
                     contentMode: .fill
                 )
-                .overlay {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 50, height: 36)
-                        .background(Color.red.opacity(0.94), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
-                }
             }
 
             Text(post.displayTitle)
