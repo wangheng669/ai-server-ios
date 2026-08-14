@@ -278,7 +278,12 @@ struct FamousHoldingsView: View {
     private func portfolioSnapshot(_ manager: FamousHoldingsManager) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 0) {
-                snapshotMetric("持仓市值", dollarValue(manager.totalValueUsd), nil)
+                snapshotMetric(
+                    "持仓市值",
+                    dollarValue(manager.totalValueUsd),
+                    portfolioValueChangeCaption(manager),
+                    captionColor: portfolioValueChangeTint(manager)
+                )
                 summaryDivider
                 snapshotMetric("持仓数量", "\(manager.positionsCount) 只", nil)
                 summaryDivider
@@ -293,7 +298,12 @@ struct FamousHoldingsView: View {
         .padding(.vertical, 14)
     }
 
-    private func snapshotMetric(_ title: String, _ value: String, _ caption: String?) -> some View {
+    private func snapshotMetric(
+        _ title: String,
+        _ value: String,
+        _ caption: String?,
+        captionColor: Color = HoldingsPalette.purple
+    ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.system(size: 9.5, weight: .medium))
@@ -306,8 +316,9 @@ struct FamousHoldingsView: View {
             if let caption {
                 Text(caption)
                     .font(.system(size: 8.5, weight: .medium))
-                    .foregroundStyle(HoldingsPalette.purple)
+                    .foregroundStyle(captionColor)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
         }
         .padding(.horizontal, 8)
@@ -508,6 +519,19 @@ struct FamousHoldingsView: View {
         let reductions = summary.decreased + summary.exited
         if additions == reductions { return "增减平衡" }
         return additions > reductions ? "增配偏多" : "减配偏多"
+    }
+
+    private func portfolioValueChangeCaption(_ manager: FamousHoldingsManager) -> String {
+        guard let change = manager.valueChangeFromPreviousReport else { return "暂无上期数据" }
+        let arrow = change.amountUsd > 0 ? "↑" : change.amountUsd < 0 ? "↓" : "→"
+        return "\(arrow) \(compactDollarValue(abs(change.amountUsd))) \(signedPercent(change.percent))"
+    }
+
+    private func portfolioValueChangeTint(_ manager: FamousHoldingsManager) -> Color {
+        guard let change = manager.valueChangeFromPreviousReport else { return .secondary }
+        if change.amountUsd > 0 { return HoldingsPalette.red }
+        if change.amountUsd < 0 { return HoldingsPalette.green }
+        return .secondary
     }
 
     private func compactDate(_ value: String) -> String {

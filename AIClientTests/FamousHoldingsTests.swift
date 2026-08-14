@@ -82,6 +82,68 @@ final class FamousHoldingsTests: XCTestCase {
         XCTAssertEqual(response.data.managers.first?.exitedPositions?.first?.previousValueUsd, 80)
         XCTAssertNotEqual(response.data.managers.first?.positions?.first?.id, response.data.managers.first?.positions?.last?.id)
     }
+
+    func testCalculatesPortfolioValueIncreaseIncludingNewAndExitedPositions() throws {
+        let manager = try decodeManager(
+            totalValueUsd: 1_200,
+            changes: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"increased","previousWeightPct":90,"weightPct":83.3,"weightChangePct":-6.7,"valueUsd":1000,"previousValueUsd":900},
+            {"id":"current:2","symbol":"NEW","name":"New","action":"new","previousWeightPct":0,"weightPct":16.7,"weightChangePct":16.7,"valueUsd":200,"previousValueUsd":0},
+            {"id":"exited:3","symbol":"OUT","name":"Out","action":"exited","previousWeightPct":10,"weightPct":0,"weightChangePct":-10,"valueUsd":0,"previousValueUsd":100}
+            """
+        )
+
+        let change = try XCTUnwrap(manager.valueChangeFromPreviousReport)
+        XCTAssertEqual(change.amountUsd, 200, accuracy: 0.001)
+        XCTAssertEqual(change.percent, 20, accuracy: 0.001)
+    }
+
+    func testCalculatesPortfolioValueDecrease() throws {
+        let manager = try decodeManager(
+            totalValueUsd: 800,
+            changes: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"decreased","previousWeightPct":90,"weightPct":100,"weightChangePct":10,"valueUsd":800,"previousValueUsd":900},
+            {"id":"exited:2","symbol":"OUT","name":"Out","action":"exited","previousWeightPct":10,"weightPct":0,"weightChangePct":-10,"valueUsd":0,"previousValueUsd":100}
+            """
+        )
+
+        let change = try XCTUnwrap(manager.valueChangeFromPreviousReport)
+        XCTAssertEqual(change.amountUsd, -200, accuracy: 0.001)
+        XCTAssertEqual(change.percent, -20, accuracy: 0.001)
+    }
+
+    func testOmitsPortfolioValueChangeWhenPreviousValueIsIncomplete() throws {
+        let manager = try decodeManager(
+            totalValueUsd: 800,
+            changes: """
+            {"id":"current:1","symbol":"ONE","name":"One","action":"decreased","previousWeightPct":100,"weightPct":100,"weightChangePct":0,"valueUsd":800}
+            """
+        )
+
+        XCTAssertNil(manager.valueChangeFromPreviousReport)
+    }
+
+    private func decodeManager(totalValueUsd: Double, changes: String) throws -> FamousHoldingsManager {
+        let changesCount = changes.split(separator: "}").count { $0.contains("\"action\"") }
+        let data = Data(
+            """
+            {
+              "key":"test",
+              "cik":"1",
+              "displayName":"测试投资人",
+              "institutionName":"测试机构",
+              "reportDate":"2026-03-31",
+              "filingDate":"2026-05-12",
+              "positionsCount":\(changesCount),
+              "totalValueUsd":\(totalValueUsd),
+              "summary":{"new":0,"increased":0,"decreased":0,"exited":0,"unchanged":0},
+              "changesCount":\(changesCount),
+              "changes":[\(changes)]
+            }
+            """.utf8
+        )
+        return try JSONDecoder().decode(FamousHoldingsManager.self, from: data)
+    }
 }
 
 final class DeploymentStatusTests: XCTestCase {
