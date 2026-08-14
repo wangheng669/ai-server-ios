@@ -235,15 +235,30 @@ private struct EditorialRootView: View {
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
+        let previewDate = Date(timeIntervalSince1970: 0)
         if ProcessInfo.processInfo.arguments.contains("--deployment-tip-success-preview") {
-            return DeploymentStatusSnapshot(phase: .succeeded, commit: "b0d5411", stage: "installed")
+            return DeploymentStatusSnapshot(
+                phase: .succeeded,
+                commit: "b0d5411",
+                updatedAt: previewDate,
+                stage: "installed"
+            )
         }
         if ProcessInfo.processInfo.arguments.contains("--deployment-tip-failed-preview") {
-            return DeploymentStatusSnapshot(phase: .failed, commit: "b0d5411", stage: "install-failed")
+            return DeploymentStatusSnapshot(
+                phase: .failed,
+                commit: "b0d5411",
+                updatedAt: previewDate,
+                stage: "install-failed"
+            )
         }
         guard ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview") ||
             ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview") else { return nil }
-        return DeploymentStatusSnapshot(phase: .running(progress: 0.75), commit: "b0d5411")
+        return DeploymentStatusSnapshot(
+            phase: .running(progress: 0.75),
+            commit: "b0d5411",
+            updatedAt: previewDate
+        )
         #else
         return nil
         #endif
@@ -342,6 +357,23 @@ private struct EditorialRootView: View {
             return .handled
         })
         .inAppBrowserCover(item: $presentedExternalLink)
+        .overlay(alignment: .topLeading) {
+            if let deploymentStatus {
+                DeploymentStatusTip(
+                    snapshot: deploymentStatus,
+                    initiallyExpanded: deploymentPreview != nil &&
+                        ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview"),
+                    onDismiss: {
+                        dismissedDeploymentIdentity = deploymentStatus.identity
+                        deploymentStore.dismissFailure(deploymentStatus)
+                    }
+                )
+                .id(deploymentStatus.identity)
+                .padding(.leading, 12)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
                 if selectedTab == .signal {
@@ -350,20 +382,6 @@ private struct EditorialRootView: View {
                         sentiment: signalSentiment,
                         showsFilters: $showsSignalFilters
                     )
-                }
-
-                if let deploymentStatus {
-                    DeploymentStatusTip(
-                        snapshot: deploymentStatus,
-                        initiallyExpanded: deploymentPreview != nil &&
-                            ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview"),
-                        onDismiss: {
-                            dismissedDeploymentIdentity = deploymentStatus.identity
-                            deploymentStore.dismissFailure(deploymentStatus)
-                        }
-                    )
-                    .id(deploymentStatus.identity)
-                    .padding(.horizontal, 12)
                 }
 
                 if !hidesRootTabBar {

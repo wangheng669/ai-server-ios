@@ -273,7 +273,7 @@ struct DeploymentStatusTip: View {
                 .accessibilityLabel(isExpanded ? "收起自动更新状态" : "查看自动更新状态，\(snapshot.detail)")
             }
         }
-        .frame(maxWidth: 352)
+        .frame(width: 280, alignment: .leading)
     }
 
     private var failedCompactTip: some View {
@@ -282,8 +282,8 @@ struct DeploymentStatusTip: View {
                 withAnimation(.snappy(duration: 0.24)) { isExpanded.toggle() }
             } label: {
                 compactContent
-                    .padding(.leading, 14)
-                    .padding(.trailing, 4)
+                    .padding(.leading, 11)
+                    .padding(.trailing, 2)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isExpanded ? "收起自动更新状态" : "查看自动更新状态，\(snapshot.detail)")
@@ -292,26 +292,25 @@ struct DeploymentStatusTip: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 40, height: 48)
+                    .frame(width: 34, height: 38)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("关闭更新失败提示")
         }
-        .frame(height: 48)
-        .frame(maxWidth: .infinity)
+        .frame(width: 194, height: 38)
         .background(.regularMaterial, in: Capsule())
         .overlay {
             Capsule()
                 .stroke(snapshot.tint.opacity(0.22), lineWidth: 0.75)
+                .allowsHitTesting(false)
         }
         .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
     }
 
     private var compactTip: some View {
         compactContent
-            .padding(.horizontal, 14)
-            .frame(height: 48)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 11)
+            .frame(width: 172, height: 38)
             .background(.regularMaterial, in: Capsule())
             .overlay {
                 Capsule()
@@ -321,24 +320,19 @@ struct DeploymentStatusTip: View {
     }
 
     private var compactContent: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             statusIndicator
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(snapshot.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(snapshot.compactDetail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            Text(snapshot.title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
 
             if case .running = snapshot.phase {
                 Text("\(Int(snapshot.progress * 100))%")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(snapshot.tint)
             }
         }
@@ -357,7 +351,7 @@ struct DeploymentStatusTip: View {
                 .font(.system(size: 8, weight: .bold))
                 .foregroundStyle(snapshot.tint)
         }
-        .frame(width: 22, height: 22)
+        .frame(width: 18, height: 18)
     }
 
     private var statusSymbol: String {
