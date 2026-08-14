@@ -299,6 +299,21 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
+    func testYouTubePostsAlternateSourcesWhilePreservingSourceOrder() throws {
+        let data = Data("""
+        [
+          {"id":1,"source":"rss:79","article_post_at":"2026-08-14T00:00:00Z","postTags":[]},
+          {"id":2,"source":"rss:79","article_post_at":"2026-08-13T00:00:00Z","postTags":[]},
+          {"id":3,"source":"rss:1391","article_post_at":"2026-06-20T00:00:00Z","postTags":[]},
+          {"id":4,"source":"rss:1391","article_post_at":"2026-05-20T00:00:00Z","postTags":[]},
+          {"id":5,"source":"rss:79","article_post_at":"2026-08-12T00:00:00Z","postTags":[]}
+        ]
+        """.utf8)
+        let posts = try JSONDecoder().decode([Post].self, from: data)
+
+        XCTAssertEqual(APIClient.balanceYouTubePostsBySource(posts).map(\.id), [1, 3, 2, 4, 5])
+    }
+
     func testWeChatRequestsAllScoresFromMaobidaoFeed() {
         let items = APIClient.regularPostQueryItems(page: 1, limit: 20, source: .wechat)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
