@@ -157,6 +157,8 @@ struct AIServerClientApp: App {
 private enum EditorialTab: Hashable {
     case world, signal, observation, investment, company, learning, people, city
 
+    static let researchTabs: [EditorialTab] = [.investment, .company, .people]
+
     var sectionTitle: String {
         switch self {
         case .signal: "信号"
@@ -167,6 +169,15 @@ private enum EditorialTab: Hashable {
         case .investment: "数据"
         case .learning: "知识"
         case .city: "城市"
+        }
+    }
+
+    var researchSelectorIcon: String {
+        switch self {
+        case .investment: "chart.xyaxis.line"
+        case .company: "building.2"
+        case .people: "person.2"
+        default: "magnifyingglass"
         }
     }
 }
@@ -290,21 +301,12 @@ private struct EditorialRootView: View {
         }
     }
 
-    private var groupedRootTabs: [EditorialTab]? {
-        switch selectedTab {
-        case .investment, .company, .people:
-            [.investment, .company, .people]
-        case .world, .signal, .observation, .learning, .city:
-            nil
-        }
+    private var showsResearchSelector: Bool {
+        !hidesRootTabBar && EditorialTab.researchTabs.contains(selectedTab)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if !hidesRootTabBar, let groupedRootTabs {
-                RootSectionBar(selection: $selectedTab, tabs: groupedRootTabs)
-            }
-
             ZStack {
                 tabContent(.world) {
                     TodayWorldView(showsDetail: $worldShowsDetail)
@@ -380,6 +382,14 @@ private struct EditorialRootView: View {
                         sentiment: signalSentiment,
                         showsFilters: $showsSignalFilters
                     )
+                }
+
+                if showsResearchSelector {
+                    HStack {
+                        Spacer(minLength: 0)
+                        ResearchSectionSelector(selection: $selectedTab)
+                    }
+                    .padding(.horizontal, 14)
                 }
 
                 if !hidesRootTabBar {
@@ -484,44 +494,50 @@ private struct EditorialRootView: View {
     }
 }
 
-private struct RootSectionBar: View {
+private struct ResearchSectionSelector: View {
     @Binding var selection: EditorialTab
-    let tabs: [EditorialTab]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(tabs, id: \.self) { tab in
+        Menu {
+            ForEach(EditorialTab.researchTabs, id: \.self) { tab in
                 Button {
-                    withAnimation(.easeOut(duration: 0.18)) {
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0)) {
                         selection = tab
                     }
                 } label: {
-                    Text(tab.sectionTitle)
-                        .font(.system(size: 14, weight: selection == tab ? .semibold : .regular))
-                        .foregroundStyle(selection == tab ? InvestmentDesign.accent : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            Capsule()
-                                .fill(
-                                    selection == tab
-                                        ? InvestmentDesign.accentSoft
-                                        : InvestmentDesign.secondarySurface
-                                )
-                        )
+                    Label(
+                        tab.sectionTitle,
+                        systemImage: selection == tab ? "checkmark" : tab.researchSelectorIcon
+                    )
                 }
-                .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selection.researchSelectorIcon)
+                    .font(.system(size: 15, weight: .semibold))
+
+                Text(selection.sectionTitle)
+                    .font(.system(size: 15, weight: .semibold))
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(InvestmentDesign.accent)
+            .padding(.horizontal, 14)
+            .frame(minWidth: 108, minHeight: 46)
+            .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.primary.opacity(0.14), lineWidth: 0.7)
+            }
+            .contentShape(Rectangle())
+            .shadow(color: Color.black.opacity(0.10), radius: 10, y: 4)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(InvestmentDesign.divider)
-                .frame(height: 0.5)
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("切换研究栏目，当前为\(selection.sectionTitle)")
     }
 }
 
