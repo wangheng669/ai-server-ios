@@ -73,13 +73,8 @@ enum FeedDetailChromePolicy {
 }
 
 enum FeedSourceTransitionPolicy {
-    static let adjacentAnimationDuration = 0.28
-
-    static func animatesTap(from current: FeedSource, to next: FeedSource) -> Bool {
-        guard let currentIndex = FeedSource.allCases.firstIndex(of: current),
-              let nextIndex = FeedSource.allCases.firstIndex(of: next) else { return false }
-        return abs(currentIndex - nextIndex) == 1
-    }
+    static let fadeOutDuration = 0.10
+    static let fadeInDuration = 0.22
 }
 
 private struct WeChatAccount: Identifiable {
@@ -118,10 +113,12 @@ struct NewsFeedView: View {
     @State private var showsAllRSSSources = false
     @State private var rssSourceSearch = ""
     @State private var isSourceSelectorExpanded = false
+    @State private var isSourceContentVisible = true
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.rootBottomChromeHeight) private var rootBottomChromeHeight
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
     private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
     private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
@@ -141,9 +138,11 @@ struct NewsFeedView: View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
                 content
+                    .opacity(isSourceContentVisible ? 1 : 0.15)
+                    .scaleEffect(isSourceContentVisible ? 1 : 0.997)
 
                 if isSourceSelectorExpanded {
-                    Color.black.opacity(0.08)
+                    Color.black.opacity(0.045)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture { closeSourceSelector() }
@@ -268,96 +267,98 @@ struct NewsFeedView: View {
     }
 
     private var sourceSelector: some View {
-        VStack(alignment: .trailing, spacing: 10) {
+        VStack(alignment: .trailing, spacing: 8) {
             if isSourceSelectorExpanded {
                 ScrollView {
-                    LazyVStack(spacing: 4) {
+                    LazyVStack(spacing: 2) {
                         ForEach(FeedSource.allCases) { source in
                             sourceOption(source)
                         }
                     }
-                    .padding(7)
+                    .padding(5)
                 }
                 .scrollIndicators(.hidden)
-                .frame(width: 252)
-                .frame(maxHeight: 420)
-                .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .frame(width: 214)
+                .frame(maxHeight: 360)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(InvestmentDesign.divider, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
                 }
-                .shadow(color: .black.opacity(0.16), radius: 24, y: 10)
+                .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
                 .transition(
-                    .asymmetric(
-                        insertion: .scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity),
-                        removal: .scale(scale: 0.96, anchor: .bottomTrailing).combined(with: .opacity)
-                    )
+                    .move(edge: .bottom).combined(with: .opacity)
                 )
             }
 
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
+                withAnimation(.smooth(duration: 0.22)) {
                     isSourceSelectorExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     sourceIcon(model.source)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 24, height: 24)
 
-                    Text("选择")
-                        .font(.system(size: 13, weight: .bold))
+                    Text(model.source.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
 
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isSourceSelectorExpanded ? 180 : 0))
                 }
-                .foregroundStyle(.white)
-                .padding(.leading, 6)
-                .padding(.trailing, 13)
-                .frame(height: 46)
-                .background(InvestmentDesign.accent, in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
-                .shadow(color: InvestmentDesign.accent.opacity(0.28), radius: 12, y: 6)
+                .foregroundStyle(.primary)
+                .padding(.leading, 10)
+                .padding(.trailing, 11)
+                .frame(height: 40)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.09), radius: 10, y: 4)
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("选择观点来源")
             .accessibilityValue(isSourceSelectorExpanded ? "已展开" : "已收起")
         }
-        .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSourceSelectorExpanded)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isSourceSelectorExpanded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.source)
     }
 
     private func sourceOption(_ source: FeedSource) -> some View {
         let isSelected = model.source == source
         return Button {
-            if !isSelected { selectSourceFromTap(source) }
-            closeSourceSelector()
+            if isSelected {
+                closeSourceSelector()
+            } else {
+                selectSourceFromTap(source)
+            }
         } label: {
-            HStack(spacing: 11) {
+            HStack(spacing: 9) {
                 sourceIcon(source)
-                    .frame(width: 40, height: 40)
-                    .background(InvestmentDesign.secondarySurface, in: Circle())
+                    .frame(width: 28, height: 28)
 
                 Text(source.title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(.primary)
 
                 Spacer(minLength: 6)
 
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(InvestmentDesign.accent, in: Circle())
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .frame(width: 16, height: 16)
                     .opacity(isSelected ? 1 : 0)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 56)
+            .padding(.horizontal, 9)
+            .frame(height: 44)
             .background(
-                isSelected ? InvestmentDesign.accent.opacity(0.09) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                isSelected ? InvestmentDesign.accent.opacity(0.07) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(source.title)
@@ -365,7 +366,7 @@ struct NewsFeedView: View {
     }
 
     private func closeSourceSelector() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+        withAnimation(.smooth(duration: 0.20)) {
             isSourceSelectorExpanded = false
         }
     }
@@ -1301,15 +1302,32 @@ struct NewsFeedView: View {
 
     private func selectSourceFromTap(_ source: FeedSource) {
         guard source != model.source else { return }
-        if FeedSourceTransitionPolicy.animatesTap(from: model.source, to: source) {
-            withAnimation(.snappy(duration: FeedSourceTransitionPolicy.adjacentAnimationDuration)) {
-                selectSource(source)
-            }
-        } else {
+        UISelectionFeedbackGenerator().selectionChanged()
+
+        guard !reduceMotion else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
                 selectSource(source)
+                isSourceSelectorExpanded = false
+            }
+            return
+        }
+
+        withAnimation(.easeOut(duration: FeedSourceTransitionPolicy.fadeOutDuration)) {
+            isSourceContentVisible = false
+            isSourceSelectorExpanded = false
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + FeedSourceTransitionPolicy.fadeOutDuration) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                selectSource(source)
+            }
+
+            withAnimation(.easeInOut(duration: FeedSourceTransitionPolicy.fadeInDuration)) {
+                isSourceContentVisible = true
             }
         }
     }

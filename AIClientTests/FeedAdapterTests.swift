@@ -172,13 +172,12 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertFalse(model.isSwitchingSource)
     }
 
-    func testFeedSourceTransitionAnimatesOnlyAdjacentTabs() {
-        let sources = FeedSource.allCases
-        XCTAssertGreaterThanOrEqual(sources.count, 3)
-        XCTAssertTrue(FeedSourceTransitionPolicy.animatesTap(from: sources[0], to: sources[1]))
-        XCTAssertTrue(FeedSourceTransitionPolicy.animatesTap(from: sources[1], to: sources[0]))
-        XCTAssertFalse(FeedSourceTransitionPolicy.animatesTap(from: sources[0], to: sources[2]))
-        XCTAssertFalse(FeedSourceTransitionPolicy.animatesTap(from: sources[0], to: sources[0]))
+    func testFeedSourceTransitionUsesABriefBalancedFade() {
+        XCTAssertLessThan(FeedSourceTransitionPolicy.fadeOutDuration, FeedSourceTransitionPolicy.fadeInDuration)
+        XCTAssertLessThan(
+            FeedSourceTransitionPolicy.fadeOutDuration + FeedSourceTransitionPolicy.fadeInDuration,
+            0.4
+        )
     }
 
     @MainActor
