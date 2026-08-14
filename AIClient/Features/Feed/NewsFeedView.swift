@@ -50,16 +50,23 @@ private enum YouTubePersonFilter: String, CaseIterable, Identifiable {
     case xiaodao = "小岛大浪吹"
 
     var id: Self { self }
-    var title: String { self == .all ? "全部" : rawValue }
-    var shortTitle: String {
+    var title: String { self == .all ? "全部用户" : rawValue }
+    var feedID: Int? {
         switch self {
-        case .all: "全"
-        case .wangZhian: "王"
-        case .chaiJing: "柴"
-        case .xiaodao: "岛"
+        case .all: nil
+        case .wangZhian: 79
+        case .chaiJing: 1391
+        case .xiaodao: 7911
         }
     }
     var person: String? { self == .all ? nil : rawValue }
+    var avatarURL: URL? {
+        if self == .xiaodao {
+            return URL(string: "https://yt3.googleusercontent.com/ytc/AIdro_mb2vZI-xznESM1CQpzVUOQFe1h9DVsghEWhCHPWfpt7ss=s900-c-k-c0x00ffffff-no-rj")
+        }
+        guard let feedID else { return nil }
+        return URL(string: "/api/ios/v1/rss/feeds/\(feedID)/avatar", relativeTo: ServerConfiguration.currentURL)?.absoluteURL
+    }
 }
 
 enum FeedChromeLayout {
@@ -365,7 +372,14 @@ struct NewsFeedView: View {
     private var youtubePersonSelector: some View {
         VStack(alignment: .leading, spacing: 8) {
             if isYouTubePersonSelectorExpanded {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("选择用户")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 7)
+                        .padding(.bottom, 1)
+
                     ForEach(YouTubePersonFilter.allCases) { option in
                         let isSelected = model.selectedYouTubePerson == option.person
                         Button {
@@ -373,11 +387,8 @@ struct NewsFeedView: View {
                             isYouTubePersonSelectorExpanded = false
                             Task { await model.selectYouTubePerson(option.person) }
                         } label: {
-                            HStack(spacing: 8) {
-                                Text(option.shortTitle)
-                                    .font(.system(size: 12, weight: .bold))
-                                    .frame(width: 22, height: 22)
-                                    .background(InvestmentDesign.accent.opacity(isSelected ? 0.13 : 0.05), in: Circle())
+                            HStack(spacing: 11) {
+                                youtubePersonAvatar(option, size: 36)
                                 Text(option.title)
                                     .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
                                     .lineLimit(1)
@@ -389,9 +400,13 @@ struct NewsFeedView: View {
                                 }
                             }
                             .foregroundStyle(.primary)
-                            .padding(.horizontal, 10)
-                            .frame(width: 132, height: 40)
-                            .contentShape(Rectangle())
+                            .padding(.horizontal, 9)
+                            .frame(width: 176, height: 49)
+                            .background(
+                                isSelected ? InvestmentDesign.accent.opacity(0.08) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
@@ -413,12 +428,17 @@ struct NewsFeedView: View {
                     isYouTubePersonSelectorExpanded.toggle()
                 }
             } label: {
-                Text(currentYouTubePersonFilter.shortTitle)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.primary)
+                youtubePersonAvatar(currentYouTubePersonFilter, size: 38)
                     .frame(width: 44, height: 44)
                     .background(.regularMaterial, in: Circle())
-                    .overlay(Circle().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
+                    .overlay {
+                        Circle().stroke(
+                            model.selectedYouTubePerson == nil
+                                ? InvestmentDesign.divider.opacity(0.9)
+                                : InvestmentDesign.accent.opacity(0.65),
+                            lineWidth: model.selectedYouTubePerson == nil ? 0.5 : 1.5
+                        )
+                    }
                     .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
             }
             .buttonStyle(.plain)
@@ -430,6 +450,41 @@ struct NewsFeedView: View {
 
     private var currentYouTubePersonFilter: YouTubePersonFilter {
         YouTubePersonFilter.allCases.first { $0.person == model.selectedYouTubePerson } ?? .all
+    }
+
+    @ViewBuilder
+    private func youtubePersonAvatar(_ option: YouTubePersonFilter, size: CGFloat) -> some View {
+        if option == .all {
+            ZStack {
+                youtubeRemoteAvatar(.wangZhian, size: size * 0.58)
+                    .offset(x: -size * 0.18, y: -size * 0.14)
+                youtubeRemoteAvatar(.chaiJing, size: size * 0.58)
+                    .offset(x: size * 0.18, y: -size * 0.14)
+                youtubeRemoteAvatar(.xiaodao, size: size * 0.58)
+                    .offset(y: size * 0.20)
+            }
+            .frame(width: size, height: size)
+            .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+        } else {
+            youtubeRemoteAvatar(option, size: size)
+        }
+    }
+
+    private func youtubeRemoteAvatar(_ option: YouTubePersonFilter, size: CGFloat) -> some View {
+        AsyncImage(url: option.avatarURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: size * 0.42, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(uiColor: .secondarySystemBackground))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: max(1, size * 0.045)))
     }
 
     private func sourceOption(_ source: FeedSource) -> some View {
