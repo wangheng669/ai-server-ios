@@ -299,19 +299,15 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
-    func testYouTubePostsAreSortedByTimeAcrossSources() throws {
-        let data = Data("""
-        [
-          {"id":1,"source":"rss:79","article_post_at":"2026-08-14T00:00:00Z","postTags":[]},
-          {"id":2,"source":"rss:79","article_post_at":"2026-08-13T00:00:00Z","postTags":[]},
-          {"id":3,"source":"rss:1391","article_post_at":"2026-06-20T00:00:00Z","postTags":[]},
-          {"id":4,"source":"rss:1391","article_post_at":"2026-05-20T00:00:00Z","postTags":[]},
-          {"id":5,"source":"rss:79","article_post_at":"2026-08-12T00:00:00Z","postTags":[]}
-        ]
-        """.utf8)
-        let posts = try JSONDecoder().decode([Post].self, from: data)
+    func testYouTubeDedicatedEndpointSupportsPersonFilter() {
+        let items = APIClient.youtubeVideoQueryItems(page: 2, limit: 12, person: " 柴静 ")
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
 
-        XCTAssertEqual(APIClient.sortYouTubePostsByTime(posts).map(\.id), [1, 2, 5, 3, 4])
+        XCTAssertEqual(query["page"], "2")
+        XCTAssertEqual(query["limit"], "12")
+        XCTAssertEqual(query["person"], "柴静")
     }
 
     func testWeChatRequestsAllScoresFromMaobidaoFeed() {

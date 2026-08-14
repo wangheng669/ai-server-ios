@@ -233,7 +233,7 @@ struct APIClient {
 
     private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
         if source == .youtube {
-            return try await fetchChronologicalYouTubePosts(page: page, limit: limit)
+            return try await fetchYouTubePosts(page: page, limit: limit)
         }
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
@@ -248,39 +248,23 @@ struct APIClient {
         return response.data
     }
 
-    private func fetchChronologicalYouTubePosts(page: Int, limit: Int) async throws -> [Post] {
-        let batchSize = 100
-        let categoryID = try await categoryID(named: "YouTube")
-        var allPosts: [Post] = []
-        var batchPage = 1
-
-        while true {
-            var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
-            var queryItems = Self.regularPostQueryItems(page: batchPage, limit: batchSize, source: .youtube)
-            queryItems.append(.init(name: "categoryId", value: String(categoryID)))
-            components?.queryItems = queryItems
-            guard let url = components?.url else { throw APIError.invalidURL }
-            let response: PostListResponse = try await get(url)
-            allPosts.append(contentsOf: response.data)
-            guard response.data.count == batchSize else { break }
-            batchPage += 1
-        }
-
-        let chronological = Self.sortYouTubePostsByTime(allPosts)
-        let start = (page - 1) * limit
-        guard start < chronological.count else { return [] }
-        return Array(chronological.dropFirst(start).prefix(limit))
+    private func fetchYouTubePosts(page: Int, limit: Int, person: String? = nil) async throws -> [Post] {
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/youtube/videos"), resolvingAgainstBaseURL: false)
+        components?.queryItems = Self.youtubeVideoQueryItems(page: page, limit: limit, person: person)
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: PostListResponse = try await get(url)
+        return response.data
     }
 
-    static func sortYouTubePostsByTime(_ posts: [Post]) -> [Post] {
-        posts.sorted {
-            let lhsTime = $0.articlePostAt ?? ""
-            let rhsTime = $1.articlePostAt ?? ""
-            if lhsTime == rhsTime {
-                return $0.id > $1.id
-            }
-            return lhsTime > rhsTime
+    static func youtubeVideoQueryItems(page: Int, limit: Int, person: String? = nil) -> [URLQueryItem] {
+        var items = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        if let person = person?.trimmingCharacters(in: .whitespacesAndNewlines), !person.isEmpty {
+            items.append(.init(name: "person", value: person))
         }
+        return items
     }
 
     static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {
