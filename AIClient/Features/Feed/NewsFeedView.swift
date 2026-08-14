@@ -96,6 +96,12 @@ enum FeedSourceTransitionPolicy {
     static let fadeInDuration = 0.22
 }
 
+enum EmbeddedWebPresentationPolicy {
+    static func opensImmediately(source: FeedSource) -> Bool {
+        source == .weibo
+    }
+}
+
 private struct WeChatAccount: Identifiable {
     let id: Int
     let name: String
@@ -971,6 +977,10 @@ struct NewsFeedView: View {
             selectedPost = post
             return
         }
+        if EmbeddedWebPresentationPolicy.opensImmediately(source: source) {
+            selectedPost = post
+            return
+        }
         if preparedWebViews[post.id] != nil {
             selectedPost = post
             return
@@ -1636,8 +1646,15 @@ private struct EmbeddedWebPage: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             EmbeddedWebView(url: url, model: model, preparedWebView: preparedWebView)
+
+            if model.isLoading {
+                ProgressView(value: model.estimatedProgress)
+                    .progressViewStyle(.linear)
+                    .tint(source == .weibo ? .red : .blue)
+                    .accessibilityLabel("页面加载进度")
+            }
 
             if source == .weibo, model.requiresWeiboAuthentication {
                 ContentUnavailableView {

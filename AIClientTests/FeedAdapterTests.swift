@@ -180,6 +180,11 @@ final class FeedAdapterTests: XCTestCase {
         )
     }
 
+    func testWeiboWebPagePresentsBeforeContentFinishesLoading() {
+        XCTAssertTrue(EmbeddedWebPresentationPolicy.opensImmediately(source: .weibo))
+        XCTAssertFalse(EmbeddedWebPresentationPolicy.opensImmediately(source: .douyin))
+    }
+
     @MainActor
     func testNewYorkTimesSourceDoesNotPublishCardsUntilFullBodiesAreReady() async throws {
         let feedPosts = try (1...5).map { id in
