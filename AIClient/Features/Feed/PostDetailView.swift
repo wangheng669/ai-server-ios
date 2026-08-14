@@ -111,6 +111,11 @@ struct PostDetailView: View {
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
+        .overlay {
+            if let destination = presentedXueqiuLink {
+                xueqiuBrowserOverlay(destination)
+            }
+        }
         .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) || isWeChatArticle ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar((post.isRSS || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
@@ -120,7 +125,6 @@ struct PostDetailView: View {
             WikipediaReaderView(entity: entity)
                 .wikipediaReaderPresentation()
         }
-        .inAppBrowserCover(item: $presentedXueqiuLink)
         .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
         // navigation pop recognizer on this screen prevents a scrub from popping
@@ -1141,6 +1145,40 @@ struct PostDetailView: View {
         .accessibilityIdentifier("xueqiu-post-detail-\(post.id)")
     }
 
+    private func xueqiuBrowserOverlay(_ destination: InAppBrowserDestination) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button { presentedXueqiuLink = nil } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("返回雪球详情")
+
+                Text(destination.url.host ?? "网页")
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+
+                Spacer(minLength: 34)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 50)
+            .background(.bar)
+
+            Divider().opacity(0.55)
+
+            InAppBrowserSheet(
+                url: destination.url,
+                showsTitleHeader: false,
+                onDismiss: { presentedXueqiuLink = nil }
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityIdentifier("xueqiu-browser-overlay")
+    }
+
     private var xueqiuDetailAuthor: some View {
         HStack(spacing: 11) {
             ZStack(alignment: .bottomTrailing) {
@@ -1166,7 +1204,7 @@ struct PostDetailView: View {
             Spacer(minLength: 0)
 
             if post.linkURL != nil {
-                Button { openOriginal() } label: {
+                Button { openXueqiuOriginal() } label: {
                     Image("XueqiuMark")
                         .resizable()
                         .renderingMode(.original)
@@ -1280,6 +1318,11 @@ struct PostDetailView: View {
             presentedXueqiuLink = InAppBrowserDestination(url: url)
             return .handled
         }
+    }
+
+    private func openXueqiuOriginal() {
+        guard let url = post.linkURL else { return }
+        presentedXueqiuLink = InAppBrowserDestination(url: url)
     }
 
     private var youtubeDetail: some View {

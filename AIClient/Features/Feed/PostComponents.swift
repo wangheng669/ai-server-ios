@@ -12,12 +12,14 @@ struct InAppBrowserDestination: Identifiable, Equatable {
 
 struct InAppBrowserSheet: View {
     let url: URL
+    var showsTitleHeader = true
+    var onDismiss: (() -> Void)?
     @State private var title = ""
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
-            if !title.isEmpty {
+            if showsTitleHeader && !title.isEmpty {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
@@ -29,7 +31,7 @@ struct InAppBrowserSheet: View {
                     .gesture(
                         DragGesture(minimumDistance: 20)
                             .onEnded { value in
-                                if value.translation.height > 80 { dismiss() }
+                                if value.translation.height > 80 { close() }
                             }
                     )
                 Divider().opacity(0.55)
@@ -41,7 +43,16 @@ struct InAppBrowserSheet: View {
             }
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
-        .accessibilityAction(.escape) { dismiss() }
+        .accessibilityIdentifier("in-app-browser")
+        .accessibilityAction(.escape) { close() }
+    }
+
+    private func close() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
     }
 }
 
