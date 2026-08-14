@@ -233,7 +233,7 @@ struct APIClient {
 
     private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
         if source == .youtube {
-            return try await fetchBalancedYouTubePosts(page: page, limit: limit)
+            return try await fetchChronologicalYouTubePosts(page: page, limit: limit)
         }
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
@@ -248,7 +248,7 @@ struct APIClient {
         return response.data
     }
 
-    private func fetchBalancedYouTubePosts(page: Int, limit: Int) async throws -> [Post] {
+    private func fetchChronologicalYouTubePosts(page: Int, limit: Int) async throws -> [Post] {
         let batchSize = 100
         let categoryID = try await categoryID(named: "YouTube")
         var allPosts: [Post] = []
@@ -266,34 +266,21 @@ struct APIClient {
             batchPage += 1
         }
 
-        let balanced = Self.balanceYouTubePostsBySource(allPosts)
+        let chronological = Self.sortYouTubePostsByTime(allPosts)
         let start = (page - 1) * limit
-        guard start < balanced.count else { return [] }
-        return Array(balanced.dropFirst(start).prefix(limit))
+        guard start < chronological.count else { return [] }
+        return Array(chronological.dropFirst(start).prefix(limit))
     }
 
-    static func balanceYouTubePostsBySource(_ posts: [Post]) -> [Post] {
-        var sourceOrder: [String] = []
-        var buckets: [String: [Post]] = [:]
-        for post in posts {
-            let key = post.source ?? post.user?.userID ?? String(post.id)
-            if buckets[key] == nil { sourceOrder.append(key) }
-            buckets[key, default: []].append(post)
-        }
-
-        var result: [Post] = []
-        var index = 0
-        while result.count < posts.count {
-            var appended = false
-            for source in sourceOrder {
-                guard let bucket = buckets[source], index < bucket.count else { continue }
-                result.append(bucket[index])
-                appended = true
+    static func sortYouTubePostsByTime(_ posts: [Post]) -> [Post] {
+        posts.sorted {
+            let lhsTime = $0.articlePostAt ?? ""
+            let rhsTime = $1.articlePostAt ?? ""
+            if lhsTime == rhsTime {
+                return $0.id > $1.id
             }
-            guard appended else { break }
-            index += 1
+            return lhsTime > rhsTime
         }
-        return result
     }
 
     static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {

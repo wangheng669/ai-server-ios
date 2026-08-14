@@ -299,7 +299,7 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
-    func testYouTubePostsAlternateSourcesWhilePreservingSourceOrder() throws {
+    func testYouTubePostsAreSortedByTimeAcrossSources() throws {
         let data = Data("""
         [
           {"id":1,"source":"rss:79","article_post_at":"2026-08-14T00:00:00Z","postTags":[]},
@@ -311,7 +311,7 @@ final class FeedAdapterTests: XCTestCase {
         """.utf8)
         let posts = try JSONDecoder().decode([Post].self, from: data)
 
-        XCTAssertEqual(APIClient.balanceYouTubePostsBySource(posts).map(\.id), [1, 3, 2, 4, 5])
+        XCTAssertEqual(APIClient.sortYouTubePostsByTime(posts).map(\.id), [1, 2, 5, 3, 4])
     }
 
     func testWeChatRequestsAllScoresFromMaobidaoFeed() {
