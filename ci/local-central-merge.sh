@@ -66,6 +66,51 @@ for command in curl git gh xcodebuild xcrun jq; do
   fi
 done
 
+repository_variable() {
+  local name=$1 fallback=${2:-} value="" attempt
+  for attempt in 1 2 3 4 5; do
+    if value=$(gh variable get "$name" 2>/dev/null) && [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+    echo "GitHub variable $name was unavailable (attempt $attempt/5)." >&2
+    sleep "$attempt"
+  done
+  if [[ -n "$fallback" ]]; then
+    echo "Using repository fallback for $name." >&2
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+  echo "Required GitHub variable is unavailable after retries: $name" >&2
+  return 1
+}
+
+report_local_delivery() {
+  local stage=$1 attempt
+  export IOS_DEPLOYMENT_COMMIT="$source_sha"
+  export IOS_DEPLOYMENT_SOURCE_BRANCH="$source_branch"
+  export IOS_DEPLOYMENT_RUN_ID="$run_id"
+  if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+    ./ci/report-ios-deployment.sh succeeded 1 "$stage"
+    return
+  fi
+  for attempt in 1 2 3 4 5; do
+    if gh workflow run local-central-delivery-report.yml \
+      --ref main \
+      -f source_sha="$source_sha" \
+      -f source_branch="$source_branch" \
+      -f originating_run_id="$run_id" \
+      -f stage="$stage"; then
+      echo "Queued authenticated deployment-status reconciliation for $source_sha."
+      return
+    fi
+    echo "Could not queue deployment-status reconciliation (attempt $attempt/5)." >&2
+    sleep "$attempt"
+  done
+  echo "Local delivery succeeded, but its success status could not be queued for reporting." >&2
+  return 1
+}
+
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 if [[ -n "$(git status --short)" ]]; then
@@ -173,9 +218,9 @@ if [[ "$app_changed" == true ]]; then
   export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}
   export RUNNER_TEMP=${RUNNER_TEMP:-$(mktemp -d /tmp/ai-server-ios-runner.XXXXXX)}
   export IOS_BUILD_CACHE_ROOT=${IOS_BUILD_CACHE_ROOT:-$HOME/Library/Caches/ai-server-ios}
-  export DEVICE_UDID=${DEVICE_UDID:-$(gh variable get IOS_DEVICE_UDID)}
-  export TEAM_ID=${TEAM_ID:-$(gh variable get IOS_TEAM_ID)}
-  export BUNDLE_ID=${BUNDLE_ID:-$(gh variable get IOS_BUNDLE_ID)}
+  export DEVICE_UDID=${DEVICE_UDID:-$(repository_variable IOS_DEVICE_UDID)}
+  export TEAM_ID=${TEAM_ID:-$(repository_variable IOS_TEAM_ID 9M7P4VLHY3)}
+  export BUNDLE_ID=${BUNDLE_ID:-$(repository_variable IOS_BUNDLE_ID com.wangheng.aiserverclient)}
 
   ./ci/verify-ios-device-stability.sh
   mkdir -p "$IOS_BUILD_CACHE_ROOT" "$RUNNER_TEMP"
@@ -228,6 +273,9 @@ git merge-base --is-ancestor "$source_sha" origin/main
 
 if [[ "$app_changed" == true ]]; then
   ./ci/sign-and-install-ios.sh
+  report_local_delivery installed-local-fallback
+else
+  report_local_delivery published-local-fallback
 fi
 
 echo "Local central fallback completed: $source_sha is in origin/main."

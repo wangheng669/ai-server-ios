@@ -108,6 +108,7 @@ preflight_duration_seconds=$((preflight_finished_epoch - preflight_started_epoch
   echo "dependency_duration_seconds=$dependency_seconds"
   echo "device_build_warm_duration_seconds=$device_build_warm_seconds"
   echo "simulator_warm_duration_seconds=$simulator_warm_seconds"
+  echo "device_gate_failed=$([[ "$device_warm_status" -ne 0 ]] && echo true || echo false)"
 } >> "$GITHUB_OUTPUT"
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
