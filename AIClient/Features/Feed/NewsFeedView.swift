@@ -1712,16 +1712,7 @@ private struct EmbeddedWebPage: View {
             }
 
             if source == .weibo, model.requiresWeiboAuthentication {
-                ContentUnavailableView {
-                    Label("微博需要登录", systemImage: "person.crop.circle.badge.exclamationmark")
-                } description: {
-                    Text("微博已限制匿名搜索，登录后即可查看这条热搜的讨论内容。")
-                } actions: {
-                    Button("登录微博") { model.beginWeiboLogin() }
-                        .buttonStyle(.borderedProminent)
-                }
-                .padding(.horizontal, 24)
-                .background(Color(uiColor: .systemBackground))
+                weiboAuthenticationPrompt
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -1769,6 +1760,30 @@ private struct EmbeddedWebPage: View {
                 Text("当前账号：\(displayName)")
             }
         }
+    }
+
+    private var weiboAuthenticationPrompt: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .font(.system(size: 52, weight: .regular))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 8) {
+                Text("微博需要登录")
+                    .font(.title2.bold())
+                Text("微博已限制匿名搜索，登录后即可查看这条热搜的讨论内容。")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button("登录微博") { model.beginWeiboLogin() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, 44)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(uiColor: .systemBackground))
     }
 
     @ViewBuilder private var hotTopicMark: some View {
@@ -2038,7 +2053,10 @@ private struct EmbeddedWebView: UIViewRepresentable {
         // WKWebView's history gesture competes with that gesture and can navigate
         // back to the hot-search list while the user is browsing photos.
         webView.allowsBackForwardNavigationGestures = !Self.isWeiboURL(url)
-        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        // SwiftUI's navigation container already positions the web view below its
+        // toolbar. Automatic UIKit adjustment adds the same top inset a second
+        // time on some Weibo documents, leaving an empty strip above the feed.
+        webView.scrollView.contentInsetAdjustmentBehavior = Self.isWeiboURL(url) ? .never : .automatic
         context.coordinator.observe(webView, observesWeiboSession: Self.isWeiboURL(url))
         model.webView = webView
         if preparedWebView != nil {
