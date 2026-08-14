@@ -583,7 +583,7 @@ struct NewsFeedView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                             .modifier(ConditionalTapGestureModifier(
-                                isEnabled: !post.isXueqiu && !(post.sourceName == "X" && !post.videoURLs.isEmpty)
+                                isEnabled: !(post.sourceName == "X" && !post.videoURLs.isEmpty)
                             ) {
                                 if post.isFlash {
                                     withAnimation(.easeInOut(duration: 0.22)) {
@@ -3004,19 +3004,15 @@ struct NewsCardView: View {
                 )
             }
 
-            Button { onOpen?() } label: {
-                HStack(spacing: 0) {
-                    Label("分享", systemImage: "square.and.arrow.up")
-                    Spacer()
-                    xueqiuMetric("bubble.left", post.meta?.metrics?.replies)
-                    Spacer()
-                    xueqiuMetric("hand.thumbsup", post.meta?.metrics?.likes)
-                    Spacer()
-                    Image(systemName: "ellipsis")
-                }
-                .contentShape(Rectangle())
+            HStack(spacing: 0) {
+                Label("分享", systemImage: "square.and.arrow.up")
+                Spacer()
+                xueqiuMetric("bubble.left", post.meta?.metrics?.replies)
+                Spacer()
+                xueqiuMetric("hand.thumbsup", post.meta?.metrics?.likes)
+                Spacer()
+                Image(systemName: "ellipsis")
             }
-            .buttonStyle(.plain)
             .font(.system(size: 15.5))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 4)
@@ -3026,61 +3022,56 @@ struct NewsCardView: View {
         .padding(.vertical, 13)
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("xueqiu-feed-card-\(post.id)")
+        .accessibilityLabel("打开雪球帖子详情")
+        .accessibilityAddTraits(.isButton)
     }
 
     private var xueqiuTextContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Button { onOpen?() } label: {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 9) {
-                        AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
-                        Text(post.authorName)
-                            .font(.system(size: 15.5, weight: .medium))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .layoutPriority(1)
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.18))
-                            .fixedSize()
-                        if let time = post.formattedTime {
-                            Text("修改于\(time)")
-                                .font(.system(size: 13.5))
-                                .foregroundStyle(Color(uiColor: .tertiaryLabel))
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if let emoji = post.xueqiuStandaloneInlineEmoji {
-                        InlineEmojiImage(emoji: emoji)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if !post.xueqiuBodyInlineEmojis.isEmpty {
-                        InlineEmojiText(
-                            text: post.xueqiuBodyContent,
-                            emojis: post.xueqiuBodyInlineEmojis,
-                            fontSize: 17,
-                            lineSpacing: 8,
-                            maximumNumberOfLines: post.hasXueqiuFeedMedia ? 5 : 8
-                        )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
-                            .font(.system(size: 17))
-                            .lineSpacing(8)
-                            .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+            HStack(spacing: 9) {
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
+                Text(post.authorName)
+                    .font(.system(size: 15.5, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.18))
+                    .fixedSize()
+                if let time = post.formattedTime {
+                    Text("修改于\(time)")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("打开雪球帖子详情")
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let emoji = post.xueqiuStandaloneInlineEmoji {
+                InlineEmojiImage(emoji: emoji)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if !post.xueqiuBodyInlineEmojis.isEmpty {
+                InlineEmojiText(
+                    text: post.xueqiuBodyContent,
+                    emojis: post.xueqiuBodyInlineEmojis,
+                    fontSize: 17,
+                    lineSpacing: 8,
+                    maximumNumberOfLines: post.hasXueqiuFeedMedia ? 5 : 8
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
+                    .font(.system(size: 17))
+                    .lineSpacing(8)
+                    .lineLimit(post.hasXueqiuFeedMedia ? 5 : 8)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if !post.xueqiuBodyImageURLs.isEmpty {
                 PostMediaGrid(
@@ -3094,17 +3085,13 @@ struct NewsCardView: View {
 
             if let quoteBody = post.xueqiuQuoteBody {
                 VStack(alignment: .leading, spacing: 12) {
-                    Button { onOpen?() } label: {
-                        (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
-                            .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
-                            .font(.system(size: 15.5))
-                            .lineSpacing(6)
-                            .lineLimit(5)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
+                        .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
+                        .font(.system(size: 15.5))
+                        .lineSpacing(6)
+                        .lineLimit(5)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     if !post.xueqiuQuoteImageURLs.isEmpty {
                         PostMediaGrid(
@@ -3116,17 +3103,12 @@ struct NewsCardView: View {
                         )
                     }
 
-                    Button { onOpen?() } label: {
-                        HStack(spacing: 4) {
-                            Text("相关讨论")
-                            if let replies = post.meta?.metrics?.replies, replies > 0 {
-                                Text(replies.formattedFeedCount)
-                            }
+                    HStack(spacing: 4) {
+                        Text("相关讨论")
+                        if let replies = post.meta?.metrics?.replies, replies > 0 {
+                            Text(replies.formattedFeedCount)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 }
@@ -3162,9 +3144,8 @@ struct NewsCardView: View {
         }
 
         var searchLocation = 0
-        // Keep link styling in the timeline without attaching AttributedString.Link.
-        // Linked Text installs its own recognizer and consumes the first tap even
-        // outside the linked range; links remain interactive in PostDetailView.
+        // Keep links visually distinct in the feed without installing a competing tap recognizer.
+        // Links remain interactive in PostDetailView after the row's single tap opens the detail.
         for link in links where !link.label.isEmpty {
             let searchRange = NSRange(location: searchLocation, length: nsValue.length - searchLocation)
             let range = nsValue.range(of: link.label, options: [], range: searchRange)

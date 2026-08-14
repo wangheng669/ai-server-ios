@@ -205,6 +205,7 @@ final class NewsFeedViewModel: ObservableObject {
         #if DEBUG
         let override = ProcessInfo.processInfo.environment["AI_FEED_SOURCE"]
         let usesXFeedPreview = ProcessInfo.processInfo.arguments.contains("--x-feed-preview")
+        let usesXueqiuTapPreview = ProcessInfo.processInfo.arguments.contains("--xueqiu-tap-preview")
         #else
         let override: String? = nil
         #endif
@@ -259,7 +260,9 @@ final class NewsFeedViewModel: ObservableObject {
             }
         }
         #if DEBUG
-        if usesXFeedPreview {
+        if usesXueqiuTapPreview {
+            self.fetchPosts = { _, _, _ in Self.xueqiuTapPreviewPosts }
+        } else if usesXFeedPreview {
             self.fetchPosts = { _, _, _ in Self.xFeedPreviewPosts }
         } else if let fetchPosts {
             self.fetchPosts = fetchPosts
@@ -586,6 +589,25 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     #if DEBUG
+    private static var xueqiuTapPreviewPosts: [Post] {
+        let json = #"""
+        [{
+          "id": 990001,
+          "source": "xueqiu",
+          "content": "这是用于验证首次点击的雪球正文，包含<a href=\"https://xueqiu.com/123456\">网页链接</a>和 $AAPL$ 标记。",
+          "formatted_time": "刚刚",
+          "post_link": "https://xueqiu.com/990001",
+          "user": {"user_name": "模拟雪球用户", "user_screen_name": "模拟雪球用户"},
+          "meta": {
+            "rss_feed_name": "雪球-模拟用户",
+            "rss_article_link": "https://xueqiu.com/990001",
+            "metrics": {"replies": 12, "likes": 34}
+          }
+        }]
+        """#
+        return (try? JSONDecoder().decode([Post].self, from: Data(json.utf8))) ?? []
+    }
+
     private static var xFeedPreviewPosts: [Post] {
         let json = #"""
         [{
