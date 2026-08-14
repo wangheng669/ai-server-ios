@@ -153,26 +153,30 @@ struct FamousHoldingsView: View {
                     isManagerSelectorExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 12, weight: .semibold))
-
-                    Text("切换")
-                        .font(.system(size: 12, weight: .bold))
-
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 10, weight: .bold))
-                        .rotationEffect(.degrees(isManagerSelectorExpanded ? 180 : 0))
+                Group {
+                    if managers.indices.contains(selectedIndex) {
+                        InvestorPortraitImage(manager: managers[selectedIndex], contentMode: .fill)
+                            .frame(width: 38, height: 38)
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 38, height: 38)
+                            .background(Color.secondary.opacity(0.10), in: Circle())
+                    }
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 13)
-                .frame(height: 40)
-                .background(HoldingsPalette.purple, in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
-                .shadow(color: HoldingsPalette.purple.opacity(0.28), radius: 12, y: 6)
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: Circle())
+                .overlay {
+                    Circle().stroke(HoldingsPalette.purple.opacity(0.60), lineWidth: 1.5)
+                }
+                .shadow(color: .black.opacity(0.10), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("选择投资人")
+            .accessibilityLabel(
+                "选择投资人，当前\(managers.indices.contains(selectedIndex) ? managers[selectedIndex].displayName : "未选择")"
+            )
             .accessibilityValue(isManagerSelectorExpanded ? "已展开" : "已收起")
         }
         .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isManagerSelectorExpanded)
