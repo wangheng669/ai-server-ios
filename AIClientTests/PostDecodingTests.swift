@@ -833,6 +833,34 @@ final class PostDecodingTests: XCTestCase {
         ])
     }
 
+    func testXueqiuPresentationCacheInvalidatesWhenPostContentChanges() throws {
+        let first = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":23,"source":"xueqiu","content":"第一版正文"}"#.utf8)
+        )
+        let updated = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":23,"source":"xueqiu","content":"更新后的正文"}"#.utf8)
+        )
+
+        XCTAssertEqual(first.xueqiuBodyContent, "第一版正文")
+        XCTAssertEqual(updated.xueqiuBodyContent, "更新后的正文")
+    }
+
+    func testRSSInlineAssetCacheInvalidatesWhenPostContentChanges() throws {
+        let first = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":24,"source":"rss:12","content":"<img class=\"emoji\" src=\"https://example.com/one.png\">"}"#.utf8)
+        )
+        let updated = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":24,"source":"rss:12","content":"<img class=\"emoji\" src=\"https://example.com/two.png\">"}"#.utf8)
+        )
+
+        XCTAssertEqual(try first.htmlInlineAssetURLs.map { try proxyTarget($0).lastPathComponent }, ["one.png"])
+        XCTAssertEqual(try updated.htmlInlineAssetURLs.map { try proxyTarget($0).lastPathComponent }, ["two.png"])
+    }
+
     func testXueqiuEmojiOnlyBodyDoesNotDuplicateQuotedPost() throws {
         let json = #"{"id":19,"source":"rss:14","content":"<img src=\"//assets.imedao.com/ugc/images/face/emoji_13_coldsweat.png?v=1\" title=\"[滴汗]\" alt=\"[滴汗]\" height=\"24\" /><blockquote>大道无形逍遥游:&nbsp;<a href=\"https://xueqiu.com/n/大道无形我有型\" target=\"_blank\">@大道无形我有型</a> 大道你好，很好奇你对美债的看法。</blockquote>"}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: json)
