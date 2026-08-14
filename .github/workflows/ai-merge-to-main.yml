@@ -307,6 +307,7 @@ jobs:
             ./ci/run-timed-step.sh "$test_label" \
               ./ci/with-ios-simulator-lock.sh \
                 --label "central merge tests $GITHUB_RUN_ID" \
+                --wait-seconds 1200 \
                 -- xcodebuild "$test_action" \
                 -project AIServerClient.xcodeproj \
                 -scheme AIServerClient \

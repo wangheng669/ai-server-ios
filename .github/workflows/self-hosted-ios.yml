@@ -56,6 +56,7 @@ jobs:
           ./ci/run-timed-step.sh "Complete iOS tests" \
             ./ci/with-ios-simulator-lock.sh \
               --label "manual install tests $GITHUB_RUN_ID" \
+              --wait-seconds 1200 \
               -- xcodebuild test \
               -project AIServerClient.xcodeproj \
               -scheme AIServerClient \

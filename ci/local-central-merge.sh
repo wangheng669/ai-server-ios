@@ -184,6 +184,7 @@ if [[ "$app_changed" == true ]]; then
   else
     ./ci/with-ios-simulator-lock.sh \
       --label "local central merge $run_id" \
+      --wait-seconds 1200 \
       -- xcodebuild test \
         -project AIServerClient.xcodeproj \
         -scheme AIServerClient \
