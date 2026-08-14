@@ -232,6 +232,9 @@ struct APIClient {
     }
 
     private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
+        if source == .youtube {
+            return try await fetchBalancedYouTubePosts(page: page, limit: limit)
+        }
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
         var queryItems = Self.regularPostQueryItems(page: page, limit: limit, source: source)
@@ -243,6 +246,54 @@ struct APIClient {
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: PostListResponse = try await get(url)
         return response.data
+    }
+
+    private func fetchBalancedYouTubePosts(page: Int, limit: Int) async throws -> [Post] {
+        let batchSize = 100
+        let categoryID = try await categoryID(named: "YouTube")
+        var allPosts: [Post] = []
+        var batchPage = 1
+
+        while true {
+            var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
+            var queryItems = Self.regularPostQueryItems(page: batchPage, limit: batchSize, source: .youtube)
+            queryItems.append(.init(name: "categoryId", value: String(categoryID)))
+            components?.queryItems = queryItems
+            guard let url = components?.url else { throw APIError.invalidURL }
+            let response: PostListResponse = try await get(url)
+            allPosts.append(contentsOf: response.data)
+            guard response.data.count == batchSize else { break }
+            batchPage += 1
+        }
+
+        let balanced = Self.balanceYouTubePostsBySource(allPosts)
+        let start = (page - 1) * limit
+        guard start < balanced.count else { return [] }
+        return Array(balanced.dropFirst(start).prefix(limit))
+    }
+
+    static func balanceYouTubePostsBySource(_ posts: [Post]) -> [Post] {
+        var sourceOrder: [String] = []
+        var buckets: [String: [Post]] = [:]
+        for post in posts {
+            let key = post.source ?? post.user?.userID ?? String(post.id)
+            if buckets[key] == nil { sourceOrder.append(key) }
+            buckets[key, default: []].append(post)
+        }
+
+        var result: [Post] = []
+        var index = 0
+        while result.count < posts.count {
+            var appended = false
+            for source in sourceOrder {
+                guard let bucket = buckets[source], index < bucket.count else { continue }
+                result.append(bucket[index])
+                appended = true
+            }
+            guard appended else { break }
+            index += 1
+        }
+        return result
     }
 
     static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {
