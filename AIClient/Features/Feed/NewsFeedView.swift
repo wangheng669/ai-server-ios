@@ -114,6 +114,14 @@ private struct WeChatAccount: Identifiable {
     let name: String
 }
 
+private struct FeedEntityChoice: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let subtitle: String?
+    let avatarURL: URL?
+    let feedID: Int?
+}
+
 private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
     let videoID: String
 
@@ -146,6 +154,10 @@ struct NewsFeedView: View {
     @State private var rssSourceSearch = ""
     @State private var isSourceSelectorExpanded = false
     @State private var isYouTubePersonSelectorExpanded = false
+    @State private var isFeedEntitySelectorExpanded = false
+    @State private var feedEntitySearch = ""
+    @State private var selectedFeedEntityIDs: [FeedSource: String] = [:]
+    @State private var selectedWeiboEntityID: String?
     @State private var isSourceContentVisible = true
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -174,7 +186,7 @@ struct NewsFeedView: View {
                     .opacity(isSourceContentVisible ? 1 : 0.15)
                     .scaleEffect(isSourceContentVisible ? 1 : 0.997)
 
-                if isSourceSelectorExpanded || isYouTubePersonSelectorExpanded {
+                if isSourceSelectorExpanded || isYouTubePersonSelectorExpanded || isFeedEntitySelectorExpanded {
                     Color.black.opacity(0.045)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
@@ -189,6 +201,9 @@ struct NewsFeedView: View {
                 HStack(alignment: .bottom, spacing: 8) {
                     if model.source == .youtube {
                         youtubePersonSelector
+                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                    } else if supportsFeedEntitySelector {
+                        feedEntitySelector
                             .transition(.scale(scale: 0.9).combined(with: .opacity))
                     }
                     sourceSelector
@@ -354,6 +369,8 @@ struct NewsFeedView: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(.smooth(duration: 0.22)) {
                     isYouTubePersonSelectorExpanded = false
+                    isFeedEntitySelectorExpanded = false
+                    feedEntitySearch = ""
                     isSourceSelectorExpanded.toggle()
                 }
             } label: {
@@ -378,6 +395,8 @@ struct NewsFeedView: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             withAnimation(.smooth(duration: 0.22)) {
                 isSourceSelectorExpanded = false
+                isFeedEntitySelectorExpanded = false
+                feedEntitySearch = ""
                 isYouTubePersonSelectorExpanded.toggle()
             }
         } label: {
@@ -456,6 +475,282 @@ struct NewsFeedView: View {
         .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
     }
 
+    private var supportsFeedEntitySelector: Bool {
+        switch model.source {
+        case .x, .xueqiu, .wechat:
+            true
+        case .weibo:
+            weiboSection == .following
+        default:
+            false
+        }
+    }
+
+    private var feedEntityChoices: [FeedEntityChoice] {
+        if model.source == .wechat {
+            return weChatAccounts.map { account in
+                let feed = model.rssFeeds.first { $0.id == account.id }
+                return FeedEntityChoice(
+                    id: "rss:\(account.id)",
+                    name: account.name,
+                    subtitle: nil,
+                    avatarURL: feed?.preferredAvatarURL,
+                    feedID: account.id
+                )
+            }
+        }
+
+        let posts = model.source == .weibo
+            ? weiboFollowingModel.posts
+            : model.posts(for: model.source)
+        var seen = Set<String>()
+        return posts.compactMap { post in
+            guard let id = feedEntityID(for: post, source: model.source), seen.insert(id).inserted else {
+                return nil
+            }
+            let handle = post.user?.userScreenName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let subtitle = handle.map {
+                "@\($0.trimmingCharacters(in: CharacterSet(charactersIn: "@")))"
+            }
+            return FeedEntityChoice(
+                id: id,
+                name: post.authorName,
+                subtitle: model.source == .x ? subtitle : nil,
+                avatarURL: post.avatarURL,
+                feedID: feedID(from: post.source)
+            )
+        }
+    }
+
+    private var selectedFeedEntityID: String? {
+        if model.source == .wechat {
+            return model.selectedWeChatFeedID.map { "rss:\($0)" }
+        }
+        if model.source == .weibo {
+            return selectedWeiboEntityID
+        }
+        return selectedFeedEntityIDs[model.source]
+    }
+
+    private var filteredFeedEntityChoices: [FeedEntityChoice] {
+        let query = feedEntitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return feedEntityChoices }
+        return feedEntityChoices.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || ($0.subtitle?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    private var feedEntitySelector: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.smooth(duration: 0.22)) {
+                isSourceSelectorExpanded = false
+                isYouTubePersonSelectorExpanded = false
+                isFeedEntitySelectorExpanded.toggle()
+                if !isFeedEntitySelectorExpanded { feedEntitySearch = "" }
+            }
+        } label: {
+            feedEntityAvatar(selectedFeedEntityID, size: 38)
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: Circle())
+                .overlay {
+                    Circle().stroke(
+                        selectedFeedEntityID == nil
+                            ? InvestmentDesign.divider.opacity(0.9)
+                            : InvestmentDesign.accent.opacity(0.65),
+                        lineWidth: selectedFeedEntityID == nil ? 0.5 : 1.5
+                    )
+                }
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("选择账号，当前\(selectedFeedEntityChoice?.name ?? "全部账号")")
+        .accessibilityValue(isFeedEntitySelectorExpanded ? "已展开" : "已收起")
+        .overlay(alignment: .bottomTrailing) {
+            if isFeedEntitySelectorExpanded {
+                feedEntityMenu
+                    .offset(y: -52)
+                    .transition(.scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity))
+            }
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isFeedEntitySelectorExpanded)
+    }
+
+    private var selectedFeedEntityChoice: FeedEntityChoice? {
+        guard let selectedFeedEntityID else { return nil }
+        return feedEntityChoices.first { $0.id == selectedFeedEntityID }
+    }
+
+    private var feedEntityMenu: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("选择账号")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(feedEntityChoices.count)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+
+            if feedEntityChoices.count > 8 {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField("搜索账号", text: $feedEntitySearch)
+                        .font(.system(size: 13))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 38)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 6)
+                .padding(.bottom, 4)
+            }
+
+            ScrollView {
+                LazyVStack(spacing: 3) {
+                    feedEntityMenuRow(nil)
+                    ForEach(filteredFeedEntityChoices) { choice in
+                        feedEntityMenuRow(choice)
+                    }
+                }
+                .padding(4)
+            }
+            .scrollIndicators(feedEntityChoices.count > 6 ? .visible : .hidden)
+        }
+        .frame(
+            width: feedEntityChoices.count > 8 ? 224 : 196,
+            height: feedEntityMenuHeight
+        )
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+    }
+
+    private var feedEntityMenuHeight: CGFloat {
+        let headerHeight: CGFloat = 32
+        let searchHeight: CGFloat = feedEntityChoices.count > 8 ? 42 : 0
+        let visibleRows = min(filteredFeedEntityChoices.count + 1, 5)
+        return min(344, headerHeight + searchHeight + CGFloat(visibleRows * 52) + 8)
+    }
+
+    private func feedEntityMenuRow(_ choice: FeedEntityChoice?) -> some View {
+        let isSelected = selectedFeedEntityID == choice?.id
+        return Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            selectFeedEntity(choice)
+        } label: {
+            HStack(spacing: 10) {
+                feedEntityAvatar(choice?.id, size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(choice?.name ?? "全部账号")
+                        .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                    if let subtitle = choice?.subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(InvestmentDesign.accent)
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .frame(height: choice?.subtitle == nil ? 47 : 52)
+            .background(
+                isSelected ? InvestmentDesign.accent.opacity(0.08) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(choice?.name ?? "全部账号")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func feedEntityAvatar(_ id: String?, size: CGFloat) -> some View {
+        if let id, let choice = feedEntityChoices.first(where: { $0.id == id }) {
+            AvatarView(url: choice.avatarURL, name: choice.name, size: size)
+                .clipShape(Circle())
+        } else {
+            let choices = Array(feedEntityChoices.prefix(3))
+            if choices.isEmpty {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: size, height: size)
+                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+            } else {
+                ZStack {
+                    ForEach(Array(choices.enumerated()), id: \.element.id) { index, choice in
+                        AvatarView(url: choice.avatarURL, name: choice.name, size: size * 0.58)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 1))
+                            .offset(entityAvatarOffset(index: index, size: size))
+                    }
+                }
+                .frame(width: size, height: size)
+                .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+            }
+        }
+    }
+
+    private func entityAvatarOffset(index: Int, size: CGFloat) -> CGSize {
+        switch index {
+        case 0: CGSize(width: -size * 0.18, height: -size * 0.14)
+        case 1: CGSize(width: size * 0.18, height: -size * 0.14)
+        default: CGSize(width: 0, height: size * 0.20)
+        }
+    }
+
+    private func selectFeedEntity(_ choice: FeedEntityChoice?) {
+        withAnimation(.smooth(duration: 0.20)) {
+            isFeedEntitySelectorExpanded = false
+            feedEntitySearch = ""
+            if model.source == .wechat {
+                Task { await model.selectWeChatFeed(choice?.feedID) }
+            } else if model.source == .weibo {
+                selectedWeiboEntityID = choice?.id
+            } else if let id = choice?.id {
+                selectedFeedEntityIDs[model.source] = id
+            } else {
+                selectedFeedEntityIDs.removeValue(forKey: model.source)
+            }
+        }
+    }
+
+    private func feedEntityID(for post: Post, source: FeedSource) -> String? {
+        if source == .x {
+            guard let handle = post.user?.userScreenName?
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@"))),
+                  !handle.isEmpty else { return nil }
+            return "x:\(handle.lowercased())"
+        }
+        guard let rawSource = post.source?.lowercased(), rawSource.hasPrefix("rss:") else { return nil }
+        return rawSource
+    }
+
+    private func feedID(from source: String?) -> Int? {
+        guard let source, source.lowercased().hasPrefix("rss:") else { return nil }
+        return Int(source.dropFirst(4))
+    }
+
     private var currentYouTubePersonFilter: YouTubePersonFilter {
         YouTubePersonFilter.allCases.first { $0.person == model.selectedYouTubePerson } ?? .all
     }
@@ -528,6 +823,8 @@ struct NewsFeedView: View {
         withAnimation(.smooth(duration: 0.20)) {
             isSourceSelectorExpanded = false
             isYouTubePersonSelectorExpanded = false
+            isFeedEntitySelectorExpanded = false
+            feedEntitySearch = ""
         }
     }
 
@@ -662,7 +959,11 @@ struct NewsFeedView: View {
         HStack(spacing: 28) {
             ForEach(WeiboSection.allCases) { section in
                 Button {
-                    withAnimation(.easeOut(duration: 0.18)) { weiboSection = section }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        weiboSection = section
+                        isFeedEntitySelectorExpanded = false
+                        feedEntitySearch = ""
+                    }
                 } label: {
                     VStack(spacing: 6) {
                         Text(section.title)
@@ -684,17 +985,21 @@ struct NewsFeedView: View {
     }
 
     private var weiboFollowingFeed: some View {
-        ZStack {
-            if !weiboFollowingModel.posts.isEmpty {
+        let followingPosts = visibleWeiboFollowingPosts
+        return ZStack {
+            if !followingPosts.isEmpty {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(weiboFollowingModel.posts) { post in
+                        ForEach(followingPosts) { post in
                             WeiboFollowingRow(post: post)
                                 .contentShape(Rectangle())
                                 .onTapGesture { openPost(post) }
                                 .task(id: rootTabIsActive) {
-                                    guard rootTabIsActive else { return }
-                                    await weiboFollowingModel.loadMoreIfNeeded(current: post)
+                                    guard rootTabIsActive, post.id == followingPosts.last?.id else { return }
+                                    await weiboFollowingModel.loadMoreIfNeeded(
+                                        current: post,
+                                        allowsFilteredTail: selectedWeiboEntityID != nil
+                                    )
                                 }
                             Divider()
                                 .overlay(Color.primary.opacity(0.04))
@@ -732,6 +1037,13 @@ struct NewsFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var visibleWeiboFollowingPosts: [Post] {
+        guard let selectedWeiboEntityID else { return weiboFollowingModel.posts }
+        return weiboFollowingModel.posts.filter {
+            feedEntityID(for: $0, source: .weibo) == selectedWeiboEntityID
+        }
+    }
+
     private func feedList(
         for source: FeedSource,
         posts: [Post],
@@ -742,6 +1054,7 @@ struct NewsFeedView: View {
         let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
         let usesFilteredPagination = source == .flash
             || (source == .rss && !isSelectedRSSPage)
+            || ((source == .x || source == .xueqiu) && selectedFeedEntityIDs[source] != nil)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -759,8 +1072,6 @@ struct NewsFeedView: View {
                         }
                     }
                     if source == .wechat {
-                        weChatAccountFilterBar
-                        Divider().opacity(0.55)
                         if model.isLoadingWeChatSelection {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
@@ -1079,6 +1390,9 @@ struct NewsFeedView: View {
             }
             return rssPosts
         }
+        if (source == .x || source == .xueqiu), let selectedID = selectedFeedEntityIDs[source] {
+            return posts.filter { feedEntityID(for: $0, source: source) == selectedID }
+        }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
     }
@@ -1090,95 +1404,6 @@ struct NewsFeedView: View {
             .init(id: 57, name: "猫笔刀"),
             .init(id: 2373, name: "小互 AI")
         ]
-    }
-
-    private var weChatAccountFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 9) {
-                weChatAccountChip(
-                    id: nil,
-                    name: "全部文章",
-                    avatarURL: nil,
-                    isSelected: model.selectedWeChatFeedID == nil
-                ) {
-                    Task { await model.selectWeChatFeed(nil) }
-                }
-
-                ForEach(weChatAccounts) { account in
-                    let feed = model.rssFeeds.first { $0.id == account.id }
-                    weChatAccountChip(
-                        id: account.id,
-                        name: account.name,
-                        avatarURL: feed?.preferredAvatarURL,
-                        isSelected: model.selectedWeChatFeedID == account.id
-                    ) {
-                        Task { await model.selectWeChatFeed(account.id) }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-        .padding(.vertical, 11)
-        .background(Color(uiColor: .systemBackground))
-        .sensoryFeedback(.selection, trigger: model.selectedWeChatFeedID)
-        .accessibilityLabel("微信公众号筛选")
-    }
-
-    private func weChatAccountChip(
-        id: Int?,
-        name: String,
-        avatarURL: URL?,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if let id {
-                    AvatarView(
-                        url: avatarURL,
-                        name: name,
-                        size: 28,
-                        rejectsUpscaledImages: true
-                    )
-                    .id(id)
-                } else {
-                    Image(systemName: "square.grid.2x2.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isSelected ? .white : Color.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            isSelected ? Color.white.opacity(0.18) : Color(uiColor: .tertiarySystemFill),
-                            in: Circle()
-                        )
-                }
-
-                Text(name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                }
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .padding(.leading, 7)
-            .padding(.trailing, 12)
-            .frame(height: 40)
-            .background(
-                isSelected ? Color(red: 0.03, green: 0.69, blue: 0.35) : Color(uiColor: .secondarySystemBackground),
-                in: Capsule()
-            )
-            .overlay {
-                if !isSelected {
-                    Capsule().stroke(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5)
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("筛选来源：\(name)")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var rssSourceSelector: some View {
@@ -1483,6 +1708,7 @@ struct NewsFeedView: View {
 
     private func selectSource(_ source: FeedSource) {
         guard source != model.source else { return }
+        closeSelectors()
         sourceChromeStates[model.source] = isFeedChromeHidden
         isFeedChromeHidden = sourceChromeStates[source] ?? false
         model.select(source)

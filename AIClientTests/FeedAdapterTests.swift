@@ -459,6 +459,24 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.posts.map(\.id), [1, 2])
     }
 
+    @MainActor
+    func testWeiboFollowingFilteredTailCanRequestNextPage() async throws {
+        var requestedPages: [Int] = []
+        let selectedTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:41"}"#.utf8))
+        let rawTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"rss:52"}"#.utf8))
+        let next = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3,"source":"rss:41"}"#.utf8))
+        let model = WeiboFollowingFeedModel { page, _ in
+            requestedPages.append(page)
+            return page == 1 ? [selectedTail, rawTail] : [next]
+        }
+
+        await model.refresh()
+        await model.loadMoreIfNeeded(current: selectedTail, allowsFilteredTail: true)
+
+        XCTAssertEqual(requestedPages, [1, 2])
+        XCTAssertEqual(model.posts.map(\.id), [1, 2, 3])
+    }
+
     func testWeiboFollowingRequestUsesPlatformAggregateContract() {
         let items = APIClient.weiboFollowingQueryItems(page: 3, limit: 20)
         let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in

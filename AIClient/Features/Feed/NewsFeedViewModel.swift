@@ -1093,8 +1093,10 @@ final class WeiboFollowingFeedModel: ObservableObject {
         }
     }
 
-    func loadMoreIfNeeded(current post: Post) async {
-        guard post.id == posts.last?.id, canLoadMore, !isLoading, !isLoadingMore else { return }
+    func loadMoreIfNeeded(current post: Post, allowsFilteredTail: Bool = false) async {
+        guard (allowsFilteredTail || post.id == posts.last?.id),
+              posts.contains(where: { $0.id == post.id }),
+              canLoadMore, !isLoading, !isLoadingMore else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
