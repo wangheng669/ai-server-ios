@@ -893,6 +893,7 @@ struct PostMediaGrid: View {
     var cornerRadius: CGFloat = 8
     var videoContentMode: ContentMode = .fit
     var videoMaxHeight: CGFloat? = nil
+    var onImageTap: (() -> Void)? = nil
     @State private var gallerySelection: ImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
@@ -988,6 +989,14 @@ struct PostMediaGrid: View {
         }
     }
 
+    private func handleImageTap(at url: URL, urls: [URL]) {
+        if let onImageTap {
+            onImageTap()
+        } else {
+            showGallery(startingAt: url, urls: urls)
+        }
+    }
+
     @MainActor
     private func loadVideoAspectRatio(for url: URL) async {
         let asset = AVURLAsset(url: url)
@@ -1018,7 +1027,7 @@ struct PostMediaGrid: View {
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     .frame(maxWidth: .infinity, alignment: .center)
             } else if urls.count == 1, let url = urls.first {
-                Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
+                Button { handleImageTap(at: url, urls: allContentImageURLs) } label: {
                     RemoteImage(
                         url: url,
                         height: resolvedSingleImageHeight,
@@ -1029,11 +1038,11 @@ struct PostMediaGrid: View {
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.plain)
-                .accessibilityLabel("查看图片")
+                .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
-                        Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
+                        Button { handleImageTap(at: url, urls: allContentImageURLs) } label: {
                             RemoteImage(
                                 url: url,
                                 height: multiImageHeight,
@@ -1044,11 +1053,11 @@ struct PostMediaGrid: View {
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("查看图片")
+                        .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
                     }
                 }
             } else if let preview = post.previewURL {
-                Button { showGallery(startingAt: preview, urls: [preview]) } label: {
+                Button { handleImageTap(at: preview, urls: [preview]) } label: {
                     RemoteImage(
                         url: preview,
                         height: resolvedSingleImageHeight,
@@ -1057,7 +1066,7 @@ struct PostMediaGrid: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("查看图片")
+                .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
             }
         }
         .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)

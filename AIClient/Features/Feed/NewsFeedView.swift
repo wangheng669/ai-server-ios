@@ -3831,7 +3831,7 @@ struct NewsCardView: View {
                     .multilineTextAlignment(.leading)
             }
 
-            PostMediaGrid(post: post)
+            PostMediaGrid(post: post, onImageTap: onOpen)
 
             HStack(spacing: 5) {
                 if post.authorName != "RSS" && post.authorName != "纽约时报中文网 国际纵览" {
