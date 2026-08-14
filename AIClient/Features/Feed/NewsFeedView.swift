@@ -1032,8 +1032,7 @@ struct NewsFeedView: View {
                     AvatarView(
                         url: selectedFeed.preferredAvatarURL,
                         name: selectedFeed.name,
-                        size: 24,
-                        rejectsUpscaledImages: true
+                        size: 24
                     )
                     Text(selectedFeed.name)
                         .lineLimit(1)
@@ -1123,7 +1122,7 @@ struct NewsFeedView: View {
                         .foregroundStyle(.secondary)
                 }
         } else {
-            AvatarView(url: url, name: name, size: size, rejectsUpscaledImages: true)
+            AvatarView(url: url, name: name, size: size)
         }
     }
 
