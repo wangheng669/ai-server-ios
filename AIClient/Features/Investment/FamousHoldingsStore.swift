@@ -53,8 +53,8 @@ final class FamousHoldingsStore {
 }
 
 private enum FamousHoldingsCache {
-    private static let payloadKey = "market.famous-holdings.cache.v1"
-    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v1"
+    private static let payloadKey = "market.famous-holdings.cache.v2"
+    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v2"
     private static let maxAge: TimeInterval = 7 * 24 * 60 * 60
     private static let networkRefreshInterval: TimeInterval = 6 * 60 * 60
 
