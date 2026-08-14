@@ -122,90 +122,94 @@ private struct MarketHomeView: View {
     @State private var selectionResetTask: Task<Void, Never>?
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: MarketHomeScrollOffsetPreferenceKey.self,
-                            value: geometry.frame(in: .named("market-scroll")).minY
-                        )
-                    }
-                    .frame(height: 1)
-                    .id("market-top")
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: MarketHomeScrollOffsetPreferenceKey.self,
+                                value: geometry.frame(in: .named("market-scroll")).minY
+                            )
+                        }
+                        .frame(height: 1)
+                        .id("market-top")
 
-                    ZStack(alignment: .topTrailing) {
-                        MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+                        ZStack(alignment: .topTrailing) {
+                            MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+                                .id(selectedMarket)
+                                .transition(.opacity)
+                            MarketRegionPicker(selection: $selectedMarket)
+                                .padding(.top, 14)
+                                .padding(.trailing, 8)
+                        }
+                        .background(MarketStyle.surface)
+                        .animation(.easeInOut(duration: 0.18), value: selectedMarket)
+
+                        VStack(spacing: MarketStyle.pageSpacing) {
+                            if let error = regionalHealthMessage {
+                                MarketErrorBanner(
+                                    message: error,
+                                    isRetrying: store.isRetrying
+                                ) { await store.refresh() }
+                            }
+                            MarketIndexTable(
+                                region: selectedMarket,
+                                store: store,
+                                onSelectIndex: selectIndex
+                            )
                             .id(selectedMarket)
                             .transition(.opacity)
-                        MarketRegionPicker(selection: $selectedMarket)
-                            .padding(.top, 14)
-                            .padding(.trailing, 8)
+                            .animation(.easeInOut(duration: 0.16), value: selectedMarket)
+                            .simultaneousGesture(regionSwipeGesture)
+                            if selectedMarket == .china {
+                                ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
+                                    .id("market-structure")
+                            }
+                            if selectedMarket != .crypto && selectedMarket != .commodity {
+                                MarketWorldMap(store: store, selection: $selectedMarket)
+                                    .id("market-map")
+                            }
+                        }
+                        .padding(.top, MarketStyle.pageSpacing)
+                        // Keep the final market rows clear of the floating root navigation capsule.
+                        .padding(.bottom, 76)
+                        .background(MarketStyle.canvas)
                     }
-                    .background(MarketStyle.surface)
-                    .animation(.easeInOut(duration: 0.18), value: selectedMarket)
-
-                    VStack(spacing: MarketStyle.pageSpacing) {
-                        if let error = regionalHealthMessage {
-                            MarketErrorBanner(
-                                message: error,
-                                isRetrying: store.isRetrying
-                            ) { await store.refresh() }
-                        }
-                        MarketIndexTable(
-                            region: selectedMarket,
-                            store: store,
-                            onSelectIndex: selectIndex
-                        )
-                        .id(selectedMarket)
-                        .transition(.opacity)
-                        .animation(.easeInOut(duration: 0.16), value: selectedMarket)
-                        .simultaneousGesture(regionSwipeGesture)
-                        if selectedMarket == .china {
-                            ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
-                                .id("market-structure")
-                        }
-                        if selectedMarket != .crypto && selectedMarket != .commodity {
-                            MarketWorldMap(store: store, selection: $selectedMarket)
-                                .id("market-map")
-                        }
-                    }
-                    .padding(.top, MarketStyle.pageSpacing)
-                    // Keep the final market rows clear of the floating root navigation capsule.
-                    .padding(.bottom, 76)
+                    .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .top)
                     .background(MarketStyle.canvas)
                 }
-            }
-            .background(MarketTerminalPalette.header.ignoresSafeArea())
-            .coordinateSpace(name: "market-scroll")
-            .scrollIndicators(.hidden)
-            .refreshable { await store.refresh() }
-            .onChange(of: selectedMarket) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("market-top", anchor: .top)
+                .background(MarketStyle.canvas.ignoresSafeArea())
+                .coordinateSpace(name: "market-scroll")
+                .scrollIndicators(.hidden)
+                .refreshable { await store.refresh() }
+                .onChange(of: selectedMarket) { _, _ in
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("market-top", anchor: .top)
+                    }
                 }
-            }
-            .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
-                onCompactHeaderChange(offset < -28)
-            }
-            .task {
+                .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
+                    onCompactHeaderChange(offset < -28)
+                }
+                .task {
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
+                        try? await Task.sleep(for: .seconds(2))
+                        proxy.scrollTo("market-structure", anchor: .top)
+                    } else if ProcessInfo.processInfo.arguments.contains("--market-map-preview") {
+                        try? await Task.sleep(for: .milliseconds(700))
+                        proxy.scrollTo("market-map", anchor: .bottom)
+                    }
+                    #endif
+                }
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
-                    try? await Task.sleep(for: .seconds(2))
+                .onChange(of: store.dashboard?.marketStructure?.generatedAt) { _, generatedAt in
+                    guard generatedAt != nil,
+                          ProcessInfo.processInfo.arguments.contains("--market-structure-preview") else { return }
                     proxy.scrollTo("market-structure", anchor: .top)
-                } else if ProcessInfo.processInfo.arguments.contains("--market-map-preview") {
-                    try? await Task.sleep(for: .milliseconds(700))
-                    proxy.scrollTo("market-map", anchor: .bottom)
                 }
                 #endif
             }
-            #if DEBUG
-            .onChange(of: store.dashboard?.marketStructure?.generatedAt) { _, generatedAt in
-                guard generatedAt != nil,
-                      ProcessInfo.processInfo.arguments.contains("--market-structure-preview") else { return }
-                proxy.scrollTo("market-structure", anchor: .top)
-            }
-            #endif
         }
     }
 
