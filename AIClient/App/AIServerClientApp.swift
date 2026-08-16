@@ -878,7 +878,7 @@ private struct TodayWorldView: View {
                 HStack(spacing: -7) {
                     ForEach(Array(system.sourceKeys.prefix(3).enumerated()), id: \.offset) { index, key in
                         AvatarView(
-                            url: sourceAvatarURL(key),
+                            url: todayWorldSourceAvatarURL(key),
                             name: sourceName(system, at: index),
                             size: 30
                         )
@@ -965,17 +965,16 @@ private struct TodayWorldView: View {
         return formatter.string(from: date)
     }
 
-    private func sourceAvatarURL(_ key: String) -> URL? {
-        let encoded = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
-        return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)")
-    }
-
     private func sourceName(_ system: TodayWorldAdvancedReportSystem, at index: Int) -> String {
         guard system.sourceNames.indices.contains(index) else { return system.systemName }
         return system.sourceNames[index]
     }
 }
 
+private func todayWorldSourceAvatarURL(_ key: String) -> URL? {
+    let encoded = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
+    return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)")
+}
 
 private struct TodayWorldReportSourcesSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -989,43 +988,50 @@ private struct TodayWorldReportSourcesSheet: View {
     @State private var selectedPost: Post?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var selectedPage: Page = .summary
+
+    private enum Page: String, CaseIterable, Identifiable {
+        case summary = "总结"
+        case posts = "用户动态"
+
+        var id: String { rawValue }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView("正在载入动态")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorMessage {
-                    ContentUnavailableView {
-                        Label("暂时无法载入", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorMessage)
-                    } actions: {
-                        Button("重新加载") {
-                            Task { await load() }
-                        }
+            VStack(spacing: 0) {
+                Picker("内容", selection: $selectedPage) {
+                    ForEach(Page.allCases) { page in
+                        Text(page.rawValue).tag(page)
                     }
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            Text("\(displayDate) · \(posts.count) 条动态")
-                                .font(.system(size: 13.5, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.bottom, 10)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
 
-                            ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
-                                if index > 0 {
-                                    Divider()
-                                        .padding(.vertical, 16)
+                Divider()
+
+                if selectedPage == .summary {
+                    summaryPage
+                } else {
+                    Group {
+                        if isLoading {
+                            ProgressView("正在载入动态")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if let errorMessage {
+                            ContentUnavailableView {
+                                Label("暂时无法载入", systemImage: "wifi.exclamationmark")
+                            } description: {
+                                Text(errorMessage)
+                            } actions: {
+                                Button("重新加载") {
+                                    Task { await load() }
                                 }
-                                postSection(post)
                             }
+                        } else {
+                            postsPage
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 16)
                     }
-                    .scrollIndicators(.hidden)
                 }
             }
             .background(Color(uiColor: .systemBackground))
@@ -1048,6 +1054,66 @@ private struct TodayWorldReportSourcesSheet: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
+    }
+
+    private var summaryPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                Text(system.summary)
+                    .font(.system(size: 16))
+                    .lineSpacing(6)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("涉及用户")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(Array(system.sourceKeys.enumerated()), id: \.element) { index, key in
+                        HStack(spacing: 12) {
+                            AvatarView(
+                                url: todayWorldSourceAvatarURL(key),
+                                name: sourceName(at: index),
+                                size: 38
+                            )
+                            Text(sourceName(at: index))
+                                .font(.system(size: 15, weight: .medium))
+                            Spacer()
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var postsPage: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                Text("\(displayDate) · \(posts.count) 条动态")
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 10)
+
+                ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                    if index > 0 {
+                        Divider()
+                            .padding(.vertical, 16)
+                    }
+                    postSection(post)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func sourceName(at index: Int) -> String {
+        guard system.sourceNames.indices.contains(index) else { return system.systemName }
+        return system.sourceNames[index]
     }
 
     @ViewBuilder
