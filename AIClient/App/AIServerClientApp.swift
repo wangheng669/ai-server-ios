@@ -973,7 +973,7 @@ private struct TodayWorldView: View {
 
 private func todayWorldSourceAvatarURL(_ key: String) -> URL? {
     let encoded = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
-    return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)")
+    return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)?v=2")
 }
 
 private struct TodayWorldReportSourcesSheet: View {
