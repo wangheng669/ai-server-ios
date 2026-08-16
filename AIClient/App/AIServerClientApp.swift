@@ -1169,21 +1169,45 @@ private struct TodayWorldReportSourcesSheet: View {
         posts = []
         translations = [:]
         translationFailures = []
-        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        let baseURL = ServerConfiguration.currentURL
         do {
-            var loaded: [Post] = []
-            for postID in system.postIDs {
-                let post = try await client.fetchPost(id: postID)
-                loaded.append(post)
-                if post.needsXTranslation, let tweetID = post.xTweetID {
-                    do {
-                        translations[post.id] = try await client.fetchXTranslation(tweetID: tweetID).text
-                    } catch {
-                        translationFailures.insert(post.id)
+            var loadedByID: [Int: Post] = [:]
+            for batch in system.postIDs.batches(of: 4) {
+                try await withThrowingTaskGroup(of: (Int, Post).self) { group in
+                    for postID in batch {
+                        group.addTask {
+                            (postID, try await APIClient(baseURL: baseURL).fetchPost(id: postID))
+                        }
+                    }
+                    for try await (postID, post) in group {
+                        loadedByID[postID] = post
+                    }
+                }
+                posts = system.postIDs.compactMap { loadedByID[$0] }
+                isLoading = false
+            }
+
+            let pendingTranslations = posts.compactMap { post -> (Int, String)? in
+                guard post.needsXTranslation, let tweetID = post.xTweetID else { return nil }
+                return (post.id, tweetID)
+            }
+            for batch in pendingTranslations.batches(of: 4) {
+                await withTaskGroup(of: (Int, String?).self) { group in
+                    for (postID, tweetID) in batch {
+                        group.addTask {
+                            let text = try? await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID).text
+                            return (postID, text)
+                        }
+                    }
+                    for await (postID, text) in group {
+                        if let text {
+                            translations[postID] = text
+                        } else {
+                            translationFailures.insert(postID)
+                        }
                     }
                 }
             }
-            posts = loaded
             isLoading = false
         } catch {
             errorMessage = NetworkErrorPresentation.message(for: error)
@@ -1200,5 +1224,14 @@ private struct TodayWorldReportSourcesSheet: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日"
         return formatter.string(from: date)
+    }
+}
+
+private extension Array {
+    func batches(of size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: startIndex, to: endIndex, by: size).map { start in
+            Array(self[start..<Swift.min(start + size, endIndex)])
+        }
     }
 }
