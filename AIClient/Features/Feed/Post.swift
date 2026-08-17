@@ -60,6 +60,23 @@ private final class RSSInlineAssetURLsBox: NSObject {
 }
 
 struct PostListResponse: Decodable { let data: [Post] }
+
+struct XFeedUser: Decodable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let screenName: String
+    let avatarURL: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case screenName = "screen_name"
+        case avatarURL = "avatar_url"
+    }
+}
+
+struct XFeedUsersResponse: Decodable {
+    let data: [XFeedUser]
+}
 struct RSSFeedPostsResponse: Decodable {
     let data: Payload
     struct Payload: Decodable { let posts: [Post] }

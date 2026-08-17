@@ -487,6 +487,17 @@ struct NewsFeedView: View {
     }
 
     private var feedEntityChoices: [FeedEntityChoice] {
+        if model.source == .x {
+            return model.xFeedUsers.map { user in
+                FeedEntityChoice(
+                    id: "x:\(user.screenName.lowercased())",
+                    name: user.name,
+                    subtitle: "@\(user.screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@")))",
+                    avatarURL: user.avatarURL,
+                    feedID: nil
+                )
+            }
+        }
         if model.source == .wechat {
             return weChatAccounts.map { account in
                 let feed = model.rssFeeds.first { $0.id == account.id }
@@ -528,6 +539,9 @@ struct NewsFeedView: View {
         }
         if model.source == .weibo {
             return selectedWeiboEntityID
+        }
+        if model.source == .x {
+            return model.selectedXAuthor.map { "x:\($0.lowercased())" }
         }
         return selectedFeedEntityIDs[model.source]
     }
@@ -727,6 +741,9 @@ struct NewsFeedView: View {
                 Task { await model.selectWeChatFeed(choice?.feedID) }
             } else if model.source == .weibo {
                 selectedWeiboEntityID = choice?.id
+            } else if model.source == .x {
+                let handle = choice?.subtitle?.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+                Task { await model.selectXAuthor(handle) }
             } else if let id = choice?.id {
                 selectedFeedEntityIDs[model.source] = id
             } else {
@@ -918,6 +935,9 @@ struct NewsFeedView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: "\(rootTabIsActive)-\(source.rawValue)") {
+                if rootTabIsActive, source == .x {
+                    await model.loadXFeedUsersIfNeeded()
+                }
                 if rootTabIsActive, source == .rss || source == .wechat {
                     await model.loadRSSFeedsIfNeeded(forceRefresh: source == .wechat)
                 }
@@ -1054,7 +1074,7 @@ struct NewsFeedView: View {
         let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
         let usesFilteredPagination = source == .flash
             || (source == .rss && !isSelectedRSSPage)
-            || ((source == .x || source == .xueqiu) && selectedFeedEntityIDs[source] != nil)
+            || (source == .xueqiu && selectedFeedEntityIDs[source] != nil)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -1390,7 +1410,7 @@ struct NewsFeedView: View {
             }
             return rssPosts
         }
-        if (source == .x || source == .xueqiu), let selectedID = selectedFeedEntityIDs[source] {
+        if source == .xueqiu, let selectedID = selectedFeedEntityIDs[source] {
             return posts.filter { feedEntityID(for: $0, source: source) == selectedID }
         }
         guard source == .flash else { return posts }

@@ -30,7 +30,8 @@ struct APIClient {
         limit: Int = 20,
         source: FeedSource,
         flashCategory: String? = nil,
-        youtubePerson: String? = nil
+        youtubePerson: String? = nil,
+        xAuthor: String? = nil
     ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin, .baidu:
@@ -54,8 +55,15 @@ struct APIClient {
         case .youtube:
             return try await fetchYouTubePosts(page: page, limit: limit, person: youtubePerson)
         default:
-            return try await fetchRegularPosts(page: page, limit: limit, source: source)
+            return try await fetchRegularPosts(page: page, limit: limit, source: source, xAuthor: xAuthor)
         }
+    }
+
+    func fetchXFeedUsers() async throws -> [XFeedUser] {
+        let response: XFeedUsersResponse = try await get(
+            baseURL.appending(path: "api/ios/v1/x/users")
+        )
+        return response.data
     }
 
     func fetchRSSFeeds() async throws -> [RSSFeedSource] {
@@ -234,13 +242,23 @@ struct APIClient {
         }
     }
 
-    private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
+    private func fetchRegularPosts(
+        page: Int,
+        limit: Int,
+        source: FeedSource,
+        xAuthor: String? = nil
+    ) async throws -> [Post] {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
         var queryItems = Self.regularPostQueryItems(page: page, limit: limit, source: source)
         if isSpecialRSS {
             let name = source == .laozhong ? "老中" : "YouTube"
             queryItems.append(.init(name: "categoryId", value: String(try await categoryID(named: name))))
+        }
+        if source == .x,
+           let xAuthor = xAuthor?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !xAuthor.isEmpty {
+            queryItems.append(.init(name: "x_author", value: xAuthor))
         }
         components?.queryItems = queryItems
         guard let url = components?.url else { throw APIError.invalidURL }
