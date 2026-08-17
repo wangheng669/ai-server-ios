@@ -987,46 +987,17 @@ private struct TodayWorldReportSourcesSheet: View {
     @State private var selectedPost: Post?
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var selectedPage: Page = .summary
-
-    private enum Page {
-        case summary
-        case posts
-    }
+    @State private var isShowingPosts = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if selectedPage == .summary {
-                sheetHeader
-                summaryPage
-            } else {
-                VStack(spacing: 0) {
-                    postsHeader
-                    Group {
-                        if isLoading {
-                            ProgressView("正在载入动态")
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if let errorMessage {
-                            ContentUnavailableView {
-                                Label("暂时无法载入", systemImage: "wifi.exclamationmark")
-                            } description: {
-                                Text(errorMessage)
-                            } actions: {
-                                Button("重新加载") {
-                                    Task { await load() }
-                                }
-                            }
-                        } else {
-                            postsPage
-                        }
-                    }
-                }
-            }
+            sheetHeader
+            summaryPage
         }
         .background(Color(uiColor: .systemBackground))
         .task(id: system.id) { await load() }
-        .sheet(item: $selectedPost) { post in
-            TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
+        .sheet(isPresented: $isShowingPosts) {
+            postsSheet
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
@@ -1169,7 +1140,7 @@ private struct TodayWorldReportSourcesSheet: View {
             }
 
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { selectedPage = .posts }
+                isShowingPosts = true
             } label: {
                 HStack(spacing: 6) {
                     Text("查看 \(system.postIDs.count) 条动态")
@@ -1194,46 +1165,64 @@ private struct TodayWorldReportSourcesSheet: View {
         .overlay(alignment: .top) { Divider() }
     }
 
-    private var postsHeader: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                HStack {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { selectedPage = .summary }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 17, weight: .semibold))
-                            Text("今日摘要")
-                                .font(.system(size: 16, weight: .medium))
+    private var postsSheet: some View {
+        VStack(spacing: 0) {
+            postsHeader
+
+            Group {
+                if isLoading {
+                    ProgressView("正在载入动态")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("暂时无法载入", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("重新加载") {
+                            Task { await load() }
                         }
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 38, height: 38)
-                            .background(Color(uiColor: .secondarySystemBackground), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("关闭")
+                } else {
+                    postsPage
                 }
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .sheet(item: $selectedPost) { post in
+            TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationContentInteraction(.scrolls)
+        }
+    }
 
+    private var postsHeader: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("\(posts.count) 条动态")
-                    .font(.system(size: 19, weight: .bold))
+                    .font(.system(size: 20, weight: .bold))
+
+                Text("\(displayDate) · 按时间排序")
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
 
-            Text("\(displayDate) · 按时间排序")
-                .font(.system(size: 13.5, weight: .medium))
-                .foregroundStyle(.secondary)
+            Spacer()
+
+            Button { isShowingPosts = false } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭动态")
         }
         .padding(.horizontal, 20)
-        .padding(.top, 12)
+        .padding(.top, 10)
         .padding(.bottom, 14)
         .overlay(alignment: .bottom) { Divider() }
     }
