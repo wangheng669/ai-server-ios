@@ -157,6 +157,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isSwitchingSource = false
     @Published private(set) var pendingRealtimePosts: [Post] = []
     @Published private(set) var xTranslations: [Int: String] = [:]
+    @Published private(set) var xLiveDetails: [Int: XTweetDetailItem] = [:]
     @Published private(set) var rssCardTranslations: [Int: RSSCardTranslation] = [:]
     @Published private(set) var rssFeeds: [RSSFeedSource] = []
     @Published private(set) var selectedRSSFeedID: Int?
@@ -198,6 +199,7 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchXFeedUsers: () async throws -> [XFeedUser]
     private let fetchXueqiuPosts: (Int, Int, Int?) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
+    private let fetchXTweetDetail: (String) async throws -> XTweetDetailItem
     private let translateRSSCard: (String, String?) async throws -> RSSCardTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
@@ -224,6 +226,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchXFeedUsers: (() async throws -> [XFeedUser])? = nil,
         fetchXueqiuPosts: ((Int, Int, Int?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
+        fetchXTweetDetail: ((String) async throws -> XTweetDetailItem)? = nil,
         translateRSSCard: ((String, String?) async throws -> RSSCardTranslation)? = nil,
         fetchRSSFeeds: (() async throws -> [RSSFeedSource])? = nil,
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
@@ -248,6 +251,9 @@ final class NewsFeedViewModel: ObservableObject {
         let client = APIClient(baseURL: serverURL)
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
+        }
+        self.fetchXTweetDetail = fetchXTweetDetail ?? { tweetID in
+            try await client.fetchXTweetDetail(tweetID: tweetID)
         }
         self.fetchXFeedUsers = fetchXFeedUsers ?? { try await client.fetchXFeedUsers() }
         if let fetchXueqiuPosts {
@@ -564,6 +570,9 @@ final class NewsFeedViewModel: ObservableObject {
 
     func postForDisplay(_ post: Post) -> Post {
         var displayed = post
+        if let detail = xLiveDetails[post.id] {
+            displayed = displayed.replacingXLiveDetail(with: detail)
+        }
         if let translation = xTranslations[post.id] {
             displayed = displayed.replacingTranslation(with: translation)
         }
@@ -585,6 +594,10 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func translateXPostIfNeeded(_ post: Post) async {
+        if post.isXRetweetWrapper {
+            await loadXRetweetPresentationIfNeeded(post)
+            return
+        }
         guard post.needsXTranslation,
               let tweetID = post.xTweetID,
               xTranslations[post.id] == nil,
@@ -602,6 +615,32 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             // Translation is best-effort. Keep the original post visible on failure.
+        }
+    }
+
+    private func loadXRetweetPresentationIfNeeded(_ post: Post) async {
+        guard let tweetID = post.xTweetID,
+              xLiveDetails[post.id] == nil,
+              !loadingXTranslationIDs.contains(post.id) else { return }
+        loadingXTranslationIDs.insert(post.id)
+        defer { loadingXTranslationIDs.remove(post.id) }
+        do {
+            let detail = try await fetchXTweetDetail(tweetID)
+            guard !Task.isCancelled else { return }
+            xLiveDetails[post.id] = detail
+
+            guard detail.lang?.lowercased().hasPrefix("zh") != true,
+                  xTranslations[post.id] == nil else { return }
+            let result = try await fetchXTranslation(detail.id)
+            guard !Task.isCancelled else { return }
+            let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, value != detail.fullText else { return }
+            pendingXTranslations[post.id] = value
+            scheduleXTranslationPublish()
+        } catch is CancellationError {
+            return
+        } catch {
+            // Keep the stored wrapper visible if live X presentation is unavailable.
         }
     }
 

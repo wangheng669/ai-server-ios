@@ -808,6 +808,46 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testXRetweetCardUsesLiveOriginalPresentation() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":7,"source":"x","content":"RT @adcock_brett: Jensen is back in the house!!","post_link":"https://x.com/adcock_brett/status/123","user":{"user_name":"Figure","user_screen_name":"Figure_robot"},"meta":{"lang":"en"}}"#.utf8)
+        )
+        let detail = try JSONDecoder().decode(
+            XTweetDetailResponse.self,
+            from: Data(#"{"success":true,"data":{"item":{"id":"123","text":"Jensen is back in the house!!","author":{"name":"Brett Adcock","screenName":"adcock_brett","profileImageUrl":"https://example.com/brett.jpg","verified":true},"media":[{"type":"photo","url":"https://pbs.twimg.com/media/team.jpg","width":1200,"height":1500}],"metrics":{"likes":5373,"views":269000},"lang":"en"}}}"#.utf8)
+        ).data.item
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXTranslation: { _ in
+                XTranslation(
+                    tweetId: "123",
+                    text: "Jensen回来了！！",
+                    sourceLanguage: "en",
+                    destinationLanguage: "zh"
+                )
+            },
+            fetchXTweetDetail: { _ in detail }
+        )
+
+        XCTAssertTrue(post.isXRetweetWrapper)
+        await model.translateXPostIfNeeded(post)
+        for _ in 0..<20 where model.postForDisplay(post).displayContent != "Jensen回来了！！" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let displayed = model.postForDisplay(post)
+
+        XCTAssertEqual(displayed.authorName, "Brett Adcock")
+        XCTAssertEqual(displayed.authorHandle, "@adcock_brett")
+        XCTAssertEqual(displayed.displayContent, "Jensen回来了！！")
+        XCTAssertFalse(displayed.displayContent.hasPrefix("RT @"))
+        XCTAssertEqual(displayed.imageURLs.count, 1)
+        XCTAssertEqual(displayed.meta?.metrics?.likes, 5373)
+        XCTAssertEqual(displayed.meta?.metrics?.views, 269000)
+    }
+
+    @MainActor
     func testXueqiuSelectionUsesDedicatedServerFeedAndPaginatesWithinIt() async throws {
         var requests: [(page: Int, feedID: Int?)] = []
         let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:14"}"#.utf8))

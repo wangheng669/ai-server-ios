@@ -653,6 +653,14 @@ struct Post: Codable, Identifiable, Hashable {
             && meta?.replyContext?.displayText == nil
     }
 
+    var isXRetweetWrapper: Bool {
+        guard sourceName == "X" else { return false }
+        return originalDisplayContent.range(
+            of: #"^\s*RT\s+@[A-Za-z0-9_]{1,15}\s*:"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
     func replacingTranslation(with translation: String) -> Post {
         Post(
             id: id, title: title, text: text, summary: summary, content: content,
@@ -660,6 +668,51 @@ struct Post: Codable, Identifiable, Hashable {
             weightReason: weightReason, finalScore: finalScore, weight: weight,
             postLink: postLink, articlePostAt: articlePostAt, user: user,
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
+        )
+    }
+
+    func replacingXLiveDetail(with detail: XTweetDetailItem) -> Post {
+        let liveImages = detail.imageMedia.compactMap { media -> PostImage? in
+            guard let url = media.thumbnailURL ?? media.url else { return nil }
+            return PostImage(url: url, width: media.width, height: media.height)
+        }
+        let liveVideos = (detail.media ?? []).filter(\.isVideo).compactMap { media -> PostVideo? in
+            guard let url = media.url else { return nil }
+            return PostVideo(
+                url: url,
+                playURL: url,
+                coverURL: media.thumbnailURL,
+                previewImageURL: media.thumbnailURL,
+                preview: media.thumbnailURL,
+                width: media.width,
+                height: media.height
+            )
+        }
+        let liveAuthor = detail.author.map { author in
+            PostUser(
+                userID: user?.userID,
+                personID: user?.personID,
+                userName: author.name,
+                userScreenName: author.screenName,
+                avatarURL: author.profileImageURL,
+                userDesc: user?.userDesc,
+                platform: user?.platform,
+                verified: author.verified,
+                verifiedType: user?.verifiedType
+            )
+        } ?? user
+
+        return Post(
+            id: id, title: title, text: text, summary: summary, content: detail.fullText,
+            contentZH: nil, source: source, formattedTime: formattedTime,
+            weightReason: weightReason, finalScore: finalScore, weight: weight,
+            postLink: postLink, articlePostAt: articlePostAt, user: liveAuthor,
+            postTags: postTags,
+            images: liveImages.isEmpty ? images : liveImages,
+            videos: liveVideos.isEmpty ? videos : liveVideos,
+            feedRank: feedRank,
+            meta: meta?.replacingXLiveDetail(with: detail)
+                ?? PostMeta.xLiveDetail(detail)
         )
     }
     func replacingRSSCardTranslation(title: String, excerpt: String?) -> Post {
@@ -1753,6 +1806,50 @@ struct PostMeta: Codable, Hashable {
             flashPlatforms: platforms
         )
     }
+
+    static func xLiveDetail(_ detail: XTweetDetailItem) -> PostMeta {
+        PostMeta(
+            metrics: detail.metrics, lang: detail.lang, urls: nil,
+            rawText: detail.fullText, noteText: detail.noteText,
+            inReplyToScreenName: nil, inReplyToStatusID: nil,
+            replyContext: nil, quotedTweet: nil, photoCredit: nil,
+            zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
+            zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
+            zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
+            zhihuAnswerVoteupCount: nil, zhihuAnswerCommentCount: nil,
+            rssFeedName: nil, rssFeedIcon: nil, rssArticleLink: nil,
+            flashCategory: nil, flashSimilarityGroupId: nil, flashSimilarityScore: nil,
+            flashSimilarCount: nil, flashPlatformCount: nil, flashPlatforms: nil
+        )
+    }
+
+    func replacingXLiveDetail(with detail: XTweetDetailItem) -> PostMeta {
+        PostMeta(
+            metrics: detail.metrics ?? metrics,
+            lang: detail.lang ?? lang,
+            urls: urls,
+            rawText: detail.fullText,
+            noteText: detail.noteText ?? noteText,
+            inReplyToScreenName: inReplyToScreenName,
+            inReplyToStatusID: inReplyToStatusID,
+            replyContext: replyContext,
+            quotedTweet: quotedTweet,
+            photoCredit: photoCredit,
+            zhihuRank: zhihuRank, zhihuHeat: zhihuHeat, zhihuAnswers: zhihuAnswers,
+            zhihuFollowerCount: zhihuFollowerCount, zhihuQuestionID: zhihuQuestionID,
+            zhihuURL: zhihuURL, zhihuAnswerExcerpt: zhihuAnswerExcerpt,
+            zhihuAnswerContent: zhihuAnswerContent, zhihuAnswerAuthor: zhihuAnswerAuthor,
+            zhihuAnswerVoteupCount: zhihuAnswerVoteupCount,
+            zhihuAnswerCommentCount: zhihuAnswerCommentCount,
+            rssFeedName: rssFeedName, rssFeedIcon: rssFeedIcon,
+            rssArticleLink: rssArticleLink, flashCategory: flashCategory,
+            flashSimilarityGroupId: flashSimilarityGroupId,
+            flashSimilarityScore: flashSimilarityScore,
+            flashSimilarCount: flashSimilarCount,
+            flashPlatformCount: flashPlatformCount,
+            flashPlatforms: flashPlatforms
+        )
+    }
 }
 
 struct XReplyContext: Codable, Hashable {
@@ -2005,6 +2102,14 @@ struct PostImage: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case url, width, height, kind
         case altText = "alt_text"
+    }
+
+    init(url: String, width: Int?, height: Int?, altText: String? = nil, kind: String? = nil) {
+        self.url = url
+        self.width = width
+        self.height = height
+        self.altText = altText
+        self.kind = kind
     }
 
     init(from decoder: Decoder) throws {
