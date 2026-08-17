@@ -23,6 +23,7 @@ final class PersonDetailStore {
     private(set) var articleSearchError: String?
     private(set) var canLoadMoreOwnPosts = true
     private(set) var xTranslations: [Int: String] = [:]
+    private(set) var xLiveDetails: [Int: XTweetDetailItem] = [:]
     private var loadingXTranslationIDs: Set<Int> = []
     private var ownPostsPage = 1
     private let pageSize = 12
@@ -126,11 +127,21 @@ final class PersonDetailStore {
     }
 
     func postForDisplay(_ post: Post) -> Post {
-        guard let translation = xTranslations[post.id] else { return post }
-        return post.replacingTranslation(with: translation)
+        var displayed = post
+        if let detail = xLiveDetails[post.id] {
+            displayed = displayed.replacingXLiveDetail(with: detail)
+        }
+        if let translation = xTranslations[post.id] {
+            displayed = displayed.replacingTranslation(with: translation)
+        }
+        return displayed
     }
 
     func translateXPostIfNeeded(_ post: Post) async {
+        if post.isXRetweetWrapper {
+            await loadXRetweetPresentationIfNeeded(post)
+            return
+        }
         guard post.needsXTranslation,
               let tweetID = post.xTweetID,
               xTranslations[post.id] == nil,
@@ -150,6 +161,40 @@ final class PersonDetailStore {
             )
             guard !value.isEmpty, value != post.originalDisplayContent else { return }
             Self.cacheXTranslation(value, tweetID: tweetID)
+            xTranslations[post.id] = value
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
+    private func loadXRetweetPresentationIfNeeded(_ post: Post) async {
+        guard let tweetID = post.xTweetID,
+              xLiveDetails[post.id] == nil,
+              !loadingXTranslationIDs.contains(post.id) else { return }
+        loadingXTranslationIDs.insert(post.id)
+        defer { loadingXTranslationIDs.remove(post.id) }
+        do {
+            let client = APIClient(baseURL: baseURL)
+            let detail = try await client.fetchXTweetDetail(tweetID: tweetID)
+            guard !Task.isCancelled else { return }
+            xLiveDetails[post.id] = detail
+
+            guard detail.lang?.lowercased().hasPrefix("zh") != true,
+                  xTranslations[post.id] == nil else { return }
+            if let cached = Self.cachedXTranslation(tweetID: detail.id) {
+                xTranslations[post.id] = cached
+                return
+            }
+            let result = try await client.fetchXTranslation(tweetID: detail.id)
+            guard !Task.isCancelled else { return }
+            let value = Self.presentedTranslation(
+                result.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                original: detail.fullText
+            )
+            guard !value.isEmpty, value != detail.fullText else { return }
+            Self.cacheXTranslation(value, tweetID: detail.id)
             xTranslations[post.id] = value
         } catch is CancellationError {
             return
