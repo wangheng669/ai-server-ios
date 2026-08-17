@@ -446,7 +446,8 @@ final class FeedAdapterTests: XCTestCase {
         let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:41"}"#.utf8))
         let duplicate = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:41"}"#.utf8))
         let second = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"rss:52"}"#.utf8))
-        let model = WeiboFollowingFeedModel { page, limit in
+        let model = WeiboFollowingFeedModel { page, limit, feedID in
+            XCTAssertNil(feedID)
             requests.append((page, limit))
             return page == 1 ? [first] : [duplicate, second]
         }
@@ -460,21 +461,26 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testWeiboFollowingFilteredTailCanRequestNextPage() async throws {
-        var requestedPages: [Int] = []
+    func testWeiboFollowingSelectionUsesDedicatedServerFeedAndPreservesDirectory() async throws {
+        var requests: [(page: Int, feedID: Int?)] = []
         let selectedTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:41"}"#.utf8))
         let rawTail = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"rss:52"}"#.utf8))
         let next = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3,"source":"rss:41"}"#.utf8))
-        let model = WeiboFollowingFeedModel { page, _ in
-            requestedPages.append(page)
-            return page == 1 ? [selectedTail, rawTail] : [next]
+        let model = WeiboFollowingFeedModel { page, _, feedID in
+            requests.append((page, feedID))
+            if feedID == nil { return [selectedTail, rawTail] }
+            return page == 1 ? [selectedTail] : [next]
         }
 
         await model.refresh()
-        await model.loadMoreIfNeeded(current: selectedTail, allowsFilteredTail: true)
+        await model.selectFeed(41)
+        await model.loadMoreIfNeeded(current: selectedTail)
 
-        XCTAssertEqual(requestedPages, [1, 2])
-        XCTAssertEqual(model.posts.map(\.id), [1, 2, 3])
+        XCTAssertEqual(requests.map(\.page), [1, 1, 2])
+        XCTAssertEqual(requests.map(\.feedID), [nil, 41, 41])
+        XCTAssertEqual(model.posts.map(\.id), [1, 3])
+        XCTAssertEqual(model.directoryPosts.map(\.id), [1, 2])
+        XCTAssertEqual(model.selectedFeedID, 41)
     }
 
     func testWeiboFollowingRequestUsesPlatformAggregateContract() {
@@ -770,6 +776,33 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(userIDs, [nil, "1605"])
         XCTAssertEqual(model.selectedXUserID, "1605")
         XCTAssertEqual(model.selectedXAuthor, "sama")
+    }
+
+    @MainActor
+    func testXueqiuSelectionUsesDedicatedServerFeedAndPaginatesWithinIt() async throws {
+        var requests: [(page: Int, feedID: Int?)] = []
+        let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:14"}"#.utf8))
+        let other = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"rss:16"}"#.utf8))
+        let next = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3,"source":"rss:14"}"#.utf8))
+        let model = NewsFeedViewModel(
+            source: .xueqiu,
+            fetchPosts: { _, _, _ in [] },
+            fetchXueqiuPosts: { page, _, feedID in
+                requests.append((page, feedID))
+                if feedID == nil { return [first, other] }
+                return page == 1 ? [first] : [next]
+            }
+        )
+
+        await model.refresh()
+        await model.selectXueqiuFeed(14)
+        await model.loadMoreIfNeeded(current: first)
+
+        XCTAssertEqual(requests.map(\.page), [1, 1, 2])
+        XCTAssertEqual(requests.map(\.feedID), [nil, 14, 14])
+        XCTAssertEqual(model.posts.map(\.id), [1, 3])
+        XCTAssertEqual(model.xueqiuDirectoryPosts.map(\.id), [1, 2])
+        XCTAssertEqual(model.selectedXueqiuFeedID, 14)
     }
 
     @MainActor

@@ -156,8 +156,6 @@ struct NewsFeedView: View {
     @State private var isYouTubePersonSelectorExpanded = false
     @State private var isFeedEntitySelectorExpanded = false
     @State private var feedEntitySearch = ""
-    @State private var selectedFeedEntityIDs: [FeedSource: String] = [:]
-    @State private var selectedWeiboEntityID: String?
     @State private var isSourceContentVisible = true
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -511,9 +509,14 @@ struct NewsFeedView: View {
             }
         }
 
-        let posts = model.source == .weibo
-            ? weiboFollowingModel.posts
-            : model.posts(for: model.source)
+        let posts: [Post]
+        if model.source == .weibo {
+            posts = weiboFollowingModel.directoryPosts
+        } else if model.source == .xueqiu {
+            posts = model.xueqiuDirectoryPosts
+        } else {
+            posts = model.posts(for: model.source)
+        }
         var seen = Set<String>()
         return posts.compactMap { post in
             guard let id = feedEntityID(for: post, source: model.source), seen.insert(id).inserted else {
@@ -538,12 +541,15 @@ struct NewsFeedView: View {
             return model.selectedWeChatFeedID.map { "rss:\($0)" }
         }
         if model.source == .weibo {
-            return selectedWeiboEntityID
+            return weiboFollowingModel.selectedFeedID.map { "rss:\($0)" }
         }
         if model.source == .x {
             return model.selectedXUserID.map { "x:\($0)" }
         }
-        return selectedFeedEntityIDs[model.source]
+        if model.source == .xueqiu {
+            return model.selectedXueqiuFeedID.map { "rss:\($0)" }
+        }
+        return nil
     }
 
     private var filteredFeedEntityChoices: [FeedEntityChoice] {
@@ -740,16 +746,14 @@ struct NewsFeedView: View {
             if model.source == .wechat {
                 Task { await model.selectWeChatFeed(choice?.feedID) }
             } else if model.source == .weibo {
-                selectedWeiboEntityID = choice?.id
+                Task { await weiboFollowingModel.selectFeed(choice?.feedID) }
             } else if model.source == .x {
                 let user = choice.flatMap { choice in
                     model.xFeedUsers.first { "x:\($0.id)" == choice.id }
                 }
                 Task { await model.selectXUser(user) }
-            } else if let id = choice?.id {
-                selectedFeedEntityIDs[model.source] = id
-            } else {
-                selectedFeedEntityIDs.removeValue(forKey: model.source)
+            } else if model.source == .xueqiu {
+                Task { await model.selectXueqiuFeed(choice?.feedID) }
             }
         }
     }
@@ -1018,10 +1022,7 @@ struct NewsFeedView: View {
                                 .onTapGesture { openPost(post) }
                                 .task(id: rootTabIsActive) {
                                     guard rootTabIsActive, post.id == followingPosts.last?.id else { return }
-                                    await weiboFollowingModel.loadMoreIfNeeded(
-                                        current: post,
-                                        allowsFilteredTail: selectedWeiboEntityID != nil
-                                    )
+                                    await weiboFollowingModel.loadMoreIfNeeded(current: post)
                                 }
                             Divider()
                                 .overlay(Color.primary.opacity(0.04))
@@ -1053,17 +1054,17 @@ struct NewsFeedView: View {
                     Button("重新加载") { Task { await weiboFollowingModel.refresh() } }
                 }
             } else {
-                ContentUnavailableView("暂无关注内容", systemImage: "person.2")
+                ContentUnavailableView(
+                    weiboFollowingModel.selectedFeedID == nil ? "暂无关注内容" : "该账号暂时没有新内容",
+                    systemImage: "person.2"
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var visibleWeiboFollowingPosts: [Post] {
-        guard let selectedWeiboEntityID else { return weiboFollowingModel.posts }
-        return weiboFollowingModel.posts.filter {
-            feedEntityID(for: $0, source: .weibo) == selectedWeiboEntityID
-        }
+        weiboFollowingModel.posts
     }
 
     private func feedList(
@@ -1076,7 +1077,6 @@ struct NewsFeedView: View {
         let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
         let usesFilteredPagination = source == .flash
             || (source == .rss && !isSelectedRSSPage)
-            || (source == .xueqiu && selectedFeedEntityIDs[source] != nil)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -1412,9 +1412,6 @@ struct NewsFeedView: View {
             }
             return rssPosts
         }
-        if source == .xueqiu, let selectedID = selectedFeedEntityIDs[source] {
-            return posts.filter { feedEntityID(for: $0, source: source) == selectedID }
-        }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
     }
@@ -1720,12 +1717,19 @@ struct NewsFeedView: View {
                         description: { Text(error) }
                         actions: { Button("重新加载") { Task { await model.refresh() } } }
                 } else {
-                    ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
+                    ContentUnavailableView(emptyFeedTitle(for: source), systemImage: "tray")
                 }
             }
             .padding(.top, topInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func emptyFeedTitle(for source: FeedSource) -> String {
+        if source == .x, model.selectedXUserID != nil { return "该账号暂时没有新内容" }
+        if source == .xueqiu, model.selectedXueqiuFeedID != nil { return "该账号暂时没有新内容" }
+        if source == .youtube, model.selectedYouTubePerson != nil { return "该用户暂时没有新内容" }
+        return "这个频道暂时没有新内容"
     }
 
     private func selectSource(_ source: FeedSource) {
