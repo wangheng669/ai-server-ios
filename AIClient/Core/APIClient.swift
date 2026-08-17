@@ -31,7 +31,7 @@ struct APIClient {
         source: FeedSource,
         flashCategory: String? = nil,
         youtubePerson: String? = nil,
-        xAuthor: String? = nil
+        xUserID: String? = nil
     ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin, .baidu:
@@ -55,7 +55,7 @@ struct APIClient {
         case .youtube:
             return try await fetchYouTubePosts(page: page, limit: limit, person: youtubePerson)
         default:
-            return try await fetchRegularPosts(page: page, limit: limit, source: source, xAuthor: xAuthor)
+            return try await fetchRegularPosts(page: page, limit: limit, source: source, xUserID: xUserID)
         }
     }
 
@@ -246,7 +246,7 @@ struct APIClient {
         page: Int,
         limit: Int,
         source: FeedSource,
-        xAuthor: String? = nil
+        xUserID: String? = nil
     ) async throws -> [Post] {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
@@ -256,9 +256,9 @@ struct APIClient {
             queryItems.append(.init(name: "categoryId", value: String(try await categoryID(named: name))))
         }
         if source == .x,
-           let xAuthor = xAuthor?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !xAuthor.isEmpty {
-            queryItems.append(.init(name: "x_author", value: xAuthor))
+           let xUserID = xUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !xUserID.isEmpty {
+            queryItems.append(.init(name: "x_user_id", value: xUserID))
         }
         components?.queryItems = queryItems
         guard let url = components?.url else { throw APIError.invalidURL }

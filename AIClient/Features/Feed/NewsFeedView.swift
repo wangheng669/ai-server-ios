@@ -490,7 +490,7 @@ struct NewsFeedView: View {
         if model.source == .x {
             return model.xFeedUsers.map { user in
                 FeedEntityChoice(
-                    id: "x:\(user.screenName.lowercased())",
+                    id: "x:\(user.id)",
                     name: user.name,
                     subtitle: "@\(user.screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@")))",
                     avatarURL: user.avatarURL,
@@ -541,7 +541,7 @@ struct NewsFeedView: View {
             return selectedWeiboEntityID
         }
         if model.source == .x {
-            return model.selectedXAuthor.map { "x:\($0.lowercased())" }
+            return model.selectedXUserID.map { "x:\($0)" }
         }
         return selectedFeedEntityIDs[model.source]
     }
@@ -742,8 +742,10 @@ struct NewsFeedView: View {
             } else if model.source == .weibo {
                 selectedWeiboEntityID = choice?.id
             } else if model.source == .x {
-                let handle = choice?.subtitle?.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
-                Task { await model.selectXAuthor(handle) }
+                let user = choice.flatMap { choice in
+                    model.xFeedUsers.first { "x:\($0.id)" == choice.id }
+                }
+                Task { await model.selectXUser(user) }
             } else if let id = choice?.id {
                 selectedFeedEntityIDs[model.source] = id
             } else {

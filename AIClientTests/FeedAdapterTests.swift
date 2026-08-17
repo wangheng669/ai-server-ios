@@ -752,6 +752,27 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testXUserSelectionSendsStableUserIDToDedicatedLoader() async {
+        var userIDs: [String?] = []
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPosts: { _, _, userID in
+                userIDs.append(userID)
+                return []
+            }
+        )
+        let user = XFeedUser(id: "1605", name: "Sam Altman", screenName: "sama", avatarURL: nil)
+
+        await model.refresh()
+        await model.selectXUser(user)
+
+        XCTAssertEqual(userIDs, [nil, "1605"])
+        XCTAssertEqual(model.selectedXUserID, "1605")
+        XCTAssertEqual(model.selectedXAuthor, "sama")
+    }
+
+    @MainActor
     func testPaginationRetriesOnceAfterTransientFailure() async throws {
         var secondPageAttempts = 0
         let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"x"}"#.utf8))

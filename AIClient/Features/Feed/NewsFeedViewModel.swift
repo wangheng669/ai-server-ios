@@ -172,6 +172,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var selectedFlashCategory: String?
     @Published private(set) var selectedYouTubePerson: String?
     @Published private(set) var xFeedUsers: [XFeedUser] = []
+    @Published private(set) var selectedXUserID: String?
     @Published private(set) var selectedXAuthor: String?
     @Published var errorMessage: String?
     @Published var source: FeedSource {
@@ -251,7 +252,7 @@ final class NewsFeedViewModel: ObservableObject {
             self.fetchXPosts = { page, limit, _ in try await fetchPosts(page, limit, .x) }
         } else {
             self.fetchXPosts = { page, limit, author in
-                try await client.fetchPosts(page: page, limit: limit, source: .x, xAuthor: author)
+                try await client.fetchPosts(page: page, limit: limit, source: .x, xUserID: author)
             }
         }
         self.translateRSSCard = translateRSSCard ?? { title, excerpt in
@@ -490,11 +491,10 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    func selectXAuthor(_ author: String?) async {
-        let normalized = author?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let selection = normalized?.isEmpty == false ? normalized : nil
-        guard source == .x, selectedXAuthor != selection else { return }
-        selectedXAuthor = selection
+    func selectXUser(_ user: XFeedUser?) async {
+        guard source == .x, selectedXUserID != user?.id else { return }
+        selectedXUserID = user?.id
+        selectedXAuthor = user?.screenName
         posts = []
         pendingRealtimePosts = []
         page = 1
@@ -855,7 +855,7 @@ final class NewsFeedViewModel: ObservableObject {
         let requestedSource = source
         let requestedFlashCategory = selectedFlashCategory
         let requestedYouTubePerson = selectedYouTubePerson
-        let requestedXAuthor = selectedXAuthor
+        let requestedXUserID = selectedXUserID
         let completesSourceSwitch = isSwitchingSource
         activeRefreshID = refreshID
         isLoading = true
@@ -874,18 +874,18 @@ final class NewsFeedViewModel: ObservableObject {
                 source: requestedSource,
                 flashCategory: requestedFlashCategory,
                 youtubePerson: requestedYouTubePerson,
-                xAuthor: requestedXAuthor
+                xAuthor: requestedXUserID
             )
             guard source == requestedSource,
                   selectedFlashCategory == requestedFlashCategory,
                   selectedYouTubePerson == requestedYouTubePerson,
-                  selectedXAuthor == requestedXAuthor,
+                  selectedXUserID == requestedXUserID,
                   activeRefreshID == refreshID else { return }
             await FeedPresentationPrewarmer.shared.warm(result)
             guard source == requestedSource,
                   selectedFlashCategory == requestedFlashCategory,
                   selectedYouTubePerson == requestedYouTubePerson,
-                  selectedXAuthor == requestedXAuthor,
+                  selectedXUserID == requestedXUserID,
                   activeRefreshID == refreshID else { return }
             posts = result
             pendingRealtimePosts = []
@@ -915,7 +915,7 @@ final class NewsFeedViewModel: ObservableObject {
         let requestedSource = source
         let requestedFlashCategory = selectedFlashCategory
         let requestedYouTubePerson = selectedYouTubePerson
-        let requestedXAuthor = selectedXAuthor
+        let requestedXUserID = selectedXUserID
         let pageSize = pageSize(for: requestedSource)
         isLoadingMore = true
         defer { isLoadingMore = false }
@@ -926,15 +926,15 @@ final class NewsFeedViewModel: ObservableObject {
                 source: requestedSource,
                 flashCategory: requestedFlashCategory,
                 youtubePerson: requestedYouTubePerson,
-                xAuthor: requestedXAuthor
+                xAuthor: requestedXUserID
             )
             guard source == requestedSource, selectedFlashCategory == requestedFlashCategory,
                   selectedYouTubePerson == requestedYouTubePerson else { return }
-            guard selectedXAuthor == requestedXAuthor else { return }
+            guard selectedXUserID == requestedXUserID else { return }
             await FeedPresentationPrewarmer.shared.warm(result)
             guard source == requestedSource, selectedFlashCategory == requestedFlashCategory,
                   selectedYouTubePerson == requestedYouTubePerson else { return }
-            guard selectedXAuthor == requestedXAuthor else { return }
+            guard selectedXUserID == requestedXUserID else { return }
             let ids = Set(posts.map(\.id))
             posts += result.filter { !ids.contains($0.id) }
             page += 1
@@ -1050,7 +1050,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func persistCurrentSnapshot() {
         guard (source != .youtube || selectedYouTubePerson == nil),
-              (source != .x || selectedXAuthor == nil) else { return }
+              (source != .x || selectedXUserID == nil) else { return }
         let snapshot = FeedDiskSnapshot(
             schemaVersion: 1,
             savedAt: Date(),
