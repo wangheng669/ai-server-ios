@@ -1171,6 +1171,21 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, "https://pbs.twimg.com/media/demo.jpg")
     }
 
+    func testXAvatarLoaderRequestsHighResolutionProfileImage() throws {
+        let original = try XCTUnwrap(URL(string: "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg"))
+
+        XCTAssertEqual(
+            ImageLoader.highResolutionAvatarURL(original).absoluteString,
+            "https://pbs.twimg.com/profile_images/123/avatar_200x200.jpg"
+        )
+    }
+
+    func testXAvatarLoaderLeavesTweetMediaUnchanged() throws {
+        let original = try XCTUnwrap(URL(string: "https://pbs.twimg.com/media/photo_normal.jpg"))
+
+        XCTAssertEqual(ImageLoader.highResolutionAvatarURL(original), original)
+    }
+
     func testOrdinaryImageUsesServerProxy() throws {
         let url = try XCTUnwrap(MediaURL.image("https://example.com/image.jpg"))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
