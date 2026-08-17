@@ -746,6 +746,57 @@ private final class TodayWorldStore: ObservableObject {
     }
 }
 
+private actor TodayWorldPostMemoryCache {
+    static let shared = TodayWorldPostMemoryCache()
+
+    private struct Entry {
+        let post: Post
+        let loadedAt: Date
+    }
+
+    private let lifetime: TimeInterval = 6 * 60 * 60
+    private var entries: [String: Entry] = [:]
+    private var inFlight: [String: Task<Post, Error>] = [:]
+
+    func cachedPosts(ids: [Int], baseURL: URL) -> [Post] {
+        discardExpiredEntries()
+        return ids.compactMap { entries[key(id: $0, baseURL: baseURL)]?.post }
+    }
+
+    func post(id: Int, baseURL: URL) async throws -> Post {
+        let cacheKey = key(id: id, baseURL: baseURL)
+        if let entry = entries[cacheKey], Date().timeIntervalSince(entry.loadedAt) <= lifetime {
+            return entry.post
+        }
+        if let task = inFlight[cacheKey] {
+            return try await task.value
+        }
+
+        let task = Task {
+            try await APIClient(baseURL: baseURL).fetchPost(id: id)
+        }
+        inFlight[cacheKey] = task
+        do {
+            let post = try await task.value
+            entries[cacheKey] = Entry(post: post, loadedAt: Date())
+            inFlight[cacheKey] = nil
+            return post
+        } catch {
+            inFlight[cacheKey] = nil
+            throw error
+        }
+    }
+
+    private func key(id: Int, baseURL: URL) -> String {
+        "\(baseURL.absoluteString)|\(id)"
+    }
+
+    private func discardExpiredEntries() {
+        let cutoff = Date().addingTimeInterval(-lifetime)
+        entries = entries.filter { $0.value.loadedAt >= cutoff }
+    }
+}
+
 private struct TodayWorldView: View {
     @Binding var showsDetail: Bool
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -1438,55 +1489,80 @@ private struct TodayWorldReportSourcesSheet: View {
 
     @MainActor
     private func load() async {
-        isLoading = true
         errorMessage = nil
-        posts = []
-        translations = [:]
         translationFailures = []
         let baseURL = ServerConfiguration.currentURL
-        do {
-            var loadedByID: [Int: Post] = [:]
-            for batch in system.postIDs.batches(of: 4) {
-                try await withThrowingTaskGroup(of: (Int, Post).self) { group in
-                    for postID in batch {
-                        group.addTask {
-                            (postID, try await APIClient(baseURL: baseURL).fetchPost(id: postID))
-                        }
-                    }
-                    for try await (postID, post) in group {
-                        loadedByID[postID] = post
+        let cachedPosts = await TodayWorldPostMemoryCache.shared.cachedPosts(
+            ids: system.postIDs,
+            baseURL: baseURL
+        )
+        var loadedByID = Dictionary(uniqueKeysWithValues: cachedPosts.map { ($0.id, $0) })
+        posts = system.postIDs.compactMap { loadedByID[$0] }
+        translations = Dictionary(uniqueKeysWithValues: posts.compactMap { post in
+            guard let tweetID = post.xTweetID,
+                  let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) else { return nil }
+            return (post.id, value)
+        })
+        isLoading = posts.isEmpty
+
+        var lastError: Error?
+        await withTaskGroup(of: (Int, Result<Post, Error>).self) { group in
+            for postID in system.postIDs where loadedByID[postID] == nil {
+                group.addTask {
+                    do {
+                        let post = try await TodayWorldPostMemoryCache.shared.post(id: postID, baseURL: baseURL)
+                        return (postID, .success(post))
+                    } catch {
+                        return (postID, .failure(error))
                     }
                 }
-                posts = system.postIDs.compactMap { loadedByID[$0] }
-                isLoading = false
             }
 
-            let pendingTranslations = posts.compactMap { post -> (Int, String)? in
-                guard post.needsXTranslation, let tweetID = post.xTweetID else { return nil }
-                return (post.id, tweetID)
-            }
-            for batch in pendingTranslations.batches(of: 4) {
-                await withTaskGroup(of: (Int, String?).self) { group in
-                    for (postID, tweetID) in batch {
-                        group.addTask {
-                            let text = try? await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID).text
-                            return (postID, text)
-                        }
+            for await (postID, result) in group {
+                switch result {
+                case .success(let post):
+                    loadedByID[postID] = post
+                    posts = system.postIDs.compactMap { loadedByID[$0] }
+                    if let tweetID = post.xTweetID,
+                       let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
+                        translations[post.id] = value
                     }
-                    for await (postID, text) in group {
-                        if let text {
-                            translations[postID] = text
-                        } else {
-                            translationFailures.insert(postID)
-                        }
-                    }
+                    isLoading = false
+                case .failure(let error):
+                    lastError = error
                 }
             }
-            isLoading = false
-        } catch {
-            errorMessage = NetworkErrorPresentation.message(for: error)
-            isLoading = false
         }
+
+        if posts.isEmpty, let lastError {
+            errorMessage = NetworkErrorPresentation.message(for: lastError)
+            isLoading = false
+            return
+        }
+
+        let pendingTranslations = posts.compactMap { post -> (Int, String)? in
+            guard post.needsXTranslation,
+                  translations[post.id] == nil,
+                  let tweetID = post.xTweetID else { return nil }
+            return (post.id, tweetID)
+        }
+        await withTaskGroup(of: (Int, String, String?).self) { group in
+            for (postID, tweetID) in pendingTranslations {
+                group.addTask {
+                    let text = try? await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID).text
+                    return (postID, tweetID, text)
+                }
+            }
+            for await (postID, tweetID, text) in group {
+                if let text {
+                    translations[postID] = text
+                    PersonDetailStore.cacheXTranslation(text, tweetID: tweetID)
+                } else {
+                    translationFailures.insert(postID)
+                }
+            }
+        }
+        isLoading = false
     }
 
     private var displayDate: String {
