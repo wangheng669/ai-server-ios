@@ -772,7 +772,7 @@ private struct TodayWorldView: View {
         }
         .sheet(item: $selectedSystem) { system in
             TodayWorldReportSourcesSheet(system: system, reportDate: store.report?.date ?? "")
-                .presentationDetents([.large])
+                .presentationDetents([.fraction(0.58), .large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
                 .presentationContentInteraction(.scrolls)
@@ -990,30 +990,20 @@ private struct TodayWorldReportSourcesSheet: View {
     @State private var errorMessage: String?
     @State private var selectedPage: Page = .summary
 
-    private enum Page: String, CaseIterable, Identifiable {
-        case summary = "总结"
-        case posts = "用户动态"
-
-        var id: String { rawValue }
+    private enum Page {
+        case summary
+        case posts
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                Picker("内容", selection: $selectedPage) {
-                    ForEach(Page.allCases) { page in
-                        Text(page.rawValue).tag(page)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
+        VStack(spacing: 0) {
+            sheetHeader
 
-                Divider()
-
-                if selectedPage == .summary {
-                    summaryPage
-                } else {
+            if selectedPage == .summary {
+                summaryPage
+            } else {
+                VStack(spacing: 0) {
+                    postsHeader
                     Group {
                         if isLoading {
                             ProgressView("正在载入动态")
@@ -1034,16 +1024,8 @@ private struct TodayWorldReportSourcesSheet: View {
                     }
                 }
             }
-            .background(Color(uiColor: .systemBackground))
-            .navigationTitle(system.systemName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                        .fontWeight(.semibold)
-                }
-            }
         }
+        .background(Color(uiColor: .systemBackground))
         .task(id: system.id) { await load() }
         .sheet(item: $selectedPost) { post in
             TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
@@ -1054,37 +1036,118 @@ private struct TodayWorldReportSourcesSheet: View {
         }
     }
 
+    private var sheetHeader: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(Color.teal)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 52, height: 52)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(system.systemName)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text("\(system.sourceKeys.count) 个账号 · \(system.postIDs.count) 条依据")
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 18)
+    }
+
     private var summaryPage: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("今日摘要")
+                    .font(.system(size: 15, weight: .semibold))
+
                 Text(system.summary)
                     .font(.system(size: 16))
                     .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("涉及用户")
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                Divider().padding(.top, 2)
 
-                    ForEach(Array(system.sourceKeys.enumerated()), id: \.element) { index, key in
-                        HStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    HStack(spacing: -9) {
+                        ForEach(Array(system.sourceKeys.prefix(3).enumerated()), id: \.offset) { index, key in
                             AvatarView(
                                 url: todayWorldSourceAvatarURL(key),
                                 name: sourceName(at: index),
-                                size: 38
+                                size: 36
                             )
-                            Text(sourceName(at: index))
-                                .font(.system(size: 15, weight: .medium))
-                            Spacer()
+                            .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
                         }
                     }
+
+                    Text("来自 \(system.sourceKeys.count) 个账号")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { selectedPage = .posts }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("查看 \(system.postIDs.count) 条动态")
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.teal)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 20)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
+    }
+
+    private var postsHeader: some View {
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { selectedPage = .summary }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("今日摘要")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.teal)
+
+            Spacer()
+
+            Text("用户动态")
+                .font(.system(size: 15, weight: .semibold))
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var postsPage: some View {
