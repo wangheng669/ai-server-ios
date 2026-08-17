@@ -2,6 +2,46 @@ import SwiftUI
 import AVKit
 import WebKit
 
+private struct XBrandMark: View {
+    var body: some View {
+        XBrandLogoShape()
+            .fill(.primary, style: FillStyle(eoFill: true))
+            .accessibilityHidden(true)
+    }
+}
+
+private struct XBrandLogoShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let scaleX = rect.width / 24
+        let scaleY = rect.height / 24
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * scaleX, y: rect.minY + y * scaleY)
+        }
+
+        var path = Path()
+        path.move(to: point(18.244, 2.25))
+        path.addLine(to: point(21.552, 2.25))
+        path.addLine(to: point(14.325, 10.51))
+        path.addLine(to: point(22.827, 21.75))
+        path.addLine(to: point(16.17, 21.75))
+        path.addLine(to: point(10.956, 14.933))
+        path.addLine(to: point(4.99, 21.75))
+        path.addLine(to: point(1.68, 21.75))
+        path.addLine(to: point(9.41, 12.915))
+        path.addLine(to: point(1.254, 2.25))
+        path.addLine(to: point(8.08, 2.25))
+        path.addLine(to: point(12.793, 8.481))
+        path.closeSubpath()
+
+        path.move(to: point(17.083, 19.77))
+        path.addLine(to: point(18.916, 19.77))
+        path.addLine(to: point(7.084, 4.126))
+        path.addLine(to: point(5.117, 4.126))
+        path.closeSubpath()
+        return path
+    }
+}
+
 struct PostDetailView: View {
     private let presentedAsSheet: Bool
     private let shouldRefreshNewYorkTimesArticle: Bool
@@ -2294,18 +2334,9 @@ struct PostDetailView: View {
                 .font(.system(size: 17, weight: .bold))
             Spacer()
 
-            Menu {
-                if let link = post.linkURL {
-                    ShareLink(item: link) {
-                        Label("分享帖子", systemImage: "square.and.arrow.up")
-                    }
-                }
-                Button("在 X 中打开") { openOriginal() }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .bold))
-                    .frame(width: 40, height: 48)
-            }
+            Color.clear
+                .frame(width: 40, height: 48)
+                .accessibilityHidden(true)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 8)
@@ -2359,12 +2390,13 @@ struct PostDetailView: View {
                 }
             }
             Spacer()
-            Button { openOriginal() } label: {
-                Text("X.com")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.primary)
+            Button { openXOriginal() } label: {
+                XBrandMark()
+                    .frame(width: 22, height: 22)
+                    .frame(width: 40, height: 40)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("在 X App 中打开")
         }
     }
 
@@ -2646,6 +2678,36 @@ struct PostDetailView: View {
 
     private func openOriginal() {
         if let link = post.linkURL { openURL(link) }
+    }
+
+    private func openXOriginal() {
+        guard let link = post.linkURL else { return }
+        guard let appURL = xAppURL(for: link) else {
+            openURL(link)
+            return
+        }
+
+        UIApplication.shared.open(appURL, options: [:]) { didOpen in
+            guard !didOpen else { return }
+            DispatchQueue.main.async {
+                openURL(link)
+            }
+        }
+    }
+
+    private func xAppURL(for link: URL) -> URL? {
+        let pathComponents = link.pathComponents.filter { $0 != "/" }
+        guard let statusIndex = pathComponents.firstIndex(where: { $0.lowercased() == "status" }),
+              pathComponents.indices.contains(statusIndex + 1) else { return nil }
+
+        let statusID = pathComponents[statusIndex + 1]
+        guard !statusID.isEmpty, statusID.allSatisfy(\.isNumber) else { return nil }
+
+        var components = URLComponents()
+        components.scheme = "twitter"
+        components.host = "status"
+        components.queryItems = [URLQueryItem(name: "id", value: statusID)]
+        return components.url
     }
 
     private func loadDetail() async {
