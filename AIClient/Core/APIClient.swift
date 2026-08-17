@@ -270,15 +270,15 @@ struct APIClient {
     ) async throws -> [Post] {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
-        var queryItems = Self.regularPostQueryItems(page: page, limit: limit, source: source)
+        var queryItems = Self.regularPostQueryItems(
+            page: page,
+            limit: limit,
+            source: source,
+            xUserID: xUserID
+        )
         if isSpecialRSS {
             let name = source == .laozhong ? "老中" : "YouTube"
             queryItems.append(.init(name: "categoryId", value: String(try await categoryID(named: name))))
-        }
-        if source == .x,
-           let xUserID = xUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !xUserID.isEmpty {
-            queryItems.append(.init(name: "x_user_id", value: xUserID))
         }
         components?.queryItems = queryItems
         guard let url = components?.url else { throw APIError.invalidURL }
@@ -305,21 +305,33 @@ struct APIClient {
         return items
     }
 
-    static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {
+    static func regularPostQueryItems(
+        page: Int,
+        limit: Int,
+        source: FeedSource,
+        xUserID: String? = nil
+    ) -> [URLQueryItem] {
         let isSpecialRSS = source == .laozhong || source == .youtube
         let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube
+        let normalizedXUserID = source == .x
+            ? xUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            : nil
+        let filtersXUser = normalizedXUserID?.isEmpty == false
         var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc"),
             .init(name: "group_similar", value: "1"), .init(name: "group_threshold", value: "70"),
             .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue),
-            .init(name: "include_zero_score", value: includesAllScores ? "true" : "false")
+            .init(name: "include_zero_score", value: includesAllScores || filtersXUser ? "true" : "false")
         ]
-        if !includesAllScores {
+        if !includesAllScores && !filtersXUser {
             let minimumScore = source == .rss ? 6 : Post.minimumFeedScore
             queryItems.append(.init(name: "final_score", value: String(minimumScore)))
         }
         if source == .x { queryItems.append(.init(name: "x_feed_view", value: "tracked")) }
+        if let normalizedXUserID, !normalizedXUserID.isEmpty {
+            queryItems.append(.init(name: "x_user_id", value: normalizedXUserID))
+        }
         return queryItems
     }
 

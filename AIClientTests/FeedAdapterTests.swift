@@ -778,6 +778,23 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.selectedXAuthor, "sama")
     }
 
+    func testXUserSelectionRequestsAllScoresInsteadOfChannelThreshold() {
+        let items = APIClient.regularPostQueryItems(
+            page: 1,
+            limit: 10,
+            source: .x,
+            xUserID: " 1602443956888817665 "
+        )
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["x_user_id"], "1602443956888817665")
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+        XCTAssertEqual(query["x_feed_view"], "tracked")
+    }
+
     @MainActor
     func testXueqiuSelectionUsesDedicatedServerFeedAndPaginatesWithinIt() async throws {
         var requests: [(page: Int, feedID: Int?)] = []
