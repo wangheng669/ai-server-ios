@@ -1036,13 +1036,12 @@ private struct TodayWorldReportSourcesSheet: View {
 
     private var sheetHeader: some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle().fill(Color.teal)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 52, height: 52)
+            AvatarView(
+                url: system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL),
+                name: sourceName(at: 0),
+                size: 54,
+                assetName: primaryPersonAvatarAssetName
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(system.systemName)
@@ -1075,14 +1074,18 @@ private struct TodayWorldReportSourcesSheet: View {
     private var summaryPage: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 18) {
                     Text("今日摘要")
                         .font(.system(size: 15, weight: .semibold))
 
-                    Text(system.summary)
-                        .font(.system(size: 16))
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(Array(summaryParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .font(.system(size: 16))
+                                .lineSpacing(5)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
@@ -1092,6 +1095,52 @@ private struct TodayWorldReportSourcesSheet: View {
 
             summaryFooter
         }
+    }
+
+    private var summaryParagraphs: [String] {
+        let text = system.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+
+        let explicitParagraphs = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if explicitParagraphs.count > 1 {
+            return explicitParagraphs
+        }
+
+        var sentences: [String] = []
+        var sentence = ""
+        for character in text {
+            sentence.append(character)
+            if "。！？!?".contains(character) {
+                let value = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty { sentences.append(value) }
+                sentence = ""
+            }
+        }
+        let remainder = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !remainder.isEmpty { sentences.append(remainder) }
+        guard sentences.count > 1 else { return [text] }
+
+        let groupSize = max(1, Int(ceil(Double(sentences.count) / 4)))
+        return stride(from: 0, to: sentences.count, by: groupSize).map { start in
+            sentences[start..<min(start + groupSize, sentences.count)].joined()
+        }
+    }
+
+    private var primaryPersonAvatarAssetName: String? {
+        let identity = ([system.systemName] + system.sourceNames).joined(separator: " ").lowercased()
+        let knownPeople: [(aliases: [String], asset: String)] = [
+            (["马斯克", "elon musk", "musk"], "ElonMuskAvatar"),
+            (["董明珠"], "DongMingzhuAvatar"),
+            (["马云", "jack ma"], "JackMaAvatar"),
+            (["雷军", "lei jun"], "LeiJunAvatar"),
+            (["李彦宏", "robin li"], "RobinLiAvatar")
+        ]
+        return knownPeople.first { person in
+            person.aliases.contains { identity.localizedCaseInsensitiveContains($0) }
+        }?.asset
     }
 
     private var summaryFooter: some View {
@@ -1128,10 +1177,13 @@ private struct TodayWorldReportSourcesSheet: View {
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.teal)
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
-                .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(
+                    Color(uiColor: .secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
             }
             .buttonStyle(.plain)
         }
@@ -1157,7 +1209,7 @@ private struct TodayWorldReportSourcesSheet: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.teal)
+                    .foregroundStyle(.primary)
 
                     Spacer()
 
@@ -1231,7 +1283,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 } else if let replyHandle = replyHandle(for: post) {
                     Text("回复 \(replyHandle)")
                         .font(.system(size: 13.5))
-                        .foregroundStyle(Color.teal)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let content = displayedContent(for: post) {
@@ -1353,7 +1405,7 @@ private struct TodayWorldReportSourcesSheet: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("回复 \(reply.handle ?? "这条动态")")
                     .font(.system(size: 13.5))
-                    .foregroundStyle(Color.teal)
+                    .foregroundStyle(.secondary)
 
                 HStack(alignment: .top, spacing: 8) {
                     AvatarView(
