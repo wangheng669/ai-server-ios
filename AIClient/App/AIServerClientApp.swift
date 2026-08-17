@@ -819,7 +819,8 @@ private func fetchTodayWorldPostBatch(ids: [Int], baseURL: URL) async throws -> 
         resolvingAgainstBaseURL: false
     )
     components?.queryItems = [
-        .init(name: "ids", value: requestedIDs.map(String.init).joined(separator: ","))
+        .init(name: "ids", value: requestedIDs.map(String.init).joined(separator: ",")),
+        .init(name: "full", value: "1")
     ]
     guard let url = components?.url else { throw APIError.invalidURL }
 
@@ -829,6 +830,9 @@ private func fetchTodayWorldPostBatch(ids: [Int], baseURL: URL) async throws -> 
     guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
     let decoded = try JSONDecoder().decode(TodayWorldPostBatchResponse.self, from: data)
     guard decoded.success else { throw APIError.invalidResponse }
+    guard decoded.posts.allSatisfy({ $0.content != nil || $0.text != nil || $0.summary != nil }) else {
+        throw APIError.invalidResponse
+    }
     return decoded.posts
 }
 
@@ -1275,6 +1279,11 @@ private struct TodayWorldReportSourcesSheet: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
+        .task {
+            if posts.isEmpty {
+                await load()
+            }
+        }
         .sheet(item: $selectedPost) { post in
             TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
                 .presentationDetents([.large])
@@ -1539,6 +1548,7 @@ private struct TodayWorldReportSourcesSheet: View {
             return (post.id, value)
         })
         isLoading = posts.isEmpty
+        defer { isLoading = false }
 
         var lastError: Error?
         let batchIDs = system.postIDs.filter { loadedByID[$0] == nil }
