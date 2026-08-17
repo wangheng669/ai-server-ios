@@ -53,7 +53,7 @@ device_warm_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-warm-f
   if [[ "$app_changed" == true && -n "${DEVICE_UDID:-}" ]]; then
     ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
     if ! ./ci/probe-ios-device.sh; then
-      ./ci/report-ios-deployment.sh failed 0 device-gate-failed || true
+      ./ci/report-ios-deployment.sh running 0.01 device-install-deferred || true
       status=1
     else
       ./ci/report-ios-deployment.sh running 0.01 device-gate-ready || true
@@ -141,6 +141,9 @@ if ((preflight_status != 0)); then
   exit "$preflight_status"
 fi
 if ((device_warm_status != 0)); then
-  echo "iPhone stability gate failed with exit code $device_warm_status." >&2
-  exit "$device_warm_status"
+  if [[ "${IOS_REQUIRE_DEVICE_GATE:-false}" == true ]]; then
+    echo "Required iPhone stability gate failed with exit code $device_warm_status." >&2
+    exit "$device_warm_status"
+  fi
+  echo "iPhone is not ready; main delivery will continue and installation will be retried after publish." >&2
 fi

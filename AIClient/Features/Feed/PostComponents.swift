@@ -664,8 +664,22 @@ actor ImageLoader {
 
     static func load(_ url: URL?, targetSize: CGSize? = nil) async -> UIImage? {
         guard let url else { return nil }
-        let relayedURL = MediaURL.image(url.absoluteString) ?? url
+        let sourceURL = highResolutionAvatarURL(url)
+        let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
         return await shared.image(for: relayedURL, targetSize: targetSize, scale: UIScreen.main.scale)
+    }
+
+    static func highResolutionAvatarURL(_ url: URL) -> URL {
+        guard let host = url.host?.lowercased(),
+              host == "pbs.twimg.com" || host.hasSuffix(".twimg.com"),
+              url.path.contains("/profile_images/") else { return url }
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let upgradedPath = url.path
+            .replacingOccurrences(of: "_40_normal.", with: "_200x200.")
+            .replacingOccurrences(of: "_normal.", with: "_200x200.")
+        components?.path = upgradedPath
+        return components?.url ?? url
     }
 
     private func image(for url: URL, targetSize: CGSize?, scale: CGFloat) async -> UIImage? {

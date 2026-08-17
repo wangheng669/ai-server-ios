@@ -45,6 +45,10 @@ if git diff --name-only "$merge_base"...HEAD -- ci/verify-ios-device-stability.s
   bash ci/test-verify-ios-device-stability.sh
 fi
 
+if git diff --name-only "$merge_base"...HEAD -- ci/prepare-central-runner-parallel.sh ci/test-central-device-delivery-policy.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
+  bash ci/test-central-device-delivery-policy.sh
+fi
+
 if git diff --name-only "$merge_base"...HEAD -- ci/local-central-merge.sh ci/actions-outage-fallback-watch.sh | grep -q .; then
   bash ci/test-actions-outage-fallback-watch.sh
 fi
