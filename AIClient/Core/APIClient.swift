@@ -139,7 +139,19 @@ struct APIClient {
         return response.data.posts
     }
 
-    func fetchWeiboFollowingPosts(page: Int, limit: Int = 20) async throws -> [Post] {
+    func fetchWeiboFollowingPosts(
+        page: Int,
+        limit: Int = 20,
+        feedID: Int? = nil
+    ) async throws -> [Post] {
+        if let feedID {
+            return try await fetchRSSFeedPosts(
+                feedID: feedID,
+                page: page,
+                limit: limit,
+                includesAllScores: true
+            )
+        }
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         components?.queryItems = Self.weiboFollowingQueryItems(page: page, limit: limit)
         guard let url = components?.url else { throw APIError.invalidURL }
@@ -211,8 +223,16 @@ struct APIClient {
             .filter { seen.insert($0.id).inserted }
     }
 
-    private func fetchXueqiuPosts(page: Int, limit: Int) async throws -> [Post] {
-        try await withThrowingTaskGroup(of: [Post].self) { group in
+    func fetchXueqiuPosts(page: Int, limit: Int, feedID: Int? = nil) async throws -> [Post] {
+        if let feedID {
+            return try await fetchRSSFeedPosts(
+                feedID: feedID,
+                page: page,
+                limit: limit,
+                includesAllScores: true
+            )
+        }
+        return try await withThrowingTaskGroup(of: [Post].self) { group in
             for feedID in [14, 16] {
                 group.addTask {
                     var parts = URLComponents(
