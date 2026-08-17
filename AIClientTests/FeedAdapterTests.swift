@@ -420,6 +420,18 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(query["final_score"], "6")
     }
 
+    func testSpecificRSSFeedRequestsAllScores() {
+        let items = APIClient.rssFeedPostQueryItems(page: 2, limit: 20)
+        let query = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(query["page"], "2")
+        XCTAssertEqual(query["limit"], "20")
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+    }
+
     func testWeiboFeedIdentityUsesAuthoritativeFeedRoute() throws {
         let decoder = JSONDecoder()
         let direct = try decoder.decode(
