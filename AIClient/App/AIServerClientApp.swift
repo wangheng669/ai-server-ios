@@ -763,6 +763,13 @@ private actor TodayWorldPostMemoryCache {
         return ids.compactMap { entries[key(id: $0, baseURL: baseURL)]?.post }
     }
 
+    func store(posts: [Post], baseURL: URL) {
+        let loadedAt = Date()
+        for post in posts {
+            entries[key(id: post.id, baseURL: baseURL)] = Entry(post: post, loadedAt: loadedAt)
+        }
+    }
+
     func post(id: Int, baseURL: URL) async throws -> Post {
         let cacheKey = key(id: id, baseURL: baseURL)
         if let entry = entries[cacheKey], Date().timeIntervalSince(entry.loadedAt) <= lifetime {
@@ -795,6 +802,34 @@ private actor TodayWorldPostMemoryCache {
         let cutoff = Date().addingTimeInterval(-lifetime)
         entries = entries.filter { $0.value.loadedAt >= cutoff }
     }
+}
+
+private struct TodayWorldPostBatchResponse: Decodable {
+    let success: Bool
+    let posts: [Post]
+}
+
+private func fetchTodayWorldPostBatch(ids: [Int], baseURL: URL) async throws -> [Post] {
+    var seen = Set<Int>()
+    let requestedIDs = ids.filter { $0 > 0 && seen.insert($0).inserted }.prefix(50)
+    guard !requestedIDs.isEmpty else { return [] }
+
+    var components = URLComponents(
+        url: baseURL.appending(path: "api/ios/v1/post/batch"),
+        resolvingAgainstBaseURL: false
+    )
+    components?.queryItems = [
+        .init(name: "ids", value: requestedIDs.map(String.init).joined(separator: ","))
+    ]
+    guard let url = components?.url else { throw APIError.invalidURL }
+
+    let request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData)
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+    guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+    let decoded = try JSONDecoder().decode(TodayWorldPostBatchResponse.self, from: data)
+    guard decoded.success else { throw APIError.invalidResponse }
+    return decoded.posts
 }
 
 private struct TodayWorldView: View {
@@ -1506,6 +1541,27 @@ private struct TodayWorldReportSourcesSheet: View {
         isLoading = posts.isEmpty
 
         var lastError: Error?
+        let batchIDs = system.postIDs.filter { loadedByID[$0] == nil }
+        if !batchIDs.isEmpty {
+            do {
+                let batchPosts = try await fetchTodayWorldPostBatch(ids: batchIDs, baseURL: baseURL)
+                await TodayWorldPostMemoryCache.shared.store(posts: batchPosts, baseURL: baseURL)
+                for post in batchPosts {
+                    loadedByID[post.id] = post
+                    if let tweetID = post.xTweetID,
+                       let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
+                        translations[post.id] = value
+                    }
+                }
+                posts = system.postIDs.compactMap { loadedByID[$0] }
+                isLoading = posts.isEmpty
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = error
+            }
+        }
+
         await withTaskGroup(of: (Int, Result<Post, Error>).self) { group in
             for postID in system.postIDs where loadedByID[postID] == nil {
                 group.addTask {
