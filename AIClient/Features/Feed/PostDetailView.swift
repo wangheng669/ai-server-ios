@@ -2379,13 +2379,15 @@ struct PostDetailView: View {
 
     private var xAuthorHeader: some View {
         HStack(spacing: 9) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 40)
+            AvatarView(url: xDetailAuthorAvatarURL, name: xDetailAuthorName, size: 40)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(post.authorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
-                    Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
+                    Text(xDetailAuthorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
+                    if xDetailAuthorIsVerified {
+                        Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
+                    }
                 }
-                if let handle = post.authorHandle {
+                if let handle = xDetailAuthorHandle {
                     Text(handle).font(.system(size: 14)).foregroundStyle(.secondary)
                 }
             }
@@ -2398,6 +2400,28 @@ struct PostDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("在 X App 中打开")
         }
+    }
+
+    private var xDetailAuthorName: String {
+        let name = xLiveDetail?.author?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? post.authorName : name
+    }
+
+    private var xDetailAuthorHandle: String? {
+        if let screenName = xLiveDetail?.author?.screenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t")),
+           !screenName.isEmpty {
+            return "@\(screenName)"
+        }
+        return post.authorHandle
+    }
+
+    private var xDetailAuthorAvatarURL: URL? {
+        xLiveDetail?.author?.profileImageURL.flatMap(MediaURL.image) ?? post.avatarURL
+    }
+
+    private var xDetailAuthorIsVerified: Bool {
+        xLiveDetail?.author?.verified ?? post.user?.verified ?? false
     }
 
     private func xStyledParagraph(_ paragraph: String) -> AttributedString {
@@ -2592,7 +2616,12 @@ struct PostDetailView: View {
     }
 
     private var detailImageHeight: CGFloat {
-        guard let image = post.images?.first, let width = image.width, let height = image.height, width > 0 else { return 300 }
+        let dimensions = post.images?.first.map { ($0.width, $0.height) }
+            ?? xLiveDetail?.imageMedia.first.map { ($0.width, $0.height) }
+        guard let dimensions,
+              let width = dimensions.0,
+              let height = dimensions.1,
+              width > 0 else { return 300 }
         let availableWidth = UIScreen.main.bounds.width - 16
         return min(availableWidth * CGFloat(height) / CGFloat(width), 620)
     }
@@ -2629,7 +2658,9 @@ struct PostDetailView: View {
         } else {
             PostMediaGrid(
                 post: post,
-                imageURLs: post.isXueqiu ? post.xueqiuUnplacedImageURLs : nil,
+                imageURLs: post.sourceName == "X"
+                    ? xDetailImageURLs
+                    : (post.isXueqiu ? post.xueqiuUnplacedImageURLs : nil),
                 singleImageHeight: detailImageHeight,
                 availableWidth: UIScreen.main.bounds.width - 16,
                 cornerRadius: 6
@@ -2641,6 +2672,10 @@ struct PostDetailView: View {
         post.videoURLs.first ?? xLiveDetail?.videoURL
     }
 
+    private var xDetailImageURLs: [URL] {
+        post.imageURLs.isEmpty ? (xLiveDetail?.imageURLs ?? []) : post.imageURLs
+    }
+
     private var xDetailVideoFallbackURL: URL? {
         nil
     }
@@ -2650,7 +2685,7 @@ struct PostDetailView: View {
     }
 
     private var xDetailHasMedia: Bool {
-        xDetailVideoURL != nil || !post.imageURLs.isEmpty
+        xDetailVideoURL != nil || !xDetailImageURLs.isEmpty
     }
 
     private var xVideoHeight: CGFloat {

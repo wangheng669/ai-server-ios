@@ -257,6 +257,10 @@ struct XTweetDetailItem: Decodable, Equatable {
         var isVideo: Bool {
             ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
         }
+
+        var displayURL: URL? {
+            (thumbnailURL ?? url).flatMap(MediaURL.image)
+        }
     }
 
     var fullText: String {
@@ -280,6 +284,14 @@ struct XTweetDetailItem: Decodable, Equatable {
 
     var videoPreviewURL: URL? {
         videoMedia?.thumbnailURL.flatMap(MediaURL.image)
+    }
+
+    var imageMedia: [Media] {
+        (media ?? []).filter { !$0.isVideo && $0.displayURL != nil }
+    }
+
+    var imageURLs: [URL] {
+        imageMedia.compactMap(\.displayURL)
     }
 }
 
