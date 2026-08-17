@@ -1046,13 +1046,11 @@ private struct TodayWorldReportSourcesSheet: View {
         }
         .task(id: system.id) { await load() }
         .sheet(item: $selectedPost) { post in
-            NavigationStack {
-                PostDetailView(post: post, presentedAsSheet: true)
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(28)
-            .presentationContentInteraction(.scrolls)
+            TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationContentInteraction(.scrolls)
         }
     }
 
@@ -1155,6 +1153,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 Button("查看帖子详情") {
                     selectedPost = post
                 }
+                .accessibilityHint("打开动态详情，可左右滑动切换")
             }
             .font(.system(size: 12.5, weight: .medium))
             .foregroundStyle(.secondary)
@@ -1224,6 +1223,93 @@ private struct TodayWorldReportSourcesSheet: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日"
         return formatter.string(from: date)
+    }
+}
+
+private struct TodayWorldPostDetailCarousel: View {
+    let posts: [Post]
+
+    @State private var selectedPostID: Int
+
+    init(posts: [Post], initialPost: Post) {
+        self.posts = posts
+        _selectedPostID = State(initialValue: initialPost.id)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if posts.count > 1 {
+                    navigationStrip
+                }
+
+                TabView(selection: $selectedPostID) {
+                    ForEach(posts) { post in
+                        PostDetailView(post: post, presentedAsSheet: true)
+                            .tag(post.id)
+                            .id(post.id)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: posts.count > 1 ? .automatic : .never))
+            }
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle("动态详情")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("动态详情，第\(selectedIndex + 1)条，共\(posts.count)条")
+        .accessibilityHint(posts.count > 1 ? "左右滑动切换动态" : "")
+        .accessibilityAction(named: "上一条动态") { move(by: -1) }
+        .accessibilityAction(named: "下一条动态") { move(by: 1) }
+    }
+
+    private var navigationStrip: some View {
+        HStack(spacing: 14) {
+            Button {
+                move(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 36, height: 32)
+            }
+            .disabled(selectedIndex == 0)
+            .accessibilityLabel("上一条动态")
+
+            Text("第\(selectedIndex + 1) / \(posts.count) 条")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+
+            Button {
+                move(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 36, height: 32)
+            }
+            .disabled(selectedIndex == posts.count - 1)
+            .accessibilityLabel("下一条动态")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var selectedIndex: Int {
+        posts.firstIndex(where: { $0.id == selectedPostID }) ?? 0
+    }
+
+    private func move(by offset: Int) {
+        let newIndex = selectedIndex + offset
+        guard posts.indices.contains(newIndex) else { return }
+        withAnimation(.easeInOut(duration: 0.22)) {
+            selectedPostID = posts[newIndex].id
+        }
     }
 }
 
