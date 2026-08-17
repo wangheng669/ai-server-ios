@@ -118,12 +118,27 @@ struct APIClient {
         feedID: Int,
         page: Int = 1,
         limit: Int = 20,
-        includesAllScores: Bool = false
+        includesAllScores: Bool = true
     ) async throws -> [Post] {
         var parts = URLComponents(
             url: baseURL.appending(path: "api/ios/v1/rss/feeds/\(feedID)/posts"),
             resolvingAgainstBaseURL: false
         )
+        parts?.queryItems = Self.rssFeedPostQueryItems(
+            page: page,
+            limit: limit,
+            includesAllScores: includesAllScores
+        )
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: RSSFeedPostsResponse = try await get(url)
+        return response.data.posts
+    }
+
+    static func rssFeedPostQueryItems(
+        page: Int,
+        limit: Int,
+        includesAllScores: Bool = true
+    ) -> [URLQueryItem] {
         var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)),
             .init(name: "limit", value: String(limit)),
@@ -133,10 +148,7 @@ struct APIClient {
         if !includesAllScores {
             queryItems.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
         }
-        parts?.queryItems = queryItems
-        guard let url = parts?.url else { throw APIError.invalidURL }
-        let response: RSSFeedPostsResponse = try await get(url)
-        return response.data.posts
+        return queryItems
     }
 
     func fetchWeiboFollowingPosts(
