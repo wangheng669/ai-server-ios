@@ -984,7 +984,6 @@ private struct TodayWorldReportSourcesSheet: View {
     @State private var posts: [Post] = []
     @State private var translations: [Int: String] = [:]
     @State private var translationFailures: Set<Int> = []
-    @State private var originalPostIDs: Set<Int> = []
     @State private var selectedPost: Post?
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -997,9 +996,8 @@ private struct TodayWorldReportSourcesSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            sheetHeader
-
             if selectedPage == .summary {
+                sheetHeader
                 summaryPage
             } else {
                 VStack(spacing: 0) {
@@ -1145,48 +1143,61 @@ private struct TodayWorldReportSourcesSheet: View {
     }
 
     private var postsHeader: some View {
-        HStack(spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { selectedPage = .summary }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("今日摘要")
-                        .font(.system(size: 14, weight: .semibold))
+        VStack(spacing: 8) {
+            ZStack {
+                HStack {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { selectedPage = .summary }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                            Text("今日摘要")
+                                .font(.system(size: 16, weight: .medium))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.teal)
+
+                    Spacer()
+
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 38, height: 38)
+                            .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("关闭")
                 }
+
+                Text("\(posts.count) 条动态")
+                    .font(.system(size: 19, weight: .bold))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.teal)
 
-            Spacer()
-
-            Text("用户动态")
-                .font(.system(size: 15, weight: .semibold))
+            Text("\(displayDate) · 按时间排序")
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
         .overlay(alignment: .bottom) { Divider() }
     }
 
     private var postsPage: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                Text("\(displayDate) · \(posts.count) 条动态")
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 10)
-
                 ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
                     if index > 0 {
                         Divider()
-                            .padding(.vertical, 16)
+                            .padding(.leading, 60)
                     }
                     postSection(post)
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
         }
         .scrollIndicators(.hidden)
     }
@@ -1198,48 +1209,189 @@ private struct TodayWorldReportSourcesSheet: View {
 
     @ViewBuilder
     private func postSection(_ post: Post) -> some View {
-        let showsOriginal = originalPostIDs.contains(post.id)
-        VStack(alignment: .leading, spacing: 9) {
-            Text(post.formattedTime ?? "")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 12) {
+            AvatarView(url: post.avatarURL, name: post.authorName, size: 48)
 
-            if showsOriginal {
-                Text(post.xStoredOriginalContent)
-                    .font(.system(size: 15))
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let translation = translations[post.id] ?? (post.hasTranslation ? post.displayContent : nil) {
-                Text(translation)
-                    .font(.system(size: 15))
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if translationFailures.contains(post.id) {
-                Text("中文翻译暂不可用")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-            } else {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("正在翻译")
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(post.authorName)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text([post.authorHandle, post.formattedTime].compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if let reply = post.meta?.replyContext,
+                   let replyText = reply.displayText {
+                    TodayWorldReplyContextCard(reply: reply, text: replyText)
+                } else if let replyHandle = replyHandle(for: post) {
+                    Text("回复 \(replyHandle)")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Color.teal)
+                }
+
+                if let content = displayedContent(for: post) {
+                    Text(content)
+                        .font(.system(size: 16))
+                        .lineSpacing(4)
+                        .lineLimit(8)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(.primary)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("正在翻译")
+                }
+
+                if let quote = post.meta?.quotedTweet {
+                    TodayWorldQuotedPostCard(quote: quote)
+                }
+
+                if post.previewURL != nil || !post.videoURLs.isEmpty {
+                    XFeedMediaView(post: post)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedPost = post
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("打开动态详情")
+    }
 
-            HStack(spacing: 16) {
-                Button(showsOriginal ? "显示翻译" : "显示原文") {
-                    if showsOriginal {
-                        originalPostIDs.remove(post.id)
-                    } else {
-                        originalPostIDs.insert(post.id)
+    private func displayedContent(for post: Post) -> String? {
+        if let translation = translations[post.id] {
+            return translation
+        }
+        if post.hasTranslation {
+            return post.displayContent
+        }
+        if translationFailures.contains(post.id) || !post.needsXTranslation {
+            return post.xStoredOriginalContent
+        }
+        return nil
+    }
+
+    private func replyHandle(for post: Post) -> String? {
+        guard let value = post.meta?.inReplyToScreenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@")),
+              !value.isEmpty else { return nil }
+        return "@\(value)"
+    }
+
+    private struct TodayWorldQuotedPostCard: View {
+        let quote: XQuotedPost
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    AvatarView(
+                        url: quote.author?.profileImageURL.flatMap(MediaURL.image),
+                        name: quote.author?.name ?? "引用动态",
+                        size: 24
+                    )
+
+                    Text(quote.author?.name ?? "引用动态")
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+
+                    if let handle = quote.author?.handle {
+                        Text(handle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                Button("查看帖子详情") {
-                    selectedPost = post
+
+                if let text = quote.displayText {
+                    Text(text)
+                        .font(.system(size: 14.5))
+                        .lineSpacing(3)
+                        .lineLimit(5)
+                        .truncationMode(.tail)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityHint("打开动态详情，可左右滑动切换")
+
+                let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
+                if let image = media.first, media.count == 1 {
+                    RemoteImage(url: image, height: 180, cornerRadius: 8)
+                        .frame(maxWidth: .infinity)
+                } else if !media.isEmpty {
+                    LazyVGrid(
+                        columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)],
+                        spacing: 3
+                    ) {
+                        ForEach(media, id: \.self) { url in
+                            RemoteImage(url: url, height: 110, cornerRadius: 8)
+                        }
+                    }
+                }
             }
-            .font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(.secondary)
-            .buttonStyle(.plain)
+            .padding(11)
+            .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            }
+        }
+    }
+
+    private struct TodayWorldReplyContextCard: View {
+        let reply: XReplyContext
+        let text: String
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("回复 \(reply.handle ?? "这条动态")")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Color.teal)
+
+                HStack(alignment: .top, spacing: 8) {
+                    AvatarView(
+                        url: reply.avatarURL.flatMap(MediaURL.image),
+                        name: reply.authorName ?? reply.handle ?? "回复",
+                        size: 26
+                    )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 5) {
+                            if let name = reply.authorName, !name.isEmpty {
+                                Text(name)
+                                    .font(.system(size: 13.5, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            if let handle = reply.handle {
+                                Text(handle)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Text(text)
+                            .font(.system(size: 14))
+                            .lineSpacing(3)
+                            .lineLimit(4)
+                            .truncationMode(.tail)
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            }
         }
     }
 
