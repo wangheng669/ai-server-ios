@@ -1766,7 +1766,7 @@ private struct MarketWorldMap: View {
             marketCode: "SPY",
             timeZone: "America/New_York",
             assetPoint: .init(x: 512, y: 306),
-            calloutOffset: .init(width: 47, height: 32)
+            calloutOffset: .init(width: 40, height: 32)
         ),
         .init(
             region: .china,
@@ -1862,7 +1862,8 @@ private struct MarketWorldMap: View {
         case .some: "已休市"
         case .none: "等待行情"
         }
-        return "\(market.region.rawValue)，\(status)"
+        let change = quote.map { "今日\($0.formattedPercent)" } ?? "涨跌等待更新"
+        return "\(market.region.rawValue)，\(status)，\(change)"
     }
 }
 
@@ -2140,6 +2141,17 @@ private struct MarketMapNode: View {
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 8.5, weight: .semibold))
+
+            HStack(spacing: 3) {
+                Text("今日")
+                    .foregroundStyle(.secondary)
+                Image(systemName: changeIcon)
+                    .font(.system(size: 7.5, weight: .bold))
+                Text(changeLabel)
+                    .monospacedDigit()
+            }
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(changeTint)
         }
         .fixedSize()
         .padding(.horizontal, 7)
@@ -2183,6 +2195,24 @@ private struct MarketMapNode: View {
 
     private var localTime: String {
         MarketViewDateFormatters.localTime(timeZone: market.timeZone).string(from: date)
+    }
+
+    private var changeLabel: String {
+        quote?.formattedPercent ?? "等待更新"
+    }
+
+    private var changeIcon: String {
+        guard let quote else { return "clock" }
+        if quote.percentValue > 0 { return "arrow.up.right" }
+        if quote.percentValue < 0 { return "arrow.down.right" }
+        return "minus"
+    }
+
+    private var changeTint: Color {
+        guard let quote else { return .secondary }
+        if quote.percentValue > 0 { return MarketStyle.gain }
+        if quote.percentValue < 0 { return MarketStyle.loss }
+        return .secondary
     }
 }
 
