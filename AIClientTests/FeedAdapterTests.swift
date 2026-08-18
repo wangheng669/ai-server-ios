@@ -1395,6 +1395,20 @@ final class FeedAdapterTests: XCTestCase {
         )
     }
 
+    func testXAvatarLoaderFallsBackToOriginalWhenHighResolutionVariantIsUnavailable() throws {
+        let original = try XCTUnwrap(
+            URL(string: "https://pbs.twimg.com/profile_images/1631421210205749248/uohbT_40_normal.jpg")
+        )
+
+        XCTAssertEqual(
+            ImageLoader.avatarCandidateURLs(original).map(\.absoluteString),
+            [
+                "https://pbs.twimg.com/profile_images/1631421210205749248/uohbT_200x200.jpg",
+                original.absoluteString,
+            ]
+        )
+    }
+
     func testXAvatarLoaderLeavesTweetMediaUnchanged() throws {
         let original = try XCTUnwrap(URL(string: "https://pbs.twimg.com/media/photo_normal.jpg"))
 
