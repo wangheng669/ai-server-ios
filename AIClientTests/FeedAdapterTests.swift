@@ -790,25 +790,20 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.selectedXAuthor, "sama")
     }
 
-    @MainActor
-    func testSelectedXUserSuppliesMissingAvatarForMatchingPosts() async throws {
+    func testXSelectorUsesMatchingPostAvatarAheadOfMissingDirectoryAvatar() throws {
         let post = try JSONDecoder().decode(
             Post.self,
-            from: Data(#"{"id":8,"source":"x","content":"你好","post_link":"https://x.com/sama/status/8","user":{"user_name":"Sam Altman","user_screen_name":"sama"},"meta":{"lang":"zh"}}"#.utf8)
-        )
-        let avatarURL = try XCTUnwrap(URL(string: "https://example.com/sama.jpg"))
-        let user = XFeedUser(id: "1605", name: "Sam Altman", screenName: "sama", avatarURL: avatarURL)
-        let model = NewsFeedViewModel(
-            source: .x,
-            fetchPosts: { _, _, _ in [] },
-            fetchXPosts: { _, _, _ in [post] },
-            fetchXFeedUsers: { [user] }
+            from: Data(#"{"id":8,"source":"x","content":"你好","post_link":"https://x.com/sama/status/8","user":{"user_name":"Sam Altman","user_screen_name":"@SAMA","avatar_url":"https://example.com/post-avatar.jpg"},"meta":{"lang":"zh"}}"#.utf8)
         )
 
-        await model.loadXFeedUsersIfNeeded()
-        await model.selectXUser(user)
-
-        XCTAssertEqual(model.postForDisplay(post).avatarURL, avatarURL)
+        XCTAssertEqual(
+            XFeedSelectorAvatarPolicy.resolvedAvatarURL(
+                directoryAvatarURL: nil,
+                screenName: "sama",
+                posts: [post]
+            ),
+            post.avatarURL
+        )
     }
 
     @MainActor

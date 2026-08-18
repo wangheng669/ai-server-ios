@@ -582,20 +582,7 @@ final class NewsFeedViewModel: ObservableObject {
                 excerpt: translation.excerpt
             )
         }
-        if displayed.sourceName == "X",
-           displayed.avatarURL == nil,
-           let selectedUser = xFeedUsers.first(where: { $0.id == selectedXUserID }),
-           Self.normalizedXHandle(displayed.user?.userScreenName) == Self.normalizedXHandle(selectedUser.screenName) {
-            displayed.xFallbackAvatarURL = selectedUser.avatarURL
-        }
         return displayed
-    }
-
-    private static func normalizedXHandle(_ value: String?) -> String? {
-        let normalized = value?
-            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@")))
-            .lowercased()
-        return normalized?.isEmpty == false ? normalized : nil
     }
 
     func preloadedNewYorkTimesArticle(for postID: Int) -> NewYorkTimesArticle? {

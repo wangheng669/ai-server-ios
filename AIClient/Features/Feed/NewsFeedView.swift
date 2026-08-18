@@ -112,6 +112,26 @@ enum FeedEntitySelectorPositionPolicy {
     }
 }
 
+enum XFeedSelectorAvatarPolicy {
+    static func resolvedAvatarURL(
+        directoryAvatarURL: URL?,
+        screenName: String,
+        posts: [Post]
+    ) -> URL? {
+        let handle = normalizedHandle(screenName)
+        return posts.first(where: {
+            normalizedHandle($0.user?.userScreenName) == handle && $0.avatarURL != nil
+        })?.avatarURL ?? directoryAvatarURL
+    }
+
+    private static func normalizedHandle(_ value: String?) -> String? {
+        let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@")))
+            .lowercased()
+        return normalized?.isEmpty == false ? normalized : nil
+    }
+}
+
 enum EmbeddedWebPresentationPolicy {
     static func opensImmediately(source: FeedSource) -> Bool {
         source == .weibo
@@ -500,7 +520,11 @@ struct NewsFeedView: View {
                     id: "x:\(user.id)",
                     name: user.name,
                     subtitle: "@\(user.screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@")))",
-                    avatarURL: user.avatarURL,
+                    avatarURL: XFeedSelectorAvatarPolicy.resolvedAvatarURL(
+                        directoryAvatarURL: user.avatarURL,
+                        screenName: user.screenName,
+                        posts: model.posts(for: .x)
+                    ),
                     feedID: nil
                 )
             }
