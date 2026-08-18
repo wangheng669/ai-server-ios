@@ -1760,35 +1760,73 @@ private struct MarketWorldMap: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let markets: [MarketMapLocation] = [
-        .init(region: .unitedStates, city: "纽约", assetPoint: .init(x: 512, y: 306)),
-        .init(region: .china, city: "上海", assetPoint: .init(x: 1_400, y: 340), labelOffset: .init(width: -40, height: 22)),
-        .init(region: .japan, city: "东京", assetPoint: .init(x: 1_497, y: 344), labelOffset: .init(width: 6, height: 10)),
-        .init(region: .korea, city: "首尔", assetPoint: .init(x: 1_450, y: 324), labelOffset: .init(width: -28, height: -24)),
-        .init(region: .europe, city: "法兰克福", assetPoint: .init(x: 860, y: 283), labelOffset: .init(width: -38, height: -17)),
+        .init(
+            region: .unitedStates,
+            city: "纽约",
+            marketCode: "SPY",
+            timeZone: "America/New_York",
+            assetPoint: .init(x: 512, y: 306),
+            calloutOffset: .init(width: 47, height: 32)
+        ),
+        .init(
+            region: .china,
+            city: "上海",
+            marketCode: "上证",
+            timeZone: "Asia/Shanghai",
+            assetPoint: .init(x: 1_400, y: 340),
+            calloutOffset: .init(width: -50, height: 34)
+        ),
+        .init(
+            region: .japan,
+            city: "东京",
+            marketCode: "N225",
+            timeZone: "Asia/Tokyo",
+            assetPoint: .init(x: 1_497, y: 344),
+            calloutOffset: .init(width: 18, height: 47)
+        ),
+        .init(
+            region: .korea,
+            city: "首尔",
+            marketCode: "KOSPI",
+            timeZone: "Asia/Seoul",
+            assetPoint: .init(x: 1_450, y: 324),
+            calloutOffset: .init(width: -17, height: -27)
+        ),
+        .init(
+            region: .europe,
+            city: "法兰克福",
+            marketCode: "STOXX",
+            timeZone: "Europe/Berlin",
+            assetPoint: .init(x: 860, y: 283),
+            calloutOffset: .init(width: 3, height: -24)
+        ),
     ]
 
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                mapBackground
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            GeometryReader { proxy in
+                ZStack {
+                    mapBackground
 
-                ForEach(markets) { market in
-                    Button { select(market.region) } label: {
-                        MarketMapNode(
-                            country: market.city,
-                            quote: store.quote(symbol: market.region.primarySymbol),
-                            isSelected: selection == market.region,
-                            labelOffset: market.labelOffset
-                        )
+                    ForEach(markets) { market in
+                        Button { select(market.region) } label: {
+                            MarketMapNode(
+                                market: market,
+                                quote: store.quote(symbol: market.region.primarySymbol),
+                                isSelected: selection == market.region,
+                                date: context.date
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(mapAccessibilityLabel(for: market))
+                        .accessibilityHint("切换到\(market.region.rawValue)市场")
+                        .position(market.position(in: proxy.size))
+                        .zIndex(selection == market.region ? 2 : 1)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(mapAccessibilityLabel(for: market))
-                    .accessibilityHint("切换到\(market.region.rawValue)市场")
-                    .position(market.position(in: proxy.size))
                 }
             }
         }
-        .frame(height: 142)
+        .frame(height: 164)
         .padding(.horizontal, 18)
         .padding(.top, 8)
         .padding(.bottom, 4)
@@ -2010,9 +2048,11 @@ private struct MarketMapLocation: Identifiable {
 
     let region: MarketRegion
     let city: String
+    let marketCode: String
+    let timeZone: String
     // Pixel coordinates calibrated against market-world-map.png.
     let assetPoint: CGPoint
-    var labelOffset = CGSize.zero
+    let calloutOffset: CGSize
     var id: MarketRegion { region }
 
     func position(in size: CGSize) -> CGPoint {
@@ -2033,34 +2073,116 @@ private struct MarketMapLocation: Identifiable {
 }
 
 private struct MarketMapNode: View {
-    let country: String
+    let market: MarketMapLocation
     let quote: MarketQuote?
     let isSelected: Bool
-    let labelOffset: CGSize
+    let date: Date
 
     var body: some View {
-        Circle()
-            .fill(nodeTint)
-            .frame(width: 8, height: 8)
-            .overlay {
-                if isSelected {
-                    Circle().stroke(MarketStyle.accent, lineWidth: 3)
-                        .padding(-4)
-                }
+        ZStack {
+            connector
+
+            if isSelected {
+                Circle()
+                    .fill(MarketStyle.accent.opacity(0.14))
+                    .frame(width: 24, height: 24)
             }
-            .overlay(alignment: .leading) {
-                Text(country)
+
+            Circle()
+                .stroke(nodeTint.opacity(isOpen ? 0.34 : 0), lineWidth: 1.5)
+                .frame(width: 18, height: 18)
+
+            Circle()
+                .fill(nodeTint)
+                .frame(width: 9, height: 9)
+                .overlay {
+                    Circle().stroke(.background.opacity(0.9), lineWidth: 1)
+                }
+
+            callout
+                .offset(market.calloutOffset)
+        }
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+    }
+
+    private var connector: some View {
+        let offset = market.calloutOffset
+        let distance = hypot(offset.width, offset.height)
+        let angle = Angle(radians: atan2(Double(offset.height), Double(offset.width)))
+        return Capsule()
+            .fill(nodeTint.opacity(isOpen ? 0.45 : 0.22))
+            .frame(width: max(distance - 18, 8), height: 1)
+            .rotationEffect(angle)
+            .offset(x: offset.width / 2, y: offset.height / 2)
+    }
+
+    private var callout: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(market.city)
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .fixedSize()
-                    .offset(x: 13 + labelOffset.width, y: labelOffset.height)
+                Text(localTime)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
+
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(nodeTint)
+                    .frame(width: 4, height: 4)
+                Text(statusLabel)
+                    .foregroundStyle(statusTint)
+                Text("· \(market.marketCode)")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 8.5, weight: .semibold))
+        }
+        .fixedSize()
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(isSelected ? MarketStyle.accent.opacity(0.7) : Color.primary.opacity(0.09), lineWidth: isSelected ? 1.2 : 0.7)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
     }
 
     private var nodeTint: Color {
-        quote?.tradingSession == .regular ? MarketStyle.loss : Color.secondary.opacity(0.55)
+        isOpen ? MarketStyle.loss : Color.secondary.opacity(0.55)
+    }
+
+    private var isOpen: Bool {
+        quote?.tradingSession == .regular || quote?.tradingSession == .alwaysOpen
+    }
+
+    private var statusLabel: String {
+        switch quote?.tradingSession {
+        case .regular: "交易中"
+        case .premarket: "盘前"
+        case .postmarket: "盘后"
+        case .overnight: "夜盘"
+        case .closed: "已休市"
+        case .alwaysOpen: "24H"
+        case .unknown: "待更新"
+        case .none: "等待行情"
+        }
+    }
+
+    private var statusTint: Color {
+        switch quote?.tradingSession {
+        case .regular, .alwaysOpen: MarketStyle.loss
+        case .premarket, .postmarket, .overnight: .orange
+        case .closed, .unknown, .none: .secondary
+        }
+    }
+
+    private var localTime: String {
+        MarketViewDateFormatters.localTime(timeZone: market.timeZone).string(from: date)
     }
 }
 
