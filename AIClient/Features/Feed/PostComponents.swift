@@ -664,9 +664,22 @@ actor ImageLoader {
 
     static func load(_ url: URL?, targetSize: CGSize? = nil) async -> UIImage? {
         guard let url else { return nil }
-        let sourceURL = highResolutionAvatarURL(url)
-        let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
-        return await shared.image(for: relayedURL, targetSize: targetSize, scale: UIScreen.main.scale)
+        for sourceURL in avatarCandidateURLs(url) {
+            let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
+            if let image = await shared.image(
+                for: relayedURL,
+                targetSize: targetSize,
+                scale: UIScreen.main.scale
+            ) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    static func avatarCandidateURLs(_ url: URL) -> [URL] {
+        let highResolutionURL = highResolutionAvatarURL(url)
+        return highResolutionURL == url ? [url] : [highResolutionURL, url]
     }
 
     static func highResolutionAvatarURL(_ url: URL) -> URL {
