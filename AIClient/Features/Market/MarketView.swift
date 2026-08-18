@@ -133,6 +133,10 @@ private struct MarketHomeView: View {
                     }
                     .frame(height: 1)
                     .id("market-top")
+                    MarketWorldMap(store: store, selection: $selectedMarket)
+                        .id("market-map")
+                    MarketRegionPicker(selection: $selectedMarket)
+                        .simultaneousGesture(regionSwipeGesture)
                     ZStack {
                         MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
                             .id(selectedMarket)
@@ -158,10 +162,6 @@ private struct MarketHomeView: View {
                         if selectedMarket == .china {
                             ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
                                 .id("market-structure")
-                        }
-                        if selectedMarket != .crypto && selectedMarket != .commodity {
-                            MarketWorldMap(store: store, selection: $selectedMarket)
-                                .id("market-map")
                         }
                     }
                     .padding(.bottom, 16)
@@ -198,10 +198,6 @@ private struct MarketHomeView: View {
                 proxy.scrollTo("market-structure", anchor: .top)
             }
             #endif
-            .safeAreaInset(edge: .top, spacing: 0) {
-                MarketRegionPicker(selection: $selectedMarket)
-                    .simultaneousGesture(regionSwipeGesture)
-            }
         }
     }
 
@@ -1762,48 +1758,34 @@ private struct MarketWorldMap: View {
         .init(region: .china, city: "上海", latitude: 31.23, longitude: 121.47, labelOffset: .init(width: -30, height: 30)),
         .init(region: .japan, city: "东京", latitude: 35.68, longitude: 139.69, labelOffset: .init(width: 6, height: 22)),
         .init(region: .korea, city: "首尔", latitude: 37.56, longitude: 126.97, labelOffset: .init(width: -8, height: -30)),
+        .init(region: .europe, city: "法兰克福", latitude: 50.11, longitude: 8.68, labelOffset: .init(width: -14, height: -20)),
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("全球市场地图").font(.title3.weight(.semibold))
-                Spacer()
-                MarketLiveStatus(store: store)
-            }
-            .padding(.horizontal, 18)
+        GeometryReader { proxy in
+            ZStack {
+                mapBackground
 
-            VStack(spacing: 0) {
-                GeometryReader { proxy in
-                    ZStack {
-                        mapBackground
-
-                        ForEach(markets) { market in
-                            Button { select(market.region) } label: {
-                                MarketMapNode(
-                                    country: market.city,
-                                    quote: store.quote(symbol: market.region.primarySymbol),
-                                    isSelected: selection == market.region
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(mapAccessibilityLabel(for: market))
-                            .accessibilityHint("切换到\(market.region.rawValue)市场")
-                            .position(market.position(in: proxy.size))
-                            .offset(market.labelOffset)
-                        }
+                ForEach(markets) { market in
+                    Button { select(market.region) } label: {
+                        MarketMapNode(
+                            country: market.city,
+                            quote: store.quote(symbol: market.region.primarySymbol),
+                            isSelected: selection == market.region
+                        )
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(mapAccessibilityLabel(for: market))
+                    .accessibilityHint("切换到\(market.region.rawValue)市场")
+                    .position(market.position(in: proxy.size))
+                    .offset(market.labelOffset)
                 }
-                .frame(height: 176)
-
-                MarketSessionSchedule(region: selection)
             }
-            .padding(.horizontal, 18)
         }
-        .padding(.vertical, 16)
-        .overlay(alignment: .top) {
-            Divider().opacity(0.65)
-        }
+        .frame(height: 142)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder private var mapBackground: some View {
@@ -1831,7 +1813,12 @@ private struct MarketWorldMap: View {
 
     private func mapAccessibilityLabel(for market: MarketMapLocation) -> String {
         let quote = store.quote(symbol: market.region.primarySymbol)
-        return "\(market.region.rawValue)，\(quote?.formattedPercent ?? "等待行情")"
+        let status = switch quote?.tradingSession {
+        case .regular: "交易中"
+        case .some: "已休市"
+        case .none: "等待行情"
+        }
+        return "\(market.region.rawValue)，\(status)"
     }
 }
 
@@ -2034,32 +2021,26 @@ private struct MarketMapNode: View {
     let isSelected: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 5) {
+        HStack(spacing: 5) {
             Circle()
-                .fill(isSelected ? Color(uiColor: .systemBackground) : nodeTint)
-                .frame(width: 7, height: 7)
+                .fill(nodeTint)
+                .frame(width: 8, height: 8)
                 .overlay {
                     if isSelected {
                         Circle().stroke(MarketStyle.accent, lineWidth: 3)
+                            .padding(-4)
                     }
                 }
-                .padding(.top, 3)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(country)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(quote?.formattedPercent ?? "—")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(quoteTint(quote))
-            }
+            Text(country)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.primary)
         }
-        .padding(5)
+        .padding(6)
         .contentShape(Rectangle())
     }
 
     private var nodeTint: Color {
-        isSelected ? MarketStyle.accent : quoteTint(quote)
+        quote?.tradingSession == .regular ? MarketStyle.loss : Color.secondary.opacity(0.55)
     }
 }
 
