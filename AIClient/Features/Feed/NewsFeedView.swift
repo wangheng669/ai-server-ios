@@ -247,7 +247,9 @@ struct NewsFeedView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedPost) { post in
+        .sheet(item: $selectedPost, onDismiss: {
+            showsDetail = false
+        }) { post in
             NavigationStack {
                 if let source = FeedSource(rawValue: post.source ?? ""),
                    source == .weibo || source == .douyin || source == .baidu,
@@ -289,10 +291,12 @@ struct NewsFeedView: View {
             }
         }
         .onChange(of: selectedPost, initial: true) { _, post in
-            showsDetail = FeedDetailChromePolicy.hidesRootChrome(
-                isPresented: post != nil,
-                isXueqiu: post?.isXueqiu == true
-            )
+            if let post {
+                showsDetail = FeedDetailChromePolicy.hidesRootChrome(
+                    isPresented: true,
+                    isXueqiu: post.isXueqiu
+                )
+            }
             if post == nil {
                 isFeedChromeHidden = false
                 hidesTabBar = false

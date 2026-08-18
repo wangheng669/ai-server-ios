@@ -67,7 +67,9 @@ struct MarketView: View {
         MarketHomeView(store: store, onCompactHeaderChange: onCompactHeaderChange) {
             selectedDetail = MarketDetailRoute(symbol: $0)
         }
-        .sheet(item: $selectedDetail) { route in
+        .sheet(item: $selectedDetail, onDismiss: {
+            showsDetail = false
+        }) { route in
             MarketIndexDetailView(
                 symbol: route.symbol,
                 store: store,
@@ -89,7 +91,11 @@ struct MarketView: View {
             guard rootTabIsActive, phase == .active else { return }
             Task { await store.resumeUpdates() }
         }
-        .onChange(of: selectedDetail) { _, route in showsDetail = route != nil }
+        .onChange(of: selectedDetail) { _, route in
+            if route != nil {
+                showsDetail = true
+            }
+        }
         .onAppear { showsDetail = selectedDetail != nil }
         .onDisappear { showsDetail = false }
     }

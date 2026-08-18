@@ -67,7 +67,9 @@ struct PeopleView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .navigationBarHidden(true)
         }
-        .sheet(isPresented: detailIsPresented) {
+        .sheet(isPresented: detailIsPresented, onDismiss: {
+            showsDetail = false
+        }) {
             PersonDetailSheet(
                 selectedPerson: $selectedPerson,
                 people: store.people,
@@ -93,7 +95,9 @@ struct PeopleView: View {
         }
         .onAppear { showsDetail = selectedPerson != nil }
         .onChange(of: selectedPerson) { _, person in
-            showsDetail = person != nil
+            if person != nil {
+                showsDetail = true
+            }
         }
         .onChange(of: notificationPersonID) { _, _ in
             openNotificationPersonIfNeeded()

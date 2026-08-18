@@ -243,8 +243,6 @@ private struct EditorialRootView: View {
     @State private var showsSignalFilters = false
     @State private var rootBottomChromeHeight: CGFloat = 0
     @State private var dismissedDeploymentIdentity: String?
-    @State private var keepsRootTabBarHidden = false
-    @State private var rootTabBarRestoreTask: Task<Void, Never>?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -382,7 +380,7 @@ private struct EditorialRootView: View {
                     )
                 }
 
-                if !keepsRootTabBarHidden {
+                if !hidesRootTabBar {
                     RootNavigationBar(
                         selection: $selectedTab,
                         dynamicTarget: lastDynamicTab,
@@ -464,30 +462,6 @@ private struct EditorialRootView: View {
                 break
             }
         }
-        .onChange(of: hidesRootTabBar, initial: true) { _, isHidden in
-            updateRootTabBarVisibility(isHidden: isHidden)
-        }
-    }
-
-    private func updateRootTabBarVisibility(isHidden: Bool) {
-        rootTabBarRestoreTask?.cancel()
-
-        if isHidden {
-            keepsRootTabBarHidden = true
-            return
-        }
-
-        guard keepsRootTabBarHidden,
-              RootChromeDismissalPolicy.shouldDelayRestore(reduceMotion: reduceMotion) else {
-            keepsRootTabBarHidden = false
-            return
-        }
-
-        rootTabBarRestoreTask = Task { @MainActor in
-            try? await Task.sleep(for: RootChromeDismissalPolicy.restoreDelay)
-            guard !Task.isCancelled else { return }
-            keepsRootTabBarHidden = false
-        }
     }
 
     private func tabContent<Content: View>(
@@ -505,14 +479,6 @@ private struct EditorialRootView: View {
                 reduceMotion ? nil : .smooth(duration: 0.2, extraBounce: 0),
                 value: selectedTab
             )
-    }
-}
-
-enum RootChromeDismissalPolicy {
-    static let restoreDelay = Duration.milliseconds(400)
-
-    static func shouldDelayRestore(reduceMotion: Bool) -> Bool {
-        !reduceMotion
     }
 }
 
@@ -747,6 +713,10 @@ private struct TodayWorldPostBatchResponse: Decodable {
     let posts: [Post]
 }
 
+enum TodayWorldSheetPresentationPolicy {
+    static let contentInteraction = PresentationContentInteraction.resizes
+}
+
 private func fetchTodayWorldPostBatch(ids: [Int], baseURL: URL) async throws -> [Post] {
     var seen = Set<Int>()
     let requestedIDs = ids.filter { $0 > 0 && seen.insert($0).inserted }.prefix(50)
@@ -798,12 +768,14 @@ private struct TodayWorldView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedSystem) { system in
+        .sheet(item: $selectedSystem, onDismiss: {
+            showsDetail = false
+        }) { system in
             TodayWorldReportSourcesSheet(system: system, reportDate: store.report?.date ?? "")
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationContentInteraction(.scrolls)
+                .presentationContentInteraction(TodayWorldSheetPresentationPolicy.contentInteraction)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -814,7 +786,9 @@ private struct TodayWorldView: View {
             Task { await store.load(force: true) }
         }
         .onChange(of: selectedSystem) { _, system in
-            showsDetail = system != nil
+            if system != nil {
+                showsDetail = true
+            }
         }
     }
 
@@ -1029,7 +1003,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationContentInteraction(.scrolls)
+                .presentationContentInteraction(TodayWorldSheetPresentationPolicy.contentInteraction)
         }
     }
 
@@ -1227,7 +1201,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationContentInteraction(.scrolls)
+                .presentationContentInteraction(TodayWorldSheetPresentationPolicy.contentInteraction)
         }
     }
 
