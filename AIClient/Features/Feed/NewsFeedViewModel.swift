@@ -691,6 +691,17 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
+    private func scheduleXTranslations(for posts: [Post]) {
+        let candidates = posts.filter { $0.needsXTranslation || $0.isXRetweetWrapper }
+        guard !candidates.isEmpty else { return }
+        for post in candidates {
+            Task { @MainActor [weak self] in
+                guard let self, !Task.isCancelled else { return }
+                await translateXPostIfNeeded(post)
+            }
+        }
+    }
+
     private struct CachedRSSCardTranslation: Codable {
         let sourceTitle: String
         let translatedTitle: String
@@ -970,6 +981,9 @@ final class NewsFeedViewModel: ObservableObject {
             }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            if requestedSource == .x {
+                scheduleXTranslations(for: result)
+            }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             guard source == requestedSource, activeRefreshID == refreshID else { return }
@@ -1023,6 +1037,9 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            if requestedSource == .x {
+                scheduleXTranslations(for: result)
+            }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             errorMessage = NetworkErrorPresentation.message(for: error)
