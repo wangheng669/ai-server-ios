@@ -3,7 +3,6 @@ import SwiftUI
 import UIKit
 
 private enum MarketStyle {
-    static let canvas = InvestmentDesign.canvas
     static let surface = InvestmentDesign.surface
     static let divider = InvestmentDesign.divider
     static let gain = InvestmentDesign.gain
@@ -11,8 +10,6 @@ private enum MarketStyle {
     static let accent = InvestmentDesign.accent
     static let chartTransition = Animation.smooth(duration: 0.6)
     static let purple = accent
-    static let pageInset: CGFloat = 14
-    static let sectionRadius: CGFloat = 20
 }
 
 private struct MarketDetailRoute: Identifiable, Equatable {
@@ -125,7 +122,7 @@ private struct MarketHomeView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 0) {
                     GeometryReader { geometry in
                         Color.clear.preference(
                             key: MarketHomeScrollOffsetPreferenceKey.self,
@@ -140,9 +137,8 @@ private struct MarketHomeView: View {
                             .transition(.opacity)
                     }
                     .animation(.easeInOut(duration: 0.18), value: selectedMarket)
-                    .padding(.horizontal, MarketStyle.pageInset)
 
-                    VStack(spacing: 12) {
+                    VStack(spacing: 0) {
                         if let error = regionalHealthMessage {
                             MarketErrorBanner(
                                 message: error,
@@ -170,7 +166,7 @@ private struct MarketHomeView: View {
                     .padding(.bottom, 16)
                 }
             }
-            .background(MarketStyle.canvas.ignoresSafeArea())
+            .background(MarketStyle.surface.ignoresSafeArea())
             .coordinateSpace(name: "market-scroll")
             .scrollIndicators(.hidden)
             .refreshable { await store.refresh() }
@@ -264,7 +260,6 @@ private struct MarketHomeScrollOffsetPreferenceKey: PreferenceKey {
 
 private enum MarketTerminalPalette {
     static let header = InvestmentDesign.surface
-    static let headerSurface = InvestmentDesign.secondarySurface
     static let headerDivider = InvestmentDesign.divider
 }
 
@@ -442,33 +437,15 @@ private struct MarketTerminalHero: View {
             }
             }
             .frame(height: dynamicTypeSize.isAccessibilitySize ? 180 : 76)
-            .padding(.vertical, 8)
-            .background(
-                MarketTerminalPalette.headerSurface.opacity(0.72),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-            )
+            .padding(.top, 12)
+            .overlay(alignment: .top) {
+                Divider().opacity(0.55)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
         .padding(.bottom, 18)
-        .background {
-            RoundedRectangle(cornerRadius: MarketStyle.sectionRadius, style: .continuous)
-                .fill(MarketTerminalPalette.header)
-                .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(MarketStyle.accent.opacity(0.09))
-                        .frame(width: 170, height: 170)
-                        .blur(radius: 30)
-                        .offset(x: 52, y: -76)
-                        .allowsHitTesting(false)
-                }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: MarketStyle.sectionRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: MarketStyle.sectionRadius, style: .continuous)
-                .stroke(MarketStyle.divider, lineWidth: 0.5)
-        }
-        .shadow(color: Color.black.opacity(0.055), radius: 14, x: 0, y: 6)
+        .background(MarketTerminalPalette.header)
     }
 
     private var sessionLabel: String {
@@ -1000,17 +977,15 @@ private struct MarketRegionPicker: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 6)
-        .frame(maxWidth: .infinity)
-        .frame(height: 50)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(MarketStyle.divider, lineWidth: 0.5)
-        }
-        .shadow(color: Color.black.opacity(0.10), radius: 12, x: 0, y: 5)
         .padding(.horizontal, 10)
-        .padding(.bottom, 5)
+        .frame(maxWidth: .infinity)
+        .frame(height: 48)
+        .background(MarketStyle.surface)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(MarketStyle.divider)
+                .frame(height: 0.5)
+        }
     }
 
     private func regionButton(_ region: MarketRegion) -> some View {
@@ -1028,11 +1003,12 @@ private struct MarketRegionPicker: View {
                 .lineLimit(1)
                 .foregroundStyle(foreground)
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 36)
-                .background(
-                    isSelected ? MarketStyle.accent.opacity(0.13) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
+                .frame(minHeight: 44)
+                .overlay(alignment: .bottom) {
+                    Capsule()
+                        .fill(isSelected ? MarketStyle.accent : Color.clear)
+                        .frame(width: 24, height: 2)
+                }
                 .contentShape(Rectangle())
         }
         .id(region)
@@ -1059,10 +1035,9 @@ private struct MarketIndexTable: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: region.sectionIcon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(MarketStyle.accent)
-                    .frame(width: 30, height: 30)
-                    .background(MarketStyle.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(region.rawValue)市场")
                         .font(.headline)
@@ -1076,9 +1051,9 @@ private struct MarketIndexTable: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
 
             if region == .china {
                 ChinaIndexScopePicker(selection: $chinaScope)
@@ -1092,7 +1067,7 @@ private struct MarketIndexTable: View {
                 }
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 18)
                 .frame(height: 32)
 
                 Divider().opacity(0.45)
@@ -1121,7 +1096,7 @@ private struct MarketIndexTable: View {
                          )
                     }
                     .buttonStyle(MarketPressStyle())
-                    if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
+                    if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 18) }
                 }
             }
 
@@ -1132,7 +1107,7 @@ private struct MarketIndexTable: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 18)
                 .padding(.top, 14)
                 .padding(.bottom, 6)
 
@@ -1148,14 +1123,15 @@ private struct MarketIndexTable: View {
                         )
                     }
                     .buttonStyle(MarketPressStyle())
-                    if index < coreStocks.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
+                    if index < coreStocks.count - 1 { Divider().opacity(0.45).padding(.leading, 18) }
                 }
             }
 
         }
         .padding(.bottom, 8)
-        .marketCard(cornerRadius: MarketStyle.sectionRadius)
-        .padding(.horizontal, MarketStyle.pageInset)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.65)
+        }
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             guard region != .commodity else { return }
@@ -1213,9 +1189,11 @@ private struct ChinaMarketStructurePanel: View {
                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
             }
         }
-        .padding(16)
-        .marketCard(cornerRadius: MarketStyle.sectionRadius)
-        .padding(.horizontal, MarketStyle.pageInset)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.65)
+        }
     }
 }
 
@@ -1259,9 +1237,8 @@ private struct CombinedCapitalSignal: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(11)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -1436,9 +1413,7 @@ private struct MarginBalanceSignal: View {
                         .foregroundStyle(tint)
                 }
                 .font(.caption2)
-                .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: summaryIcon)
@@ -1456,9 +1431,8 @@ private struct MarginBalanceSignal: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(10)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             Text("判断综合余额趋势与融资买入活跃度；两融数据仅作为杠杆风险偏好的代理指标。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -1566,14 +1540,18 @@ private struct ChinaIndexScopePicker: View {
                         .foregroundStyle(selection == scope ? MarketStyle.accent : Color.secondary)
                         .padding(.horizontal, 10)
                         .frame(height: 28)
-                        .background(selection == scope ? MarketStyle.accent.opacity(0.09) : Color.clear, in: Capsule())
+                        .overlay(alignment: .bottom) {
+                            Capsule()
+                                .fill(selection == scope ? MarketStyle.accent : Color.clear)
+                                .frame(height: 2)
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == scope ? .isSelected : [])
             }
             Spacer()
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 18)
         .padding(.top, 4)
     }
 }
@@ -1595,7 +1573,7 @@ private struct MarketIndexTableRow: View {
                 standardLayout
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 18)
         .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 88 : 62)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -1810,11 +1788,12 @@ private struct MarketWorldMap: View {
 
                 MarketSessionSchedule(region: selection)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 18)
         }
-        .padding(.vertical, 14)
-        .marketCard(cornerRadius: MarketStyle.sectionRadius)
-        .padding(.horizontal, MarketStyle.pageInset)
+        .padding(.vertical, 16)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.65)
+        }
     }
 
     @ViewBuilder private var mapBackground: some View {
@@ -1873,7 +1852,6 @@ private struct MarketSessionSchedule: View {
                                 .foregroundStyle(activePeriod(at: context.date) == index ? MarketStyle.accent : .secondary)
                         }
                         .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(activePeriod(at: context.date) == index ? MarketStyle.accent.opacity(0.08) : .clear)
                         .overlay(alignment: .top) {
                             Rectangle()
                                 .fill(activePeriod(at: context.date) == index ? MarketStyle.accent : MarketStyle.divider)
@@ -2203,9 +2181,11 @@ private struct MarketErrorBanner: View {
                 .disabled(isRetrying)
                 .accessibilityLabel(isRetrying ? "正在重试行情" : "重试缺失行情")
         }
-        .padding(.horizontal, 12)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, MarketStyle.pageInset)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.45)
+        }
         .accessibilityElement(children: .contain)
     }
 }
