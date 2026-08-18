@@ -3342,47 +3342,62 @@ struct NewsCardView: View {
     }
 
     private var xCard: some View {
-        HStack(alignment: .top, spacing: 10) {
-            AvatarView(
-                url: post.avatarURL,
-                name: post.authorName,
-                size: 44,
-                cornerRadius: xAvatarCornerRadius
-            )
-            .contentShape(Rectangle())
-            .onTapGesture { onOpen?() }
-
-            VStack(alignment: .leading, spacing: 10) {
-                xAuthorHeader
-                    .contentShape(Rectangle())
-                    .onTapGesture { onOpen?() }
-
-                VStack(alignment: .leading, spacing: 5) {
-                    xRichText(xTimelineContent)
-                        .font(.system(size: 17, weight: .regular))
-                        .lineSpacing(3)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(isLongXPost ? 8 : nil)
-                        .fixedSize(horizontal: false, vertical: !isLongXPost)
-
-                    if isLongXPost {
-                        Button(action: { onOpen?() }) {
-                            Text("显示更多")
-                                .font(.system(size: 15, weight: .regular))
-                                .foregroundStyle(.blue)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("查看完整帖子")
-                    }
+        VStack(alignment: .leading, spacing: 6) {
+            if let attribution = post.xRepostAttributionText {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.2.squarepath")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(attribution)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
                 }
+                .foregroundStyle(.secondary)
+                .padding(.leading, 54)
+                .accessibilityElement(children: .combine)
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                AvatarView(
+                    url: post.avatarURL,
+                    name: post.authorName,
+                    size: 44,
+                    cornerRadius: xAvatarCornerRadius
+                )
                 .contentShape(Rectangle())
                 .onTapGesture { onOpen?() }
 
-                XFeedMediaView(post: post)
+                VStack(alignment: .leading, spacing: 10) {
+                    xAuthorHeader
+                        .contentShape(Rectangle())
+                        .onTapGesture { onOpen?() }
 
-                FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+                    VStack(alignment: .leading, spacing: 5) {
+                        xRichText(xTimelineContent)
+                            .font(.system(size: 17, weight: .regular))
+                            .lineSpacing(3)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(isLongXPost ? 8 : nil)
+                            .fixedSize(horizontal: false, vertical: !isLongXPost)
+
+                        if isLongXPost {
+                            Button(action: { onOpen?() }) {
+                                Text("显示更多")
+                                    .font(.system(size: 15, weight: .regular))
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("查看完整帖子")
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen?() }
+
+                    XFeedMediaView(post: post)
+
+                    FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)

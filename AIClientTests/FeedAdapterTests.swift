@@ -840,6 +840,7 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(displayed.authorName, "Brett Adcock")
         XCTAssertEqual(displayed.authorHandle, "@adcock_brett")
+        XCTAssertEqual(displayed.xRepostAttributionText, "Figure 已转帖")
         XCTAssertEqual(displayed.displayContent, "Jensen回来了！！")
         XCTAssertFalse(displayed.displayContent.hasPrefix("RT @"))
         XCTAssertEqual(displayed.imageURLs.count, 1)
