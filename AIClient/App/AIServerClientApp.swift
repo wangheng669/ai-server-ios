@@ -301,10 +301,6 @@ private struct EditorialRootView: View {
         }
     }
 
-    private var showsResearchSelector: Bool {
-        !hidesRootTabBar && EditorialTab.researchTabs.contains(selectedTab)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -382,14 +378,6 @@ private struct EditorialRootView: View {
                         sentiment: signalSentiment,
                         showsFilters: $showsSignalFilters
                     )
-                }
-
-                if showsResearchSelector {
-                    HStack {
-                        Spacer(minLength: 0)
-                        ResearchSectionSelector(selection: $selectedTab)
-                    }
-                    .padding(.horizontal, 14)
                 }
 
                 if !hidesRootTabBar {
@@ -494,109 +482,6 @@ private struct EditorialRootView: View {
     }
 }
 
-private struct ResearchSectionSelector: View {
-    @Binding var selection: EditorialTab
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isExpanded = false
-
-    var body: some View {
-        Button {
-            withAnimation(expansionAnimation) {
-                isExpanded.toggle()
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: selection.researchSelectorIcon)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Text(selection.sectionTitle)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .heavy))
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .frame(minWidth: 112, minHeight: 48)
-            .background(InvestmentDesign.accent, in: RoundedRectangle(cornerRadius: 16))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.white.opacity(0.24), lineWidth: 0.8)
-            }
-            .contentShape(Rectangle())
-            .shadow(color: InvestmentDesign.accent.opacity(0.26), radius: 12, y: 5)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("切换研究栏目，当前为\(selection.sectionTitle)")
-        .accessibilityValue(isExpanded ? "已展开" : "已收起")
-        .overlay(alignment: .bottomTrailing) {
-            if isExpanded {
-                VStack(alignment: .trailing, spacing: 8) {
-                    ForEach(EditorialTab.researchTabs, id: \.self) { tab in
-                        option(tab)
-                    }
-                }
-                .offset(y: -56)
-                .transition(
-                    .move(edge: .bottom)
-                        .combined(with: .scale(scale: 0.94, anchor: .bottomTrailing))
-                        .combined(with: .opacity)
-                )
-                .zIndex(1)
-            }
-        }
-        .zIndex(10)
-        .sensoryFeedback(.selection, trigger: selection)
-    }
-
-    private var expansionAnimation: Animation? {
-        reduceMotion ? nil : .snappy(duration: 0.26, extraBounce: 0.08)
-    }
-
-    private func option(_ tab: EditorialTab) -> some View {
-        let isSelected = selection == tab
-
-        return Button {
-            withAnimation(expansionAnimation) {
-                selection = tab
-                isExpanded = false
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: tab.researchSelectorIcon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 22)
-
-                Text(tab.sectionTitle)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Circle()
-                    .fill(isSelected ? Color.white : Color.clear)
-                    .frame(width: 5, height: 5)
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.82))
-            .padding(.horizontal, 14)
-            .frame(width: 132, height: 46, alignment: .leading)
-            .background(
-                isSelected ? InvestmentDesign.accent : Color(uiColor: .systemBackground),
-                in: RoundedRectangle(cornerRadius: 15)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 15)
-                    .stroke(
-                        isSelected ? InvestmentDesign.accent : Color.primary.opacity(0.12),
-                        lineWidth: 0.8
-                    )
-            }
-            .shadow(color: Color.black.opacity(isSelected ? 0.12 : 0.09), radius: 10, y: 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
 private struct RootNavigationBar: View {
     @Binding var selection: EditorialTab
     let dynamicTarget: EditorialTab
@@ -608,12 +493,7 @@ private struct RootNavigationBar: View {
         HStack(spacing: 0) {
             item(.world, title: "今日", icon: "globe")
             intelligenceItem
-            item(
-                researchTarget,
-                selectedTabs: [.investment, .company, .people],
-                title: "研究",
-                icon: "magnifyingglass"
-            )
+            researchItem
             item(.learning, title: "知识", icon: "books.vertical")
             item(.city, title: "城市", icon: "map")
         }
@@ -664,13 +544,37 @@ private struct RootNavigationBar: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    private var researchItem: some View {
+        let isSelected = EditorialTab.researchTabs.contains(selection)
+        let currentTab = isSelected ? selection : researchTarget
+
+        return Menu {
+            Picker("研究栏目", selection: Binding(
+                get: { currentTab },
+                set: { select($0) }
+            )) {
+                ForEach(EditorialTab.researchTabs, id: \.self) { tab in
+                    Label(tab.sectionTitle, systemImage: tab.researchSelectorIcon)
+                        .tag(tab)
+                }
+            }
+        } label: {
+            itemLabel(title: "研究", icon: currentTab.researchSelectorIcon, isSelected: isSelected)
+        } primaryAction: {
+            select(currentTab)
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("研究，当前\(currentTab.sectionTitle)")
+        .accessibilityHint(isSelected ? "轻点保持当前栏目，长按选择其他研究栏目" : "轻点打开，长按选择研究栏目")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
     private func item(
         _ tab: EditorialTab,
-        selectedTabs: [EditorialTab] = [],
         title: String,
         icon: String
     ) -> some View {
-        let isSelected = selection == tab || selectedTabs.contains(selection)
+        let isSelected = selection == tab
 
         return Button {
             select(tab)
