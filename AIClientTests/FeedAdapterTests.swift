@@ -1225,6 +1225,15 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertFalse(FeedDetailChromePolicy.hidesRootChrome(isPresented: false, isXueqiu: false))
     }
 
+    func testRootChromeWaitsForStandardSheetDismissalAnimation() {
+        XCTAssertTrue(RootChromeDismissalPolicy.shouldDelayRestore(reduceMotion: false))
+        XCTAssertGreaterThan(RootChromeDismissalPolicy.restoreDelay, .zero)
+    }
+
+    func testRootChromeRestoresImmediatelyWhenMotionIsReduced() {
+        XCTAssertFalse(RootChromeDismissalPolicy.shouldDelayRestore(reduceMotion: true))
+    }
+
     func testFilteredPaginationTaskAdvancesWithRawTail() {
         XCTAssertEqual(
             FeedPaginationLayout.taskPostID(
