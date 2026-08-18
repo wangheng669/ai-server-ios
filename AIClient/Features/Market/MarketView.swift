@@ -11,6 +11,8 @@ private enum MarketStyle {
     static let accent = InvestmentDesign.accent
     static let chartTransition = Animation.smooth(duration: 0.6)
     static let purple = accent
+    static let pageInset: CGFloat = 14
+    static let sectionRadius: CGFloat = 20
 }
 
 private struct MarketDetailRoute: Identifiable, Equatable {
@@ -123,7 +125,7 @@ private struct MarketHomeView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 12) {
                     GeometryReader { geometry in
                         Color.clear.preference(
                             key: MarketHomeScrollOffsetPreferenceKey.self,
@@ -138,8 +140,9 @@ private struct MarketHomeView: View {
                             .transition(.opacity)
                     }
                     .animation(.easeInOut(duration: 0.18), value: selectedMarket)
+                    .padding(.horizontal, MarketStyle.pageInset)
 
-                    VStack(spacing: 0) {
+                    VStack(spacing: 12) {
                         if let error = regionalHealthMessage {
                             MarketErrorBanner(
                                 message: error,
@@ -164,12 +167,10 @@ private struct MarketHomeView: View {
                                 .id("market-map")
                         }
                     }
-                    .padding(.top, 8)
                     .padding(.bottom, 16)
-                    .background(MarketStyle.canvas)
                 }
             }
-            .background(MarketTerminalPalette.header.ignoresSafeArea())
+            .background(MarketStyle.canvas.ignoresSafeArea())
             .coordinateSpace(name: "market-scroll")
             .scrollIndicators(.hidden)
             .refreshable { await store.refresh() }
@@ -441,11 +442,33 @@ private struct MarketTerminalHero: View {
             }
             }
             .frame(height: dynamicTypeSize.isAccessibilitySize ? 180 : 76)
+            .padding(.vertical, 8)
+            .background(
+                MarketTerminalPalette.headerSurface.opacity(0.72),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
         .padding(.bottom, 18)
-        .background(MarketTerminalPalette.header)
+        .background {
+            RoundedRectangle(cornerRadius: MarketStyle.sectionRadius, style: .continuous)
+                .fill(MarketTerminalPalette.header)
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(MarketStyle.accent.opacity(0.09))
+                        .frame(width: 170, height: 170)
+                        .blur(radius: 30)
+                        .offset(x: 52, y: -76)
+                        .allowsHitTesting(false)
+                }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: MarketStyle.sectionRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MarketStyle.sectionRadius, style: .continuous)
+                .stroke(MarketStyle.divider, lineWidth: 0.5)
+        }
+        .shadow(color: Color.black.opacity(0.055), radius: 14, x: 0, y: 6)
     }
 
     private var sessionLabel: String {
@@ -977,15 +1000,17 @@ private struct MarketRegionPicker: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 6)
         .frame(maxWidth: .infinity)
-        .frame(height: 48)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(MarketStyle.divider)
-                .frame(height: 0.5)
+        .frame(height: 50)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(MarketStyle.divider, lineWidth: 0.5)
         }
+        .shadow(color: Color.black.opacity(0.10), radius: 12, x: 0, y: 5)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 5)
     }
 
     private func regionButton(_ region: MarketRegion) -> some View {
@@ -1003,10 +1028,10 @@ private struct MarketRegionPicker: View {
                 .lineLimit(1)
                 .foregroundStyle(foreground)
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 34)
+                .frame(minHeight: 36)
                 .background(
-                    isSelected ? MarketStyle.accent.opacity(0.11) : Color.clear,
-                    in: Capsule()
+                    isSelected ? MarketStyle.accent.opacity(0.13) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
                 .contentShape(Rectangle())
         }
@@ -1032,6 +1057,29 @@ private struct MarketIndexTable: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: region.sectionIcon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MarketStyle.accent)
+                    .frame(width: 30, height: 30)
+                    .background(MarketStyle.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(region.rawValue)市场")
+                        .font(.headline)
+                    Text(region.sectionSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Text("\(quotes.count + coreStocks.count) 项")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
             if region == .china {
                 ChinaIndexScopePicker(selection: $chinaScope)
             }
@@ -1105,7 +1153,9 @@ private struct MarketIndexTable: View {
             }
 
         }
-        .padding(.horizontal, 18)
+        .padding(.bottom, 8)
+        .marketCard(cornerRadius: MarketStyle.sectionRadius)
+        .padding(.horizontal, MarketStyle.pageInset)
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             guard region != .commodity else { return }
@@ -1164,9 +1214,8 @@ private struct ChinaMarketStructurePanel: View {
             }
         }
         .padding(16)
-        .marketCard(cornerRadius: 16)
-        .padding(.horizontal, 18)
-        .padding(.top, 20)
+        .marketCard(cornerRadius: MarketStyle.sectionRadius)
+        .padding(.horizontal, MarketStyle.pageInset)
     }
 }
 
@@ -1763,6 +1812,9 @@ private struct MarketWorldMap: View {
             }
             .padding(.horizontal, 14)
         }
+        .padding(.vertical, 14)
+        .marketCard(cornerRadius: MarketStyle.sectionRadius)
+        .padding(.horizontal, MarketStyle.pageInset)
     }
 
     @ViewBuilder private var mapBackground: some View {
@@ -1947,6 +1999,26 @@ private struct SessionPeriod {
 }
 
 private extension MarketRegion {
+    var sectionIcon: String {
+        switch self {
+        case .unitedStates: "building.columns.fill"
+        case .china: "chart.line.uptrend.xyaxis"
+        case .japan: "sun.max.fill"
+        case .korea: "circle.grid.cross.fill"
+        case .europe: "globe.europe.africa.fill"
+        case .commodity: "shippingbox.fill"
+        case .crypto: "bitcoinsign.circle.fill"
+        }
+    }
+
+    var sectionSubtitle: String {
+        switch self {
+        case .commodity: "主要期货 · 连续合约"
+        case .crypto: "主流资产 · USDT 计价"
+        default: "核心指数与代表成分"
+        }
+    }
+
     var cityName: String {
         switch self {
         case .unitedStates: "纽约"
@@ -2133,7 +2205,7 @@ private struct MarketErrorBanner: View {
         }
         .padding(.horizontal, 12)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 18)
+        .padding(.horizontal, MarketStyle.pageInset)
         .accessibilityElement(children: .contain)
     }
 }
