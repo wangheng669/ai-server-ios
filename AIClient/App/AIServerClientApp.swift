@@ -243,6 +243,8 @@ private struct EditorialRootView: View {
     @State private var showsSignalFilters = false
     @State private var rootBottomChromeHeight: CGFloat = 0
     @State private var dismissedDeploymentIdentity: String?
+    @State private var keepsRootTabBarHidden = false
+    @State private var rootTabBarRestoreTask: Task<Void, Never>?
 
     private var deploymentPreview: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -380,7 +382,7 @@ private struct EditorialRootView: View {
                     )
                 }
 
-                if !hidesRootTabBar {
+                if !keepsRootTabBarHidden {
                     RootNavigationBar(
                         selection: $selectedTab,
                         dynamicTarget: lastDynamicTab,
@@ -462,6 +464,30 @@ private struct EditorialRootView: View {
                 break
             }
         }
+        .onChange(of: hidesRootTabBar, initial: true) { _, isHidden in
+            updateRootTabBarVisibility(isHidden: isHidden)
+        }
+    }
+
+    private func updateRootTabBarVisibility(isHidden: Bool) {
+        rootTabBarRestoreTask?.cancel()
+
+        if isHidden {
+            keepsRootTabBarHidden = true
+            return
+        }
+
+        guard keepsRootTabBarHidden,
+              RootChromeDismissalPolicy.shouldDelayRestore(reduceMotion: reduceMotion) else {
+            keepsRootTabBarHidden = false
+            return
+        }
+
+        rootTabBarRestoreTask = Task { @MainActor in
+            try? await Task.sleep(for: RootChromeDismissalPolicy.restoreDelay)
+            guard !Task.isCancelled else { return }
+            keepsRootTabBarHidden = false
+        }
     }
 
     private func tabContent<Content: View>(
@@ -479,6 +505,14 @@ private struct EditorialRootView: View {
                 reduceMotion ? nil : .smooth(duration: 0.2, extraBounce: 0),
                 value: selectedTab
             )
+    }
+}
+
+enum RootChromeDismissalPolicy {
+    static let restoreDelay = Duration.milliseconds(400)
+
+    static func shouldDelayRestore(reduceMotion: Bool) -> Bool {
+        !reduceMotion
     }
 }
 
