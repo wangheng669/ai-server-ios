@@ -33,11 +33,13 @@ final class MarketStore {
     private var chartRetryTasks: [ChartKey: Task<Void, Never>] = [:]
     private var chartRetryAttempts: [ChartKey: Int] = [:]
     private var loadingConstituentSymbols: Set<String> = []
+    private var loadingCompanyLogoSymbols: Set<String> = []
     private var trendBackfillTask: Task<Void, Never>?
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
         realtime = MarketRealtimeClient(baseURL: baseURL)
+        companyLogoPaths = MarketCompanyLogoPathCache.load()
     }
 
     func runUpdates() async {
@@ -300,8 +302,11 @@ final class MarketStore {
 
     func loadCompanyLogo(symbol: String, name: String) async {
         guard companyLogoPaths[symbol] == nil else { return }
+        guard loadingCompanyLogoSymbols.insert(symbol).inserted else { return }
+        defer { loadingCompanyLogoSymbols.remove(symbol) }
         if let path = try? await service.companyLogo(symbol: symbol, name: name) {
             companyLogoPaths[symbol] = path
+            MarketCompanyLogoPathCache.save(companyLogoPaths)
         }
     }
 
@@ -369,6 +374,26 @@ final class MarketStore {
         await refresh(force: false)
     }
 
+}
+
+enum MarketCompanyLogoPathCache {
+    private static let defaultsKey = "market.companyLogoPaths.v1"
+    private static let savedAtKey = "market.companyLogoPaths.savedAt.v1"
+    private static let maximumAge: TimeInterval = 30 * 24 * 60 * 60
+
+    static func load(defaults: UserDefaults = .standard, now: Date = Date()) -> [String: String] {
+        guard let savedAt = defaults.object(forKey: savedAtKey) as? Date,
+              now.timeIntervalSince(savedAt) < maximumAge else { return [:] }
+        return defaults.dictionary(forKey: defaultsKey)?.reduce(into: [:]) { result, item in
+            guard let path = item.value as? String, !path.isEmpty else { return }
+            result[item.key] = path
+        } ?? [:]
+    }
+
+    static func save(_ paths: [String: String], defaults: UserDefaults = .standard) {
+        defaults.set(paths, forKey: defaultsKey)
+        defaults.set(Date(), forKey: savedAtKey)
+    }
 }
 
 func marketQuoteNeedsTrendBackfill(_ quote: MarketQuote) -> Bool {

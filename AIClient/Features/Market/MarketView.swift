@@ -4294,15 +4294,7 @@ private struct CompanyLogo: View {
     var body: some View {
         Group {
             if let logoURL {
-                AsyncImage(url: logoURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFit().padding(size * 0.15)
-                    } else if phase.error == nil {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        fallback
-                    }
-                }
+                MarketCachedLogoImage(url: logoURL, size: size, fallback: AnyView(fallback))
             } else {
                 fallback
             }
@@ -4324,6 +4316,74 @@ private struct CompanyLogo: View {
         return MediaURL.image(url.absoluteString) ?? url
     }
 
+}
+
+@MainActor
+private final class MarketLogoImageCache {
+    static let shared = MarketLogoImageCache()
+
+    private let images = NSCache<NSURL, UIImage>()
+    private var requests: [URL: Task<UIImage?, Never>] = [:]
+
+    private init() {
+        images.countLimit = 160
+        images.totalCostLimit = 24 * 1_024 * 1_024
+    }
+
+    func cachedImage(for url: URL) -> UIImage? {
+        images.object(forKey: url as NSURL)
+    }
+
+    func image(for url: URL) async -> UIImage? {
+        if let image = cachedImage(for: url) { return image }
+        if let request = requests[url] { return await request.value }
+
+        let request = Task { () -> UIImage? in
+            var urlRequest = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
+            urlRequest.timeoutInterval = 20
+            guard let (data, response) = try? await URLSession.shared.data(for: urlRequest),
+                  (response as? HTTPURLResponse).map({ 200..<300 ~= $0.statusCode }) ?? true,
+                  let image = UIImage(data: data) else { return nil }
+            return image
+        }
+        requests[url] = request
+        let image = await request.value
+        requests[url] = nil
+        if let image {
+            images.setObject(image, forKey: url as NSURL, cost: image.marketCacheCost)
+        }
+        return image
+    }
+}
+
+private struct MarketCachedLogoImage: View {
+    let url: URL
+    let size: CGFloat
+    let fallback: AnyView
+    @State private var loadedImage: UIImage?
+
+    var body: some View {
+        Group {
+            if let image = loadedImage ?? MarketLogoImageCache.shared.cachedImage(for: url) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.15)
+            } else {
+                fallback
+            }
+        }
+        .task(id: url) {
+            loadedImage = await MarketLogoImageCache.shared.image(for: url)
+        }
+    }
+}
+
+private extension UIImage {
+    var marketCacheCost: Int {
+        guard let cgImage else { return Int(size.width * size.height * scale * scale * 4) }
+        return cgImage.bytesPerRow * cgImage.height
+    }
 }
 
 private struct Sparkline: View {
