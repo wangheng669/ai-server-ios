@@ -4041,49 +4041,58 @@ private struct PersonRelatedPostRow: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 12) {
-                AvatarView(
-                    url: post.avatarURL,
-                    name: post.authorName,
-                    size: 42
-                )
+            VStack(alignment: .leading, spacing: 6) {
+                if let attribution = post.xRepostAttributionText {
+                    Label(attribution, systemImage: "arrow.2.squarepath")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 54)
+                }
 
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(post.authorName)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if let handle = post.authorHandle {
-                            Text(handle)
+                HStack(alignment: .top, spacing: 12) {
+                    AvatarView(
+                        url: post.avatarURL,
+                        name: post.authorName,
+                        size: 42
+                    )
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(post.authorName)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if let handle = post.authorHandle {
+                                Text(handle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 6)
+                            Text(post.formattedTime ?? "")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        Spacer(minLength: 6)
-                        Text(post.formattedTime ?? "")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
 
-                    if post.needsXTranslation {
-                        HStack(spacing: 7) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("正在翻译为中文…")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
+                        if post.needsXTranslation {
+                            HStack(spacing: 7) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("正在翻译为中文…")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(minHeight: 42, alignment: .leading)
+                        } else {
+                            Text(post.displayContent)
+                                .font(.system(size: 15))
+                                .foregroundStyle(.primary)
+                                .lineSpacing(3)
+                                .lineLimit(6)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(minHeight: 42, alignment: .leading)
-                    } else {
-                        Text(post.displayContent)
-                            .font(.system(size: 15))
-                            .foregroundStyle(.primary)
-                            .lineSpacing(3)
-                            .lineLimit(6)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -4576,6 +4585,11 @@ private struct PersonPostTimelineRow: View {
                 Text([post.formattedTime, post.sourceName].compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
+                if let attribution = post.xRepostAttributionText {
+                    Label(attribution, systemImage: "arrow.2.squarepath")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
                 Button(action: onOpen) {
                     Text(displayContent)
                         .font(.system(size: compact ? 15 : 16))

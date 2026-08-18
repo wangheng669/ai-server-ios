@@ -553,6 +553,8 @@ struct Post: Codable, Identifiable, Hashable {
     // Runtime-only card translations. The backend payload and offline cache remain unchanged.
     var rssTitleZH: String? = nil
     var rssExcerptZH: String? = nil
+    // Runtime-only attribution retained when an X repost wrapper is replaced by its live original.
+    var xReposterName: String? = nil
 
     var displayTitle: String {
         clean(rssTitleZH)
@@ -661,14 +663,20 @@ struct Post: Codable, Identifiable, Hashable {
         ) != nil
     }
 
+    var xRepostAttributionText: String? {
+        clean(xReposterName).map { "\($0) 已转帖" }
+    }
+
     func replacingTranslation(with translation: String) -> Post {
-        Post(
+        var replaced = Post(
             id: id, title: title, text: text, summary: summary, content: content,
             contentZH: translation, source: source, formattedTime: formattedTime,
             weightReason: weightReason, finalScore: finalScore, weight: weight,
             postLink: postLink, articlePostAt: articlePostAt, user: user,
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
         )
+        replaced.xReposterName = xReposterName
+        return replaced
     }
 
     func replacingXLiveDetail(with detail: XTweetDetailItem) -> Post {
@@ -702,7 +710,7 @@ struct Post: Codable, Identifiable, Hashable {
             )
         } ?? user
 
-        return Post(
+        var replaced = Post(
             id: id, title: title, text: text, summary: summary, content: detail.fullText,
             contentZH: nil, source: source, formattedTime: formattedTime,
             weightReason: weightReason, finalScore: finalScore, weight: weight,
@@ -714,6 +722,8 @@ struct Post: Codable, Identifiable, Hashable {
             meta: meta?.replacingXLiveDetail(with: detail)
                 ?? PostMeta.xLiveDetail(detail)
         )
+        replaced.xReposterName = xReposterName ?? (isXRetweetWrapper ? authorName : nil)
+        return replaced
     }
     func replacingRSSCardTranslation(title: String, excerpt: String?) -> Post {
         var translated = self
