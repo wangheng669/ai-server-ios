@@ -1057,28 +1057,6 @@ private struct MarketIndexTable: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: region.sectionIcon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(MarketStyle.accent)
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(region.rawValue)市场")
-                        .font(.headline)
-                    Text(region.sectionSubtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                Text("\(quotes.count + coreStocks.count) 项")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 16)
-            .padding(.bottom, 10)
-
             if region == .china {
                 ChinaIndexScopePicker(selection: $chinaScope)
             }
@@ -2009,26 +1987,6 @@ private struct SessionPeriod {
 }
 
 private extension MarketRegion {
-    var sectionIcon: String {
-        switch self {
-        case .unitedStates: "building.columns.fill"
-        case .china: "chart.line.uptrend.xyaxis"
-        case .japan: "sun.max.fill"
-        case .korea: "circle.grid.cross.fill"
-        case .europe: "globe.europe.africa.fill"
-        case .commodity: "shippingbox.fill"
-        case .crypto: "bitcoinsign.circle.fill"
-        }
-    }
-
-    var sectionSubtitle: String {
-        switch self {
-        case .commodity: "主要期货 · 连续合约"
-        case .crypto: "主流资产 · USDT 计价"
-        default: "核心指数与代表成分"
-        }
-    }
-
     var cityName: String {
         switch self {
         case .unitedStates: "纽约"
