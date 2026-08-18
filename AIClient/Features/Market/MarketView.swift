@@ -1760,11 +1760,11 @@ private struct MarketWorldMap: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let markets: [MarketMapLocation] = [
-        .init(region: .unitedStates, city: "纽约", latitude: 40.71, longitude: -74.00),
-        .init(region: .china, city: "上海", latitude: 31.23, longitude: 121.47, labelOffset: .init(width: -30, height: 30)),
-        .init(region: .japan, city: "东京", latitude: 35.68, longitude: 139.69, labelOffset: .init(width: 6, height: 22)),
-        .init(region: .korea, city: "首尔", latitude: 37.56, longitude: 126.97, labelOffset: .init(width: -8, height: -30)),
-        .init(region: .europe, city: "法兰克福", latitude: 50.11, longitude: 8.68, labelOffset: .init(width: -14, height: -20)),
+        .init(region: .unitedStates, city: "纽约", assetPoint: .init(x: 512, y: 306)),
+        .init(region: .china, city: "上海", assetPoint: .init(x: 1_400, y: 340), labelOffset: .init(width: -40, height: 22)),
+        .init(region: .japan, city: "东京", assetPoint: .init(x: 1_497, y: 344), labelOffset: .init(width: 6, height: 10)),
+        .init(region: .korea, city: "首尔", assetPoint: .init(x: 1_450, y: 324), labelOffset: .init(width: -28, height: -24)),
+        .init(region: .europe, city: "法兰克福", assetPoint: .init(x: 860, y: 283), labelOffset: .init(width: -38, height: -17)),
     ]
 
     var body: some View {
@@ -1777,14 +1777,14 @@ private struct MarketWorldMap: View {
                         MarketMapNode(
                             country: market.city,
                             quote: store.quote(symbol: market.region.primarySymbol),
-                            isSelected: selection == market.region
+                            isSelected: selection == market.region,
+                            labelOffset: market.labelOffset
                         )
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(mapAccessibilityLabel(for: market))
                     .accessibilityHint("切换到\(market.region.rawValue)市场")
                     .position(market.position(in: proxy.size))
-                    .offset(market.labelOffset)
                 }
             }
         }
@@ -2006,17 +2006,28 @@ private extension MarketRegion {
 }
 
 private struct MarketMapLocation: Identifiable {
+    private static let assetSize = CGSize(width: 1_821, height: 864)
+
     let region: MarketRegion
     let city: String
-    let latitude: Double
-    let longitude: Double
+    // Pixel coordinates calibrated against market-world-map.png.
+    let assetPoint: CGPoint
     var labelOffset = CGSize.zero
     var id: MarketRegion { region }
 
     func position(in size: CGSize) -> CGPoint {
-        CGPoint(
-            x: size.width * CGFloat((longitude + 180) / 360),
-            y: size.height * CGFloat((83 - latitude) / 155)
+        let scale = max(size.width / Self.assetSize.width, size.height / Self.assetSize.height)
+        let renderedSize = CGSize(
+            width: Self.assetSize.width * scale,
+            height: Self.assetSize.height * scale
+        )
+        let origin = CGPoint(
+            x: (size.width - renderedSize.width) / 2,
+            y: (size.height - renderedSize.height) / 2
+        )
+        return CGPoint(
+            x: origin.x + assetPoint.x * scale,
+            y: origin.y + assetPoint.y * scale
         )
     }
 }
@@ -2025,24 +2036,27 @@ private struct MarketMapNode: View {
     let country: String
     let quote: MarketQuote?
     let isSelected: Bool
+    let labelOffset: CGSize
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(nodeTint)
-                .frame(width: 8, height: 8)
-                .overlay {
-                    if isSelected {
-                        Circle().stroke(MarketStyle.accent, lineWidth: 3)
-                            .padding(-4)
-                    }
+        Circle()
+            .fill(nodeTint)
+            .frame(width: 8, height: 8)
+            .overlay {
+                if isSelected {
+                    Circle().stroke(MarketStyle.accent, lineWidth: 3)
+                        .padding(-4)
                 }
-            Text(country)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.primary)
-        }
-        .padding(6)
-        .contentShape(Rectangle())
+            }
+            .overlay(alignment: .leading) {
+                Text(country)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .fixedSize()
+                    .offset(x: 13 + labelOffset.width, y: labelOffset.height)
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     private var nodeTint: Color {
