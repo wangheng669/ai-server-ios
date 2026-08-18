@@ -18,7 +18,6 @@ enum InvestmentDesign {
 private enum InvestmentMotion {
     static let selection = Animation.smooth(duration: 0.28, extraBounce: 0)
     static let reveal = Animation.snappy(duration: 0.26, extraBounce: 0.03)
-    static let page = Animation.smooth(duration: 0.24, extraBounce: 0)
 }
 
 private enum InvestmentSection: String, CaseIterable, Identifiable {
@@ -91,6 +90,11 @@ struct InvestmentView: View {
     @Binding private var showsDetail: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var section: InvestmentSection
+    @State private var displayedSection: InvestmentSection
+    @State private var contentOpacity = 1.0
+    @State private var contentScale: CGFloat = 1
+    @State private var contentOffset: CGFloat = 0
+    @State private var transitionTask: Task<Void, Never>?
     @State private var marketShowsDetail = false
     @State private var holdingsShowsDetail = false
     @State private var headerIsCompact = false
@@ -100,27 +104,30 @@ struct InvestmentView: View {
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
+        let initialSection: InvestmentSection
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--holdings-preview") {
-            _section = State(initialValue: .holdings)
+            initialSection = .holdings
         } else if ProcessInfo.processInfo.arguments.contains("--industries-preview") {
-            _section = State(initialValue: .industries)
+            initialSection = .industries
         } else if ProcessInfo.processInfo.arguments.contains("--china-macro-preview") {
-            _section = State(initialValue: .chinaMacro)
+            initialSection = .chinaMacro
         } else if ProcessInfo.processInfo.arguments.contains("--institution-research-preview") {
-            _section = State(initialValue: .institutionResearch)
+            initialSection = .institutionResearch
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
                     ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
-            _section = State(initialValue: .sentiment)
+            initialSection = .sentiment
         } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
                     ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) {
-            _section = State(initialValue: .gdp)
+            initialSection = .gdp
         } else {
-            _section = State(initialValue: .market)
+            initialSection = .market
         }
         #else
-        _section = State(initialValue: .market)
+        initialSection = .market
         #endif
+        _section = State(initialValue: initialSection)
+        _displayedSection = State(initialValue: initialSection)
     }
 
     var body: some View {
@@ -170,7 +177,9 @@ struct InvestmentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(reduceMotion ? nil : InvestmentMotion.page, value: section)
+            .opacity(contentOpacity)
+            .scaleEffect(contentScale)
+            .offset(y: contentOffset)
         }
         .background(InvestmentDesign.canvas)
         .overlay(alignment: .bottomTrailing) {
@@ -185,12 +194,14 @@ struct InvestmentView: View {
             showsDetail = value
         }
         .onChange(of: section) { _, value in
+            transitionPage(to: value)
             marketShowsDetail = false
             holdingsShowsDetail = false
             showsDetail = false
             headerIsCompact = false
         }
         .onDisappear {
+            transitionTask?.cancel()
             showsDetail = false
         }
     }
@@ -199,14 +210,51 @@ struct InvestmentView: View {
         _ target: InvestmentSection,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        let isSelected = section == target
+        let isSelected = displayedSection == target
 
         return content()
             .opacity(isSelected ? 1 : 0)
-            .scaleEffect(isSelected || reduceMotion ? 1 : 0.992)
             .allowsHitTesting(isSelected)
             .accessibilityHidden(!isSelected)
             .zIndex(isSelected ? 1 : 0)
+    }
+
+    private func transitionPage(to target: InvestmentSection) {
+        transitionTask?.cancel()
+        guard displayedSection != target else { return }
+
+        guard !reduceMotion else {
+            displayedSection = target
+            contentOpacity = 1
+            contentScale = 1
+            contentOffset = 0
+            return
+        }
+
+        transitionTask = Task { @MainActor in
+            withAnimation(.easeIn(duration: 0.10)) {
+                contentOpacity = 0
+                contentScale = 0.996
+                contentOffset = -2
+            }
+
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled, section == target else { return }
+
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                displayedSection = target
+                contentScale = 1.004
+                contentOffset = 3
+            }
+
+            withAnimation(.easeOut(duration: 0.18)) {
+                contentOpacity = 1
+                contentScale = 1
+                contentOffset = 0
+            }
+        }
     }
 }
 
