@@ -155,7 +155,6 @@ private struct MarketHomeView: View {
                         .id(selectedMarket)
                         .transition(.opacity)
                         .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
-                        .simultaneousGesture(regionSwipeGesture)
                         if selectedMarket == .china {
                             ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
                                 .id("market-structure")
@@ -172,6 +171,7 @@ private struct MarketHomeView: View {
             .coordinateSpace(name: "market-scroll")
             .scrollIndicators(.hidden)
             .refreshable { await store.refresh() }
+            .simultaneousGesture(regionSwipeGesture)
             .onChange(of: selectedMarket) { _, _ in
                 withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
                     proxy.scrollTo("market-top", anchor: .top)
@@ -200,6 +200,7 @@ private struct MarketHomeView: View {
             #endif
             .safeAreaInset(edge: .top, spacing: 0) {
                 MarketRegionPicker(selection: $selectedMarket)
+                    .simultaneousGesture(regionSwipeGesture)
             }
         }
     }
@@ -211,7 +212,7 @@ private struct MarketHomeView: View {
     }
 
     private var regionSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
+        DragGesture(minimumDistance: 14)
             .onChanged { value in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 selectionResetTask?.cancel()
@@ -220,7 +221,11 @@ private struct MarketHomeView: View {
             .onEnded { value in
                 let horizontalDistance = value.translation.width
                 let verticalDistance = value.translation.height
-                if abs(horizontalDistance) > abs(verticalDistance), abs(horizontalDistance) >= 56 {
+                let projectedHorizontalDistance = value.predictedEndTranslation.width
+                let isHorizontal = abs(horizontalDistance) > abs(verticalDistance)
+                let crossedDistance = abs(horizontalDistance) >= 36
+                let hasHorizontalMomentum = abs(projectedHorizontalDistance) >= 64
+                if isHorizontal, crossedDistance || hasHorizontalMomentum {
                     selectAdjacentRegion(offset: horizontalDistance < 0 ? 1 : -1)
                 }
                 allowIndexSelectionAfterGesture()
