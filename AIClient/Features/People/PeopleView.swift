@@ -4899,7 +4899,6 @@ private struct PersonProfileView: View {
 private struct XQuotedPostCard: View {
     let quote: XQuotedPost
     @State private var liveTranslation: String?
-    @State private var showsOriginal = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -4916,14 +4915,6 @@ private struct XQuotedPostCard: View {
             if let text = displayedText {
                 Text(text).font(.subheadline).lineSpacing(2).foregroundStyle(.primary)
             }
-            if hasTranslation, quote.originalText != nil {
-                Button(showsOriginal ? "显示翻译" : "显示原文") {
-                    showsOriginal.toggle()
-                }
-                .font(.caption.weight(.medium))
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-            }
             let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
             if !media.isEmpty {
                 XQuotedMediaGrid(urls: media)
@@ -4939,17 +4930,9 @@ private struct XQuotedPostCard: View {
     }
 
     private var displayedText: String? {
-        if showsOriginal {
-            return quote.originalText ?? quote.displayText
-        }
         return nonempty(quote.textZH)
             ?? liveTranslation
             ?? quote.originalText
-    }
-
-    private var hasTranslation: Bool {
-        nonempty(quote.textZH) != nil
-            || liveTranslation != nil
     }
 
     private func loadTranslationIfNeeded() async {
