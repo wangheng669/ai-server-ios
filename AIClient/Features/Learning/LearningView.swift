@@ -53,7 +53,9 @@ struct LearningView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedRoute) { route in
+        .sheet(item: $selectedRoute, onDismiss: {
+            showsDetail = selectedIdeologyPerson != nil
+        }) { route in
             NavigationStack {
                 switch route {
                 case let .topic(topic, lessonTitle, lessonNumber, lessonCount):
@@ -74,7 +76,9 @@ struct LearningView: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
-        .sheet(isPresented: ideologyPersonIsPresented) {
+        .sheet(isPresented: ideologyPersonIsPresented, onDismiss: {
+            showsDetail = selectedRoute != nil
+        }) {
             PersonDetailSheet(
                 selectedPerson: $selectedIdeologyPerson,
                 people: ideologyPeople,
@@ -132,10 +136,14 @@ struct LearningView: View {
             }
         }
         .onChange(of: selectedRoute, initial: true) { _, route in
-            showsDetail = route != nil || selectedIdeologyPerson != nil
+            if route != nil || selectedIdeologyPerson != nil {
+                showsDetail = true
+            }
         }
         .onChange(of: selectedIdeologyPerson) { _, person in
-            showsDetail = selectedRoute != nil || person != nil
+            if selectedRoute != nil || person != nil {
+                showsDetail = true
+            }
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
