@@ -1403,8 +1403,8 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(
             ImageLoader.avatarCandidateURLs(original).map(\.absoluteString),
             [
-                "https://pbs.twimg.com/profile_images/1631421210205749248/uohbT_200x200.jpg",
                 original.absoluteString,
+                "https://pbs.twimg.com/profile_images/1631421210205749248/uohbT_200x200.jpg",
             ]
         )
     }
