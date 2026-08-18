@@ -807,6 +807,23 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(query["x_feed_view"], "tracked")
     }
 
+    func testFeedEntitySelectorTargetsCurrentUserWhenOpened() {
+        let ids = ["x:111", "x:222", "x:333"]
+
+        XCTAssertEqual(
+            FeedEntitySelectorPositionPolicy.targetID(selectedID: "x:222", visibleChoiceIDs: ids),
+            "x:222"
+        )
+        XCTAssertEqual(
+            FeedEntitySelectorPositionPolicy.targetID(selectedID: "x:999", visibleChoiceIDs: ids),
+            FeedEntitySelectorPositionPolicy.allAccountsID
+        )
+        XCTAssertEqual(
+            FeedEntitySelectorPositionPolicy.targetID(selectedID: nil, visibleChoiceIDs: ids),
+            FeedEntitySelectorPositionPolicy.allAccountsID
+        )
+    }
+
     @MainActor
     func testXRetweetCardUsesLiveOriginalPresentation() async throws {
         let post = try JSONDecoder().decode(
