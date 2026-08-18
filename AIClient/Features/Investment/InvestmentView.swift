@@ -53,6 +53,18 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         case .gdp: "全球排行"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .market: "chart.line.uptrend.xyaxis"
+        case .sentiment: "gauge.with.dots.needle.50percent"
+        case .chinaMacro: "building.columns"
+        case .institutionResearch: "doc.text.magnifyingglass"
+        case .holdings: "person.crop.circle.badge.checkmark"
+        case .industries: "square.3.layers.3d"
+        case .gdp: "list.number"
+        }
+    }
 }
 
 private enum InvestmentCategory: String, CaseIterable, Identifiable {
@@ -97,7 +109,6 @@ struct InvestmentView: View {
     @State private var transitionTask: Task<Void, Never>?
     @State private var marketShowsDetail = false
     @State private var holdingsShowsDetail = false
-    @State private var headerIsCompact = false
     @State private var marketStore = MarketStore()
     @State private var sentimentStore = RetailSentimentStore()
     @State private var holdingsStore = FamousHoldingsStore()
@@ -132,19 +143,11 @@ struct InvestmentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !showsDetail {
-                InvestmentHeader(selection: $section, isCompact: headerIsCompact && section == .market)
-            }
-
             ZStack {
                 sectionLayer(.market) {
                     MarketView(
                         store: marketStore,
-                        showsDetail: $marketShowsDetail,
-                        onCompactHeaderChange: { compact in
-                            guard section == .market, headerIsCompact != compact else { return }
-                            withAnimation(.easeOut(duration: 0.18)) { headerIsCompact = compact }
-                        }
+                        showsDetail: $marketShowsDetail
                     )
                 }
 
@@ -184,9 +187,12 @@ struct InvestmentView: View {
         .background(InvestmentDesign.canvas)
         .overlay(alignment: .bottomTrailing) {
             if !showsDetail {
-                InvestmentCategorySelector(selection: $section)
-                    .padding(.trailing, 14)
-                    .padding(.bottom, section == .market ? 58 : 10)
+                HStack(alignment: .bottom, spacing: 8) {
+                    InvestmentSectionSelector(selection: $section)
+                    InvestmentCategorySelector(selection: $section)
+                }
+                .padding(.trailing, 14)
+                .padding(.bottom, 10)
             }
         }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
@@ -198,7 +204,6 @@ struct InvestmentView: View {
             marketShowsDetail = false
             holdingsShowsDetail = false
             showsDetail = false
-            headerIsCompact = false
         }
         .onDisappear {
             transitionTask?.cancel()
@@ -258,73 +263,91 @@ struct InvestmentView: View {
     }
 }
 
-private struct InvestmentHeader: View {
+private struct InvestmentSectionSelector: View {
     @Binding var selection: InvestmentSection
-    let isCompact: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var selectionHighlight
+    @State private var isExpanded = false
 
-    private var category: InvestmentCategory {
-        selection.category
+    private var sections: [InvestmentSection] {
+        selection.category.sections
     }
 
     var body: some View {
-        Group {
-            if !isCompact {
-                compactHeader
-                    .id(category)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 8)
-                    .background(InvestmentDesign.surface)
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(InvestmentDesign.divider)
-                            .frame(height: 0.5)
-                    }
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .leading)))
-            }
-        }
-        .animation(reduceMotion ? nil : InvestmentMotion.selection, value: category)
-        .animation(reduceMotion ? nil : InvestmentMotion.selection, value: isCompact)
-    }
-
-    private var compactHeader: some View {
-        HStack(spacing: 8) {
-            ForEach(category.sections) { section in
-                Button {
-                    withAnimation(reduceMotion ? nil : InvestmentMotion.selection) {
-                        selection = section
-                    }
-                } label: {
-                    Text(section.subsectionTitle)
-                        .font(.subheadline.weight(selection == section ? .semibold : .regular))
-                        .foregroundStyle(secondaryColor(isSelected: selection == section))
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 36)
-                        .background {
-                            if selection == section {
-                                Capsule()
-                                    .fill(InvestmentDesign.accentSoft)
-                                    .matchedGeometryEffect(
-                                        id: "investment-subsection-selection",
-                                        in: selectionHighlight
-                                    )
-                            } else {
-                                Capsule().fill(InvestmentDesign.secondarySurface)
+        VStack(alignment: .trailing, spacing: 7) {
+            if isExpanded {
+                VStack(alignment: .trailing, spacing: 7) {
+                    ForEach(sections.filter { $0 != selection }) { item in
+                        Button {
+                            withAnimation(reduceMotion ? nil : InvestmentMotion.selection) {
+                                selection = item
+                                isExpanded = false
                             }
+                        } label: {
+                            selectorLabel(item, showsChevron: false)
+                                .foregroundStyle(.primary)
+                                .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                                }
+                                .shadow(color: Color.black.opacity(0.08), radius: 7, y: 3)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(item.subsectionTitle)
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == section ? .isSelected : [])
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .scale(scale: 0.96, anchor: .bottomTrailing))
+                        .combined(with: .opacity)
+                )
             }
-            Spacer(minLength: 0)
+
+            Button {
+                withAnimation(reduceMotion ? nil : InvestmentMotion.reveal) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                selectorLabel(selection, showsChevron: true)
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(InvestmentDesign.accent.opacity(0.24), lineWidth: 0.8)
+                    }
+                    .shadow(color: Color.black.opacity(0.10), radius: 8, y: 3)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("投资子栏目")
+            .accessibilityValue(selection.subsectionTitle)
+            .accessibilityHint(isExpanded ? "轻点收起" : "轻点展开")
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+        .onChange(of: selection.category) { _, _ in
+            isExpanded = false
         }
     }
 
-    private func secondaryColor(isSelected: Bool) -> Color {
-        return isSelected ? InvestmentDesign.accent : .secondary
+    private func selectorLabel(
+        _ item: InvestmentSection,
+        showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: item.icon)
+                .font(.system(size: 14, weight: .semibold))
+
+            Text(item.subsectionTitle)
+                .font(.system(size: 14, weight: .semibold))
+
+            if showsChevron {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minWidth: 94, minHeight: 40)
+        .contentShape(Rectangle())
     }
 }
 

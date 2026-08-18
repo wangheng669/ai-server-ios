@@ -198,7 +198,7 @@ private struct MarketHomeView: View {
                 proxy.scrollTo("market-structure", anchor: .top)
             }
             #endif
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .safeAreaInset(edge: .top, spacing: 0) {
                 MarketRegionPicker(selection: $selectedMarket)
             }
         }
@@ -985,7 +985,7 @@ private struct MarketRegionPicker: View {
         .frame(maxWidth: .infinity)
         .frame(height: 48)
         .background(MarketStyle.surface)
-        .overlay(alignment: .top) {
+        .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(MarketStyle.divider)
                 .frame(height: 0.5)
