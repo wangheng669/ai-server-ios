@@ -1229,6 +1229,27 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(TodayWorldSheetPresentationPolicy.contentInteraction, .resizes)
     }
 
+    func testTodayWorldPostLoadingStartsOnlyAfterOpeningPostsSheet() {
+        XCTAssertFalse(
+            TodayWorldPostLoadingPolicy.shouldLoad(
+                isPostsSheetPresented: false,
+                postsAreEmpty: true
+            )
+        )
+        XCTAssertTrue(
+            TodayWorldPostLoadingPolicy.shouldLoad(
+                isPostsSheetPresented: true,
+                postsAreEmpty: true
+            )
+        )
+        XCTAssertFalse(
+            TodayWorldPostLoadingPolicy.shouldLoad(
+                isPostsSheetPresented: true,
+                postsAreEmpty: false
+            )
+        )
+    }
+
     func testFilteredPaginationTaskAdvancesWithRawTail() {
         XCTAssertEqual(
             FeedPaginationLayout.taskPostID(
