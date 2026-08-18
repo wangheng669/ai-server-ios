@@ -103,6 +103,15 @@ enum FeedSourceTransitionPolicy {
     static let fadeInDuration = 0.22
 }
 
+enum FeedEntitySelectorPositionPolicy {
+    static let allAccountsID = "feed-entity:all"
+
+    static func targetID(selectedID: String?, visibleChoiceIDs: [String]) -> String {
+        guard let selectedID, visibleChoiceIDs.contains(selectedID) else { return allAccountsID }
+        return selectedID
+    }
+}
+
 enum EmbeddedWebPresentationPolicy {
     static func opensImmediately(source: FeedSource) -> Bool {
         source == .weibo
@@ -633,16 +642,24 @@ struct NewsFeedView: View {
                 .padding(.bottom, 4)
             }
 
-            ScrollView {
-                LazyVStack(spacing: 3) {
-                    feedEntityMenuRow(nil)
-                    ForEach(filteredFeedEntityChoices) { choice in
-                        feedEntityMenuRow(choice)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        feedEntityMenuRow(nil)
+                            .id(FeedEntitySelectorPositionPolicy.allAccountsID)
+                        ForEach(filteredFeedEntityChoices) { choice in
+                            feedEntityMenuRow(choice)
+                                .id(choice.id)
+                        }
                     }
+                    .padding(4)
                 }
-                .padding(4)
+                .scrollIndicators(feedEntityChoices.count > 6 ? .visible : .hidden)
+                .task(id: feedEntityMenuScrollTargetID) {
+                    await Task.yield()
+                    proxy.scrollTo(feedEntityMenuScrollTargetID, anchor: .center)
+                }
             }
-            .scrollIndicators(feedEntityChoices.count > 6 ? .visible : .hidden)
         }
         .frame(
             width: feedEntityChoices.count > 8 ? 224 : 196,
@@ -654,6 +671,13 @@ struct NewsFeedView: View {
                 .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+    }
+
+    private var feedEntityMenuScrollTargetID: String {
+        FeedEntitySelectorPositionPolicy.targetID(
+            selectedID: selectedFeedEntityID,
+            visibleChoiceIDs: filteredFeedEntityChoices.map(\.id)
+        )
     }
 
     private var feedEntityMenuHeight: CGFloat {
