@@ -717,6 +717,12 @@ enum TodayWorldSheetPresentationPolicy {
     static let contentInteraction = PresentationContentInteraction.resizes
 }
 
+enum TodayWorldPostLoadingPolicy {
+    static func shouldLoad(isPostsSheetPresented: Bool, postsAreEmpty: Bool) -> Bool {
+        isPostsSheetPresented && postsAreEmpty
+    }
+}
+
 private func fetchTodayWorldPostBatch(ids: [Int], baseURL: URL) async throws -> [Post] {
     var seen = Set<Int>()
     let requestedIDs = ids.filter { $0 > 0 && seen.insert($0).inserted }.prefix(50)
@@ -997,13 +1003,19 @@ private struct TodayWorldReportSourcesSheet: View {
             summaryPage
         }
         .background(Color(uiColor: .systemBackground))
-        .task(id: system.id) { await load() }
         .sheet(isPresented: $isShowingPosts) {
             postsSheet
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
                 .presentationContentInteraction(TodayWorldSheetPresentationPolicy.contentInteraction)
+                .task(id: system.id) {
+                    guard TodayWorldPostLoadingPolicy.shouldLoad(
+                        isPostsSheetPresented: isShowingPosts,
+                        postsAreEmpty: posts.isEmpty
+                    ) else { return }
+                    await load()
+                }
         }
     }
 
@@ -1065,6 +1077,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 .padding(.bottom, 20)
             }
             .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
 
             summaryFooter
         }
@@ -1191,11 +1204,6 @@ private struct TodayWorldReportSourcesSheet: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
-        .task {
-            if posts.isEmpty {
-                await load()
-            }
-        }
         .sheet(item: $selectedPost) { post in
             TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
                 .presentationDetents([.large])
@@ -1452,6 +1460,7 @@ private struct TodayWorldReportSourcesSheet: View {
             ids: system.postIDs,
             baseURL: baseURL
         )
+        guard !Task.isCancelled else { return }
         var loadedByID = Dictionary(uniqueKeysWithValues: cachedPosts.map { ($0.id, $0) })
         posts = system.postIDs.compactMap { loadedByID[$0] }
         translations = Dictionary(uniqueKeysWithValues: posts.compactMap { post in
@@ -1460,14 +1469,20 @@ private struct TodayWorldReportSourcesSheet: View {
             return (post.id, value)
         })
         isLoading = posts.isEmpty
-        defer { isLoading = false }
+        defer {
+            if !Task.isCancelled {
+                isLoading = false
+            }
+        }
 
         var lastError: Error?
         let batchIDs = system.postIDs.filter { loadedByID[$0] == nil }
         if !batchIDs.isEmpty {
             do {
                 let batchPosts = try await fetchTodayWorldPostBatch(ids: batchIDs, baseURL: baseURL)
+                guard !Task.isCancelled else { return }
                 await TodayWorldPostMemoryCache.shared.store(posts: batchPosts, baseURL: baseURL)
+                guard !Task.isCancelled else { return }
                 for post in batchPosts {
                     loadedByID[post.id] = post
                     if let tweetID = post.xTweetID,
@@ -1497,6 +1512,10 @@ private struct TodayWorldReportSourcesSheet: View {
             }
 
             for await (postID, result) in group {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
                 switch result {
                 case .success(let post):
                     loadedByID[postID] = post
@@ -1511,6 +1530,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 }
             }
         }
+        guard !Task.isCancelled else { return }
 
         if posts.isEmpty, let lastError {
             errorMessage = NetworkErrorPresentation.message(for: lastError)
@@ -1532,6 +1552,10 @@ private struct TodayWorldReportSourcesSheet: View {
                 }
             }
             for await (postID, tweetID, text) in group {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
                 if let text {
                     translations[postID] = text
                     PersonDetailStore.cacheXTranslation(text, tweetID: tweetID)
@@ -1540,7 +1564,6 @@ private struct TodayWorldReportSourcesSheet: View {
                 }
             }
         }
-        isLoading = false
     }
 
     private var displayDate: String {
