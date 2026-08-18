@@ -2679,7 +2679,6 @@ private struct MarketIndexDetailView: View {
     @State private var presentedValuation: CompanyValuationHistoryRoute?
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
-    private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
     private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
@@ -2879,9 +2878,6 @@ private struct MarketIndexDetailView: View {
                 Text(quote?.marketAsOfLabel ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if showsIndexSession, let session = indexSessionQuote {
-                    sessionQuotePill(title: "期货夜盘", quote: session)
-                }
             }
         }
         .padding(.horizontal, 18)
@@ -3075,34 +3071,12 @@ private struct MarketIndexDetailView: View {
         .padding(.top, 20)
     }
 
-    @ViewBuilder
-    private func sessionQuotePill(title: String, quote: MarketQuote) -> some View {
-        HStack(spacing: 7) {
-            Text(title).fontWeight(.semibold)
-            Text(quote.symbol)
-            Text(number(quote.price, digits: 2)).fontWeight(.semibold).monospacedDigit()
-            Text(quote.formattedPercent).fontWeight(.semibold).monospacedDigit().foregroundStyle(quoteTint(quote))
-            Sparkline(values: quote.trend, color: MarketStyle.purple, showsFill: false)
-                .frame(width: 52, height: 20)
-        }
-        .font(.caption)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(MarketStyle.purple.opacity(0.08), in: Capsule())
-        .accessibilityLabel("\(title)，\(quote.presentationName)，\(number(quote.price, digits: 2))，\(quote.formattedPercent)")
-    }
-
     private var sessionText: String {
         quote?.tradingSession.displayLabel ?? "行情更新"
     }
     private var isCrypto: Bool { symbol.hasPrefix("BINANCE:") }
     private var isCommodity: Bool { quote?.instrumentType == "commodity-future" || symbol.hasSuffix("1!") }
     private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
-
-    private var showsIndexSession: Bool {
-        guard quote?.marketSession != "regular", let session = indexSessionQuote, let timestamp = session.timestamp else { return false }
-        return Date().timeIntervalSince1970 - Double(timestamp) / 1_000 < 10 * 60
-    }
 
     private var shareText: String {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
