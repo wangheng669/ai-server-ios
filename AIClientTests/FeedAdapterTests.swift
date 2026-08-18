@@ -790,6 +790,56 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.selectedXAuthor, "sama")
     }
 
+    @MainActor
+    func testSelectedXUserSuppliesMissingAvatarForMatchingPosts() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":8,"source":"x","content":"你好","post_link":"https://x.com/sama/status/8","user":{"user_name":"Sam Altman","user_screen_name":"sama"},"meta":{"lang":"zh"}}"#.utf8)
+        )
+        let avatarURL = try XCTUnwrap(URL(string: "https://example.com/sama.jpg"))
+        let user = XFeedUser(id: "1605", name: "Sam Altman", screenName: "sama", avatarURL: avatarURL)
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPosts: { _, _, _ in [post] },
+            fetchXFeedUsers: { [user] }
+        )
+
+        await model.loadXFeedUsersIfNeeded()
+        await model.selectXUser(user)
+
+        XCTAssertEqual(model.postForDisplay(post).avatarURL, avatarURL)
+    }
+
+    @MainActor
+    func testXRefreshTranslatesEnglishPostWhenLanguageMetadataIsMissing() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":9,"source":"x","content":"Monkey's paw: What would you like to wish for?","post_link":"https://x.com/AmandaAskell/status/9","user":{"user_name":"Amanda Askell","user_screen_name":"AmandaAskell"}}"#.utf8)
+        )
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPosts: { _, _, _ in [post] },
+            fetchXTranslation: { _ in
+                XTranslation(
+                    tweetId: "9",
+                    text: "猴爪：你想许什么愿？",
+                    sourceLanguage: "en",
+                    destinationLanguage: "zh"
+                )
+            }
+        )
+
+        XCTAssertTrue(post.needsXTranslation)
+        await model.refresh()
+        for _ in 0..<30 where model.postForDisplay(post).displayContent != "猴爪：你想许什么愿？" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertEqual(model.postForDisplay(post).displayContent, "猴爪：你想许什么愿？")
+    }
+
     func testXUserSelectionRequestsAllScoresInsteadOfChannelThreshold() {
         let items = APIClient.regularPostQueryItems(
             page: 1,

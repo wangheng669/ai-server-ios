@@ -555,6 +555,8 @@ struct Post: Codable, Identifiable, Hashable {
     var rssExcerptZH: String? = nil
     // Runtime-only attribution retained when an X repost wrapper is replaced by its live original.
     var xReposterName: String? = nil
+    // Runtime-only fallback from the selected X account directory when a feed row omits its avatar.
+    var xFallbackAvatarURL: URL? = nil
 
     var displayTitle: String {
         clean(rssTitleZH)
@@ -632,8 +634,9 @@ struct Post: Codable, Identifiable, Hashable {
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
     var needsXTranslation: Bool {
         guard sourceName == "X", xTweetID != nil else { return false }
-        guard let language = meta?.lang?.lowercased() else { return false }
-        guard !language.hasPrefix("zh") else { return false }
+        let language = meta?.lang?.lowercased()
+        guard language?.hasPrefix("zh") != true else { return false }
+        guard language != nil || !Self.containsHanCharacters(xStoredOriginalContent) else { return false }
         guard hasTranslation else { return true }
         let translation = displayContent
         if XPostTextFormatter.isTruncated(translation) { return true }
@@ -676,6 +679,7 @@ struct Post: Codable, Identifiable, Hashable {
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
         )
         replaced.xReposterName = xReposterName
+        replaced.xFallbackAvatarURL = xFallbackAvatarURL
         return replaced
     }
 
@@ -723,6 +727,7 @@ struct Post: Codable, Identifiable, Hashable {
                 ?? PostMeta.xLiveDetail(detail)
         )
         replaced.xReposterName = xReposterName ?? (isXRetweetWrapper ? authorName : nil)
+        replaced.xFallbackAvatarURL = xFallbackAvatarURL
         return replaced
     }
     func replacingRSSCardTranslation(title: String, excerpt: String?) -> Post {
@@ -1344,7 +1349,7 @@ struct Post: Codable, Identifiable, Hashable {
         return !value.isEmpty && value.allSatisfy(\.isNumber) ? value : nil
     }
     var avatarURL: URL? {
-        guard let url = clean(user?.avatarURL).flatMap(MediaURL.image) else { return nil }
+        guard let url = clean(user?.avatarURL).flatMap(MediaURL.image) ?? xFallbackAvatarURL else { return nil }
         guard isRSS, clean(meta?.rssFeedIcon) == nil else { return url }
         let path = url.path.lowercased()
         return path.contains("/rss/feeds/") && path.hasSuffix("/avatar") ? nil : url

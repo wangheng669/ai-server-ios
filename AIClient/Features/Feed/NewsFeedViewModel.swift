@@ -582,7 +582,20 @@ final class NewsFeedViewModel: ObservableObject {
                 excerpt: translation.excerpt
             )
         }
+        if displayed.sourceName == "X",
+           displayed.avatarURL == nil,
+           let selectedUser = xFeedUsers.first(where: { $0.id == selectedXUserID }),
+           Self.normalizedXHandle(displayed.user?.userScreenName) == Self.normalizedXHandle(selectedUser.screenName) {
+            displayed.xFallbackAvatarURL = selectedUser.avatarURL
+        }
         return displayed
+    }
+
+    private static func normalizedXHandle(_ value: String?) -> String? {
+        let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@")))
+            .lowercased()
+        return normalized?.isEmpty == false ? normalized : nil
     }
 
     func preloadedNewYorkTimesArticle(for postID: Int) -> NewYorkTimesArticle? {
@@ -687,6 +700,17 @@ final class NewsFeedViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, !Task.isCancelled else { return }
                 await translateRSSPostIfNeeded(post)
+            }
+        }
+    }
+
+    private func scheduleXTranslations(for posts: [Post]) {
+        let candidates = posts.filter { $0.needsXTranslation || $0.isXRetweetWrapper }
+        guard !candidates.isEmpty else { return }
+        for post in candidates {
+            Task { @MainActor [weak self] in
+                guard let self, !Task.isCancelled else { return }
+                await translateXPostIfNeeded(post)
             }
         }
     }
@@ -970,6 +994,9 @@ final class NewsFeedViewModel: ObservableObject {
             }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            if requestedSource == .x {
+                scheduleXTranslations(for: result)
+            }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             guard source == requestedSource, activeRefreshID == refreshID else { return }
@@ -1023,6 +1050,9 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            if requestedSource == .x {
+                scheduleXTranslations(for: result)
+            }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             errorMessage = NetworkErrorPresentation.message(for: error)
