@@ -2265,8 +2265,12 @@ struct PostDetailView: View {
                                 .padding(.top, 14)
                         }
 
-                        if let quote = post.meta?.quotedTweet {
-                            xQuotedPostCard(quote)
+                        if let quote = post.xQuotedPost {
+                            XFeedQuotedPostCard(
+                                quote: quote,
+                                availableWidth: UIScreen.main.bounds.width - 42,
+                                enablesTextSelection: true
+                            )
                                 .padding(.top, 16)
                         }
 
@@ -2538,81 +2542,6 @@ struct PostDetailView: View {
             return stored
         }
         return xLiveReplyContext
-    }
-
-    private func xQuotedPostCard(_ quote: XQuotedPost) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                if let avatar = quote.author?.profileImageURL.flatMap(MediaURL.image) {
-                    RemoteImage(url: avatar, height: 28, cornerRadius: 14)
-                        .frame(width: 28, height: 28)
-                        .clipped()
-                }
-
-                Text(quote.author?.name ?? "引用动态")
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-
-                if let handle = quote.author?.handle {
-                    Text(handle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-
-            if let text = quote.displayText {
-                Text(text)
-                    .font(.system(size: 15))
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-
-            ForEach(Array((quote.media ?? []).enumerated()), id: \.offset) { _, media in
-                xQuotedMedia(media)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
-        }
-    }
-
-    @ViewBuilder
-    private func xQuotedMedia(_ media: XQuotedMedia) -> some View {
-        if let videoURL = media.playbackURL {
-            XVideoPlayerView(
-                url: videoURL,
-                fallbackURL: nil,
-                thumbnailURL: media.previewURL,
-                generatesThumbnailWhenMissing: false
-            )
-                .frame(height: xQuotedMediaHeight(media))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else if let imageURL = media.displayURL {
-            RemoteImage(
-                url: imageURL,
-                height: xQuotedMediaHeight(media),
-                cornerRadius: 8,
-                contentMode: .fit
-            )
-            .frame(maxWidth: .infinity)
-            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-            .clipped()
-        }
-    }
-
-    private func xQuotedMediaHeight(_ media: XQuotedMedia) -> CGFloat {
-        let width = UIScreen.main.bounds.width - 42
-        guard let mediaWidth = media.width,
-              let mediaHeight = media.height,
-              mediaWidth > 0,
-              mediaHeight > 0 else { return 190 }
-        return min(width * CGFloat(mediaHeight) / CGFloat(mediaWidth), 460)
     }
 
     private var detailImageHeight: CGFloat {
