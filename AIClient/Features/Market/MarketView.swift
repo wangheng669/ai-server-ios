@@ -1023,7 +1023,15 @@ private struct MarketIndexTable: View {
     let onSelectIndex: (String) -> Void
 
     @State private var chinaScope: ChinaIndexScope = .core
+    @State private var displayedLogoPaths: [String: String]
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(region: MarketRegion, store: MarketStore, onSelectIndex: @escaping (String) -> Void) {
+        self.region = region
+        self.store = store
+        self.onSelectIndex = onSelectIndex
+        _displayedLogoPaths = State(initialValue: store.companyLogoPaths)
+    }
 
     private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
     private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
@@ -1075,7 +1083,7 @@ private struct MarketIndexTable: View {
 
             if quotes.isEmpty {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
+                    Image(systemName: "chart.line.uptrend.xyaxis")
                     Text("正在加载\(region.rawValue)市场行情")
                 }
                 .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -1091,7 +1099,7 @@ private struct MarketIndexTable: View {
                             trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
                                  ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
                                  : quote),
-                            companyLogoPath: store.companyLogoPaths[quote.symbol],
+                            companyLogoPath: displayedLogoPaths[quote.symbol],
                             showsCompanyLogo: true
                          )
                     }
@@ -1118,7 +1126,7 @@ private struct MarketIndexTable: View {
                             quote: quote,
                             overnightQuote: nil,
                             trend: store.trendValues(for: quote),
-                            companyLogoPath: store.companyLogoPaths[quote.symbol],
+                            companyLogoPath: displayedLogoPaths[quote.symbol],
                             showsCompanyLogo: true
                         )
                     }
@@ -1135,13 +1143,21 @@ private struct MarketIndexTable: View {
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             guard region != .commodity else { return }
+            let requestedQuotes = (quotes + coreStocks).reduce(into: [String: MarketQuote]()) {
+                $0[$1.symbol] = $1
+            }.values
             await withTaskGroup(of: Void.self) { group in
-                for quote in quotes + coreStocks {
-                    group.addTask {
+                for quote in requestedQuotes {
+                    group.addTask { @MainActor in
                         await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                        guard let path = store.companyLogoPaths[quote.symbol],
+                              let url = marketCompanyLogoURL(path) else { return }
+                        _ = await MarketLogoImageCache.shared.image(for: url)
                     }
                 }
             }
+            guard !Task.isCancelled else { return }
+            displayedLogoPaths = store.companyLogoPaths
         }
     }
 
@@ -4305,17 +4321,22 @@ private struct CompanyLogo: View {
     }
 
     private var fallback: some View {
-        Image(systemName: "building.2.crop.circle")
-            .font(.system(size: size * 0.45, weight: .medium))
+        Text(String(quote.presentationName.prefix(2)))
+            .font(.system(size: size * 0.25, weight: .semibold, design: .rounded))
             .foregroundStyle(.secondary)
+            .minimumScaleFactor(0.7)
     }
 
     private var logoURL: URL? {
-        guard let path, !path.isEmpty else { return nil }
-        guard let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
-        return MediaURL.image(url.absoluteString) ?? url
+        marketCompanyLogoURL(path)
     }
 
+}
+
+private func marketCompanyLogoURL(_ path: String?) -> URL? {
+    guard let path, !path.isEmpty else { return nil }
+    guard let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
+    return MediaURL.image(url.absoluteString) ?? url
 }
 
 @MainActor
