@@ -2725,12 +2725,9 @@ private struct MarketIndexDetailView: View {
             }
         }
         .contentShape(Rectangle())
-        .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭行情详情")
-                .padding(16)
-        }
         .simultaneousGesture(oneHandDismissGesture)
         .accessibilityHint("在详情内容区域向下滑动即可收起")
+        .accessibilityAction(.escape) { dismiss() }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $presentedValuation) { route in
@@ -2781,6 +2778,13 @@ private struct MarketIndexDetailView: View {
 
     private var detailNavigation: some View {
         HStack {
+            Button(action: dismiss.callAsFunction) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("关闭行情详情")
             Spacer(minLength: 0)
             ShareLink(item: shareText) {
                 Image(systemName: "square.and.arrow.up")
