@@ -2215,19 +2215,6 @@ struct PostDetailView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 0) {
                         xAuthorHeader
-                        if !post.isChineseXSource,
-                           post.hasTranslation || xLiveTranslationText != nil {
-                            HStack(spacing: 5) {
-                                Image(systemName: "character.bubble")
-                                Text(showsOriginal ? xOriginalLanguageLabel : "翻译自英语")
-                                Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
-                                    .foregroundStyle(.blue)
-                            }
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 16)
-                        }
-
                         Group {
                             if isLoadingXFullText {
                                 xFullTextLoadingPlaceholder
@@ -2359,10 +2346,6 @@ struct PostDetailView: View {
             ) ?? post.displayContent
         }
         return XPostTextFormatter.detailText(value)
-    }
-
-    private var xOriginalLanguageLabel: String {
-        post.isChineseXSource ? "原文" : "英语原文"
     }
 
     private var xDisplayedDetailParagraphs: [String] {
@@ -3156,8 +3139,6 @@ private struct XCommentRow: View {
     let translation: String?
     let isTranslating: Bool
     let translate: () async -> Void
-    @State private var showsOriginal = false
-
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             AvatarView(url: comment.author.avatarURL, name: comment.author.name, size: 40)
@@ -3186,18 +3167,7 @@ private struct XCommentRow: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
-                if translation != nil {
-                    HStack(spacing: 5) {
-                        Image(systemName: "character.bubble")
-                        Text(showsOriginal ? "查看译文" : "X 自动翻译")
-                        Button(showsOriginal ? "显示翻译" : "显示原文") {
-                            showsOriginal.toggle()
-                        }
-                        .foregroundStyle(.blue)
-                    }
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                } else if isTranslating {
+                if isTranslating {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                         Text("正在翻译…")
@@ -3205,7 +3175,7 @@ private struct XCommentRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 }
-                Text(showsOriginal || translation == nil ? displayedCommentText : translation ?? displayedCommentText)
+                Text(translation ?? displayedCommentText)
                     .font(.system(size: 16))
                     .lineSpacing(3)
                     .textSelection(.enabled)
