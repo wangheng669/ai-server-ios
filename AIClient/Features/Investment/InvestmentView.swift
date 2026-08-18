@@ -15,6 +15,11 @@ enum InvestmentDesign {
     static let cornerRadius: CGFloat = 14
 }
 
+private enum InvestmentMotion {
+    static let selection = Animation.smooth(duration: 0.28, extraBounce: 0)
+    static let reveal = Animation.snappy(duration: 0.26, extraBounce: 0.03)
+}
+
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
     case sentiment = "情绪"
@@ -184,6 +189,8 @@ struct InvestmentView: View {
 private struct InvestmentHeader: View {
     @Binding var selection: InvestmentSection
     let isCompact: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var selectionHighlight
 
     private var category: InvestmentCategory {
         selection.category
@@ -193,6 +200,7 @@ private struct InvestmentHeader: View {
         Group {
             if !isCompact {
                 compactHeader
+                    .id(category)
                     .padding(.horizontal, 16)
                     .padding(.top, 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -203,23 +211,38 @@ private struct InvestmentHeader: View {
                             .fill(InvestmentDesign.divider)
                             .frame(height: 0.5)
                     }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .leading)))
             }
         }
-        .animation(.easeOut(duration: 0.18), value: category)
-        .animation(.easeOut(duration: 0.18), value: isCompact)
+        .animation(reduceMotion ? nil : InvestmentMotion.selection, value: category)
+        .animation(reduceMotion ? nil : InvestmentMotion.selection, value: isCompact)
     }
 
     private var compactHeader: some View {
         HStack(spacing: 8) {
             ForEach(category.sections) { section in
-                Button { selection = section } label: {
+                Button {
+                    withAnimation(reduceMotion ? nil : InvestmentMotion.selection) {
+                        selection = section
+                    }
+                } label: {
                     Text(section.subsectionTitle)
                         .font(.subheadline.weight(selection == section ? .semibold : .regular))
                         .foregroundStyle(secondaryColor(isSelected: selection == section))
                         .padding(.horizontal, 12)
                         .frame(minHeight: 36)
-                        .background(secondaryBackground(isSelected: selection == section), in: Capsule())
+                        .background {
+                            if selection == section {
+                                Capsule()
+                                    .fill(InvestmentDesign.accentSoft)
+                                    .matchedGeometryEffect(
+                                        id: "investment-subsection-selection",
+                                        in: selectionHighlight
+                                    )
+                            } else {
+                                Capsule().fill(InvestmentDesign.secondarySurface)
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == section ? .isSelected : [])
@@ -231,59 +254,96 @@ private struct InvestmentHeader: View {
     private func secondaryColor(isSelected: Bool) -> Color {
         return isSelected ? InvestmentDesign.accent : .secondary
     }
-
-    private func secondaryBackground(isSelected: Bool) -> Color {
-        return isSelected ? InvestmentDesign.accentSoft : InvestmentDesign.secondarySurface
-    }
 }
 
 private struct InvestmentCategorySelector: View {
     @Binding var selection: InvestmentSection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isExpanded = false
 
     private var category: InvestmentCategory {
         selection.category
     }
 
     var body: some View {
-        Menu {
-            ForEach(InvestmentCategory.allCases) { item in
-                Button {
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.24, extraBounce: 0)) {
-                        selection = item.defaultSection
+        VStack(alignment: .trailing, spacing: 7) {
+            if isExpanded {
+                VStack(alignment: .trailing, spacing: 7) {
+                    ForEach(InvestmentCategory.allCases.filter { $0 != category }) { item in
+                        categoryButton(item)
                     }
-                } label: {
-                    Label(
-                        item.rawValue,
-                        systemImage: item == category ? "checkmark" : item.icon
-                    )
                 }
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .scale(scale: 0.96, anchor: .bottomTrailing))
+                        .combined(with: .opacity)
+                )
+            }
+
+            Button {
+                withAnimation(reduceMotion ? nil : InvestmentMotion.reveal) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                selectorLabel(category, showsChevron: true)
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(InvestmentDesign.accent.opacity(0.24), lineWidth: 0.8)
+                    }
+                    .shadow(color: Color.black.opacity(0.10), radius: 8, y: 3)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("投资栏目")
+            .accessibilityValue(category.rawValue)
+            .accessibilityHint(isExpanded ? "轻点收起" : "轻点展开")
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+        .onChange(of: category) { _, _ in
+            isExpanded = false
+        }
+    }
+
+    private func categoryButton(_ item: InvestmentCategory) -> some View {
+        Button {
+            withAnimation(reduceMotion ? nil : InvestmentMotion.selection) {
+                selection = item.defaultSection
+                isExpanded = false
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: category.icon)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Text(category.rawValue)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .bold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .frame(minWidth: 108, minHeight: 46)
-            .background(InvestmentDesign.accent, in: RoundedRectangle(cornerRadius: 15))
-            .overlay {
-                RoundedRectangle(cornerRadius: 15)
-                    .stroke(Color.white.opacity(0.24), lineWidth: 0.8)
-            }
-            .shadow(color: InvestmentDesign.accent.opacity(0.24), radius: 10, y: 4)
-            .contentShape(Rectangle())
+            selectorLabel(item, showsChevron: false)
+                .foregroundStyle(.primary)
+                .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                }
+                .shadow(color: Color.black.opacity(0.08), radius: 7, y: 3)
         }
-        .menuOrder(.fixed)
-        .accessibilityLabel("投资栏目")
-        .accessibilityValue(category.rawValue)
-        .sensoryFeedback(.selection, trigger: selection)
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.rawValue)
+    }
+
+    private func selectorLabel(
+        _ item: InvestmentCategory,
+        showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: item.icon)
+                .font(.system(size: 14, weight: .semibold))
+
+            Text(item.rawValue)
+                .font(.system(size: 14, weight: .semibold))
+
+            if showsChevron {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minWidth: 94, minHeight: 40)
+        .contentShape(Rectangle())
     }
 }
