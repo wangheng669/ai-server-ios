@@ -2881,19 +2881,6 @@ private struct MarketIndexDetailView: View {
                     .foregroundStyle(.secondary)
                 if showsIndexSession, let session = indexSessionQuote {
                     sessionQuotePill(title: "期货夜盘", quote: session)
-                } else if let quote, quote.hasActiveExtendedSessionQuote, let nightPrice = quote.sessionPrice {
-                    HStack(spacing: 7) {
-                        Text("个股夜盘").fontWeight(.semibold)
-                        Text(number(nightPrice, digits: 2)).fontWeight(.semibold).monospacedDigit()
-                        Text(quote.formattedSessionPercent ?? "—").fontWeight(.semibold).monospacedDigit()
-                        Sparkline(values: quote.nightTrend, color: MarketStyle.purple, showsFill: false)
-                            .frame(width: 52, height: 20)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(MarketStyle.purple)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(MarketStyle.purple.opacity(0.08), in: Capsule())
                 }
             }
         }
