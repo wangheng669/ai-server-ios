@@ -9,6 +9,7 @@ private enum MarketStyle {
     static let loss = InvestmentDesign.loss
     static let accent = InvestmentDesign.accent
     static let chartTransition = Animation.smooth(duration: 0.6)
+    static let regionTransition = Animation.smooth(duration: 0.26, extraBounce: 0)
     static let purple = accent
 }
 
@@ -118,6 +119,7 @@ private struct MarketHomeView: View {
     }()
     @State private var suppressIndexSelection = false
     @State private var selectionResetTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -136,7 +138,7 @@ private struct MarketHomeView: View {
                             .id(selectedMarket)
                             .transition(.opacity)
                     }
-                    .animation(.easeInOut(duration: 0.18), value: selectedMarket)
+                    .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
 
                     VStack(spacing: 0) {
                         if let error = regionalHealthMessage {
@@ -152,7 +154,7 @@ private struct MarketHomeView: View {
                         )
                         .id(selectedMarket)
                         .transition(.opacity)
-                        .animation(.easeInOut(duration: 0.16), value: selectedMarket)
+                        .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
                         .simultaneousGesture(regionSwipeGesture)
                         if selectedMarket == .china {
                             ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
@@ -171,7 +173,7 @@ private struct MarketHomeView: View {
             .scrollIndicators(.hidden)
             .refreshable { await store.refresh() }
             .onChange(of: selectedMarket) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
+                withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
                     proxy.scrollTo("market-top", anchor: .top)
                 }
             }
@@ -244,7 +246,7 @@ private struct MarketHomeView: View {
         guard let currentIndex = regions.firstIndex(of: selectedMarket) else { return }
         let nextIndex = currentIndex + offset
         guard regions.indices.contains(nextIndex) else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
             selectedMarket = regions[nextIndex]
         }
     }
@@ -969,6 +971,8 @@ private struct MarketTerminalSentiment: View {
 
 private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var selectionIndicator
 
     var body: some View {
         HStack(spacing: 2) {
@@ -994,7 +998,7 @@ private struct MarketRegionPicker: View {
         let foreground = isSelected ? MarketStyle.accent : Color.secondary
 
         return Button {
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
                 selection = region
             }
         } label: {
@@ -1005,14 +1009,21 @@ private struct MarketRegionPicker: View {
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 44)
                 .overlay(alignment: .bottom) {
-                    Capsule()
-                        .fill(isSelected ? MarketStyle.accent : Color.clear)
-                        .frame(width: 24, height: 2)
+                    if isSelected {
+                        Capsule()
+                            .fill(MarketStyle.accent)
+                            .frame(width: 24, height: 2)
+                            .matchedGeometryEffect(
+                                id: "market-region-selection",
+                                in: selectionIndicator
+                            )
+                    }
                 }
                 .contentShape(Rectangle())
         }
         .id(region)
         .buttonStyle(.plain)
+        .accessibilityLabel(region.rawValue)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
