@@ -213,6 +213,15 @@ final class MarketStore {
         return marketAppendingLiveValue(liveTrendValue, to: snapshotValues, limit: 40)
     }
 
+    func listTrendValues(for quote: MarketQuote?) -> [Double] {
+        guard let quote else { return [] }
+        if let chart = chart(symbol: quote.symbol, range: .day) {
+            let values = marketSampledChartTrend(chart.candles)
+            if values.count > 1 { return values }
+        }
+        return trendValues(for: quote)
+    }
+
     private func backfillMissingTrends() async {
         guard let dashboard else { return }
         var seen: Set<String> = []

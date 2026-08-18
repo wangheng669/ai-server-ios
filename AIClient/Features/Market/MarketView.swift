@@ -1089,12 +1089,8 @@ private struct MarketIndexTable: View {
                     Button { onSelectIndex(quote.symbol) } label: {
                          MarketIndexTableRow(
                              quote: quote,
-                            overnightQuote: region == .unitedStates && quote.marketSession != "regular"
-                                 ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol])
-                                 : nil,
-                            trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
-                                 ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
-                                 : quote),
+                            overnightQuote: nil,
+                            trend: store.listTrendValues(for: quote),
                             companyLogoPath: displayedLogoPaths[quote.symbol],
                             showsCompanyLogo: true
                          )
@@ -1121,7 +1117,7 @@ private struct MarketIndexTable: View {
                         MarketIndexTableRow(
                             quote: quote,
                             overnightQuote: nil,
-                            trend: store.trendValues(for: quote),
+                            trend: store.listTrendValues(for: quote),
                             companyLogoPath: displayedLogoPaths[quote.symbol],
                             showsCompanyLogo: true
                         )
@@ -1155,10 +1151,23 @@ private struct MarketIndexTable: View {
             guard !Task.isCancelled else { return }
             displayedLogoPaths = store.companyLogoPaths
         }
+        .task(id: componentChartRequestID) {
+            await withTaskGroup(of: Void.self) { group in
+                for quote in quotes + coreStocks {
+                    group.addTask { @MainActor in
+                        await store.loadChart(symbol: quote.symbol, range: .day)
+                    }
+                }
+            }
+        }
     }
 
     private var componentLogoRequestID: String {
         "\(region.dashboardID):\((quotes + coreStocks).map(\.symbol).joined(separator: ","))"
+    }
+
+    private var componentChartRequestID: String {
+        "day:\(componentLogoRequestID)"
     }
 }
 
