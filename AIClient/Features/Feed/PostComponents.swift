@@ -679,7 +679,11 @@ actor ImageLoader {
 
     static func avatarCandidateURLs(_ url: URL) -> [URL] {
         let highResolutionURL = highResolutionAvatarURL(url)
-        return highResolutionURL == url ? [url] : [highResolutionURL, url]
+        guard highResolutionURL != url else { return [url] }
+        if url.path.contains("_40_normal.") {
+            return [url, highResolutionURL]
+        }
+        return [highResolutionURL, url]
     }
 
     static func highResolutionAvatarURL(_ url: URL) -> URL {
