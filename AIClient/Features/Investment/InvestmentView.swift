@@ -71,6 +71,14 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
     var defaultSection: InvestmentSection {
         sections[0]
     }
+
+    var icon: String {
+        switch self {
+        case .market: "chart.xyaxis.line"
+        case .macro: "globe.asia.australia"
+        case .research: "doc.text.magnifyingglass"
+        }
+    }
 }
 
 struct InvestmentView: View {
@@ -150,6 +158,13 @@ struct InvestmentView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(InvestmentDesign.canvas)
+        .overlay(alignment: .bottomTrailing) {
+            if !showsDetail {
+                InvestmentCategorySelector(selection: $section)
+                    .padding(.trailing, 14)
+                    .padding(.bottom, section == .market ? 58 : 10)
+            }
+        }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
         .onChange(of: holdingsShowsDetail) { _, value in
             showsDetail = value
@@ -197,19 +212,6 @@ private struct InvestmentHeader: View {
 
     private var compactHeader: some View {
         HStack(spacing: 8) {
-            Menu {
-                ForEach(InvestmentCategory.allCases) { item in
-                    Button(item.rawValue) { selection = item.defaultSection }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(category.rawValue).font(.subheadline.weight(.semibold))
-                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
-                }
-                .foregroundStyle(primaryColor(isSelected: true))
-                .frame(minHeight: 36)
-            }
-            Divider().frame(height: 22)
             ForEach(category.sections) { section in
                 Button { selection = section } label: {
                     Text(section.subsectionTitle)
@@ -226,15 +228,62 @@ private struct InvestmentHeader: View {
         }
     }
 
-    private func primaryColor(isSelected: Bool) -> Color {
-        return isSelected ? .primary : .secondary
-    }
-
     private func secondaryColor(isSelected: Bool) -> Color {
         return isSelected ? InvestmentDesign.accent : .secondary
     }
 
     private func secondaryBackground(isSelected: Bool) -> Color {
         return isSelected ? InvestmentDesign.accentSoft : InvestmentDesign.secondarySurface
+    }
+}
+
+private struct InvestmentCategorySelector: View {
+    @Binding var selection: InvestmentSection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var category: InvestmentCategory {
+        selection.category
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(InvestmentCategory.allCases) { item in
+                Button {
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.24, extraBounce: 0)) {
+                        selection = item.defaultSection
+                    }
+                } label: {
+                    Label(
+                        item.rawValue,
+                        systemImage: item == category ? "checkmark" : item.icon
+                    )
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: category.icon)
+                    .font(.system(size: 15, weight: .semibold))
+
+                Text(category.rawValue)
+                    .font(.system(size: 15, weight: .semibold))
+
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 10, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .frame(minWidth: 108, minHeight: 46)
+            .background(InvestmentDesign.accent, in: RoundedRectangle(cornerRadius: 15))
+            .overlay {
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(Color.white.opacity(0.24), lineWidth: 0.8)
+            }
+            .shadow(color: InvestmentDesign.accent.opacity(0.24), radius: 10, y: 4)
+            .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("投资栏目")
+        .accessibilityValue(category.rawValue)
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
