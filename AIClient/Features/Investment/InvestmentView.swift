@@ -18,6 +18,7 @@ enum InvestmentDesign {
 private enum InvestmentMotion {
     static let selection = Animation.smooth(duration: 0.28, extraBounce: 0)
     static let reveal = Animation.snappy(duration: 0.26, extraBounce: 0.03)
+    static let page = Animation.smooth(duration: 0.24, extraBounce: 0)
 }
 
 private enum InvestmentSection: String, CaseIterable, Identifiable {
@@ -88,6 +89,7 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
 
 struct InvestmentView: View {
     @Binding private var showsDetail: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var section: InvestmentSection
     @State private var marketShowsDetail = false
     @State private var holdingsShowsDetail = false
@@ -127,40 +129,48 @@ struct InvestmentView: View {
                 InvestmentHeader(selection: $section, isCompact: headerIsCompact && section == .market)
             }
 
-            TabView(selection: $section) {
-                MarketView(
-                    store: marketStore,
-                    showsDetail: $marketShowsDetail,
-                    onCompactHeaderChange: { compact in
-                        guard section == .market, headerIsCompact != compact else { return }
-                        withAnimation(.easeOut(duration: 0.18)) { headerIsCompact = compact }
-                    }
-                )
-                    .tag(InvestmentSection.market)
+            ZStack {
+                sectionLayer(.market) {
+                    MarketView(
+                        store: marketStore,
+                        showsDetail: $marketShowsDetail,
+                        onCompactHeaderChange: { compact in
+                            guard section == .market, headerIsCompact != compact else { return }
+                            withAnimation(.easeOut(duration: 0.18)) { headerIsCompact = compact }
+                        }
+                    )
+                }
 
-                RetailInvestorView(
-                    store: sentimentStore,
-                    marketStore: marketStore,
-                    showsDetail: $showsDetail
-                )
-                .tag(InvestmentSection.sentiment)
+                sectionLayer(.sentiment) {
+                    RetailInvestorView(
+                        store: sentimentStore,
+                        marketStore: marketStore,
+                        showsDetail: $showsDetail
+                    )
+                }
 
-                ChinaMacroView()
-                    .tag(InvestmentSection.chinaMacro)
+                sectionLayer(.chinaMacro) {
+                    ChinaMacroView()
+                }
 
-                InstitutionResearchView()
-                    .tag(InvestmentSection.institutionResearch)
+                sectionLayer(.institutionResearch) {
+                    InstitutionResearchView()
+                }
 
-                FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
-                    .tag(InvestmentSection.holdings)
+                sectionLayer(.holdings) {
+                    FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
+                }
 
-                IndustryPanoramaView()
-                    .tag(InvestmentSection.industries)
+                sectionLayer(.industries) {
+                    IndustryPanoramaView()
+                }
 
-                CountryGDPRankingView(showsDetail: $showsDetail)
-                    .tag(InvestmentSection.gdp)
+                sectionLayer(.gdp) {
+                    CountryGDPRankingView(showsDetail: $showsDetail)
+                }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(reduceMotion ? nil : InvestmentMotion.page, value: section)
         }
         .background(InvestmentDesign.canvas)
         .overlay(alignment: .bottomTrailing) {
@@ -183,6 +193,20 @@ struct InvestmentView: View {
         .onDisappear {
             showsDetail = false
         }
+    }
+
+    private func sectionLayer<Content: View>(
+        _ target: InvestmentSection,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isSelected = section == target
+
+        return content()
+            .opacity(isSelected ? 1 : 0)
+            .scaleEffect(isSelected || reduceMotion ? 1 : 0.992)
+            .allowsHitTesting(isSelected)
+            .accessibilityHidden(!isSelected)
+            .zIndex(isSelected ? 1 : 0)
     }
 }
 
