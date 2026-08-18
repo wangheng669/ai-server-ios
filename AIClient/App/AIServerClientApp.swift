@@ -713,7 +713,7 @@ private struct TodayWorldPostBatchResponse: Decodable {
     let posts: [Post]
 }
 
-enum TodayWorldSheetPresentationPolicy {
+enum TodayWorldNestedSheetPresentationPolicy {
     static let contentInteraction = PresentationContentInteraction.resizes
 }
 
@@ -778,10 +778,8 @@ private struct TodayWorldView: View {
             showsDetail = false
         }) { system in
             TodayWorldReportSourcesSheet(system: system, reportDate: store.report?.date ?? "")
-                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationContentInteraction(TodayWorldSheetPresentationPolicy.contentInteraction)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -1008,7 +1006,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationContentInteraction(TodayWorldSheetPresentationPolicy.contentInteraction)
+                .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
                 .task(id: system.id) {
                     guard TodayWorldPostLoadingPolicy.shouldLoad(
                         isPostsSheetPresented: isShowingPosts,
@@ -1209,7 +1207,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationContentInteraction(TodayWorldSheetPresentationPolicy.contentInteraction)
+                .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
         }
     }
 

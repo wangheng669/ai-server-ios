@@ -1225,8 +1225,8 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertFalse(FeedDetailChromePolicy.hidesRootChrome(isPresented: false, isXueqiu: false))
     }
 
-    func testTodayWorldSheetsPrioritizeResizingOverScrollGesture() {
-        XCTAssertEqual(TodayWorldSheetPresentationPolicy.contentInteraction, .resizes)
+    func testTodayWorldNestedSheetsPrioritizeResizingOverScrollGesture() {
+        XCTAssertEqual(TodayWorldNestedSheetPresentationPolicy.contentInteraction, .resizes)
     }
 
     func testTodayWorldPostLoadingStartsOnlyAfterOpeningPostsSheet() {
