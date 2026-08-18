@@ -199,6 +199,7 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchXFeedUsers: () async throws -> [XFeedUser]
     private let fetchXueqiuPosts: (Int, Int, Int?) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
+    private let translateXFallback: (String) async throws -> String
     private let fetchXTweetDetail: (String) async throws -> XTweetDetailItem
     private let translateRSSCard: (String, String?) async throws -> RSSCardTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
@@ -226,6 +227,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchXFeedUsers: (() async throws -> [XFeedUser])? = nil,
         fetchXueqiuPosts: ((Int, Int, Int?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
+        translateXFallback: ((String) async throws -> String)? = nil,
         fetchXTweetDetail: ((String) async throws -> XTweetDetailItem)? = nil,
         translateRSSCard: ((String, String?) async throws -> RSSCardTranslation)? = nil,
         fetchRSSFeeds: (() async throws -> [RSSFeedSource])? = nil,
@@ -251,6 +253,9 @@ final class NewsFeedViewModel: ObservableObject {
         let client = APIClient(baseURL: serverURL)
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
+        }
+        self.translateXFallback = translateXFallback ?? { text in
+            try await PersonArticleTranslationService.shared.translate(text)
         }
         self.fetchXTweetDetail = fetchXTweetDetail ?? { tweetID in
             try await client.fetchXTweetDetail(tweetID: tweetID)
@@ -605,11 +610,11 @@ final class NewsFeedViewModel: ObservableObject {
         loadingXTranslationIDs.insert(post.id)
         defer { loadingXTranslationIDs.remove(post.id) }
         do {
-            let result = try await fetchXTranslation(tweetID)
+            let value = try await resolvedXTranslation(tweetID: tweetID, sourceText: post.originalDisplayContent)
             guard !Task.isCancelled else { return }
-            let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty, value != post.originalDisplayContent else { return }
-            pendingXTranslations[post.id] = value
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty, normalized != post.originalDisplayContent else { return }
+            pendingXTranslations[post.id] = normalized
             scheduleXTranslationPublish()
         } catch is CancellationError {
             return
@@ -631,16 +636,26 @@ final class NewsFeedViewModel: ObservableObject {
 
             guard detail.lang?.lowercased().hasPrefix("zh") != true,
                   xTranslations[post.id] == nil else { return }
-            let result = try await fetchXTranslation(detail.id)
+            let value = try await resolvedXTranslation(tweetID: detail.id, sourceText: detail.fullText)
             guard !Task.isCancelled else { return }
-            let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty, value != detail.fullText else { return }
-            pendingXTranslations[post.id] = value
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty, normalized != detail.fullText else { return }
+            pendingXTranslations[post.id] = normalized
             scheduleXTranslationPublish()
         } catch is CancellationError {
             return
         } catch {
             // Keep the stored wrapper visible if live X presentation is unavailable.
+        }
+    }
+
+    private func resolvedXTranslation(tweetID: String, sourceText: String) async throws -> String {
+        do {
+            return try await fetchXTranslation(tweetID).text
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return try await translateXFallback(sourceText)
         }
     }
 

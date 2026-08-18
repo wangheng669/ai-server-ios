@@ -835,6 +835,35 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.postForDisplay(post).displayContent, "猴爪：你想许什么愿？")
     }
 
+    @MainActor
+    func testXTranslationFallsBackWhenDedicatedServiceIsUnavailable() async throws {
+        struct ServiceUnavailable: Error {}
+        let sourceText = "Monkey's paw: What would you like to wish for?"
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":10,"source":"x","content":"Monkey's paw: What would you like to wish for?","post_link":"https://x.com/AmandaAskell/status/10","user":{"user_name":"Amanda Askell","user_screen_name":"AmandaAskell"},"meta":{"lang":"en"}}"#.utf8)
+        )
+        var fallbackInputs: [String] = []
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPosts: { _, _, _ in [post] },
+            fetchXTranslation: { _ in throw ServiceUnavailable() },
+            translateXFallback: { text in
+                fallbackInputs.append(text)
+                return "猴爪：你想许什么愿？"
+            }
+        )
+
+        await model.refresh()
+        for _ in 0..<30 where model.postForDisplay(post).displayContent != "猴爪：你想许什么愿？" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertEqual(fallbackInputs, [sourceText])
+        XCTAssertEqual(model.postForDisplay(post).displayContent, "猴爪：你想许什么愿？")
+    }
+
     func testXUserSelectionRequestsAllScoresInsteadOfChannelThreshold() {
         let items = APIClient.regularPostQueryItems(
             page: 1,
