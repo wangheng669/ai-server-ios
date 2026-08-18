@@ -668,6 +668,10 @@ struct Post: Codable, Identifiable, Hashable {
         clean(xReposterName).map { "\($0) 已转帖" }
     }
 
+    var xQuotedPost: XQuotedPost? {
+        sourceName == "X" ? meta?.quotedTweet : nil
+    }
+
     func replacingTranslation(with translation: String) -> Post {
         var replaced = Post(
             id: id, title: title, text: text, summary: summary, content: content,

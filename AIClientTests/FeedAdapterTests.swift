@@ -881,6 +881,17 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(query["x_feed_view"], "tracked")
     }
 
+    func testXFilteredPostKeepsQuotedPostForTimelinePresentation() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":2774267,"source":"x","content":"personal superintelligence should be available to everyone","meta":{"quoted_tweet":{"id":"2086754845218726027","text":"Everyone should have access to superintelligence.","text_zh":"每个人都应该能够使用超级智能。","author":{"name":"Mark Zuckerberg","screenName":"finkd","profileImageUrl":"https://example.com/mark.jpg"},"media":[{"type":"photo","url":"https://pbs.twimg.com/media/quote.jpg","width":1200,"height":800}]}}}"#.utf8)
+        )
+
+        XCTAssertEqual(post.xQuotedPost?.author?.name, "Mark Zuckerberg")
+        XCTAssertEqual(post.xQuotedPost?.displayText, "每个人都应该能够使用超级智能。")
+        XCTAssertEqual(post.xQuotedPost?.media?.first?.displayURL?.host, "api.wanghengai.xin")
+    }
+
     func testFeedEntitySelectorTargetsCurrentUserWhenOpened() {
         let ids = ["x:111", "x:222", "x:333"]
 

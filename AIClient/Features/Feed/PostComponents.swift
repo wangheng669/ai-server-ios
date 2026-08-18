@@ -1130,23 +1130,29 @@ struct XFeedMediaView: View {
     let post: Post
 
     var body: some View {
-        if let videoURL = post.feedPlaybackURL {
-            XVideoPlayerView(
-                url: videoURL,
-                fallbackURL: post.feedPlaybackFallbackURL,
-                thumbnailURL: post.previewURL,
-                observationSurface: "x-feed"
-            )
+        VStack(alignment: .leading, spacing: 10) {
+            if let videoURL = post.feedPlaybackURL {
+                XVideoPlayerView(
+                    url: videoURL,
+                    fallbackURL: post.feedPlaybackFallbackURL,
+                    thumbnailURL: post.previewURL,
+                    observationSurface: "x-feed"
+                )
                 .id(videoURL)
                 .frame(height: videoHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        } else {
-            PostMediaGrid(
-                post: post,
-                singleImageMaxHeight: 420,
-                availableWidth: availableWidth,
-                cornerRadius: 12
-            )
+            } else {
+                PostMediaGrid(
+                    post: post,
+                    singleImageMaxHeight: 420,
+                    availableWidth: availableWidth,
+                    cornerRadius: 12
+                )
+            }
+
+            if let quote = post.xQuotedPost {
+                XFeedQuotedPostCard(quote: quote, availableWidth: availableWidth)
+            }
         }
     }
 
@@ -1163,6 +1169,100 @@ struct XFeedMediaView: View {
             return availableWidth * 9 / 16
         }
         return min(availableWidth * CGFloat(height) / CGFloat(width), 440)
+    }
+}
+
+struct XFeedQuotedPostCard: View {
+    let quote: XQuotedPost
+    let availableWidth: CGFloat
+    var enablesTextSelection = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                if let avatarURL = quote.author?.profileImageURL.flatMap(URL.init(string:)) {
+                    AvatarView(
+                        url: avatarURL,
+                        name: quote.author?.name ?? "引用动态",
+                        size: 28
+                    )
+                }
+
+                Text(quote.author?.name ?? "引用动态")
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+
+                if let handle = quote.author?.handle {
+                    Text(handle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if let text = quote.displayText {
+                quotedText(text)
+            }
+
+            ForEach(Array((quote.media ?? []).enumerated()), id: \.offset) { _, media in
+                quotedMedia(media)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
+        }
+    }
+
+    @ViewBuilder
+    private func quotedText(_ text: String) -> some View {
+        if enablesTextSelection {
+            Text(text)
+                .font(.system(size: 15))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        } else {
+            Text(text)
+                .font(.system(size: 15))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func quotedMedia(_ media: XQuotedMedia) -> some View {
+        if let videoURL = media.playbackURL {
+            XVideoPlayerView(
+                url: videoURL,
+                fallbackURL: nil,
+                thumbnailURL: media.previewURL,
+                generatesThumbnailWhenMissing: false
+            )
+            .frame(height: quotedMediaHeight(media))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else if let imageURL = media.displayURL {
+            RemoteImage(
+                url: imageURL,
+                height: quotedMediaHeight(media),
+                cornerRadius: 8,
+                contentMode: .fit
+            )
+            .frame(maxWidth: .infinity)
+            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .clipped()
+        }
+    }
+
+    private func quotedMediaHeight(_ media: XQuotedMedia) -> CGFloat {
+        guard let mediaWidth = media.width,
+              let mediaHeight = media.height,
+              mediaWidth > 0,
+              mediaHeight > 0 else { return 190 }
+        return min(availableWidth * CGFloat(mediaHeight) / CGFloat(mediaWidth), 460)
     }
 }
 
