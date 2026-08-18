@@ -1048,6 +1048,26 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketChartDisplayPoints(points).map(\.timestamp), [2])
     }
 
+    func testMarketSampledChartTrendUsesWholeDayAndKeepsEndpoints() {
+        var points: [MarketChartPoint] = []
+        for index in 0..<120 {
+            let value = Double(index + 1)
+            let point = MarketChartPoint(
+                timestamp: Int64(index), open: value, high: value,
+                low: value, close: value, volume: nil,
+                state: "confirmed", source: "tradingview", session: "regular"
+            )
+            points.append(point)
+        }
+
+        let values = marketSampledChartTrend(points, limit: 40)
+
+        XCTAssertEqual(values.count, 40)
+        XCTAssertEqual(values.first, 1)
+        XCTAssertEqual(values.last, 120)
+        XCTAssertTrue(values.contains { $0 > 40 && $0 < 80 })
+    }
+
     func testVolumeScaleUsesRobustPercentileCeiling() throws {
         let rows = (1...20).map { index in
             #"{"timestamp":\#(index),"open":10,"high":11,"low":9,"close":10,"volume":\#(index * 100),"state":"confirmed","source":"test","session":"regular"}"#
