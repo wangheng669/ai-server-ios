@@ -1329,6 +1329,7 @@ struct NewsFeedView: View {
         let displayPost = model.postForDisplay(post)
         return NewsCardView(
             post: displayPost,
+            rssAvatarURL: rssDirectoryAvatarURL(for: displayPost),
             usesWeChatStyle: source == .wechat,
             isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
             isExpandedFlash: expandedFlashIDs.contains(post.id),
@@ -1390,6 +1391,12 @@ struct NewsFeedView: View {
                 baseURL: ServerConfiguration.currentURL
             )
         }
+    }
+
+    private func rssDirectoryAvatarURL(for post: Post) -> URL? {
+        guard post.isRSS,
+              let feedID = feedID(from: post.source) else { return nil }
+        return model.rssFeeds.first { $0.id == feedID }?.preferredAvatarURL
     }
 
     private func xNewPostsPill(action: @escaping () -> Void) -> some View {
@@ -3190,6 +3197,7 @@ struct NewsCardView: View {
         return cache
     }()
     let post: Post
+    var rssAvatarURL: URL? = nil
     var usesWeChatStyle = false
     var isFeaturedBilibili = false
     var isExpandedFlash = false
@@ -4073,7 +4081,11 @@ struct NewsCardView: View {
     private var rssCard: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
-                AvatarView(url: post.rssCardAvatarURL, name: post.rssCardSourceName, size: 25)
+                AvatarView(
+                    url: rssAvatarURL ?? post.rssCardAvatarURL,
+                    name: post.rssCardSourceName,
+                    size: 25
+                )
                 Text(post.rssCardSourceName)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.blue)
