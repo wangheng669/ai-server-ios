@@ -427,9 +427,9 @@ struct PostDetailView: View {
                 rssSourceHeader
 
                 Text(post.displayTitle)
-                    .font(.system(size: 27, weight: .bold))
-                    .tracking(-0.35)
-                    .lineSpacing(4)
+                    .font(.system(size: 24, weight: .bold))
+                    .tracking(-0.25)
+                    .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 18)
 
