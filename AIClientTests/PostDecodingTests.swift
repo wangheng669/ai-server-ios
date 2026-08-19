@@ -570,6 +570,20 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertFalse(post.needsXStoredDetailRefresh)
     }
 
+    func testXLiveEngagementRefreshPreservesStoredTranslation() throws {
+        let postData = #"{"id":7,"source":"x","content":"Complete stored original.","content_zh":"已经存储的完整中文翻译。","post_link":"https://x.com/example/status/123","meta":{"lang":"en"}}"#.data(using: .utf8)!
+        let detailData = #"{"id":"123","text":"Complete live original.","metrics":{"likes":42},"lang":"en"}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: postData)
+        let detail = try JSONDecoder().decode(XTweetDetailItem.self, from: detailData)
+
+        let refreshed = post.replacingXLiveDetail(with: detail)
+
+        XCTAssertEqual(refreshed.originalDisplayContent, "Complete live original.")
+        XCTAssertEqual(refreshed.displayContent, "已经存储的完整中文翻译。")
+        XCTAssertTrue(refreshed.hasTranslation)
+        XCTAssertEqual(refreshed.meta?.metrics?.likes, 42)
+    }
+
     func testXDetailFetchesOnlyMissingStoredData() throws {
         let data = #"{"id":7,"source":"x","content":"Truncated original…","post_link":"https://x.com/example/status/123","meta":{"lang":"en"}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: data)

@@ -717,7 +717,7 @@ struct Post: Codable, Identifiable, Hashable {
 
         var replaced = Post(
             id: id, title: title, text: text, summary: summary, content: detail.fullText,
-            contentZH: nil, source: source, formattedTime: formattedTime,
+            contentZH: contentZH, source: source, formattedTime: formattedTime,
             weightReason: weightReason, finalScore: finalScore, weight: weight,
             postLink: postLink, articlePostAt: articlePostAt, user: liveAuthor,
             postTags: postTags,
