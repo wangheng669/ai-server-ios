@@ -376,6 +376,11 @@ struct AvatarView: View {
     @State private var image: UIImage?
 
     private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
+    private var imageBackground: Color {
+        name == "观点网"
+            ? Color(red: 0.20, green: 0.22, blue: 0.24)
+            : Color.clear
+    }
 
     var body: some View {
         Group {
@@ -394,6 +399,7 @@ struct AvatarView: View {
             }
         }
         .frame(width: size, height: size)
+        .background(imageBackground)
         .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
         .task(id: url) {
             guard assetName == nil else { return }
