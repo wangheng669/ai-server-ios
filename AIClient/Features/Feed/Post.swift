@@ -357,6 +357,11 @@ enum XPostTextFormatter {
         return trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
     }
 
+    static func containsUntranslatedEnglishPassage(_ value: String) -> Bool {
+        let pattern = #"(?i)(?:\b[a-z][a-z'’.-]*\b(?:\s+|[,;:()]+\s*)){8,}\b[a-z][a-z'’.-]*\b"#
+        return value.range(of: pattern, options: .regularExpression) != nil
+    }
+
     static func shouldPreferFullOriginal(displayed: String, fullOriginal: String) -> Bool {
         let displayed = detailText(displayed)
         let fullOriginal = detailText(fullOriginal)
@@ -640,6 +645,7 @@ struct Post: Codable, Identifiable, Hashable {
         guard hasTranslation else { return true }
         let translation = displayContent
         if XPostTextFormatter.isTruncated(translation) { return true }
+        if XPostTextFormatter.containsUntranslatedEnglishPassage(translation) { return true }
         return xStoredOriginalContent.count >= 600
             && XPostTextFormatter.paragraphs(xStoredOriginalContent).count >= 3
             && XPostTextFormatter.paragraphs(translation).count == 1
