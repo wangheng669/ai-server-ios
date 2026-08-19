@@ -147,7 +147,7 @@ private struct MarketHomeView: View {
                             MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
                                 .id(selectedMarket)
                                 .transition(.opacity)
-                            MarketRegionPicker(selection: $selectedMarket)
+                            MarketRegionPicker(store: store, selection: $selectedMarket)
                                 .padding(.top, 14)
                                 .padding(.trailing, 8)
                         }
@@ -173,10 +173,6 @@ private struct MarketHomeView: View {
                             if selectedMarket == .china {
                                 ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
                                     .id("market-structure")
-                            }
-                            if selectedMarket != .crypto && selectedMarket != .commodity {
-                                MarketWorldMap(store: store, selection: $selectedMarket)
-                                    .id("market-map")
                             }
                         }
                         .padding(.top, MarketStyle.pageSpacing)
@@ -204,9 +200,6 @@ private struct MarketHomeView: View {
                     if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
                         try? await Task.sleep(for: .seconds(2))
                         proxy.scrollTo("market-structure", anchor: .top)
-                    } else if ProcessInfo.processInfo.arguments.contains("--market-map-preview") {
-                        try? await Task.sleep(for: .milliseconds(700))
-                        proxy.scrollTo("market-map", anchor: .bottom)
                     }
                     #endif
                 }
@@ -361,7 +354,7 @@ private struct MarketTerminalHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             heroStatusHeader
-                .padding(.trailing, 58)
+                .padding(.trailing, 76)
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
                 VStack(alignment: .leading, spacing: 8) {
@@ -369,7 +362,7 @@ private struct MarketTerminalHero: View {
                     heroPriceAndChart
                 }
                 .foregroundStyle(.primary)
-                .padding(.trailing, 58)
+                .padding(.trailing, 76)
             }
             .buttonStyle(MarketPressStyle())
             .accessibilityLabel(heroAccessibilityLabel)
@@ -992,6 +985,7 @@ private struct MarketTerminalSentiment: View {
 }
 
 private struct MarketRegionPicker: View {
+    let store: MarketStore
     @Binding var selection: MarketRegion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1002,7 +996,7 @@ private struct MarketRegionPicker: View {
             }
         }
         .padding(3)
-        .frame(width: 50)
+        .frame(width: 68)
         .background(MarketStyle.canvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
@@ -1010,17 +1004,24 @@ private struct MarketRegionPicker: View {
         let isSelected = selection == region
         let weight: Font.Weight = isSelected ? .semibold : .medium
         let foreground = isSelected ? MarketStyle.accent : Color.secondary
+        let quote = store.quote(symbol: region.primarySymbol)
 
         return Button {
             withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
                 selection = region
             }
         } label: {
-            Text(region.rawValue)
-                .font(.system(size: 13, weight: weight))
+            VStack(spacing: 1) {
+                Text(region.rawValue)
+                    .font(.system(size: 12, weight: weight))
+                    .foregroundStyle(foreground)
+                Text(quote?.formattedPercent ?? "—")
+                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(quoteTint(quote))
+            }
                 .lineLimit(1)
-                .foregroundStyle(foreground)
-                .frame(width: 44, height: 26)
+                .frame(width: 62, height: 33)
                 .background(
                     isSelected ? MarketStyle.surface : Color.clear,
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1036,7 +1037,7 @@ private struct MarketRegionPicker: View {
         }
         .id(region)
         .buttonStyle(.plain)
-        .accessibilityLabel(region.rawValue)
+        .accessibilityLabel("\(region.rawValue)，\(quote?.formattedPercent ?? "涨跌幅等待更新")")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
