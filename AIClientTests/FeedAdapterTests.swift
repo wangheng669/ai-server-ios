@@ -892,6 +892,38 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.xQuotedPost?.media?.first?.displayURL?.host, "api.wanghengai.xin")
     }
 
+    @MainActor
+    func testXQuotedPostIsAutomaticallyTranslated() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":2916471,"source":"x","content":"主帖已有中文。","content_zh":"主帖已有中文。","post_link":"https://x.com/StatsWire/status/2089910370546954620","meta":{"lang":"zh","quoted_tweet":{"id":"2089891927659585918","text":"Recapping the safety changes we rolled out.","author":{"name":"Tibo","screenName":"thsottiaux"}}}}"#.utf8)
+        )
+        var requestedTweetIDs: [String] = []
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPosts: { _, _, _ in [post] },
+            fetchXTranslation: { tweetID in
+                requestedTweetIDs.append(tweetID)
+                return XTranslation(
+                    tweetId: tweetID,
+                    text: "回顾一下我们推出的安全改进。",
+                    sourceLanguage: "en",
+                    destinationLanguage: "zh"
+                )
+            }
+        )
+
+        await model.refresh()
+        for _ in 0..<30 where model.postForDisplay(post).xQuotedPost?.displayText != "回顾一下我们推出的安全改进。" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertEqual(requestedTweetIDs, ["2089891927659585918"])
+        XCTAssertEqual(model.postForDisplay(post).displayContent, "主帖已有中文。")
+        XCTAssertEqual(model.postForDisplay(post).xQuotedPost?.displayText, "回顾一下我们推出的安全改进。")
+    }
+
     func testFeedEntitySelectorTargetsCurrentUserWhenOpened() {
         let ids = ["x:111", "x:222", "x:333"]
 
