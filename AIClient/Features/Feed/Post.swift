@@ -553,6 +553,8 @@ struct Post: Codable, Identifiable, Hashable {
     // Runtime-only card translations. The backend payload and offline cache remain unchanged.
     var rssTitleZH: String? = nil
     var rssExcerptZH: String? = nil
+    // Runtime-only translation for an embedded quoted X post.
+    var xQuotedTextZH: String? = nil
     // Runtime-only attribution retained when an X repost wrapper is replaced by its live original.
     var xReposterName: String? = nil
 
@@ -669,7 +671,24 @@ struct Post: Codable, Identifiable, Hashable {
     }
 
     var xQuotedPost: XQuotedPost? {
-        sourceName == "X" ? meta?.quotedTweet : nil
+        guard sourceName == "X", var quote = meta?.quotedTweet else { return nil }
+        if let xQuotedTextZH { quote.textZH = xQuotedTextZH }
+        return quote
+    }
+
+    var needsXQuotedTranslation: Bool {
+        guard sourceName == "X",
+              let quote = meta?.quotedTweet,
+              xNonempty(quote.id) != nil,
+              let original = quote.originalText,
+              xNonempty(quote.textZH) == nil else { return false }
+        return !Self.containsHanCharacters(original)
+    }
+
+    func replacingXQuotedTranslation(with translation: String) -> Post {
+        var translated = self
+        translated.xQuotedTextZH = translation
+        return translated
     }
 
     func replacingTranslation(with translation: String) -> Post {
@@ -1893,7 +1912,7 @@ struct XReplyContext: Codable, Hashable {
 struct XQuotedPost: Codable, Hashable {
     let id: String?
     let text: String?
-    let textZH: String?
+    var textZH: String?
     let createdAt: String?
     let author: XQuotedAuthor?
     let media: [XQuotedMedia]?

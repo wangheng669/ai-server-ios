@@ -157,6 +157,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isSwitchingSource = false
     @Published private(set) var pendingRealtimePosts: [Post] = []
     @Published private(set) var xTranslations: [Int: String] = [:]
+    @Published private(set) var xQuotedTranslations: [Int: String] = [:]
     @Published private(set) var xLiveDetails: [Int: XTweetDetailItem] = [:]
     @Published private(set) var rssCardTranslations: [Int: RSSCardTranslation] = [:]
     @Published private(set) var rssFeeds: [RSSFeedSource] = []
@@ -208,6 +209,7 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchPostDetail: (Int) async throws -> Post
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
+    private var loadingXQuotedTranslationIDs: Set<Int> = []
     private var loadingXLiveDetailIDs: Set<Int> = []
     private var loadingRSSTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
@@ -582,6 +584,9 @@ final class NewsFeedViewModel: ObservableObject {
         if let translation = xTranslations[post.id] {
             displayed = displayed.replacingTranslation(with: translation)
         }
+        if let translation = xQuotedTranslations[post.id] {
+            displayed = displayed.replacingXQuotedTranslation(with: translation)
+        }
         if let translation = rssCardTranslations[post.id] ?? pendingRSSCardTranslations[post.id] {
             displayed = displayed.replacingRSSCardTranslation(
                 title: translation.title,
@@ -604,6 +609,11 @@ final class NewsFeedViewModel: ObservableObject {
             await loadXRetweetPresentationIfNeeded(post)
             return
         }
+        await translateXMainPostIfNeeded(post)
+        await translateXQuotedPostIfNeeded(post)
+    }
+
+    private func translateXMainPostIfNeeded(_ post: Post) async {
         guard post.needsXTranslation,
               let tweetID = post.xTweetID,
               xTranslations[post.id] == nil,
@@ -621,6 +631,28 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             // Translation is best-effort. Keep the original post visible on failure.
+        }
+    }
+
+    private func translateXQuotedPostIfNeeded(_ post: Post) async {
+        guard post.needsXQuotedTranslation,
+              let quote = post.meta?.quotedTweet,
+              let tweetID = quote.id,
+              let sourceText = quote.originalText,
+              xQuotedTranslations[post.id] == nil,
+              !loadingXQuotedTranslationIDs.contains(post.id) else { return }
+        loadingXQuotedTranslationIDs.insert(post.id)
+        defer { loadingXQuotedTranslationIDs.remove(post.id) }
+        do {
+            let value = try await resolvedXTranslation(tweetID: tweetID, sourceText: sourceText)
+            guard !Task.isCancelled else { return }
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty, normalized != sourceText else { return }
+            xQuotedTranslations[post.id] = normalized
+        } catch is CancellationError {
+            return
+        } catch {
+            // Translation is best-effort. Keep the quoted source post visible on failure.
         }
     }
 
@@ -727,7 +759,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func scheduleXTranslations(for posts: [Post]) {
-        let candidates = posts.filter { $0.needsXTranslation || $0.isXRetweetWrapper }
+        let candidates = posts.filter {
+            $0.needsXTranslation || $0.needsXQuotedTranslation || $0.isXRetweetWrapper
+        }
         guard !candidates.isEmpty else { return }
         for post in candidates {
             Task { @MainActor [weak self] in
