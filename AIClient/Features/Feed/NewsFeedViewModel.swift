@@ -158,6 +158,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var pendingRealtimePosts: [Post] = []
     @Published private(set) var xTranslations: [Int: String] = [:]
     @Published private(set) var xQuotedTranslations: [Int: String] = [:]
+    @Published private(set) var xReplyContexts: [Int: XReplyContext] = [:]
     @Published private(set) var xLiveDetails: [Int: XTweetDetailItem] = [:]
     @Published private(set) var rssCardTranslations: [Int: RSSCardTranslation] = [:]
     @Published private(set) var rssFeeds: [RSSFeedSource] = []
@@ -210,6 +211,7 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
     private var loadingXQuotedTranslationIDs: Set<Int> = []
+    private var loadingXReplyContextIDs: Set<Int> = []
     private var loadingXLiveDetailIDs: Set<Int> = []
     private var loadingRSSTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
@@ -587,6 +589,9 @@ final class NewsFeedViewModel: ObservableObject {
         if let translation = xQuotedTranslations[post.id] {
             displayed = displayed.replacingXQuotedTranslation(with: translation)
         }
+        if let reply = xReplyContexts[post.id] {
+            displayed = displayed.replacingXReplyContext(with: reply)
+        }
         if let translation = rssCardTranslations[post.id] ?? pendingRSSCardTranslations[post.id] {
             displayed = displayed.replacingRSSCardTranslation(
                 title: translation.title,
@@ -607,10 +612,11 @@ final class NewsFeedViewModel: ObservableObject {
     func translateXPostIfNeeded(_ post: Post) async {
         if post.isXRetweetWrapper {
             await loadXRetweetPresentationIfNeeded(post)
-            return
+        } else {
+            await translateXMainPostIfNeeded(post)
+            await translateXQuotedPostIfNeeded(post)
         }
-        await translateXMainPostIfNeeded(post)
-        await translateXQuotedPostIfNeeded(post)
+        await loadAndTranslateXReplyContextIfNeeded(post)
     }
 
     private func translateXMainPostIfNeeded(_ post: Post) async {
@@ -653,6 +659,47 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             // Translation is best-effort. Keep the quoted source post visible on failure.
+        }
+    }
+
+    private func loadAndTranslateXReplyContextIfNeeded(_ post: Post) async {
+        guard post.needsXReplyContextRefresh || post.needsXReplyContextTranslation,
+              let replyID = post.meta?.inReplyToStatusID?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !replyID.isEmpty,
+              xReplyContexts[post.id] == nil,
+              !loadingXReplyContextIDs.contains(post.id) else { return }
+        loadingXReplyContextIDs.insert(post.id)
+        defer { loadingXReplyContextIDs.remove(post.id) }
+        do {
+            let stored = post.meta?.replyContext
+            let detail: XTweetDetailItem? = if stored?.displayText == nil {
+                try await fetchXTweetDetail(replyID)
+            } else {
+                nil
+            }
+            let sourceText = stored?.text ?? detail?.fullText ?? ""
+            let language = detail?.lang?.lowercased()
+            let translatedText: String? = if Self.containsHanCharacters(sourceText)
+                || language?.hasPrefix("zh") == true {
+                nil
+            } else {
+                try await resolvedXTranslation(tweetID: detail?.id ?? replyID, sourceText: sourceText)
+            }
+            guard !Task.isCancelled else { return }
+            xReplyContexts[post.id] = XReplyContext(
+                id: detail?.id ?? stored?.id ?? replyID,
+                authorName: detail?.author?.name ?? stored?.authorName,
+                screenName: detail?.author?.screenName ?? stored?.screenName
+                    ?? post.meta?.inReplyToScreenName,
+                avatarURL: detail?.author?.profileImageURL ?? stored?.avatarURL,
+                text: detail?.fullText ?? stored?.text,
+                textZH: translatedText ?? stored?.textZH
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            // Reply context is best-effort. Keep the compact reply label on failure.
         }
     }
 
@@ -760,7 +807,11 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func scheduleXTranslations(for posts: [Post]) {
         let candidates = posts.filter {
-            $0.needsXTranslation || $0.needsXQuotedTranslation || $0.isXRetweetWrapper
+            $0.needsXTranslation
+                || $0.needsXQuotedTranslation
+                || $0.needsXReplyContextRefresh
+                || $0.needsXReplyContextTranslation
+                || $0.isXRetweetWrapper
         }
         guard !candidates.isEmpty else { return }
         for post in candidates {

@@ -924,6 +924,39 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(model.postForDisplay(post).xQuotedPost?.displayText, "回顾一下我们推出的安全改进。")
     }
 
+    @MainActor
+    func testXReplyContextIsTranslatedAndAttachedToFeedCard() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":7,"source":"x","content":"评论区里所有人都被狠狠地羞辱了一番","content_zh":"评论区里所有人都被狠狠地羞辱了一番","post_link":"https://x.com/_aidan_clark_/status/123","meta":{"lang":"zh","in_reply_to_status_id":"456","in_reply_to_screen_name":"_aidan_clark_","reply_context":{"id":"456","author_name":"Aidan Clark","screen_name":"_aidan_clark_","text":"ChatGPT is gaslighting me by trying to say that bean-to-bar is a commonplace way to describe chocolate."}}}"#.utf8)
+        )
+        var requestedTweetIDs: [String] = []
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPosts: { _, _, _ in [post] },
+            fetchXTranslation: { tweetID in
+                requestedTweetIDs.append(tweetID)
+                return XTranslation(
+                    tweetId: tweetID,
+                    text: "ChatGPT 试图声称‘从可可豆到巧克力棒’是描述巧克力的常见说法，简直是在误导我。",
+                    sourceLanguage: "en",
+                    destinationLanguage: "zh"
+                )
+            }
+        )
+
+        await model.refresh()
+        for _ in 0..<30 where model.postForDisplay(post).xReplyContext?.textZH == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let reply = try XCTUnwrap(model.postForDisplay(post).xReplyContext)
+        XCTAssertEqual(requestedTweetIDs, ["456"])
+        XCTAssertEqual(reply.displayText, "ChatGPT 试图声称‘从可可豆到巧克力棒’是描述巧克力的常见说法，简直是在误导我。")
+        XCTAssertEqual(reply.handle, "@_aidan_clark_")
+    }
+
     func testFeedEntitySelectorTargetsCurrentUserWhenOpened() {
         let ids = ["x:111", "x:222", "x:333"]
 

@@ -2297,7 +2297,10 @@ struct PostDetailView: View {
                     .padding(.bottom, 12)
 
                     Divider()
-                    xEngagementRow
+                    FeedEngagementRow(
+                        post: xLiveDetail.map { post.replacingXLiveDetail(with: $0) } ?? post,
+                        showsOnlyLikeAndBookmark: true
+                    )
                         .padding(.horizontal, 15)
                         .frame(height: 44)
                     Divider()
@@ -2474,31 +2477,6 @@ struct PostDetailView: View {
         }
     }
 
-    private var xEngagementRow: some View {
-        let metrics = xMetrics
-        return HStack {
-            xMetric("bubble.left", metrics?.replies)
-            Spacer(); xMetric("arrow.2.squarepath", metrics?.retweets)
-            Spacer(); xMetric("heart", metrics?.likes)
-            Spacer(); xMetric("bookmark", metrics?.bookmarks)
-            Spacer()
-            if let link = post.linkURL {
-                ShareLink(item: link) { Image(systemName: "square.and.arrow.up") }
-            } else {
-                Image(systemName: "square.and.arrow.up")
-            }
-        }
-        .font(.system(size: 16, weight: .regular))
-        .foregroundStyle(Color(uiColor: .label).opacity(0.72))
-    }
-
-    private func xMetric(_ symbol: String, _ value: Int?) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: symbol)
-            if let value, value > 0 { Text(compactCount(value)).font(.caption) }
-        }
-    }
-
     private var xMetrics: PostMetrics? {
         xLiveDetail?.metrics ?? post.meta?.metrics
     }
@@ -2521,10 +2499,13 @@ struct PostDetailView: View {
     }
 
     private var xResolvedReplyContext: XReplyContext? {
-        if let stored = post.meta?.replyContext, stored.displayText != nil {
+        if let live = xLiveReplyContext, live.displayText != nil {
+            return live
+        }
+        if let stored = post.xReplyContext, stored.displayText != nil {
             return stored
         }
-        return xLiveReplyContext
+        return nil
     }
 
     private var detailImageHeight: CGFloat {
@@ -2743,7 +2724,10 @@ struct PostDetailView: View {
 
     @MainActor
     private func loadXReplyContext(using client: APIClient) async {
-        guard post.meta?.replyContext?.displayText == nil,
+        let stored = post.xReplyContext
+        let storedNeedsTranslation = stored?.textZH == nil
+            && stored?.text.map { !Self.containsHanCharacters($0) } == true
+        guard stored?.displayText == nil || storedNeedsTranslation,
               let replyID = post.meta?.inReplyToStatusID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !replyID.isEmpty else {
             return
@@ -2772,6 +2756,10 @@ struct PostDetailView: View {
         } catch {
             // The existing "回复 @用户" label remains as a useful fallback.
         }
+    }
+
+    nonisolated private static func containsHanCharacters(_ value: String) -> Bool {
+        value.unicodeScalars.contains { (0x4E00...0x9FFF).contains(Int($0.value)) }
     }
 
     private func loadNewYorkTimesDetail() async {

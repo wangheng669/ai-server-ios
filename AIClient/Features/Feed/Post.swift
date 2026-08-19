@@ -560,6 +560,8 @@ struct Post: Codable, Identifiable, Hashable {
     var rssExcerptZH: String? = nil
     // Runtime-only translation for an embedded quoted X post.
     var xQuotedTextZH: String? = nil
+    // Runtime-only reply context loaded or translated after the feed payload arrives.
+    var xReplyContextOverride: XReplyContext? = nil
     // Runtime-only attribution retained when an X repost wrapper is replaced by its live original.
     var xReposterName: String? = nil
 
@@ -662,6 +664,25 @@ struct Post: Codable, Identifiable, Hashable {
         sourceName == "X"
             && clean(meta?.inReplyToStatusID) != nil
             && meta?.replyContext?.displayText == nil
+    }
+
+    var needsXReplyContextTranslation: Bool {
+        guard sourceName == "X",
+              clean(meta?.inReplyToStatusID) != nil,
+              let reply = meta?.replyContext,
+              xNonempty(reply.textZH) == nil,
+              let original = xNonempty(reply.text) else { return false }
+        return !Self.containsHanCharacters(original)
+    }
+
+    var xReplyContext: XReplyContext? {
+        xReplyContextOverride ?? meta?.replyContext
+    }
+
+    func replacingXReplyContext(with reply: XReplyContext) -> Post {
+        var replaced = self
+        replaced.xReplyContextOverride = reply
+        return replaced
     }
 
     var isXRetweetWrapper: Bool {

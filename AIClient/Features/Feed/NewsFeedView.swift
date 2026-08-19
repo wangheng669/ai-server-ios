@@ -3448,6 +3448,13 @@ struct NewsCardView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onOpen?() }
 
+                    if let reply = post.xReplyContext,
+                       let replyText = reply.displayText {
+                        XReplyContextCard(reply: reply, text: replyText)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onOpen?() }
+                    }
+
                     VStack(alignment: .leading, spacing: 0) {
                         XFeedMediaView(post: post)
                         FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
