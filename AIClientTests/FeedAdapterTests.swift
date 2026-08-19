@@ -957,6 +957,34 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(reply.handle, "@_aidan_clark_")
     }
 
+    @MainActor
+    func testXIdentityIsPreloadedBeforeInitialPostsArePublished() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":7,"source":"x","content":"AI 嘉宾审稿后，你会直接发送是先检查？","content_zh":"AI 嘉宾审稿后，你会直接发送还是先检查？","post_link":"https://x.com/zohanlin/status/123","user":{"user_name":"佐哥 ZOHAN","user_screen_name":"zohanlin"},"meta":{"lang":"zh"}}"#.utf8)
+        )
+        let detail = try JSONDecoder().decode(
+            XTweetDetailItem.self,
+            from: Data(#"{"id":"123","text":"AI 嘉宾审稿后，你会直接发送还是先检查？","author":{"name":"佐哥 ZOHAN","screenName":"zohanlin","verified":true},"lang":"zh"}"#.utf8)
+        )
+        var requestedTweetIDs: [String] = []
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPosts: { _, _, _ in [post] },
+            fetchXTweetDetail: { tweetID in
+                requestedTweetIDs.append(tweetID)
+                return detail
+            }
+        )
+
+        await model.refresh()
+
+        XCTAssertEqual(requestedTweetIDs, ["123"])
+        XCTAssertEqual(model.posts.count, 1)
+        XCTAssertTrue(model.postForDisplay(model.posts[0]).user?.verified == true)
+    }
+
     func testFeedEntitySelectorTargetsCurrentUserWhenOpened() {
         let ids = ["x:111", "x:222", "x:333"]
 
