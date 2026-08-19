@@ -226,12 +226,14 @@ struct NewsFeedView: View {
                 }
 
                 HStack(alignment: .bottom, spacing: 8) {
-                    if model.source == .youtube {
-                        youtubePersonSelector
-                            .transition(.scale(scale: 0.9).combined(with: .opacity))
-                    } else if supportsFeedEntitySelector {
-                        feedEntitySelector
-                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+                    if !isSourceSelectorExpanded {
+                        if model.source == .youtube {
+                            youtubePersonSelector
+                                .transition(userSelectorTransition)
+                        } else if supportsFeedEntitySelector {
+                            feedEntitySelector
+                                .transition(userSelectorTransition)
+                        }
                     }
                     sourceSelector
                 }
@@ -363,8 +365,8 @@ struct NewsFeedView: View {
         VStack(alignment: .trailing, spacing: 8) {
             if isSourceSelectorExpanded {
                 ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 1) {
+                    ScrollView(.horizontal) {
+                        LazyHStack(spacing: 1) {
                             ForEach(FeedSource.allCases) { source in
                                 sourceOption(source)
                                     .id(source)
@@ -380,8 +382,7 @@ struct NewsFeedView: View {
                         }
                     }
                 }
-                .frame(width: 54)
-                .frame(maxHeight: 344)
+                .frame(width: sourceSelectorExpandedWidth, height: 54)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -419,6 +420,17 @@ struct NewsFeedView: View {
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isSourceSelectorExpanded)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.source)
+    }
+
+    private var sourceSelectorExpandedWidth: CGFloat {
+        let contentWidth = CGFloat(FeedSource.allCases.count) * 55 + 8
+        return min(contentWidth, max(54, UIScreen.main.bounds.width - 32))
+    }
+
+    private var userSelectorTransition: AnyTransition {
+        .move(edge: .trailing)
+            .combined(with: .scale(scale: 0.86, anchor: .trailing))
+            .combined(with: .opacity)
     }
 
     private var youtubePersonSelector: some View {
