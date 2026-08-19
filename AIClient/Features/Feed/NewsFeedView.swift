@@ -179,8 +179,6 @@ struct NewsFeedView: View {
     @State private var openingWebPostID: Int?
     @State private var webOpenError: String?
     @State private var preparedWebViews: [Int: WKWebView] = [:]
-    @State private var showsAllRSSSources = false
-    @State private var rssSourceSearch = ""
     @State private var isSourceSelectorExpanded = false
     @State private var isYouTubePersonSelectorExpanded = false
     @State private var isFeedEntitySelectorExpanded = false
@@ -521,7 +519,7 @@ struct NewsFeedView: View {
 
     private var supportsFeedEntitySelector: Bool {
         switch model.source {
-        case .x, .xueqiu, .wechat:
+        case .x, .xueqiu, .wechat, .rss:
             true
         case .weibo:
             weiboSection == .following
@@ -558,6 +556,17 @@ struct NewsFeedView: View {
                 )
             }
         }
+        if model.source == .rss {
+            return model.rssFeeds.map { feed in
+                FeedEntityChoice(
+                    id: "rss:\(feed.id)",
+                    name: feed.name,
+                    subtitle: nil,
+                    avatarURL: feed.preferredAvatarURL,
+                    feedID: feed.id
+                )
+            }
+        }
 
         let posts: [Post]
         if model.source == .weibo {
@@ -589,6 +598,9 @@ struct NewsFeedView: View {
     private var selectedFeedEntityID: String? {
         if model.source == .wechat {
             return model.selectedWeChatFeedID.map { "rss:\($0)" }
+        }
+        if model.source == .rss {
+            return model.selectedRSSFeedID.map { "rss:\($0)" }
         }
         if model.source == .weibo {
             return weiboFollowingModel.selectedFeedID.map { "rss:\($0)" }
@@ -810,6 +822,8 @@ struct NewsFeedView: View {
             feedEntitySearch = ""
             if model.source == .wechat {
                 Task { await model.selectWeChatFeed(choice?.feedID) }
+            } else if model.source == .rss {
+                Task { await model.selectRSSFeed(choice?.feedID) }
             } else if model.source == .weibo {
                 Task { await weiboFollowingModel.selectFeed(choice?.feedID) }
             } else if model.source == .x {
@@ -1294,34 +1308,6 @@ struct NewsFeedView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .overlay {
-                if source == .rss, model.source == .rss {
-                    ZStack(alignment: .bottomTrailing) {
-                        if showsAllRSSSources {
-                            Color.black.opacity(0.001)
-                                .ignoresSafeArea()
-                                .contentShape(Rectangle())
-                                .onTapGesture { closeRSSSourceMenu() }
-                        }
-
-                        VStack(alignment: .trailing, spacing: 8) {
-                            if showsAllRSSSources {
-                                rssSourceMenu
-                                    .transition(
-                                        .scale(scale: 0.92, anchor: .bottomTrailing)
-                                            .combined(with: .opacity)
-                                    )
-                            }
-
-                            rssSourceSelector
-                        }
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 70)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
             .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
             .alert("页面加载失败", isPresented: Binding(
                 get: { webOpenError != nil },
@@ -1488,189 +1474,6 @@ struct NewsFeedView: View {
             .init(id: 57, name: "猫笔刀"),
             .init(id: 2373, name: "小互 AI")
         ]
-    }
-
-    private var rssSourceSelector: some View {
-        rssSourcePickerTrigger
-    }
-
-    private var rssSourceMenu: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
-                TextField("搜索来源", text: $rssSourceSearch)
-                    .font(.system(size: 14))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-
-                if !rssSourceSearch.isEmpty {
-                    Button {
-                        rssSourceSearch = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("清除搜索")
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 42)
-
-            Divider()
-
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: true) {
-                    LazyVStack(spacing: 0) {
-                        rssSourcePickerRow(id: nil, name: "全部 RSS", iconURL: nil)
-                            .id("rss-source-all")
-
-                        ForEach(filteredRSSFeeds) { feed in
-                            Divider().padding(.leading, 50)
-                            rssSourcePickerRow(
-                                id: feed.id,
-                                name: feed.name,
-                                iconURL: feed.preferredAvatarURL
-                            )
-                            .id("rss-source-\(feed.id)")
-                        }
-                    }
-                }
-                .onAppear {
-                    guard let selectedID = model.selectedRSSFeedID else { return }
-                    DispatchQueue.main.async {
-                        proxy.scrollTo("rss-source-\(selectedID)", anchor: .center)
-                    }
-                }
-            }
-        }
-        .frame(width: 276, height: 276)
-        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(uiColor: .separator).opacity(0.22), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.16), radius: 18, y: 7)
-        .accessibilityElement(children: .contain)
-    }
-
-    private var filteredRSSFeeds: [RSSFeedSource] {
-        guard !rssSourceSearch.isEmpty else { return model.rssFeeds }
-        return model.rssFeeds.filter {
-            $0.name.localizedCaseInsensitiveContains(rssSourceSearch)
-        }
-    }
-
-    private var rssSourcePickerTrigger: some View {
-        let selectedFeed = model.rssFeeds.first { $0.id == model.selectedRSSFeedID }
-        return Button {
-            withAnimation(.snappy(duration: 0.22)) {
-                if showsAllRSSSources {
-                    closeRSSSourceMenu()
-                } else {
-                    showsAllRSSSources = true
-                }
-            }
-        } label: {
-            HStack(spacing: 7) {
-                if let selectedFeed {
-                    AvatarView(
-                        url: selectedFeed.preferredAvatarURL,
-                        name: selectedFeed.name,
-                        size: 24
-                    )
-                    Text(selectedFeed.name)
-                        .lineLimit(1)
-                        .frame(maxWidth: 150)
-                } else {
-                    Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.orange)
-                    Text("全部来源")
-                }
-
-                Image(systemName: showsAllRSSSources ? "chevron.down" : "chevron.up")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 12)
-            .frame(height: 44)
-            .background(.regularMaterial, in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(Color(uiColor: .separator).opacity(0.22), lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("选择 RSS 来源")
-        .accessibilityValue(selectedFeed?.name ?? "全部 RSS")
-        .accessibilityAddTraits(showsAllRSSSources ? .isSelected : [])
-    }
-
-    private func closeRSSSourceMenu() {
-        showsAllRSSSources = false
-        rssSourceSearch = ""
-    }
-
-    private func rssSourcePickerRow(
-        id: Int?,
-        name: String,
-        iconURL: URL?
-    ) -> some View {
-        let isSelected = model.selectedRSSFeedID == id
-        return Button {
-            Task { await model.selectRSSFeed(id) }
-            closeRSSSourceMenu()
-        } label: {
-            HStack(spacing: 10) {
-                rssSourceIcon(url: iconURL, name: name, size: 24, isAggregate: id == nil)
-
-                Text(name)
-                    .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.tint)
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("选择来源：\(name)")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    @ViewBuilder private func rssSourceIcon(
-        url: URL?,
-        name: String,
-        size: CGFloat,
-        isAggregate: Bool
-    ) -> some View {
-        if isAggregate {
-            Circle()
-                .fill(Color(uiColor: .tertiarySystemFill))
-                .frame(width: size, height: size)
-                .overlay {
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .font(.system(size: size * 0.38, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-        } else {
-            AvatarView(url: url, name: name, size: size)
-        }
     }
 
     private func sourceAvatarButton(
