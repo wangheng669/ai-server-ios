@@ -1999,38 +1999,10 @@ struct FeedEngagementRow: View {
     }
 
     var body: some View {
-        Group {
-            if showsOnlyLikeAndBookmark {
-                HStack {
-                    metric(.system("heart"), post.meta?.metrics?.likes)
-                        .accessibilityLabel("喜欢")
-                    Spacer()
-                    bookmarkButton
-                }
-            } else {
-                HStack(spacing: 0) {
-                    metric(.system("bubble"), post.meta?.metrics?.replies, label: "回复")
-                    metric(.system("arrow.2.squarepath"), post.meta?.metrics?.retweets, label: "转发")
-                    metric(.system("heart"), post.meta?.metrics?.likes, label: "喜欢")
-                    metric(.analytics, post.meta?.metrics?.views, label: "浏览")
-                    bookmarkButton
-                    if let link = post.linkURL {
-                        ShareLink(item: link) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 14, weight: .regular))
-                                .frame(width: 24, height: 32, alignment: .trailing)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("分享")
-                    } else {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 14, weight: .regular))
-                            .frame(width: 24, height: 32, alignment: .trailing)
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
+        HStack(spacing: 12) {
+            metric("heart", post.meta?.metrics?.likes, label: "喜欢")
+            bookmarkButton
+            Spacer(minLength: 0)
         }
         .foregroundStyle(xToolbarColor)
         .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)
@@ -2089,9 +2061,10 @@ struct FeedEngagementRow: View {
         }
     }
 
-    private func metric(_ icon: XToolbarMetricIcon, _ value: Int?, label: String? = nil) -> some View {
+    private func metric(_ icon: String, _ value: Int?, label: String? = nil) -> some View {
         HStack(spacing: 4) {
-            metricIcon(icon)
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .regular))
                 .frame(width: 18, height: 18)
             if let value, value > 0 {
                 Text(compactCount(value))
@@ -2099,28 +2072,12 @@ struct FeedEngagementRow: View {
             }
         }
         .frame(
-            maxWidth: showsOnlyLikeAndBookmark ? nil : .infinity,
             minHeight: showsOnlyLikeAndBookmark ? 44 : 32,
             alignment: .leading
         )
-        .frame(minWidth: showsOnlyLikeAndBookmark ? 44 : nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label ?? "互动数据")
         .accessibilityValue(value.map(compactCount) ?? "0")
-    }
-
-    @ViewBuilder
-    private func metricIcon(_ icon: XToolbarMetricIcon) -> some View {
-        switch icon {
-        case let .system(symbol):
-            Image(systemName: symbol)
-                .font(.system(
-                    size: symbol == "arrow.2.squarepath" ? 15 : 14,
-                    weight: .regular
-                ))
-        case .analytics:
-            XAnalyticsGlyph()
-        }
     }
 
     private var xToolbarColor: Color {
@@ -2139,30 +2096,6 @@ struct FeedEngagementRow: View {
                 .replacingOccurrences(of: ".0万", with: "万")
         }
         return String(value)
-    }
-}
-
-private enum XToolbarMetricIcon {
-    case system(String)
-    case analytics
-}
-
-/// X uses four filled columns for post views; SF Symbols' chart glyph has only
-/// three thin columns and remains visibly different even at toolbar size.
-private struct XAnalyticsGlyph: View {
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 1.25) {
-            bar(height: 8)
-            bar(height: 11)
-            bar(height: 14)
-            bar(height: 16)
-        }
-        .frame(width: 18, height: 18, alignment: .center)
-    }
-
-    private func bar(height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 0.75, style: .continuous)
-            .frame(width: 3.5, height: height)
     }
 }
 
