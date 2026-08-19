@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 private enum MarketStyle {
+    static let canvas = InvestmentDesign.canvas
     static let surface = InvestmentDesign.surface
     static let divider = InvestmentDesign.divider
     static let gain = InvestmentDesign.gain
@@ -11,6 +12,7 @@ private enum MarketStyle {
     static let chartTransition = Animation.smooth(duration: 0.6)
     static let regionTransition = Animation.smooth(duration: 0.26, extraBounce: 0)
     static let purple = accent
+    static let pageSpacing: CGFloat = 10
 }
 
 private struct MarketDetailRoute: Identifiable, Equatable {
@@ -128,82 +130,94 @@ private struct MarketHomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: MarketHomeScrollOffsetPreferenceKey.self,
-                            value: geometry.frame(in: .named("market-scroll")).minY
-                        )
-                    }
-                    .frame(height: 1)
-                    .id("market-top")
-                    MarketWorldMap(store: store, selection: $selectedMarket)
-                        .id("market-map")
-                    MarketRegionPicker(selection: $selectedMarket)
-                        .simultaneousGesture(regionSwipeGesture)
-                    ZStack {
-                        MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: MarketHomeScrollOffsetPreferenceKey.self,
+                                value: geometry.frame(in: .named("market-scroll")).minY
+                            )
+                        }
+                        .frame(height: 1)
+                        .id("market-top")
+
+                        ZStack(alignment: .topTrailing) {
+                            MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+                                .id(selectedMarket)
+                                .transition(.opacity)
+                            MarketRegionPicker(selection: $selectedMarket)
+                                .padding(.top, 14)
+                                .padding(.trailing, 8)
+                        }
+                        .background(MarketStyle.surface)
+                        .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
+
+                        VStack(spacing: MarketStyle.pageSpacing) {
+                            if let error = regionalHealthMessage {
+                                MarketErrorBanner(
+                                    message: error,
+                                    isRetrying: store.isRetrying
+                                ) { await store.refresh() }
+                            }
+                            MarketIndexTable(
+                                region: selectedMarket,
+                                store: store,
+                                onSelectIndex: selectIndex
+                            )
                             .id(selectedMarket)
                             .transition(.opacity)
-                    }
-                    .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
-
-                    VStack(spacing: 0) {
-                        if let error = regionalHealthMessage {
-                            MarketErrorBanner(
-                                message: error,
-                                isRetrying: store.isRetrying
-                            ) { await store.refresh() }
+                            .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
+                            .simultaneousGesture(regionSwipeGesture)
+                            if selectedMarket == .china {
+                                ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
+                                    .id("market-structure")
+                            }
+                            if selectedMarket != .crypto && selectedMarket != .commodity {
+                                MarketWorldMap(store: store, selection: $selectedMarket)
+                                    .id("market-map")
+                            }
                         }
-                        MarketIndexTable(
-                            region: selectedMarket,
-                            store: store,
-                            onSelectIndex: selectIndex
-                        )
-                        .id(selectedMarket)
-                        .transition(.opacity)
-                        .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
-                        if selectedMarket == .china {
-                            ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
-                                .id("market-structure")
-                        }
+                        .padding(.top, MarketStyle.pageSpacing)
+                        // Keep the final market rows clear of the floating root navigation capsule.
+                        .padding(.bottom, 76)
+                        .background(MarketStyle.canvas)
                     }
-                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .top)
+                    .background(MarketStyle.canvas)
                 }
-            }
-            .background(MarketStyle.surface.ignoresSafeArea())
-            .coordinateSpace(name: "market-scroll")
-            .scrollIndicators(.hidden)
-            .refreshable { await store.refresh() }
-            .simultaneousGesture(regionSwipeGesture)
-            .onChange(of: selectedMarket) { _, _ in
-                withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
-                    proxy.scrollTo("market-top", anchor: .top)
+                .background(MarketStyle.canvas.ignoresSafeArea())
+                .coordinateSpace(name: "market-scroll")
+                .scrollIndicators(.hidden)
+                .refreshable { await store.refresh() }
+                .onChange(of: selectedMarket) { _, _ in
+                    withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
+                        proxy.scrollTo("market-top", anchor: .top)
+                    }
                 }
-            }
-            .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
-                onCompactHeaderChange(offset < -28)
-            }
-            .task {
+                .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
+                    onCompactHeaderChange(offset < -28)
+                }
+                .task {
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
+                        try? await Task.sleep(for: .seconds(2))
+                        proxy.scrollTo("market-structure", anchor: .top)
+                    } else if ProcessInfo.processInfo.arguments.contains("--market-map-preview") {
+                        try? await Task.sleep(for: .milliseconds(700))
+                        proxy.scrollTo("market-map", anchor: .bottom)
+                    }
+                    #endif
+                }
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
-                    try? await Task.sleep(for: .seconds(2))
+                .onChange(of: store.dashboard?.marketStructure?.generatedAt) { _, generatedAt in
+                    guard generatedAt != nil,
+                          ProcessInfo.processInfo.arguments.contains("--market-structure-preview") else { return }
                     proxy.scrollTo("market-structure", anchor: .top)
-                } else if ProcessInfo.processInfo.arguments.contains("--market-map-preview") {
-                    try? await Task.sleep(for: .milliseconds(700))
-                    proxy.scrollTo("market-map", anchor: .bottom)
                 }
                 #endif
             }
-            #if DEBUG
-            .onChange(of: store.dashboard?.marketStructure?.generatedAt) { _, generatedAt in
-                guard generatedAt != nil,
-                      ProcessInfo.processInfo.arguments.contains("--market-structure-preview") else { return }
-                proxy.scrollTo("market-structure", anchor: .top)
-            }
-            #endif
         }
     }
 
@@ -347,6 +361,7 @@ private struct MarketTerminalHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             heroStatusHeader
+                .padding(.trailing, 58)
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
                 VStack(alignment: .leading, spacing: 8) {
@@ -354,6 +369,7 @@ private struct MarketTerminalHero: View {
                     heroPriceAndChart
                 }
                 .foregroundStyle(.primary)
+                .padding(.trailing, 58)
             }
             .buttonStyle(MarketPressStyle())
             .accessibilityLabel(heroAccessibilityLabel)
@@ -529,10 +545,9 @@ private struct MarketTerminalHero: View {
                 .dynamicTypeSize(.large)
             }
         } else {
-            HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
                 sessionStatus
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
+                Group {
                     Text(heroDateLabel)
                     MarketLiveStatus(store: store)
                 }
@@ -979,24 +994,16 @@ private struct MarketTerminalSentiment: View {
 private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var selectionIndicator
 
     var body: some View {
-        HStack(spacing: 2) {
+        VStack(spacing: 1) {
             ForEach(MarketRegion.allCases) { region in
                 regionButton(region)
-                    .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity)
-        .frame(height: 48)
-        .background(MarketStyle.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(MarketStyle.divider)
-                .frame(height: 0.5)
-        }
+        .padding(3)
+        .frame(width: 50)
+        .background(MarketStyle.canvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
     private func regionButton(_ region: MarketRegion) -> some View {
@@ -1013,19 +1020,18 @@ private struct MarketRegionPicker: View {
                 .font(.system(size: 13, weight: weight))
                 .lineLimit(1)
                 .foregroundStyle(foreground)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 44)
-                .overlay(alignment: .bottom) {
+                .frame(width: 44, height: 26)
+                .background(
+                    isSelected ? MarketStyle.surface : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .overlay {
                     if isSelected {
-                        Capsule()
-                            .fill(MarketStyle.accent)
-                            .frame(width: 24, height: 2)
-                            .matchedGeometryEffect(
-                                id: "market-region-selection",
-                                in: selectionIndicator
-                            )
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(MarketStyle.divider, lineWidth: 0.5)
                     }
                 }
+                .shadow(color: isSelected ? Color.black.opacity(0.05) : .clear, radius: 3, y: 1)
                 .contentShape(Rectangle())
         }
         .id(region)
@@ -1128,7 +1134,9 @@ private struct MarketIndexTable: View {
             }
 
         }
-        .padding(.bottom, 8)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(MarketStyle.surface)
         .overlay(alignment: .top) {
             Divider().opacity(0.65)
         }
