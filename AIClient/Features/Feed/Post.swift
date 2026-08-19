@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct XueqiuTextLink: Equatable {
     let label: String
@@ -871,7 +872,21 @@ struct Post: Codable, Identifiable, Hashable {
         return clean(meta?.rssFeedName) ?? clean(user?.userScreenName) ?? authorName
     }
     var rssCardAvatarURL: URL? {
-        avatarURL
+        guard isRSS,
+              let rawSource = source?.lowercased(),
+              rawSource.hasPrefix("rss:"),
+              let feedID = Int(rawSource.dropFirst(4)),
+              let feedName = clean(meta?.rssFeedName),
+              let icon = clean(meta?.rssFeedIcon) else { return avatarURL }
+        let identity = "\(feedID)\0\(feedName)\0\(icon)"
+        let digest = SHA256.hash(data: Data(identity.utf8))
+            .prefix(6)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return URL(
+            string: "/api/ios/v1/rss/feeds/\(feedID)/avatar?v=\(digest)",
+            relativeTo: ServerConfiguration.currentURL
+        )?.absoluteURL
     }
     var authorHandle: String? {
         if let accountLabel = user?.resolvedAccountLabel {

@@ -1418,6 +1418,23 @@ final class RSSSourcePresentationTests: XCTestCase {
 
         XCTAssertEqual(post.rssCardSourceName, "爱范儿")
         XCTAssertEqual(post.rssCardAvatarURL?.path, "/api/ios/v1/rss/feeds/46/avatar")
+        XCTAssertNotNil(
+            URLComponents(url: try XCTUnwrap(post.rssCardAvatarURL), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "v" })?.value
+        )
+    }
+
+    func testRSSCardBuildsSameVersionedAvatarAsFeedDirectory() throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":3,"source":"rss:96","title":"标题","user":{"user_screen_name":"观点网","avatar_url":"/api/ios/v1/rss/feeds/96/avatar"},"meta":{"rss_feed_name":"观点网","rss_feed_icon":"/img/rss-feed-icons/rss-feed-96.png"}}"#.utf8)
+        )
+
+        let components = try XCTUnwrap(
+            URLComponents(url: try XCTUnwrap(post.rssCardAvatarURL), resolvingAgainstBaseURL: false)
+        )
+        XCTAssertEqual(components.path, "/api/ios/v1/rss/feeds/96/avatar")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "v" })?.value, "f16e9661f7e6")
     }
 
     func testRSSFeedDirectoryRejectsGeneratedFallbackAvatar() throws {
