@@ -380,7 +380,13 @@ struct AvatarView: View {
     var body: some View {
         Group {
             if let assetName { Image(assetName).resizable().scaledToFill() }
-            else if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .scaledToFill()
+            }
             else {
                 RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
                     .fill(Color.blue.opacity(0.11))
@@ -391,7 +397,10 @@ struct AvatarView: View {
         .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
         .task(id: url) {
             guard assetName == nil else { return }
-            let loaded = await ImageLoader.load(url, targetSize: CGSize(width: size, height: size))
+            let loaded = await ImageLoader.load(
+                url,
+                targetSize: CGSize(width: size * 2, height: size * 2)
+            )
             if rejectsUpscaledImages,
                let cgImage = loaded?.cgImage,
                min(cgImage.width, cgImage.height) < Int(size * UIScreen.main.scale * 0.9) {
