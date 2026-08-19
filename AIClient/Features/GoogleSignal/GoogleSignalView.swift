@@ -1069,14 +1069,6 @@ private struct GoogleSignalEventDetailView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 20)
-        .task(id: event.representativeSourceURL) {
-            guard storedRepresentativeTranslation == nil else { return }
-            await translationStore.translateIfNeeded(
-                sourceURL: event.representativeSourceURL,
-                language: event.language,
-                original: event.originalContent
-            )
-        }
     }
 
     private var storedRepresentativeTranslation: String? {
@@ -1127,13 +1119,7 @@ private struct GoogleSignalEventDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .task {
-                            async let pagination: Void = evidenceStore.loadMoreIfNeeded(after: item)
-                            async let translation: Void = translationStore.translateIfNeeded(
-                                sourceURL: item.sourceURL,
-                                language: item.language,
-                                original: item.content
-                            )
-                            _ = await (pagination, translation)
+                            await evidenceStore.loadMoreIfNeeded(after: item)
                         }
                         if index < evidenceStore.items.count - 1 {
                             Divider().padding(.leading, 46)

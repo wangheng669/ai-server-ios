@@ -2682,10 +2682,8 @@ struct PostDetailView: View {
             nil
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
-            var translationTweetID = tweetID
             if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 xLiveDetail = liveDetail
-                translationTweetID = liveDetail.id
                 if post.videoURLs.isEmpty,
                    let videoURL = liveDetail.videoURL,
                    detectedVideoAspectRatio == nil,
@@ -2701,10 +2699,6 @@ struct PostDetailView: View {
                 }
             }
             isLoadingXFullText = false
-            if post.needsXTranslation,
-               let translation = try? await client.fetchXTranslation(tweetID: translationTweetID) {
-                xLiveTranslationText = translation.text
-            }
         } else if post.sourceName == "X" {
             isLoadingXFullText = false
         }
@@ -2736,12 +2730,6 @@ struct PostDetailView: View {
         defer { isLoadingXReplyContext = false }
         do {
             let detail = try await client.fetchXTweetDetail(tweetID: replyID)
-            let language = detail.lang?.lowercased() ?? ""
-            let translatedText: String? = if language.hasPrefix("zh") {
-                nil
-            } else {
-                (try? await client.fetchXTranslation(tweetID: detail.id))?.text
-            }
             guard !Task.isCancelled else { return }
             xLiveReplyContext = XReplyContext(
                 id: detail.id,
@@ -2749,7 +2737,7 @@ struct PostDetailView: View {
                 screenName: detail.author?.screenName ?? post.meta?.inReplyToScreenName,
                 avatarURL: detail.author?.profileImageURL,
                 text: detail.fullText,
-                textZH: translatedText
+                textZH: nil
             )
         } catch is CancellationError {
             return

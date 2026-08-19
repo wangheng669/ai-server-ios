@@ -3549,7 +3549,6 @@ private struct PersonDetailPage: View {
             ForEach(store.ownPosts) { post in
                 let displayPost = store.postForDisplay(post)
                 PersonPostTimelineRow(post: displayPost, compact: false) { selectedPost = displayPost }
-                    .task { await store.translateXPostIfNeeded(post) }
                     .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
             }
             ownPostsPaginationStatus
@@ -3812,7 +3811,6 @@ private struct PersonDetailPage: View {
             ForEach(posts) { post in
                 let displayPost = store.postForDisplay(post)
                 PersonRelatedPostRow(post: displayPost) { selectedPost = displayPost }
-                    .task { await store.translateXPostIfNeeded(post) }
             }
         }
     }
@@ -4924,40 +4922,12 @@ private struct XQuotedPostCard: View {
         .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.18)))
-        .task(id: quote.id) {
-            await loadTranslationIfNeeded()
-        }
     }
 
     private var displayedText: String? {
         return nonempty(quote.textZH)
             ?? liveTranslation
             ?? quote.originalText
-    }
-
-    private func loadTranslationIfNeeded() async {
-        guard nonempty(quote.textZH) == nil,
-              liveTranslation == nil,
-              let tweetID = nonempty(quote.id),
-              let original = quote.originalText else { return }
-        if let cached = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
-            liveTranslation = cached
-            return
-        }
-        do {
-            let result = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchXTranslation(tweetID: tweetID)
-            guard !Task.isCancelled else { return }
-            let value = PersonDetailStore.presentedTranslation(
-                result.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                original: original
-            )
-            guard !value.isEmpty, value != original else { return }
-            PersonDetailStore.cacheXTranslation(value, tweetID: tweetID)
-            liveTranslation = value
-        } catch {
-            return
-        }
     }
 
     private func nonempty(_ value: String?) -> String? {

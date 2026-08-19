@@ -807,17 +807,19 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testXRefreshTranslatesEnglishPostWhenLanguageMetadataIsMissing() async throws {
+    func testXRefreshDoesNotTriggerPerPostTranslationWhenLanguageMetadataIsMissing() async throws {
         let post = try JSONDecoder().decode(
             Post.self,
             from: Data(#"{"id":9,"source":"x","content":"Monkey's paw: What would you like to wish for?","post_link":"https://x.com/AmandaAskell/status/9","user":{"user_name":"Amanda Askell","user_screen_name":"AmandaAskell"}}"#.utf8)
         )
+        var translationRequests = 0
         let model = NewsFeedViewModel(
             source: .x,
             fetchPosts: { _, _, _ in [] },
             fetchXPosts: { _, _, _ in [post] },
             fetchXTranslation: { _ in
-                XTranslation(
+                translationRequests += 1
+                return XTranslation(
                     tweetId: "9",
                     text: "猴爪：你想许什么愿？",
                     sourceLanguage: "en",
@@ -828,15 +830,12 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertTrue(post.needsXTranslation)
         await model.refresh()
-        for _ in 0..<30 where model.postForDisplay(post).displayContent != "猴爪：你想许什么愿？" {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
-        XCTAssertEqual(model.postForDisplay(post).displayContent, "猴爪：你想许什么愿？")
+        XCTAssertEqual(translationRequests, 0)
+        XCTAssertEqual(model.postForDisplay(post).displayContent, post.originalDisplayContent)
     }
 
     @MainActor
-    func testXTranslationFallsBackWhenDedicatedServiceIsUnavailable() async throws {
+    func testXRefreshDoesNotRunClientTranslationFallback() async throws {
         struct ServiceUnavailable: Error {}
         let sourceText = "Monkey's paw: What would you like to wish for?"
         let post = try JSONDecoder().decode(
@@ -856,12 +855,8 @@ final class FeedAdapterTests: XCTestCase {
         )
 
         await model.refresh()
-        for _ in 0..<30 where model.postForDisplay(post).displayContent != "猴爪：你想许什么愿？" {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
-        XCTAssertEqual(fallbackInputs, [sourceText])
-        XCTAssertEqual(model.postForDisplay(post).displayContent, "猴爪：你想许什么愿？")
+        XCTAssertEqual(fallbackInputs, [])
+        XCTAssertEqual(model.postForDisplay(post).displayContent, sourceText)
     }
 
     func testXUserSelectionRequestsAllScoresInsteadOfChannelThreshold() {
@@ -893,7 +888,7 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testXQuotedPostIsAutomaticallyTranslated() async throws {
+    func testXQuotedPostWaitsForPersistedServerTranslation() async throws {
         let post = try JSONDecoder().decode(
             Post.self,
             from: Data(#"{"id":2916471,"source":"x","content":"主帖已有中文。","content_zh":"主帖已有中文。","post_link":"https://x.com/StatsWire/status/2089910370546954620","meta":{"lang":"zh","quoted_tweet":{"id":"2089891927659585918","text":"Recapping the safety changes we rolled out.","author":{"name":"Tibo","screenName":"thsottiaux"}}}}"#.utf8)
@@ -915,17 +910,13 @@ final class FeedAdapterTests: XCTestCase {
         )
 
         await model.refresh()
-        for _ in 0..<30 where model.postForDisplay(post).xQuotedPost?.displayText != "回顾一下我们推出的安全改进。" {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
-        XCTAssertEqual(requestedTweetIDs, ["2089891927659585918"])
+        XCTAssertEqual(requestedTweetIDs, [])
         XCTAssertEqual(model.postForDisplay(post).displayContent, "主帖已有中文。")
-        XCTAssertEqual(model.postForDisplay(post).xQuotedPost?.displayText, "回顾一下我们推出的安全改进。")
+        XCTAssertEqual(model.postForDisplay(post).xQuotedPost?.displayText, "Recapping the safety changes we rolled out.")
     }
 
     @MainActor
-    func testXReplyContextIsTranslatedAndAttachedToFeedCard() async throws {
+    func testXReplyContextWaitsForPersistedServerTranslation() async throws {
         let post = try JSONDecoder().decode(
             Post.self,
             from: Data(#"{"id":7,"source":"x","content":"评论区里所有人都被狠狠地羞辱了一番","content_zh":"评论区里所有人都被狠狠地羞辱了一番","post_link":"https://x.com/_aidan_clark_/status/123","meta":{"lang":"zh","in_reply_to_status_id":"456","in_reply_to_screen_name":"_aidan_clark_","reply_context":{"id":"456","author_name":"Aidan Clark","screen_name":"_aidan_clark_","text":"ChatGPT is gaslighting me by trying to say that bean-to-bar is a commonplace way to describe chocolate."}}}"#.utf8)
@@ -947,13 +938,9 @@ final class FeedAdapterTests: XCTestCase {
         )
 
         await model.refresh()
-        for _ in 0..<30 where model.postForDisplay(post).xReplyContext?.textZH == nil {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
         let reply = try XCTUnwrap(model.postForDisplay(post).xReplyContext)
-        XCTAssertEqual(requestedTweetIDs, ["456"])
-        XCTAssertEqual(reply.displayText, "ChatGPT 试图声称‘从可可豆到巧克力棒’是描述巧克力的常见说法，简直是在误导我。")
+        XCTAssertEqual(requestedTweetIDs, [])
+        XCTAssertEqual(reply.displayText, "ChatGPT is gaslighting me by trying to say that bean-to-bar is a commonplace way to describe chocolate.")
         XCTAssertEqual(reply.handle, "@_aidan_clark_")
     }
 
