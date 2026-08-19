@@ -2008,35 +2008,31 @@ struct FeedEngagementRow: View {
                 }
             } else {
                 HStack(spacing: 0) {
-                    metric("bubble", post.meta?.metrics?.replies, label: "回复")
-                    Spacer()
+                    metric("bubble.left", post.meta?.metrics?.replies, label: "回复")
                     metric("arrow.2.squarepath", post.meta?.metrics?.retweets, label: "转发")
-                    Spacer()
                     metric("heart", post.meta?.metrics?.likes, label: "喜欢")
-                    Spacer()
-                    metric("chart.bar", post.meta?.metrics?.views, label: "浏览")
-                    Spacer()
+                    metric("chart.bar.xaxis", post.meta?.metrics?.views, label: "浏览")
                     bookmarkButton
-                    Spacer()
                     if let link = post.linkURL {
                         ShareLink(item: link) {
                             Image(systemName: "square.and.arrow.up")
-                                .frame(width: 44, height: 44)
+                                .font(.system(size: 14, weight: .regular))
+                                .frame(maxWidth: .infinity, minHeight: 32, alignment: .trailing)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("分享")
                     } else {
                         Image(systemName: "square.and.arrow.up")
-                            .frame(width: 44, height: 44)
+                            .font(.system(size: 14, weight: .regular))
+                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .trailing)
                             .accessibilityHidden(true)
                     }
                 }
             }
         }
-        .font(.system(size: 16, weight: .regular))
-        .foregroundStyle(.secondary)
-        .frame(height: 44)
+        .foregroundStyle(Color(uiColor: .secondaryLabel))
+        .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)
         .contentShape(Rectangle())
         .sensoryFeedback(.success, trigger: isBookmarked)
         .alert("书签保存失败", isPresented: bookmarkErrorBinding) {
@@ -2053,9 +2049,15 @@ struct FeedEngagementRow: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 14, weight: .regular))
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(
+                maxWidth: showsOnlyLikeAndBookmark ? nil : .infinity,
+                minHeight: showsOnlyLikeAndBookmark ? 44 : 32,
+                alignment: showsOnlyLikeAndBookmark ? .center : .trailing
+            )
+            .frame(width: showsOnlyLikeAndBookmark ? 44 : nil)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2088,11 +2090,22 @@ struct FeedEngagementRow: View {
     }
 
     private func metric(_ symbol: String, _ value: Int?, label: String? = nil) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Image(systemName: symbol)
-            if let value, value > 0 { Text(compactCount(value)).font(.system(size: 13)) }
+                .font(.system(size: 14, weight: .regular))
+                .frame(width: 16)
+            if let value, value > 0 {
+                Text(compactCount(value))
+                    .font(.system(size: 12, weight: .regular))
+                    .monospacedDigit()
+            }
         }
-        .frame(minWidth: 44, minHeight: 44)
+        .frame(
+            maxWidth: showsOnlyLikeAndBookmark ? nil : .infinity,
+            minHeight: showsOnlyLikeAndBookmark ? 44 : 32,
+            alignment: .leading
+        )
+        .frame(minWidth: showsOnlyLikeAndBookmark ? 44 : nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label ?? "互动数据")
         .accessibilityValue(value.map(compactCount) ?? "0")
@@ -2103,7 +2116,7 @@ struct FeedEngagementRow: View {
             return String(format: "%.1f万", Double(value) / 10_000)
                 .replacingOccurrences(of: ".0万", with: "万")
         }
-        return value.formatted()
+        return String(value)
     }
 }
 
