@@ -574,7 +574,7 @@ private struct MarketTerminalHero: View {
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Text(name)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .lineLimit(1)
                     .layoutPriority(1)
                 Text(code)
@@ -997,7 +997,7 @@ private struct MarketRegionPicker: View {
         }
         .padding(3)
         .frame(width: 68)
-        .background(MarketStyle.canvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(Color.clear)
     }
 
     private func regionButton(_ region: MarketRegion) -> some View {
@@ -1022,17 +1022,13 @@ private struct MarketRegionPicker: View {
             }
                 .lineLimit(1)
                 .frame(width: 62, height: 33)
-                .background(
-                    isSelected ? MarketStyle.surface : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                )
+                .background(Color.clear)
                 .overlay {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(MarketStyle.divider, lineWidth: 0.5)
+                            .stroke(MarketStyle.accent.opacity(0.45), lineWidth: 0.75)
                     }
                 }
-                .shadow(color: isSelected ? Color.black.opacity(0.05) : .clear, radius: 3, y: 1)
                 .contentShape(Rectangle())
         }
         .id(region)
