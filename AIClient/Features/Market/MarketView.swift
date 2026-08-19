@@ -10,6 +10,7 @@ private enum MarketStyle {
     static let loss = InvestmentDesign.loss
     static let accent = InvestmentDesign.accent
     static let chartTransition = Animation.smooth(duration: 0.6)
+    static let regionTransition = Animation.smooth(duration: 0.26, extraBounce: 0)
     static let purple = accent
     static let pageSpacing: CGFloat = 10
 }
@@ -68,7 +69,9 @@ struct MarketView: View {
         MarketHomeView(store: store, onCompactHeaderChange: onCompactHeaderChange) {
             selectedDetail = MarketDetailRoute(symbol: $0)
         }
-        .sheet(item: $selectedDetail) { route in
+        .sheet(item: $selectedDetail, onDismiss: {
+            showsDetail = false
+        }) { route in
             MarketIndexDetailView(
                 symbol: route.symbol,
                 store: store,
@@ -90,7 +93,11 @@ struct MarketView: View {
             guard rootTabIsActive, phase == .active else { return }
             Task { await store.resumeUpdates() }
         }
-        .onChange(of: selectedDetail) { _, route in showsDetail = route != nil }
+        .onChange(of: selectedDetail) { _, route in
+            if route != nil {
+                showsDetail = true
+            }
+        }
         .onAppear { showsDetail = selectedDetail != nil }
         .onDisappear { showsDetail = false }
     }
@@ -120,6 +127,7 @@ private struct MarketHomeView: View {
     }()
     @State private var suppressIndexSelection = false
     @State private var selectionResetTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { viewport in
@@ -144,7 +152,7 @@ private struct MarketHomeView: View {
                                 .padding(.trailing, 8)
                         }
                         .background(MarketStyle.surface)
-                        .animation(.easeInOut(duration: 0.18), value: selectedMarket)
+                        .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
 
                         VStack(spacing: MarketStyle.pageSpacing) {
                             if let error = regionalHealthMessage {
@@ -160,7 +168,7 @@ private struct MarketHomeView: View {
                             )
                             .id(selectedMarket)
                             .transition(.opacity)
-                            .animation(.easeInOut(duration: 0.16), value: selectedMarket)
+                            .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
                             .simultaneousGesture(regionSwipeGesture)
                             if selectedMarket == .china {
                                 ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
@@ -184,7 +192,7 @@ private struct MarketHomeView: View {
                 .scrollIndicators(.hidden)
                 .refreshable { await store.refresh() }
                 .onChange(of: selectedMarket) { _, _ in
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
                         proxy.scrollTo("market-top", anchor: .top)
                     }
                 }
@@ -220,7 +228,7 @@ private struct MarketHomeView: View {
     }
 
     private var regionSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
+        DragGesture(minimumDistance: 14)
             .onChanged { value in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 selectionResetTask?.cancel()
@@ -229,7 +237,11 @@ private struct MarketHomeView: View {
             .onEnded { value in
                 let horizontalDistance = value.translation.width
                 let verticalDistance = value.translation.height
-                if abs(horizontalDistance) > abs(verticalDistance), abs(horizontalDistance) >= 56 {
+                let projectedHorizontalDistance = value.predictedEndTranslation.width
+                let isHorizontal = abs(horizontalDistance) > abs(verticalDistance)
+                let crossedDistance = abs(horizontalDistance) >= 36
+                let hasHorizontalMomentum = abs(projectedHorizontalDistance) >= 64
+                if isHorizontal, crossedDistance || hasHorizontalMomentum {
                     selectAdjacentRegion(offset: horizontalDistance < 0 ? 1 : -1)
                 }
                 allowIndexSelectionAfterGesture()
@@ -255,7 +267,7 @@ private struct MarketHomeView: View {
         guard let currentIndex = regions.firstIndex(of: selectedMarket) else { return }
         let nextIndex = currentIndex + offset
         guard regions.indices.contains(nextIndex) else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
             selectedMarket = regions[nextIndex]
         }
     }
@@ -271,7 +283,6 @@ private struct MarketHomeScrollOffsetPreferenceKey: PreferenceKey {
 
 private enum MarketTerminalPalette {
     static let header = InvestmentDesign.surface
-    static let headerSurface = InvestmentDesign.secondarySurface
     static let headerDivider = InvestmentDesign.divider
 }
 
@@ -451,6 +462,10 @@ private struct MarketTerminalHero: View {
             }
             }
             .frame(height: dynamicTypeSize.isAccessibilitySize ? 180 : 76)
+            .padding(.top, 12)
+            .overlay(alignment: .top) {
+                Divider().opacity(0.55)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -978,6 +993,7 @@ private struct MarketTerminalSentiment: View {
 
 private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 1) {
@@ -996,7 +1012,7 @@ private struct MarketRegionPicker: View {
         let foreground = isSelected ? MarketStyle.accent : Color.secondary
 
         return Button {
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
                 selection = region
             }
         } label: {
@@ -1020,6 +1036,7 @@ private struct MarketRegionPicker: View {
         }
         .id(region)
         .buttonStyle(.plain)
+        .accessibilityLabel(region.rawValue)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
@@ -1030,7 +1047,15 @@ private struct MarketIndexTable: View {
     let onSelectIndex: (String) -> Void
 
     @State private var chinaScope: ChinaIndexScope = .core
+    @State private var displayedLogoPaths: [String: String]
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(region: MarketRegion, store: MarketStore, onSelectIndex: @escaping (String) -> Void) {
+        self.region = region
+        self.store = store
+        self.onSelectIndex = onSelectIndex
+        _displayedLogoPaths = State(initialValue: store.companyLogoPaths)
+    }
 
     private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
     private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
@@ -1052,7 +1077,7 @@ private struct MarketIndexTable: View {
                 }
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 18)
                 .frame(height: 32)
 
                 Divider().opacity(0.45)
@@ -1060,7 +1085,7 @@ private struct MarketIndexTable: View {
 
             if quotes.isEmpty {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
+                    Image(systemName: "chart.line.uptrend.xyaxis")
                     Text("正在加载\(region.rawValue)市场行情")
                 }
                 .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -1070,18 +1095,14 @@ private struct MarketIndexTable: View {
                     Button { onSelectIndex(quote.symbol) } label: {
                          MarketIndexTableRow(
                              quote: quote,
-                            overnightQuote: region == .unitedStates && quote.marketSession != "regular"
-                                 ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol])
-                                 : nil,
-                            trend: store.trendValues(for: region == .unitedStates && quote.marketSession != "regular"
-                                 ? marketActiveIndexSession(store.dashboard?.indexSessions?[quote.symbol]) ?? quote
-                                 : quote),
-                            companyLogoPath: store.companyLogoPaths[quote.symbol],
+                            overnightQuote: nil,
+                            trend: store.listTrendValues(for: quote),
+                            companyLogoPath: displayedLogoPaths[quote.symbol],
                             showsCompanyLogo: true
                          )
                     }
                     .buttonStyle(MarketPressStyle())
-                    if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
+                    if index < quotes.count - 1 { Divider().opacity(0.45).padding(.leading, 18) }
                 }
             }
 
@@ -1092,7 +1113,7 @@ private struct MarketIndexTable: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 18)
                 .padding(.top, 14)
                 .padding(.bottom, 6)
 
@@ -1102,13 +1123,13 @@ private struct MarketIndexTable: View {
                         MarketIndexTableRow(
                             quote: quote,
                             overnightQuote: nil,
-                            trend: store.trendValues(for: quote),
-                            companyLogoPath: store.companyLogoPaths[quote.symbol],
+                            trend: store.listTrendValues(for: quote),
+                            companyLogoPath: displayedLogoPaths[quote.symbol],
                             showsCompanyLogo: true
                         )
                     }
                     .buttonStyle(MarketPressStyle())
-                    if index < coreStocks.count - 1 { Divider().opacity(0.45).padding(.leading, 12) }
+                    if index < coreStocks.count - 1 { Divider().opacity(0.45).padding(.leading, 18) }
                 }
             }
 
@@ -1116,13 +1137,33 @@ private struct MarketIndexTable: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 8)
         .background(MarketStyle.surface)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.65)
+        }
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             guard region != .commodity else { return }
+            let requestedQuotes = (quotes + coreStocks).reduce(into: [String: MarketQuote]()) {
+                $0[$1.symbol] = $1
+            }.values
+            await withTaskGroup(of: Void.self) { group in
+                for quote in requestedQuotes {
+                    group.addTask { @MainActor in
+                        await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                        guard let path = store.companyLogoPaths[quote.symbol],
+                              let url = marketCompanyLogoURL(path) else { return }
+                        _ = await MarketLogoImageCache.shared.image(for: url)
+                    }
+                }
+            }
+            guard !Task.isCancelled else { return }
+            displayedLogoPaths = store.companyLogoPaths
+        }
+        .task(id: componentChartRequestID) {
             await withTaskGroup(of: Void.self) { group in
                 for quote in quotes + coreStocks {
-                    group.addTask {
-                        await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                    group.addTask { @MainActor in
+                        await store.loadChart(symbol: quote.symbol, range: .day)
                     }
                 }
             }
@@ -1131,6 +1172,10 @@ private struct MarketIndexTable: View {
 
     private var componentLogoRequestID: String {
         "\(region.dashboardID):\((quotes + coreStocks).map(\.symbol).joined(separator: ","))"
+    }
+
+    private var componentChartRequestID: String {
+        "day:\(componentLogoRequestID)"
     }
 }
 
@@ -1173,10 +1218,11 @@ private struct ChinaMarketStructurePanel: View {
                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
             }
         }
-        .padding(16)
-        .marketCard(cornerRadius: 16)
         .padding(.horizontal, 18)
-        .padding(.top, 20)
+        .padding(.vertical, 16)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.65)
+        }
     }
 }
 
@@ -1220,9 +1266,8 @@ private struct CombinedCapitalSignal: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(11)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -1397,9 +1442,7 @@ private struct MarginBalanceSignal: View {
                         .foregroundStyle(tint)
                 }
                 .font(.caption2)
-                .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: summaryIcon)
@@ -1417,9 +1460,8 @@ private struct MarginBalanceSignal: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(10)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             Text("判断综合余额趋势与融资买入活跃度；两融数据仅作为杠杆风险偏好的代理指标。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -1527,14 +1569,18 @@ private struct ChinaIndexScopePicker: View {
                         .foregroundStyle(selection == scope ? MarketStyle.accent : Color.secondary)
                         .padding(.horizontal, 10)
                         .frame(height: 28)
-                        .background(selection == scope ? MarketStyle.accent.opacity(0.09) : Color.clear, in: Capsule())
+                        .overlay(alignment: .bottom) {
+                            Capsule()
+                                .fill(selection == scope ? MarketStyle.accent : Color.clear)
+                                .frame(height: 2)
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == scope ? .isSelected : [])
             }
             Spacer()
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 18)
         .padding(.top, 4)
     }
 }
@@ -1556,7 +1602,7 @@ private struct MarketIndexTableRow: View {
                 standardLayout
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 18)
         .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 88 : 62)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -1731,48 +1777,76 @@ private struct MarketWorldMap: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private let markets: [MarketMapLocation] = [
-        .init(region: .unitedStates, city: "纽约", latitude: 40.71, longitude: -74.00),
-        .init(region: .china, city: "上海", latitude: 31.23, longitude: 121.47, labelOffset: .init(width: -30, height: 30)),
-        .init(region: .japan, city: "东京", latitude: 35.68, longitude: 139.69, labelOffset: .init(width: 6, height: 22)),
-        .init(region: .korea, city: "首尔", latitude: 37.56, longitude: 126.97, labelOffset: .init(width: -8, height: -30)),
+        .init(
+            region: .unitedStates,
+            city: "纽约",
+            marketCode: "SPY",
+            timeZone: "America/New_York",
+            assetPoint: .init(x: 512, y: 306),
+            calloutOffset: .init(width: 40, height: 32)
+        ),
+        .init(
+            region: .china,
+            city: "上海",
+            marketCode: "上证",
+            timeZone: "Asia/Shanghai",
+            assetPoint: .init(x: 1_400, y: 340),
+            calloutOffset: .init(width: -50, height: 34)
+        ),
+        .init(
+            region: .japan,
+            city: "东京",
+            marketCode: "N225",
+            timeZone: "Asia/Tokyo",
+            assetPoint: .init(x: 1_497, y: 344),
+            calloutOffset: .init(width: 18, height: 47)
+        ),
+        .init(
+            region: .korea,
+            city: "首尔",
+            marketCode: "KOSPI",
+            timeZone: "Asia/Seoul",
+            assetPoint: .init(x: 1_450, y: 324),
+            calloutOffset: .init(width: -17, height: -27)
+        ),
+        .init(
+            region: .europe,
+            city: "法兰克福",
+            marketCode: "STOXX",
+            timeZone: "Europe/Berlin",
+            assetPoint: .init(x: 860, y: 283),
+            calloutOffset: .init(width: 3, height: -24)
+        ),
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("全球市场地图").font(.title3.weight(.semibold))
-                Spacer()
-                MarketLiveStatus(store: store)
-            }
-            .padding(.horizontal, 18)
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            GeometryReader { proxy in
+                ZStack {
+                    mapBackground
 
-            VStack(spacing: 0) {
-                GeometryReader { proxy in
-                    ZStack {
-                        mapBackground
-
-                        ForEach(markets) { market in
-                            Button { select(market.region) } label: {
-                                MarketMapNode(
-                                    country: market.city,
-                                    quote: store.quote(symbol: market.region.primarySymbol),
-                                    isSelected: selection == market.region
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(mapAccessibilityLabel(for: market))
-                            .accessibilityHint("切换到\(market.region.rawValue)市场")
-                            .position(market.position(in: proxy.size))
-                            .offset(market.labelOffset)
+                    ForEach(markets) { market in
+                        Button { select(market.region) } label: {
+                            MarketMapNode(
+                                market: market,
+                                quote: store.quote(symbol: market.region.primarySymbol),
+                                isSelected: selection == market.region,
+                                date: context.date
+                            )
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(mapAccessibilityLabel(for: market))
+                        .accessibilityHint("切换到\(market.region.rawValue)市场")
+                        .position(market.position(in: proxy.size))
+                        .zIndex(selection == market.region ? 2 : 1)
                     }
                 }
-                .frame(height: 176)
-
-                MarketSessionSchedule(region: selection)
             }
-            .padding(.horizontal, 14)
         }
+        .frame(height: 164)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder private var mapBackground: some View {
@@ -1800,7 +1874,13 @@ private struct MarketWorldMap: View {
 
     private func mapAccessibilityLabel(for market: MarketMapLocation) -> String {
         let quote = store.quote(symbol: market.region.primarySymbol)
-        return "\(market.region.rawValue)，\(quote?.formattedPercent ?? "等待行情")"
+        let status = switch quote?.tradingSession {
+        case .regular: "交易中"
+        case .some: "已休市"
+        case .none: "等待行情"
+        }
+        let change = quote.map { "今日\($0.formattedPercent)" } ?? "涨跌等待更新"
+        return "\(market.region.rawValue)，\(status)，\(change)"
     }
 }
 
@@ -1831,7 +1911,6 @@ private struct MarketSessionSchedule: View {
                                 .foregroundStyle(activePeriod(at: context.date) == index ? MarketStyle.accent : .secondary)
                         }
                         .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(activePeriod(at: context.date) == index ? MarketStyle.accent.opacity(0.08) : .clear)
                         .overlay(alignment: .top) {
                             Rectangle()
                                 .fill(activePeriod(at: context.date) == index ? MarketStyle.accent : MarketStyle.divider)
@@ -1983,53 +2062,174 @@ private extension MarketRegion {
 }
 
 private struct MarketMapLocation: Identifiable {
+    private static let assetSize = CGSize(width: 1_821, height: 864)
+
     let region: MarketRegion
     let city: String
-    let latitude: Double
-    let longitude: Double
-    var labelOffset = CGSize.zero
+    let marketCode: String
+    let timeZone: String
+    // Pixel coordinates calibrated against market-world-map.png.
+    let assetPoint: CGPoint
+    let calloutOffset: CGSize
     var id: MarketRegion { region }
 
     func position(in size: CGSize) -> CGPoint {
-        CGPoint(
-            x: size.width * CGFloat((longitude + 180) / 360),
-            y: size.height * CGFloat((83 - latitude) / 155)
+        let scale = max(size.width / Self.assetSize.width, size.height / Self.assetSize.height)
+        let renderedSize = CGSize(
+            width: Self.assetSize.width * scale,
+            height: Self.assetSize.height * scale
+        )
+        let origin = CGPoint(
+            x: (size.width - renderedSize.width) / 2,
+            y: (size.height - renderedSize.height) / 2
+        )
+        return CGPoint(
+            x: origin.x + assetPoint.x * scale,
+            y: origin.y + assetPoint.y * scale
         )
     }
 }
 
 private struct MarketMapNode: View {
-    let country: String
+    let market: MarketMapLocation
     let quote: MarketQuote?
     let isSelected: Bool
+    let date: Date
 
     var body: some View {
-        HStack(alignment: .top, spacing: 5) {
+        ZStack {
+            connector
+
+            if isSelected {
+                Circle()
+                    .fill(MarketStyle.accent.opacity(0.14))
+                    .frame(width: 24, height: 24)
+            }
+
             Circle()
-                .fill(isSelected ? Color(uiColor: .systemBackground) : nodeTint)
-                .frame(width: 7, height: 7)
+                .stroke(nodeTint.opacity(isOpen ? 0.34 : 0), lineWidth: 1.5)
+                .frame(width: 18, height: 18)
+
+            Circle()
+                .fill(nodeTint)
+                .frame(width: 9, height: 9)
                 .overlay {
-                    if isSelected {
-                        Circle().stroke(MarketStyle.accent, lineWidth: 3)
-                    }
+                    Circle().stroke(.background.opacity(0.9), lineWidth: 1)
                 }
-                .padding(.top, 3)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(country)
+
+            callout
+                .offset(market.calloutOffset)
+        }
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+    }
+
+    private var connector: some View {
+        let offset = market.calloutOffset
+        let distance = hypot(offset.width, offset.height)
+        let angle = Angle(radians: atan2(Double(offset.height), Double(offset.width)))
+        return Capsule()
+            .fill(nodeTint.opacity(isOpen ? 0.45 : 0.22))
+            .frame(width: max(distance - 18, 8), height: 1)
+            .rotationEffect(angle)
+            .offset(x: offset.width / 2, y: offset.height / 2)
+    }
+
+    private var callout: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(market.city)
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text(quote?.formattedPercent ?? "—")
-                    .font(.system(size: 9.5, weight: .semibold))
+                Text(localTime)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(quoteTint(quote))
+                    .foregroundStyle(.secondary)
             }
+
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(nodeTint)
+                    .frame(width: 4, height: 4)
+                Text(statusLabel)
+                    .foregroundStyle(statusTint)
+                Text("· \(market.marketCode)")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 8.5, weight: .semibold))
+
+            HStack(spacing: 3) {
+                Text("今日")
+                    .foregroundStyle(.secondary)
+                Image(systemName: changeIcon)
+                    .font(.system(size: 7.5, weight: .bold))
+                Text(changeLabel)
+                    .monospacedDigit()
+            }
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(changeTint)
         }
-        .padding(5)
-        .contentShape(Rectangle())
+        .fixedSize()
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(isSelected ? MarketStyle.accent.opacity(0.7) : Color.primary.opacity(0.09), lineWidth: isSelected ? 1.2 : 0.7)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
     }
 
     private var nodeTint: Color {
-        isSelected ? MarketStyle.accent : quoteTint(quote)
+        isOpen ? MarketStyle.loss : Color.secondary.opacity(0.55)
+    }
+
+    private var isOpen: Bool {
+        quote?.tradingSession == .regular || quote?.tradingSession == .alwaysOpen
+    }
+
+    private var statusLabel: String {
+        switch quote?.tradingSession {
+        case .regular: "交易中"
+        case .premarket: "盘前"
+        case .postmarket: "盘后"
+        case .overnight: "夜盘"
+        case .closed: "已休市"
+        case .alwaysOpen: "24H"
+        case .unknown: "待更新"
+        case .none: "等待行情"
+        }
+    }
+
+    private var statusTint: Color {
+        switch quote?.tradingSession {
+        case .regular, .alwaysOpen: MarketStyle.loss
+        case .premarket, .postmarket, .overnight: .orange
+        case .closed, .unknown, .none: .secondary
+        }
+    }
+
+    private var localTime: String {
+        MarketViewDateFormatters.localTime(timeZone: market.timeZone).string(from: date)
+    }
+
+    private var changeLabel: String {
+        quote?.formattedPercent ?? "等待更新"
+    }
+
+    private var changeIcon: String {
+        guard let quote else { return "clock" }
+        if quote.percentValue > 0 { return "arrow.up.right" }
+        if quote.percentValue < 0 { return "arrow.down.right" }
+        return "minus"
+    }
+
+    private var changeTint: Color {
+        guard let quote else { return .secondary }
+        if quote.percentValue > 0 { return MarketStyle.gain }
+        if quote.percentValue < 0 { return MarketStyle.loss }
+        return .secondary
     }
 }
 
@@ -2141,9 +2341,11 @@ private struct MarketErrorBanner: View {
                 .disabled(isRetrying)
                 .accessibilityLabel(isRetrying ? "正在重试行情" : "重试缺失行情")
         }
-        .padding(.horizontal, 12)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.45)
+        }
         .accessibilityElement(children: .contain)
     }
 }
@@ -2494,7 +2696,6 @@ private struct MarketIndexDetailView: View {
     @State private var presentedValuation: CompanyValuationHistoryRoute?
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
-    private var indexSessionQuote: MarketQuote? { store.dashboard?.indexSessions?[symbol] }
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
     private var companyLogoPath: String? { constituent?.logoPath ?? store.companyLogoPaths[symbol] }
     private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
@@ -2570,12 +2771,9 @@ private struct MarketIndexDetailView: View {
             }
         }
         .contentShape(Rectangle())
-        .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭行情详情")
-                .padding(16)
-        }
         .simultaneousGesture(oneHandDismissGesture)
         .accessibilityHint("在详情内容区域向下滑动即可收起")
+        .accessibilityAction(.escape) { dismiss() }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $presentedValuation) { route in
@@ -2626,6 +2824,13 @@ private struct MarketIndexDetailView: View {
 
     private var detailNavigation: some View {
         HStack {
+            Button(action: dismiss.callAsFunction) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("关闭行情详情")
             Spacer(minLength: 0)
             ShareLink(item: shareText) {
                 Image(systemName: "square.and.arrow.up")
@@ -2690,22 +2895,6 @@ private struct MarketIndexDetailView: View {
                 Text(quote?.marketAsOfLabel ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if showsIndexSession, let session = indexSessionQuote {
-                    sessionQuotePill(title: "期货夜盘", quote: session)
-                } else if let quote, quote.hasActiveExtendedSessionQuote, let nightPrice = quote.sessionPrice {
-                    HStack(spacing: 7) {
-                        Text("个股夜盘").fontWeight(.semibold)
-                        Text(number(nightPrice, digits: 2)).fontWeight(.semibold).monospacedDigit()
-                        Text(quote.formattedSessionPercent ?? "—").fontWeight(.semibold).monospacedDigit()
-                        Sparkline(values: quote.nightTrend, color: MarketStyle.purple, showsFill: false)
-                            .frame(width: 52, height: 20)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(MarketStyle.purple)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(MarketStyle.purple.opacity(0.08), in: Capsule())
-                }
             }
         }
         .padding(.horizontal, 18)
@@ -2899,34 +3088,12 @@ private struct MarketIndexDetailView: View {
         .padding(.top, 20)
     }
 
-    @ViewBuilder
-    private func sessionQuotePill(title: String, quote: MarketQuote) -> some View {
-        HStack(spacing: 7) {
-            Text(title).fontWeight(.semibold)
-            Text(quote.symbol)
-            Text(number(quote.price, digits: 2)).fontWeight(.semibold).monospacedDigit()
-            Text(quote.formattedPercent).fontWeight(.semibold).monospacedDigit().foregroundStyle(quoteTint(quote))
-            Sparkline(values: quote.trend, color: MarketStyle.purple, showsFill: false)
-                .frame(width: 52, height: 20)
-        }
-        .font(.caption)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(MarketStyle.purple.opacity(0.08), in: Capsule())
-        .accessibilityLabel("\(title)，\(quote.presentationName)，\(number(quote.price, digits: 2))，\(quote.formattedPercent)")
-    }
-
     private var sessionText: String {
         quote?.tradingSession.displayLabel ?? "行情更新"
     }
     private var isCrypto: Bool { symbol.hasPrefix("BINANCE:") }
     private var isCommodity: Bool { quote?.instrumentType == "commodity-future" || symbol.hasSuffix("1!") }
     private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
-
-    private var showsIndexSession: Bool {
-        guard quote?.marketSession != "regular", let session = indexSessionQuote, let timestamp = session.timestamp else { return false }
-        return Date().timeIntervalSince1970 - Double(timestamp) / 1_000 < 10 * 60
-    }
 
     private var shareText: String {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
@@ -4252,15 +4419,7 @@ private struct CompanyLogo: View {
     var body: some View {
         Group {
             if let logoURL {
-                AsyncImage(url: logoURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFit().padding(size * 0.15)
-                    } else if phase.error == nil {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        fallback
-                    }
-                }
+                MarketCachedLogoImage(url: logoURL, size: size, fallback: AnyView(fallback))
             } else {
                 fallback
             }
@@ -4271,17 +4430,90 @@ private struct CompanyLogo: View {
     }
 
     private var fallback: some View {
-        Image(systemName: "building.2.crop.circle")
-            .font(.system(size: size * 0.45, weight: .medium))
+        Text(String(quote.presentationName.prefix(2)))
+            .font(.system(size: size * 0.25, weight: .semibold, design: .rounded))
             .foregroundStyle(.secondary)
+            .minimumScaleFactor(0.7)
     }
 
     private var logoURL: URL? {
-        guard let path, !path.isEmpty else { return nil }
-        guard let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
-        return MediaURL.image(url.absoluteString) ?? url
+        marketCompanyLogoURL(path)
     }
 
+}
+
+private func marketCompanyLogoURL(_ path: String?) -> URL? {
+    guard let path, !path.isEmpty else { return nil }
+    guard let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL else { return nil }
+    return MediaURL.image(url.absoluteString) ?? url
+}
+
+@MainActor
+private final class MarketLogoImageCache {
+    static let shared = MarketLogoImageCache()
+
+    private let images = NSCache<NSURL, UIImage>()
+    private var requests: [URL: Task<UIImage?, Never>] = [:]
+
+    private init() {
+        images.countLimit = 160
+        images.totalCostLimit = 24 * 1_024 * 1_024
+    }
+
+    func cachedImage(for url: URL) -> UIImage? {
+        images.object(forKey: url as NSURL)
+    }
+
+    func image(for url: URL) async -> UIImage? {
+        if let image = cachedImage(for: url) { return image }
+        if let request = requests[url] { return await request.value }
+
+        let request = Task { () -> UIImage? in
+            var urlRequest = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
+            urlRequest.timeoutInterval = 20
+            guard let (data, response) = try? await URLSession.shared.data(for: urlRequest),
+                  (response as? HTTPURLResponse).map({ 200..<300 ~= $0.statusCode }) ?? true,
+                  let image = UIImage(data: data) else { return nil }
+            return image
+        }
+        requests[url] = request
+        let image = await request.value
+        requests[url] = nil
+        if let image {
+            images.setObject(image, forKey: url as NSURL, cost: image.marketCacheCost)
+        }
+        return image
+    }
+}
+
+private struct MarketCachedLogoImage: View {
+    let url: URL
+    let size: CGFloat
+    let fallback: AnyView
+    @State private var loadedImage: UIImage?
+
+    var body: some View {
+        Group {
+            if let image = loadedImage ?? MarketLogoImageCache.shared.cachedImage(for: url) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.15)
+            } else {
+                fallback
+            }
+        }
+        .task(id: url) {
+            loadedImage = await MarketLogoImageCache.shared.image(for: url)
+        }
+    }
+}
+
+private extension UIImage {
+    var marketCacheCost: Int {
+        guard let cgImage else { return Int(size.width * size.height * scale * scale * 4) }
+        return cgImage.bytesPerRow * cgImage.height
+    }
 }
 
 private struct Sparkline: View {

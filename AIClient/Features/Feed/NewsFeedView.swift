@@ -103,6 +103,35 @@ enum FeedSourceTransitionPolicy {
     static let fadeInDuration = 0.22
 }
 
+enum FeedEntitySelectorPositionPolicy {
+    static let allAccountsID = "feed-entity:all"
+
+    static func targetID(selectedID: String?, visibleChoiceIDs: [String]) -> String {
+        guard let selectedID, visibleChoiceIDs.contains(selectedID) else { return allAccountsID }
+        return selectedID
+    }
+}
+
+enum XFeedSelectorAvatarPolicy {
+    static func resolvedAvatarURL(
+        directoryAvatarURL: URL?,
+        screenName: String,
+        posts: [Post]
+    ) -> URL? {
+        let handle = normalizedHandle(screenName)
+        return posts.first(where: {
+            normalizedHandle($0.user?.userScreenName) == handle && $0.avatarURL != nil
+        })?.avatarURL ?? directoryAvatarURL
+    }
+
+    private static func normalizedHandle(_ value: String?) -> String? {
+        let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@")))
+            .lowercased()
+        return normalized?.isEmpty == false ? normalized : nil
+    }
+}
+
 enum EmbeddedWebPresentationPolicy {
     static func opensImmediately(source: FeedSource) -> Bool {
         source == .weibo
@@ -156,8 +185,6 @@ struct NewsFeedView: View {
     @State private var isYouTubePersonSelectorExpanded = false
     @State private var isFeedEntitySelectorExpanded = false
     @State private var feedEntitySearch = ""
-    @State private var selectedFeedEntityIDs: [FeedSource: String] = [:]
-    @State private var selectedWeiboEntityID: String?
     @State private var isSourceContentVisible = true
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -220,7 +247,9 @@ struct NewsFeedView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedPost) { post in
+        .sheet(item: $selectedPost, onDismiss: {
+            showsDetail = false
+        }) { post in
             NavigationStack {
                 if let source = FeedSource(rawValue: post.source ?? ""),
                    source == .weibo || source == .douyin || source == .baidu,
@@ -262,10 +291,12 @@ struct NewsFeedView: View {
             }
         }
         .onChange(of: selectedPost, initial: true) { _, post in
-            showsDetail = FeedDetailChromePolicy.hidesRootChrome(
-                isPresented: post != nil,
-                isXueqiu: post?.isXueqiu == true
-            )
+            if let post {
+                showsDetail = FeedDetailChromePolicy.hidesRootChrome(
+                    isPresented: true,
+                    isXueqiu: post.isXueqiu
+                )
+            }
             if post == nil {
                 isFeedChromeHidden = false
                 hidesTabBar = false
@@ -487,6 +518,21 @@ struct NewsFeedView: View {
     }
 
     private var feedEntityChoices: [FeedEntityChoice] {
+        if model.source == .x {
+            return model.xFeedUsers.map { user in
+                FeedEntityChoice(
+                    id: "x:\(user.id)",
+                    name: user.name,
+                    subtitle: "@\(user.screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@")))",
+                    avatarURL: XFeedSelectorAvatarPolicy.resolvedAvatarURL(
+                        directoryAvatarURL: user.avatarURL,
+                        screenName: user.screenName,
+                        posts: model.posts(for: .x)
+                    ),
+                    feedID: nil
+                )
+            }
+        }
         if model.source == .wechat {
             return weChatAccounts.map { account in
                 let feed = model.rssFeeds.first { $0.id == account.id }
@@ -500,9 +546,14 @@ struct NewsFeedView: View {
             }
         }
 
-        let posts = model.source == .weibo
-            ? weiboFollowingModel.posts
-            : model.posts(for: model.source)
+        let posts: [Post]
+        if model.source == .weibo {
+            posts = weiboFollowingModel.directoryPosts
+        } else if model.source == .xueqiu {
+            posts = model.xueqiuDirectoryPosts
+        } else {
+            posts = model.posts(for: model.source)
+        }
         var seen = Set<String>()
         return posts.compactMap { post in
             guard let id = feedEntityID(for: post, source: model.source), seen.insert(id).inserted else {
@@ -527,9 +578,15 @@ struct NewsFeedView: View {
             return model.selectedWeChatFeedID.map { "rss:\($0)" }
         }
         if model.source == .weibo {
-            return selectedWeiboEntityID
+            return weiboFollowingModel.selectedFeedID.map { "rss:\($0)" }
         }
-        return selectedFeedEntityIDs[model.source]
+        if model.source == .x {
+            return model.selectedXUserID.map { "x:\($0)" }
+        }
+        if model.source == .xueqiu {
+            return model.selectedXueqiuFeedID.map { "rss:\($0)" }
+        }
+        return nil
     }
 
     private var filteredFeedEntityChoices: [FeedEntityChoice] {
@@ -613,16 +670,24 @@ struct NewsFeedView: View {
                 .padding(.bottom, 4)
             }
 
-            ScrollView {
-                LazyVStack(spacing: 3) {
-                    feedEntityMenuRow(nil)
-                    ForEach(filteredFeedEntityChoices) { choice in
-                        feedEntityMenuRow(choice)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        feedEntityMenuRow(nil)
+                            .id(FeedEntitySelectorPositionPolicy.allAccountsID)
+                        ForEach(filteredFeedEntityChoices) { choice in
+                            feedEntityMenuRow(choice)
+                                .id(choice.id)
+                        }
                     }
+                    .padding(4)
                 }
-                .padding(4)
+                .scrollIndicators(feedEntityChoices.count > 6 ? .visible : .hidden)
+                .task(id: feedEntityMenuScrollTargetID) {
+                    await Task.yield()
+                    proxy.scrollTo(feedEntityMenuScrollTargetID, anchor: .center)
+                }
             }
-            .scrollIndicators(feedEntityChoices.count > 6 ? .visible : .hidden)
         }
         .frame(
             width: feedEntityChoices.count > 8 ? 224 : 196,
@@ -634,6 +699,13 @@ struct NewsFeedView: View {
                 .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+    }
+
+    private var feedEntityMenuScrollTargetID: String {
+        FeedEntitySelectorPositionPolicy.targetID(
+            selectedID: selectedFeedEntityID,
+            visibleChoiceIDs: filteredFeedEntityChoices.map(\.id)
+        )
     }
 
     private var feedEntityMenuHeight: CGFloat {
@@ -726,11 +798,14 @@ struct NewsFeedView: View {
             if model.source == .wechat {
                 Task { await model.selectWeChatFeed(choice?.feedID) }
             } else if model.source == .weibo {
-                selectedWeiboEntityID = choice?.id
-            } else if let id = choice?.id {
-                selectedFeedEntityIDs[model.source] = id
-            } else {
-                selectedFeedEntityIDs.removeValue(forKey: model.source)
+                Task { await weiboFollowingModel.selectFeed(choice?.feedID) }
+            } else if model.source == .x {
+                let user = choice.flatMap { choice in
+                    model.xFeedUsers.first { "x:\($0.id)" == choice.id }
+                }
+                Task { await model.selectXUser(user) }
+            } else if model.source == .xueqiu {
+                Task { await model.selectXueqiuFeed(choice?.feedID) }
             }
         }
     }
@@ -918,6 +993,9 @@ struct NewsFeedView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: "\(rootTabIsActive)-\(source.rawValue)") {
+                if rootTabIsActive, source == .x {
+                    await model.loadXFeedUsersIfNeeded()
+                }
                 if rootTabIsActive, source == .rss || source == .wechat {
                     await model.loadRSSFeedsIfNeeded(forceRefresh: source == .wechat)
                 }
@@ -996,10 +1074,7 @@ struct NewsFeedView: View {
                                 .onTapGesture { openPost(post) }
                                 .task(id: rootTabIsActive) {
                                     guard rootTabIsActive, post.id == followingPosts.last?.id else { return }
-                                    await weiboFollowingModel.loadMoreIfNeeded(
-                                        current: post,
-                                        allowsFilteredTail: selectedWeiboEntityID != nil
-                                    )
+                                    await weiboFollowingModel.loadMoreIfNeeded(current: post)
                                 }
                             Divider()
                                 .overlay(Color.primary.opacity(0.04))
@@ -1031,17 +1106,17 @@ struct NewsFeedView: View {
                     Button("重新加载") { Task { await weiboFollowingModel.refresh() } }
                 }
             } else {
-                ContentUnavailableView("暂无关注内容", systemImage: "person.2")
+                ContentUnavailableView(
+                    weiboFollowingModel.selectedFeedID == nil ? "暂无关注内容" : "该账号暂时没有新内容",
+                    systemImage: "person.2"
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var visibleWeiboFollowingPosts: [Post] {
-        guard let selectedWeiboEntityID else { return weiboFollowingModel.posts }
-        return weiboFollowingModel.posts.filter {
-            feedEntityID(for: $0, source: .weibo) == selectedWeiboEntityID
-        }
+        weiboFollowingModel.posts
     }
 
     private func feedList(
@@ -1054,7 +1129,6 @@ struct NewsFeedView: View {
         let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
         let usesFilteredPagination = source == .flash
             || (source == .rss && !isSelectedRSSPage)
-            || ((source == .x || source == .xueqiu) && selectedFeedEntityIDs[source] != nil)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -1302,6 +1376,10 @@ struct NewsFeedView: View {
             guard rootTabIsActive, source == .x, source == model.source else { return }
             await model.translateXPostIfNeeded(post)
         }
+        .task(id: "\(rootTabIsActive)-x-engagement-\(post.id)") {
+            guard rootTabIsActive, source == .x, source == model.source else { return }
+            await model.loadXEngagementIfNeeded(post)
+        }
         .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
             await model.translateRSSPostIfNeeded(post)
         }
@@ -1389,9 +1467,6 @@ struct NewsFeedView: View {
                 rssPosts = posts.filter { !$0.hasDedicatedFeedTab }
             }
             return rssPosts
-        }
-        if (source == .x || source == .xueqiu), let selectedID = selectedFeedEntityIDs[source] {
-            return posts.filter { feedEntityID(for: $0, source: source) == selectedID }
         }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
@@ -1698,12 +1773,19 @@ struct NewsFeedView: View {
                         description: { Text(error) }
                         actions: { Button("重新加载") { Task { await model.refresh() } } }
                 } else {
-                    ContentUnavailableView("这个频道暂时没有新内容", systemImage: "tray")
+                    ContentUnavailableView(emptyFeedTitle(for: source), systemImage: "tray")
                 }
             }
             .padding(.top, topInset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func emptyFeedTitle(for source: FeedSource) -> String {
+        if source == .x, model.selectedXUserID != nil { return "该账号暂时没有新内容" }
+        if source == .xueqiu, model.selectedXueqiuFeedID != nil { return "该账号暂时没有新内容" }
+        if source == .youtube, model.selectedYouTubePerson != nil { return "该用户暂时没有新内容" }
+        return "这个频道暂时没有新内容"
     }
 
     private func selectSource(_ source: FeedSource) {
@@ -3316,47 +3398,63 @@ struct NewsCardView: View {
     }
 
     private var xCard: some View {
-        HStack(alignment: .top, spacing: 10) {
-            AvatarView(
-                url: post.avatarURL,
-                name: post.authorName,
-                size: 44,
-                cornerRadius: xAvatarCornerRadius
-            )
-            .contentShape(Rectangle())
-            .onTapGesture { onOpen?() }
-
-            VStack(alignment: .leading, spacing: 10) {
-                xAuthorHeader
-                    .contentShape(Rectangle())
-                    .onTapGesture { onOpen?() }
-
-                VStack(alignment: .leading, spacing: 5) {
-                    xRichText(xTimelineContent)
-                        .font(.system(size: 17, weight: .regular))
-                        .lineSpacing(3)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(isLongXPost ? 8 : nil)
-                        .fixedSize(horizontal: false, vertical: !isLongXPost)
-
-                    if isLongXPost {
-                        Button(action: { onOpen?() }) {
-                            Text("显示更多")
-                                .font(.system(size: 15, weight: .regular))
-                                .foregroundStyle(.blue)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("查看完整帖子")
-                    }
+        VStack(alignment: .leading, spacing: 6) {
+            if let attribution = post.xRepostAttributionText {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.2.squarepath")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(attribution)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
                 }
+                .foregroundStyle(.secondary)
+                .padding(.leading, 54)
+                .accessibilityElement(children: .combine)
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                AvatarView(
+                    url: post.avatarURL,
+                    name: post.authorName,
+                    size: 44,
+                    cornerRadius: xAvatarCornerRadius
+                )
                 .contentShape(Rectangle())
                 .onTapGesture { onOpen?() }
 
-                XFeedMediaView(post: post)
+                VStack(alignment: .leading, spacing: 10) {
+                    xAuthorHeader
+                        .contentShape(Rectangle())
+                        .onTapGesture { onOpen?() }
 
-                FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+                    VStack(alignment: .leading, spacing: 5) {
+                        xRichText(xTimelineContent)
+                            .font(.system(size: 17, weight: .regular))
+                            .lineSpacing(3)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(isLongXPost ? 8 : nil)
+                            .fixedSize(horizontal: false, vertical: !isLongXPost)
+
+                        if isLongXPost {
+                            Button(action: { onOpen?() }) {
+                                Text("显示更多")
+                                    .font(.system(size: 15, weight: .regular))
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("查看完整帖子")
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen?() }
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        XFeedMediaView(post: post)
+                        FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)

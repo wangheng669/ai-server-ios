@@ -81,7 +81,9 @@ struct FamousHoldingsView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedDetail) { route in
+        .sheet(item: $selectedDetail, onDismiss: {
+            showsDetail = false
+        }) { route in
             NavigationStack {
                 if let manager = managers.first(where: { $0.key == route.managerKey }) {
                     FamousHoldingDetailView(manager: manager, store: store)
@@ -92,7 +94,11 @@ struct FamousHoldingsView: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
-        .onChange(of: selectedDetail) { _, value in showsDetail = value != nil }
+        .onChange(of: selectedDetail) { _, value in
+            if value != nil {
+                showsDetail = true
+            }
+        }
         .onAppear { showsDetail = selectedDetail != nil }
         .onDisappear { showsDetail = false }
     }

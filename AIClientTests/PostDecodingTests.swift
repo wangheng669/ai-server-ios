@@ -485,6 +485,16 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(item.videoPreviewURL?.path, "/api/ios/v1/image-proxy")
     }
 
+    func testDecodesLiveXTweetPhotoForDetailFallback() throws {
+        let data = #"{"success":true,"data":{"item":{"id":"2083612366155984927","text":"Jensen is back!!","media":[{"type":"photo","url":"https://pbs.twimg.com/media/demo.jpg","width":1200,"height":1500}]}}}"#.data(using: .utf8)!
+        let item = try JSONDecoder().decode(XTweetDetailResponse.self, from: data).data.item
+
+        XCTAssertEqual(item.imageMedia.count, 1)
+        XCTAssertEqual(item.imageMedia.first?.width, 1200)
+        XCTAssertEqual(item.imageMedia.first?.height, 1500)
+        XCTAssertEqual(item.imageURLs.first?.path, "/api/ios/v1/image-proxy")
+    }
+
     func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
         let storedBody = "这是已经存储的完整中文正文，包含第一段和第二段。"
         let liveSummary = "中文摘要…"

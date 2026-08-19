@@ -301,10 +301,6 @@ private struct EditorialRootView: View {
         }
     }
 
-    private var showsResearchSelector: Bool {
-        !hidesRootTabBar && EditorialTab.researchTabs.contains(selectedTab)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -382,14 +378,6 @@ private struct EditorialRootView: View {
                         sentiment: signalSentiment,
                         showsFilters: $showsSignalFilters
                     )
-                }
-
-                if showsResearchSelector {
-                    HStack {
-                        Spacer(minLength: 0)
-                        ResearchSectionSelector(selection: $selectedTab)
-                    }
-                    .padding(.horizontal, 14)
                 }
 
                 if !hidesRootTabBar {
@@ -494,109 +482,6 @@ private struct EditorialRootView: View {
     }
 }
 
-private struct ResearchSectionSelector: View {
-    @Binding var selection: EditorialTab
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isExpanded = false
-
-    var body: some View {
-        Button {
-            withAnimation(expansionAnimation) {
-                isExpanded.toggle()
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: selection.researchSelectorIcon)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Text(selection.sectionTitle)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .heavy))
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .frame(minWidth: 112, minHeight: 48)
-            .background(InvestmentDesign.accent, in: RoundedRectangle(cornerRadius: 16))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.white.opacity(0.24), lineWidth: 0.8)
-            }
-            .contentShape(Rectangle())
-            .shadow(color: InvestmentDesign.accent.opacity(0.26), radius: 12, y: 5)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("切换研究栏目，当前为\(selection.sectionTitle)")
-        .accessibilityValue(isExpanded ? "已展开" : "已收起")
-        .overlay(alignment: .bottomTrailing) {
-            if isExpanded {
-                VStack(alignment: .trailing, spacing: 8) {
-                    ForEach(EditorialTab.researchTabs, id: \.self) { tab in
-                        option(tab)
-                    }
-                }
-                .offset(y: -56)
-                .transition(
-                    .move(edge: .bottom)
-                        .combined(with: .scale(scale: 0.94, anchor: .bottomTrailing))
-                        .combined(with: .opacity)
-                )
-                .zIndex(1)
-            }
-        }
-        .zIndex(10)
-        .sensoryFeedback(.selection, trigger: selection)
-    }
-
-    private var expansionAnimation: Animation? {
-        reduceMotion ? nil : .snappy(duration: 0.26, extraBounce: 0.08)
-    }
-
-    private func option(_ tab: EditorialTab) -> some View {
-        let isSelected = selection == tab
-
-        return Button {
-            withAnimation(expansionAnimation) {
-                selection = tab
-                isExpanded = false
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: tab.researchSelectorIcon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 22)
-
-                Text(tab.sectionTitle)
-                    .font(.system(size: 15, weight: .semibold))
-
-                Circle()
-                    .fill(isSelected ? Color.white : Color.clear)
-                    .frame(width: 5, height: 5)
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.82))
-            .padding(.horizontal, 14)
-            .frame(width: 132, height: 46, alignment: .leading)
-            .background(
-                isSelected ? InvestmentDesign.accent : Color(uiColor: .systemBackground),
-                in: RoundedRectangle(cornerRadius: 15)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 15)
-                    .stroke(
-                        isSelected ? InvestmentDesign.accent : Color.primary.opacity(0.12),
-                        lineWidth: 0.8
-                    )
-            }
-            .shadow(color: Color.black.opacity(isSelected ? 0.12 : 0.09), radius: 10, y: 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
 private struct RootNavigationBar: View {
     @Binding var selection: EditorialTab
     let dynamicTarget: EditorialTab
@@ -608,12 +493,7 @@ private struct RootNavigationBar: View {
         HStack(spacing: 0) {
             item(.world, title: "今日", icon: "globe")
             intelligenceItem
-            item(
-                researchTarget,
-                selectedTabs: [.investment, .company, .people],
-                title: "研究",
-                icon: "magnifyingglass"
-            )
+            researchItem
             item(.learning, title: "知识", icon: "books.vertical")
             item(.city, title: "城市", icon: "map")
         }
@@ -664,13 +544,37 @@ private struct RootNavigationBar: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    private var researchItem: some View {
+        let isSelected = EditorialTab.researchTabs.contains(selection)
+        let currentTab = isSelected ? selection : researchTarget
+
+        return Menu {
+            Picker("研究栏目", selection: Binding(
+                get: { currentTab },
+                set: { select($0) }
+            )) {
+                ForEach(EditorialTab.researchTabs, id: \.self) { tab in
+                    Label(tab.sectionTitle, systemImage: tab.researchSelectorIcon)
+                        .tag(tab)
+                }
+            }
+        } label: {
+            itemLabel(title: "研究", icon: currentTab.researchSelectorIcon, isSelected: isSelected)
+        } primaryAction: {
+            select(currentTab)
+        }
+        .menuOrder(.fixed)
+        .accessibilityLabel("研究，当前\(currentTab.sectionTitle)")
+        .accessibilityHint(isSelected ? "轻点保持当前栏目，长按选择其他研究栏目" : "轻点打开，长按选择研究栏目")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
     private func item(
         _ tab: EditorialTab,
-        selectedTabs: [EditorialTab] = [],
         title: String,
         icon: String
     ) -> some View {
-        let isSelected = selection == tab || selectedTabs.contains(selection)
+        let isSelected = selection == tab
 
         return Button {
             select(tab)
@@ -746,6 +650,106 @@ private final class TodayWorldStore: ObservableObject {
     }
 }
 
+private actor TodayWorldPostMemoryCache {
+    static let shared = TodayWorldPostMemoryCache()
+
+    private struct Entry {
+        let post: Post
+        let loadedAt: Date
+    }
+
+    private let lifetime: TimeInterval = 6 * 60 * 60
+    private var entries: [String: Entry] = [:]
+    private var inFlight: [String: Task<Post, Error>] = [:]
+
+    func cachedPosts(ids: [Int], baseURL: URL) -> [Post] {
+        discardExpiredEntries()
+        return ids.compactMap { entries[key(id: $0, baseURL: baseURL)]?.post }
+    }
+
+    func store(posts: [Post], baseURL: URL) {
+        let loadedAt = Date()
+        for post in posts {
+            entries[key(id: post.id, baseURL: baseURL)] = Entry(post: post, loadedAt: loadedAt)
+        }
+    }
+
+    func post(id: Int, baseURL: URL) async throws -> Post {
+        let cacheKey = key(id: id, baseURL: baseURL)
+        if let entry = entries[cacheKey], Date().timeIntervalSince(entry.loadedAt) <= lifetime {
+            return entry.post
+        }
+        if let task = inFlight[cacheKey] {
+            return try await task.value
+        }
+
+        let task = Task {
+            try await APIClient(baseURL: baseURL).fetchPost(id: id)
+        }
+        inFlight[cacheKey] = task
+        do {
+            let post = try await task.value
+            entries[cacheKey] = Entry(post: post, loadedAt: Date())
+            inFlight[cacheKey] = nil
+            return post
+        } catch {
+            inFlight[cacheKey] = nil
+            throw error
+        }
+    }
+
+    private func key(id: Int, baseURL: URL) -> String {
+        "\(baseURL.absoluteString)|\(id)"
+    }
+
+    private func discardExpiredEntries() {
+        let cutoff = Date().addingTimeInterval(-lifetime)
+        entries = entries.filter { $0.value.loadedAt >= cutoff }
+    }
+}
+
+private struct TodayWorldPostBatchResponse: Decodable {
+    let success: Bool
+    let posts: [Post]
+}
+
+enum TodayWorldNestedSheetPresentationPolicy {
+    static let contentInteraction = PresentationContentInteraction.resizes
+}
+
+enum TodayWorldPostLoadingPolicy {
+    static func shouldLoad(isPostsSheetPresented: Bool, postsAreEmpty: Bool) -> Bool {
+        isPostsSheetPresented && postsAreEmpty
+    }
+}
+
+private func fetchTodayWorldPostBatch(ids: [Int], baseURL: URL) async throws -> [Post] {
+    var seen = Set<Int>()
+    let requestedIDs = ids.filter { $0 > 0 && seen.insert($0).inserted }.prefix(50)
+    guard !requestedIDs.isEmpty else { return [] }
+
+    var components = URLComponents(
+        url: baseURL.appending(path: "api/ios/v1/post/batch"),
+        resolvingAgainstBaseURL: false
+    )
+    components?.queryItems = [
+        .init(name: "ids", value: requestedIDs.map(String.init).joined(separator: ",")),
+        .init(name: "full", value: "1")
+    ]
+    guard let url = components?.url else { throw APIError.invalidURL }
+
+    let request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData)
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+    guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+    let decoded = try JSONDecoder().decode(TodayWorldPostBatchResponse.self, from: data)
+    guard decoded.success else { throw APIError.invalidResponse }
+    guard decoded.posts.allSatisfy({ $0.content != nil || $0.text != nil || $0.summary != nil }) else {
+        throw APIError.invalidResponse
+    }
+    return decoded.posts
+}
+
 private struct TodayWorldView: View {
     @Binding var showsDetail: Bool
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -770,12 +774,12 @@ private struct TodayWorldView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedSystem) { system in
+        .sheet(item: $selectedSystem, onDismiss: {
+            showsDetail = false
+        }) { system in
             TodayWorldReportSourcesSheet(system: system, reportDate: store.report?.date ?? "")
-                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationContentInteraction(.scrolls)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -786,7 +790,9 @@ private struct TodayWorldView: View {
             Task { await store.load(force: true) }
         }
         .onChange(of: selectedSystem) { _, system in
-            showsDetail = system != nil
+            if system != nil {
+                showsDetail = true
+            }
         }
     }
 
@@ -878,7 +884,7 @@ private struct TodayWorldView: View {
                 HStack(spacing: -7) {
                     ForEach(Array(system.sourceKeys.prefix(3).enumerated()), id: \.offset) { index, key in
                         AvatarView(
-                            url: sourceAvatarURL(key),
+                            url: todayWorldSourceAvatarURL(key),
                             name: sourceName(system, at: index),
                             size: 30
                         )
@@ -965,17 +971,16 @@ private struct TodayWorldView: View {
         return formatter.string(from: date)
     }
 
-    private func sourceAvatarURL(_ key: String) -> URL? {
-        let encoded = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
-        return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)")
-    }
-
     private func sourceName(_ system: TodayWorldAdvancedReportSystem, at index: Int) -> String {
         guard system.sourceNames.indices.contains(index) else { return system.systemName }
         return system.sourceNames[index]
     }
 }
 
+private func todayWorldSourceAvatarURL(_ key: String) -> URL? {
+    let encoded = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
+    return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)?v=2")
+}
 
 private struct TodayWorldReportSourcesSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -985,13 +990,198 @@ private struct TodayWorldReportSourcesSheet: View {
     @State private var posts: [Post] = []
     @State private var translations: [Int: String] = [:]
     @State private var translationFailures: Set<Int> = []
-    @State private var originalPostIDs: Set<Int> = []
     @State private var selectedPost: Post?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var isShowingPosts = false
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            sheetHeader
+            summaryPage
+        }
+        .background(Color(uiColor: .systemBackground))
+        .sheet(isPresented: $isShowingPosts) {
+            postsSheet
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
+                .task(id: system.id) {
+                    guard TodayWorldPostLoadingPolicy.shouldLoad(
+                        isPostsSheetPresented: isShowingPosts,
+                        postsAreEmpty: posts.isEmpty
+                    ) else { return }
+                    await load()
+                }
+        }
+    }
+
+    private var sheetHeader: some View {
+        HStack(spacing: 14) {
+            AvatarView(
+                url: system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL),
+                name: sourceName(at: 0),
+                size: 54,
+                assetName: primaryPersonAvatarAssetName
+            )
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(system.systemName)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text("\(system.sourceKeys.count) 个账号 · \(system.postIDs.count) 条依据")
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 18)
+    }
+
+    private var summaryPage: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("今日摘要")
+                        .font(.system(size: 15, weight: .semibold))
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(Array(summaryParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .font(.system(size: 16))
+                                .lineSpacing(5)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
+
+            summaryFooter
+        }
+    }
+
+    private var summaryParagraphs: [String] {
+        let text = system.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+
+        let explicitParagraphs = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if explicitParagraphs.count > 1 {
+            return explicitParagraphs
+        }
+
+        var sentences: [String] = []
+        var sentence = ""
+        for character in text {
+            sentence.append(character)
+            if "。！？!?".contains(character) {
+                let value = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty { sentences.append(value) }
+                sentence = ""
+            }
+        }
+        let remainder = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !remainder.isEmpty { sentences.append(remainder) }
+        guard sentences.count > 1 else { return [text] }
+
+        let groupSize = max(1, Int(ceil(Double(sentences.count) / 4)))
+        return stride(from: 0, to: sentences.count, by: groupSize).map { start in
+            sentences[start..<min(start + groupSize, sentences.count)].joined()
+        }
+    }
+
+    private var primaryPersonAvatarAssetName: String? {
+        let identity = ([system.systemName] + system.sourceNames).joined(separator: " ").lowercased()
+        let knownPeople: [(aliases: [String], asset: String)] = [
+            (["马斯克", "elon musk", "musk"], "ElonMuskAvatar"),
+            (["董明珠"], "DongMingzhuAvatar"),
+            (["马云", "jack ma"], "JackMaAvatar"),
+            (["雷军", "lei jun"], "LeiJunAvatar"),
+            (["李彦宏", "robin li"], "RobinLiAvatar")
+        ]
+        return knownPeople.first { person in
+            person.aliases.contains { identity.localizedCaseInsensitiveContains($0) }
+        }?.asset
+    }
+
+    private var summaryFooter: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 12) {
+                HStack(spacing: -10) {
+                    ForEach(Array(system.sourceKeys.prefix(4).enumerated()), id: \.offset) { index, key in
+                        AvatarView(
+                            url: todayWorldSourceAvatarURL(key),
+                            name: sourceName(at: index),
+                            size: 44
+                        )
+                        .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("来源账号")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("共 \(system.sourceKeys.count) 个账号")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            Button {
+                isShowingPosts = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text("查看 \(system.postIDs.count) 条动态")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .background(
+                    Color(uiColor: .secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var postsSheet: some View {
+        VStack(spacing: 0) {
+            postsHeader
+
             Group {
                 if isLoading {
                     ProgressView("正在载入动态")
@@ -1007,121 +1197,370 @@ private struct TodayWorldReportSourcesSheet: View {
                         }
                     }
                 } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            Text("\(displayDate) · \(posts.count) 条动态")
-                                .font(.system(size: 13.5, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.bottom, 10)
-
-                            ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
-                                if index > 0 {
-                                    Divider()
-                                        .padding(.vertical, 16)
-                                }
-                                postSection(post)
-                            }
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 16)
-                    }
-                    .scrollIndicators(.hidden)
-                }
-            }
-            .background(Color(uiColor: .systemBackground))
-            .navigationTitle(system.systemName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                        .fontWeight(.semibold)
+                    postsPage
                 }
             }
         }
-        .task(id: system.id) { await load() }
+        .background(Color(uiColor: .systemBackground))
         .sheet(item: $selectedPost) { post in
-            NavigationStack {
-                PostDetailView(post: post, presentedAsSheet: true)
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(28)
-            .presentationContentInteraction(.scrolls)
+            TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
         }
+    }
+
+    private var postsHeader: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(posts.count) 条动态")
+                    .font(.system(size: 20, weight: .bold))
+
+                Text("\(displayDate) · 按时间排序")
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button { isShowingPosts = false } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭动态")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 14)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var postsPage: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                    if index > 0 {
+                        Divider()
+                            .padding(.leading, 60)
+                    }
+                    postSection(post)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func sourceName(at index: Int) -> String {
+        guard system.sourceNames.indices.contains(index) else { return system.systemName }
+        return system.sourceNames[index]
     }
 
     @ViewBuilder
     private func postSection(_ post: Post) -> some View {
-        let showsOriginal = originalPostIDs.contains(post.id)
-        VStack(alignment: .leading, spacing: 9) {
-            Text(post.formattedTime ?? "")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 12) {
+            AvatarView(url: post.avatarURL, name: post.authorName, size: 48)
 
-            if showsOriginal {
-                Text(post.xStoredOriginalContent)
-                    .font(.system(size: 15))
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let translation = translations[post.id] ?? (post.hasTranslation ? post.displayContent : nil) {
-                Text(translation)
-                    .font(.system(size: 15))
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if translationFailures.contains(post.id) {
-                Text("中文翻译暂不可用")
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-            } else {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("正在翻译")
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(post.authorName)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text([post.authorHandle, post.formattedTime].compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if let reply = post.meta?.replyContext,
+                   let replyText = reply.displayText {
+                    TodayWorldReplyContextCard(reply: reply, text: replyText)
+                } else if let replyHandle = replyHandle(for: post) {
+                    Text("回复 \(replyHandle)")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let content = displayedContent(for: post) {
+                    Text(content)
+                        .font(.system(size: 16))
+                        .lineSpacing(4)
+                        .lineLimit(8)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(.primary)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("正在翻译")
+                }
+
+                if let quote = post.meta?.quotedTweet {
+                    TodayWorldQuotedPostCard(quote: quote)
+                }
+
+                if post.previewURL != nil || !post.videoURLs.isEmpty {
+                    XFeedMediaView(post: post)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedPost = post
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("打开动态详情")
+    }
 
-            HStack(spacing: 16) {
-                Button(showsOriginal ? "显示翻译" : "显示原文") {
-                    if showsOriginal {
-                        originalPostIDs.remove(post.id)
-                    } else {
-                        originalPostIDs.insert(post.id)
+    private func displayedContent(for post: Post) -> String? {
+        if let translation = translations[post.id] {
+            return translation
+        }
+        if post.hasTranslation {
+            return post.displayContent
+        }
+        if translationFailures.contains(post.id) || !post.needsXTranslation {
+            return post.xStoredOriginalContent
+        }
+        return nil
+    }
+
+    private func replyHandle(for post: Post) -> String? {
+        guard let value = post.meta?.inReplyToScreenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@")),
+              !value.isEmpty else { return nil }
+        return "@\(value)"
+    }
+
+    private struct TodayWorldQuotedPostCard: View {
+        let quote: XQuotedPost
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    AvatarView(
+                        url: quote.author?.profileImageURL.flatMap(MediaURL.image),
+                        name: quote.author?.name ?? "引用动态",
+                        size: 24
+                    )
+
+                    Text(quote.author?.name ?? "引用动态")
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+
+                    if let handle = quote.author?.handle {
+                        Text(handle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                Button("查看帖子详情") {
-                    selectedPost = post
+
+                if let text = quote.displayText {
+                    Text(text)
+                        .font(.system(size: 14.5))
+                        .lineSpacing(3)
+                        .lineLimit(5)
+                        .truncationMode(.tail)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
+                if let image = media.first, media.count == 1 {
+                    RemoteImage(url: image, height: 180, cornerRadius: 8)
+                        .frame(maxWidth: .infinity)
+                } else if !media.isEmpty {
+                    LazyVGrid(
+                        columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)],
+                        spacing: 3
+                    ) {
+                        ForEach(media, id: \.self) { url in
+                            RemoteImage(url: url, height: 110, cornerRadius: 8)
+                        }
+                    }
                 }
             }
-            .font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(.secondary)
-            .buttonStyle(.plain)
+            .padding(11)
+            .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            }
+        }
+    }
+
+    private struct TodayWorldReplyContextCard: View {
+        let reply: XReplyContext
+        let text: String
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("回复 \(reply.handle ?? "这条动态")")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.secondary)
+
+                HStack(alignment: .top, spacing: 8) {
+                    AvatarView(
+                        url: reply.avatarURL.flatMap(MediaURL.image),
+                        name: reply.authorName ?? reply.handle ?? "回复",
+                        size: 26
+                    )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 5) {
+                            if let name = reply.authorName, !name.isEmpty {
+                                Text(name)
+                                    .font(.system(size: 13.5, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            if let handle = reply.handle {
+                                Text(handle)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Text(text)
+                            .font(.system(size: 14))
+                            .lineSpacing(3)
+                            .lineLimit(4)
+                            .truncationMode(.tail)
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            }
         }
     }
 
     @MainActor
     private func load() async {
-        isLoading = true
         errorMessage = nil
-        posts = []
-        translations = [:]
         translationFailures = []
-        let client = APIClient(baseURL: ServerConfiguration.currentURL)
-        do {
-            var loaded: [Post] = []
-            for postID in system.postIDs {
-                let post = try await client.fetchPost(id: postID)
-                loaded.append(post)
-                if post.needsXTranslation, let tweetID = post.xTweetID {
+        let baseURL = ServerConfiguration.currentURL
+        let cachedPosts = await TodayWorldPostMemoryCache.shared.cachedPosts(
+            ids: system.postIDs,
+            baseURL: baseURL
+        )
+        guard !Task.isCancelled else { return }
+        var loadedByID = Dictionary(uniqueKeysWithValues: cachedPosts.map { ($0.id, $0) })
+        posts = system.postIDs.compactMap { loadedByID[$0] }
+        translations = Dictionary(uniqueKeysWithValues: posts.compactMap { post in
+            guard let tweetID = post.xTweetID,
+                  let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) else { return nil }
+            return (post.id, value)
+        })
+        isLoading = posts.isEmpty
+        defer {
+            if !Task.isCancelled {
+                isLoading = false
+            }
+        }
+
+        var lastError: Error?
+        let batchIDs = system.postIDs.filter { loadedByID[$0] == nil }
+        if !batchIDs.isEmpty {
+            do {
+                let batchPosts = try await fetchTodayWorldPostBatch(ids: batchIDs, baseURL: baseURL)
+                guard !Task.isCancelled else { return }
+                await TodayWorldPostMemoryCache.shared.store(posts: batchPosts, baseURL: baseURL)
+                guard !Task.isCancelled else { return }
+                for post in batchPosts {
+                    loadedByID[post.id] = post
+                    if let tweetID = post.xTweetID,
+                       let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
+                        translations[post.id] = value
+                    }
+                }
+                posts = system.postIDs.compactMap { loadedByID[$0] }
+                isLoading = posts.isEmpty
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = error
+            }
+        }
+
+        await withTaskGroup(of: (Int, Result<Post, Error>).self) { group in
+            for postID in system.postIDs where loadedByID[postID] == nil {
+                group.addTask {
                     do {
-                        translations[post.id] = try await client.fetchXTranslation(tweetID: tweetID).text
+                        let post = try await TodayWorldPostMemoryCache.shared.post(id: postID, baseURL: baseURL)
+                        return (postID, .success(post))
                     } catch {
-                        translationFailures.insert(post.id)
+                        return (postID, .failure(error))
                     }
                 }
             }
-            posts = loaded
+
+            for await (postID, result) in group {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
+                switch result {
+                case .success(let post):
+                    loadedByID[postID] = post
+                    posts = system.postIDs.compactMap { loadedByID[$0] }
+                    if let tweetID = post.xTweetID,
+                       let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
+                        translations[post.id] = value
+                    }
+                    isLoading = false
+                case .failure(let error):
+                    lastError = error
+                }
+            }
+        }
+        guard !Task.isCancelled else { return }
+
+        if posts.isEmpty, let lastError {
+            errorMessage = NetworkErrorPresentation.message(for: lastError)
             isLoading = false
-        } catch {
-            errorMessage = NetworkErrorPresentation.message(for: error)
-            isLoading = false
+            return
+        }
+
+        let pendingTranslations = posts.compactMap { post -> (Int, String)? in
+            guard post.needsXTranslation,
+                  translations[post.id] == nil,
+                  let tweetID = post.xTweetID else { return nil }
+            return (post.id, tweetID)
+        }
+        await withTaskGroup(of: (Int, String, String?).self) { group in
+            for (postID, tweetID) in pendingTranslations {
+                group.addTask {
+                    let text = try? await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID).text
+                    return (postID, tweetID, text)
+                }
+            }
+            for await (postID, tweetID, text) in group {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
+                if let text {
+                    translations[postID] = text
+                    PersonDetailStore.cacheXTranslation(text, tweetID: tweetID)
+                } else {
+                    translationFailures.insert(postID)
+                }
+            }
         }
     }
 
@@ -1134,5 +1573,101 @@ private struct TodayWorldReportSourcesSheet: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日"
         return formatter.string(from: date)
+    }
+}
+
+private struct TodayWorldPostDetailCarousel: View {
+    let posts: [Post]
+
+    @State private var selectedPostID: Int
+
+    init(posts: [Post], initialPost: Post) {
+        self.posts = posts
+        _selectedPostID = State(initialValue: initialPost.id)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if posts.count > 1 {
+                    navigationStrip
+                }
+
+                TabView(selection: $selectedPostID) {
+                    ForEach(posts) { post in
+                        PostDetailView(post: post, presentedAsSheet: true)
+                            .tag(post.id)
+                            .id(post.id)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: posts.count > 1 ? .automatic : .never))
+            }
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle("动态详情")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("动态详情，第\(selectedIndex + 1)条，共\(posts.count)条")
+        .accessibilityHint(posts.count > 1 ? "左右滑动切换动态" : "")
+        .accessibilityAction(named: "上一条动态") { move(by: -1) }
+        .accessibilityAction(named: "下一条动态") { move(by: 1) }
+    }
+
+    private var navigationStrip: some View {
+        HStack(spacing: 14) {
+            Button {
+                move(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 36, height: 32)
+            }
+            .disabled(selectedIndex == 0)
+            .accessibilityLabel("上一条动态")
+
+            Text("第\(selectedIndex + 1) / \(posts.count) 条")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+
+            Button {
+                move(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 36, height: 32)
+            }
+            .disabled(selectedIndex == posts.count - 1)
+            .accessibilityLabel("下一条动态")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var selectedIndex: Int {
+        posts.firstIndex(where: { $0.id == selectedPostID }) ?? 0
+    }
+
+    private func move(by offset: Int) {
+        let newIndex = selectedIndex + offset
+        guard posts.indices.contains(newIndex) else { return }
+        withAnimation(.easeInOut(duration: 0.22)) {
+            selectedPostID = posts[newIndex].id
+        }
+    }
+}
+
+private extension Array {
+    func batches(of size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: startIndex, to: endIndex, by: size).map { start in
+            Array(self[start..<Swift.min(start + size, endIndex)])
+        }
     }
 }

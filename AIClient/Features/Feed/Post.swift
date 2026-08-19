@@ -60,6 +60,23 @@ private final class RSSInlineAssetURLsBox: NSObject {
 }
 
 struct PostListResponse: Decodable { let data: [Post] }
+
+struct XFeedUser: Decodable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let screenName: String
+    let avatarURL: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case screenName = "screen_name"
+        case avatarURL = "avatar_url"
+    }
+}
+
+struct XFeedUsersResponse: Decodable {
+    let data: [XFeedUser]
+}
 struct RSSFeedPostsResponse: Decodable {
     let data: Payload
     struct Payload: Decodable { let posts: [Post] }
@@ -240,6 +257,10 @@ struct XTweetDetailItem: Decodable, Equatable {
         var isVideo: Bool {
             ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
         }
+
+        var displayURL: URL? {
+            (thumbnailURL ?? url).flatMap(MediaURL.image)
+        }
     }
 
     var fullText: String {
@@ -263,6 +284,14 @@ struct XTweetDetailItem: Decodable, Equatable {
 
     var videoPreviewURL: URL? {
         videoMedia?.thumbnailURL.flatMap(MediaURL.image)
+    }
+
+    var imageMedia: [Media] {
+        (media ?? []).filter { !$0.isVideo && $0.displayURL != nil }
+    }
+
+    var imageURLs: [URL] {
+        imageMedia.compactMap(\.displayURL)
     }
 }
 
@@ -524,6 +553,8 @@ struct Post: Codable, Identifiable, Hashable {
     // Runtime-only card translations. The backend payload and offline cache remain unchanged.
     var rssTitleZH: String? = nil
     var rssExcerptZH: String? = nil
+    // Runtime-only attribution retained when an X repost wrapper is replaced by its live original.
+    var xReposterName: String? = nil
 
     var displayTitle: String {
         clean(rssTitleZH)
@@ -601,8 +632,9 @@ struct Post: Codable, Identifiable, Hashable {
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
     var needsXTranslation: Bool {
         guard sourceName == "X", xTweetID != nil else { return false }
-        guard let language = meta?.lang?.lowercased() else { return false }
-        guard !language.hasPrefix("zh") else { return false }
+        let language = meta?.lang?.lowercased()
+        guard language?.hasPrefix("zh") != true else { return false }
+        guard language != nil || !Self.containsHanCharacters(xStoredOriginalContent) else { return false }
         guard hasTranslation else { return true }
         let translation = displayContent
         if XPostTextFormatter.isTruncated(translation) { return true }
@@ -624,14 +656,79 @@ struct Post: Codable, Identifiable, Hashable {
             && meta?.replyContext?.displayText == nil
     }
 
+    var isXRetweetWrapper: Bool {
+        guard sourceName == "X" else { return false }
+        return originalDisplayContent.range(
+            of: #"^\s*RT\s+@[A-Za-z0-9_]{1,15}\s*:"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
+    var xRepostAttributionText: String? {
+        clean(xReposterName).map { "\($0) 已转帖" }
+    }
+
+    var xQuotedPost: XQuotedPost? {
+        sourceName == "X" ? meta?.quotedTweet : nil
+    }
+
     func replacingTranslation(with translation: String) -> Post {
-        Post(
+        var replaced = Post(
             id: id, title: title, text: text, summary: summary, content: content,
             contentZH: translation, source: source, formattedTime: formattedTime,
             weightReason: weightReason, finalScore: finalScore, weight: weight,
             postLink: postLink, articlePostAt: articlePostAt, user: user,
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
         )
+        replaced.xReposterName = xReposterName
+        return replaced
+    }
+
+    func replacingXLiveDetail(with detail: XTweetDetailItem) -> Post {
+        let liveImages = detail.imageMedia.compactMap { media -> PostImage? in
+            guard let url = media.thumbnailURL ?? media.url else { return nil }
+            return PostImage(url: url, width: media.width, height: media.height)
+        }
+        let liveVideos = (detail.media ?? []).filter(\.isVideo).compactMap { media -> PostVideo? in
+            guard let url = media.url else { return nil }
+            return PostVideo(
+                url: url,
+                playURL: url,
+                coverURL: media.thumbnailURL,
+                previewImageURL: media.thumbnailURL,
+                preview: media.thumbnailURL,
+                width: media.width,
+                height: media.height
+            )
+        }
+        let liveAuthor = detail.author.map { author in
+            PostUser(
+                userID: user?.userID,
+                personID: user?.personID,
+                userName: author.name,
+                userScreenName: author.screenName,
+                avatarURL: author.profileImageURL,
+                userDesc: user?.userDesc,
+                platform: user?.platform,
+                verified: author.verified,
+                verifiedType: user?.verifiedType
+            )
+        } ?? user
+
+        var replaced = Post(
+            id: id, title: title, text: text, summary: summary, content: detail.fullText,
+            contentZH: nil, source: source, formattedTime: formattedTime,
+            weightReason: weightReason, finalScore: finalScore, weight: weight,
+            postLink: postLink, articlePostAt: articlePostAt, user: liveAuthor,
+            postTags: postTags,
+            images: liveImages.isEmpty ? images : liveImages,
+            videos: liveVideos.isEmpty ? videos : liveVideos,
+            feedRank: feedRank,
+            meta: meta?.replacingXLiveDetail(with: detail)
+                ?? PostMeta.xLiveDetail(detail)
+        )
+        replaced.xReposterName = xReposterName ?? (isXRetweetWrapper ? authorName : nil)
+        return replaced
     }
     func replacingRSSCardTranslation(title: String, excerpt: String?) -> Post {
         var translated = self
@@ -1724,6 +1821,50 @@ struct PostMeta: Codable, Hashable {
             flashPlatforms: platforms
         )
     }
+
+    static func xLiveDetail(_ detail: XTweetDetailItem) -> PostMeta {
+        PostMeta(
+            metrics: detail.metrics, lang: detail.lang, urls: nil,
+            rawText: detail.fullText, noteText: detail.noteText,
+            inReplyToScreenName: nil, inReplyToStatusID: nil,
+            replyContext: nil, quotedTweet: nil, photoCredit: nil,
+            zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
+            zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
+            zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
+            zhihuAnswerVoteupCount: nil, zhihuAnswerCommentCount: nil,
+            rssFeedName: nil, rssFeedIcon: nil, rssArticleLink: nil,
+            flashCategory: nil, flashSimilarityGroupId: nil, flashSimilarityScore: nil,
+            flashSimilarCount: nil, flashPlatformCount: nil, flashPlatforms: nil
+        )
+    }
+
+    func replacingXLiveDetail(with detail: XTweetDetailItem) -> PostMeta {
+        PostMeta(
+            metrics: detail.metrics ?? metrics,
+            lang: detail.lang ?? lang,
+            urls: urls,
+            rawText: detail.fullText,
+            noteText: detail.noteText ?? noteText,
+            inReplyToScreenName: inReplyToScreenName,
+            inReplyToStatusID: inReplyToStatusID,
+            replyContext: replyContext,
+            quotedTweet: quotedTweet,
+            photoCredit: photoCredit,
+            zhihuRank: zhihuRank, zhihuHeat: zhihuHeat, zhihuAnswers: zhihuAnswers,
+            zhihuFollowerCount: zhihuFollowerCount, zhihuQuestionID: zhihuQuestionID,
+            zhihuURL: zhihuURL, zhihuAnswerExcerpt: zhihuAnswerExcerpt,
+            zhihuAnswerContent: zhihuAnswerContent, zhihuAnswerAuthor: zhihuAnswerAuthor,
+            zhihuAnswerVoteupCount: zhihuAnswerVoteupCount,
+            zhihuAnswerCommentCount: zhihuAnswerCommentCount,
+            rssFeedName: rssFeedName, rssFeedIcon: rssFeedIcon,
+            rssArticleLink: rssArticleLink, flashCategory: flashCategory,
+            flashSimilarityGroupId: flashSimilarityGroupId,
+            flashSimilarityScore: flashSimilarityScore,
+            flashSimilarCount: flashSimilarCount,
+            flashPlatformCount: flashPlatformCount,
+            flashPlatforms: flashPlatforms
+        )
+    }
 }
 
 struct XReplyContext: Codable, Hashable {
@@ -1976,6 +2117,14 @@ struct PostImage: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case url, width, height, kind
         case altText = "alt_text"
+    }
+
+    init(url: String, width: Int?, height: Int?, altText: String? = nil, kind: String? = nil) {
+        self.url = url
+        self.width = width
+        self.height = height
+        self.altText = altText
+        self.kind = kind
     }
 
     init(from decoder: Decoder) throws {
