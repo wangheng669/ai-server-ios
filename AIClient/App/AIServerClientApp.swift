@@ -778,7 +778,7 @@ private struct TodayWorldView: View {
             showsDetail = false
         }) { system in
             TodayWorldReportSourcesSheet(system: system, reportDate: store.report?.date ?? "")
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
         }
         .task(id: rootTabIsActive) {
@@ -1004,7 +1004,7 @@ private struct TodayWorldReportSourcesSheet: View {
         .sheet(isPresented: $isShowingPosts) {
             postsSheet
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
                 .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
                 .task(id: system.id) {
@@ -1205,7 +1205,7 @@ private struct TodayWorldReportSourcesSheet: View {
         .sheet(item: $selectedPost) { post in
             TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
                 .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
         }

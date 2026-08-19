@@ -526,7 +526,7 @@ struct GoogleSignalView: View {
         .sheet(item: $selectedEvent) { event in
             GoogleSignalEventDetailView(event: event)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
         }
         .task(id: requestKey) {

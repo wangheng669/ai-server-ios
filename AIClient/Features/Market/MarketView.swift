@@ -81,7 +81,7 @@ struct MarketView: View {
             )
             .id(route.symbol)
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(MarketStyle.surface)
         }
@@ -2760,7 +2760,7 @@ private struct MarketIndexDetailView: View {
         .sheet(item: $presentedValuation) { route in
             CompanyValuationHistorySheet(route: route)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
         }
         .task(id: historicalSymbol) {

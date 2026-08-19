@@ -72,7 +72,7 @@ struct LearningView: View {
                 }
             }
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
@@ -85,7 +85,7 @@ struct LearningView: View {
                 onClose: { selectedIdeologyPerson = nil }
             )
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }

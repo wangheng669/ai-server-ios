@@ -222,7 +222,7 @@ private struct InAppBrowserCoverModifier: ViewModifier {
             content.sheet(item: $destination) { destination in
                 InAppBrowserSheet(url: destination.url)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
             }
         }

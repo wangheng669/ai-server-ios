@@ -45,6 +45,7 @@ private struct XBrandLogoShape: Shape {
 struct PostDetailView: View {
     private let presentedAsSheet: Bool
     private let shouldRefreshNewYorkTimesArticle: Bool
+    private let rssAvatarURL: URL?
     @State private var post: Post
     @State private var player: AVPlayer?
     @State private var detectedVideoAspectRatio: CGFloat?
@@ -105,9 +106,11 @@ struct PostDetailView: View {
     init(
         post: Post,
         preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil,
+        rssAvatarURL: URL? = nil,
         presentedAsSheet: Bool = false
     ) {
         self.presentedAsSheet = presentedAsSheet
+        self.rssAvatarURL = rssAvatarURL
         self.shouldRefreshNewYorkTimesArticle = post.isNewYorkTimes && preloadedNewYorkTimesArticle == nil
         let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
             ? (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
@@ -184,8 +187,6 @@ struct PostDetailView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if post.isWeiboRSS {
                 weiboBottomBar
-            } else if isGenericRSSDetail {
-                rssBottomBar
             }
         }
         .toolbar {
@@ -255,7 +256,7 @@ struct PostDetailView: View {
     }
 
     private var sheetCloseBottomPadding: CGFloat {
-        post.isWeiboRSS || isWeChatArticle || isGenericRSSDetail
+        post.isWeiboRSS || isWeChatArticle
             || ["知乎", "Truth", "雪球"].contains(post.sourceName) ? 72 : 16
     }
 
@@ -421,45 +422,41 @@ struct PostDetailView: View {
     }
 
     private var rssDetail: some View {
-        VStack(spacing: 0) {
-            rssDetailHeader
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                rssSourceHeader
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    rssSourceHeader
+                Text(post.displayTitle)
+                    .font(.system(size: 27, weight: .bold))
+                    .tracking(-0.35)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 18)
 
-                    Text(post.displayTitle)
-                        .font(.system(size: 29, weight: .bold))
-                        .tracking(-0.45)
+                if let summary = rssDetailSummary {
+                    Text(summary)
+                        .font(.system(size: 16.5))
+                        .foregroundStyle(.secondary)
                         .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 22)
+                        .padding(.top, 12)
+                }
 
-                    if let summary = rssDetailSummary {
-                        Text(summary)
-                            .font(.system(size: 17))
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(6)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 14)
-                    }
+                rssMetadata
+                    .padding(.top, 16)
 
-                    rssMetadata
-                        .padding(.top, 18)
+                Divider()
+                    .padding(.vertical, 22)
 
-                    Divider()
-                        .padding(.vertical, 24)
-
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
-                            rssArticleBlock(block, isWeChat: false)
-                        }
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
+                        rssArticleBlock(block, isWeChat: false)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-                .padding(.bottom, 38)
             }
+            .padding(.horizontal, 22)
+            .padding(.top, 14)
+            .padding(.bottom, 36)
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
@@ -481,34 +478,6 @@ struct PostDetailView: View {
               summary != post.displayTitle,
               summary != post.displayContent else { return nil }
         return summary
-    }
-
-    private var rssDetailHeader: some View {
-        ZStack {
-            Text("文章")
-                .font(.system(size: 17, weight: .semibold))
-
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: dismissIconName)
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(dismissAccessibilityLabel)
-                .opacity(presentedAsSheet ? 0 : 1)
-                .disabled(presentedAsSheet)
-                .accessibilityHidden(presentedAsSheet)
-
-                Spacer(minLength: 0)
-            }
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 6)
-        .frame(height: 50)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider().opacity(0.7) }
     }
 
     private var isWeChatArticle: Bool {
@@ -614,42 +583,6 @@ struct PostDetailView: View {
 
     private func rssReaderParagraphText(_ text: String) -> String {
         RSSReaderParagraphFormatter.text(text)
-    }
-
-    private var rssBottomBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                isRSSBookmarked.toggle()
-                RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
-            } label: {
-                Label(
-                    isRSSBookmarked ? "已收藏" : "收藏",
-                    systemImage: isRSSBookmarked ? "bookmark.fill" : "bookmark"
-                )
-                .frame(minWidth: 68)
-            }
-            .accessibilityLabel(isRSSBookmarked ? "取消收藏" : "收藏")
-
-            if let link = post.linkURL {
-                Spacer(minLength: 8)
-
-                Button { openOriginal() } label: {
-                    Label("阅读原文", systemImage: "safari")
-                        .font(.system(size: 15, weight: .semibold))
-                        .padding(.horizontal, 17)
-                        .frame(height: 38)
-                        .foregroundStyle(Color(uiColor: .systemBackground))
-                        .background(Color.primary, in: Capsule())
-                }
-                .accessibilityLabel("打开原文")
-            }
-        }
-        .font(.system(size: 14, weight: .medium))
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 16)
-        .frame(height: 58)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) { Divider().opacity(0.65) }
     }
 
     private var weChatBottomBar: some View {
@@ -1068,19 +1001,16 @@ struct PostDetailView: View {
     }
 
     private var rssSourceHeader: some View {
-        HStack(spacing: 11) {
-            AvatarView(url: post.rssCardAvatarURL, name: post.rssCardSourceName, size: 40)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(post.rssCardSourceName)
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
-                Text("RSS 订阅")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
+        HStack(spacing: 10) {
+            AvatarView(
+                url: rssAvatarURL ?? post.rssCardAvatarURL,
+                name: post.rssCardSourceName,
+                size: 36
+            )
+            Text(post.rssCardSourceName)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
         }
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var rssMetadata: some View {
