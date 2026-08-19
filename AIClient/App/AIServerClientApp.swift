@@ -1536,32 +1536,6 @@ private struct TodayWorldReportSourcesSheet: View {
             return
         }
 
-        let pendingTranslations = posts.compactMap { post -> (Int, String)? in
-            guard post.needsXTranslation,
-                  translations[post.id] == nil,
-                  let tweetID = post.xTweetID else { return nil }
-            return (post.id, tweetID)
-        }
-        await withTaskGroup(of: (Int, String, String?).self) { group in
-            for (postID, tweetID) in pendingTranslations {
-                group.addTask {
-                    let text = try? await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID).text
-                    return (postID, tweetID, text)
-                }
-            }
-            for await (postID, tweetID, text) in group {
-                guard !Task.isCancelled else {
-                    group.cancelAll()
-                    return
-                }
-                if let text {
-                    translations[postID] = text
-                    PersonDetailStore.cacheXTranslation(text, tweetID: tweetID)
-                } else {
-                    translationFailures.insert(postID)
-                }
-            }
-        }
     }
 
     private var displayDate: String {

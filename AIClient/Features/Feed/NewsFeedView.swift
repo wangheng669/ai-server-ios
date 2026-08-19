@@ -1372,10 +1372,6 @@ struct NewsFeedView: View {
                 .allowsHitTesting(false)
             }
         }
-        .task(id: "\(rootTabIsActive)-translate-\(post.id)") {
-            guard rootTabIsActive, source == .x, source == model.source else { return }
-            await model.translateXPostIfNeeded(post)
-        }
         .task(id: "\(rootTabIsActive)-x-engagement-\(post.id)") {
             guard rootTabIsActive, source == .x, source == model.source else { return }
             await model.loadXEngagementIfNeeded(post)
