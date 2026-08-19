@@ -2002,22 +2002,22 @@ struct FeedEngagementRow: View {
         Group {
             if showsOnlyLikeAndBookmark {
                 HStack {
-                    metric("heart", post.meta?.metrics?.likes)
+                    metric(.system("heart"), post.meta?.metrics?.likes)
                         .accessibilityLabel("喜欢")
                     Spacer()
                     bookmarkButton
                 }
             } else {
                 HStack(spacing: 0) {
-                    metric("bubble.left", post.meta?.metrics?.replies, label: "回复")
-                    metric("arrow.2.squarepath", post.meta?.metrics?.retweets, label: "转发")
-                    metric("heart", post.meta?.metrics?.likes, label: "喜欢")
-                    metric("chart.bar.fill", post.meta?.metrics?.views, label: "浏览")
+                    metric(.system("bubble"), post.meta?.metrics?.replies, label: "回复")
+                    metric(.system("arrow.2.squarepath"), post.meta?.metrics?.retweets, label: "转发")
+                    metric(.system("heart"), post.meta?.metrics?.likes, label: "喜欢")
+                    metric(.analytics, post.meta?.metrics?.views, label: "浏览")
                     bookmarkButton
                     if let link = post.linkURL {
                         ShareLink(item: link) {
                             Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 16, weight: .regular))
+                                .font(.system(size: 14, weight: .regular))
                                 .frame(width: 24, height: 32, alignment: .trailing)
                                 .contentShape(Rectangle())
                         }
@@ -2025,7 +2025,7 @@ struct FeedEngagementRow: View {
                         .accessibilityLabel("分享")
                     } else {
                         Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 16, weight: .regular))
+                            .font(.system(size: 14, weight: .regular))
                             .frame(width: 24, height: 32, alignment: .trailing)
                             .accessibilityHidden(true)
                     }
@@ -2050,7 +2050,7 @@ struct FeedEngagementRow: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                        .font(.system(size: 16, weight: .regular))
+                        .font(.system(size: 14, weight: .regular))
                 }
             }
             .frame(
@@ -2089,15 +2089,13 @@ struct FeedEngagementRow: View {
         }
     }
 
-    private func metric(_ symbol: String, _ value: Int?, label: String? = nil) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .regular))
-                .frame(width: 18)
+    private func metric(_ icon: XToolbarMetricIcon, _ value: Int?, label: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            metricIcon(icon)
+                .frame(width: 18, height: 18)
             if let value, value > 0 {
                 Text(compactCount(value))
                     .font(.system(size: 13, weight: .regular))
-                    .monospacedDigit()
             }
         }
         .frame(
@@ -2109,6 +2107,20 @@ struct FeedEngagementRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label ?? "互动数据")
         .accessibilityValue(value.map(compactCount) ?? "0")
+    }
+
+    @ViewBuilder
+    private func metricIcon(_ icon: XToolbarMetricIcon) -> some View {
+        switch icon {
+        case let .system(symbol):
+            Image(systemName: symbol)
+                .font(.system(
+                    size: symbol == "arrow.2.squarepath" ? 15 : 14,
+                    weight: .regular
+                ))
+        case .analytics:
+            XAnalyticsGlyph()
+        }
     }
 
     private var xToolbarColor: Color {
@@ -2127,6 +2139,30 @@ struct FeedEngagementRow: View {
                 .replacingOccurrences(of: ".0万", with: "万")
         }
         return String(value)
+    }
+}
+
+private enum XToolbarMetricIcon {
+    case system(String)
+    case analytics
+}
+
+/// X uses four filled columns for post views; SF Symbols' chart glyph has only
+/// three thin columns and remains visibly different even at toolbar size.
+private struct XAnalyticsGlyph: View {
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 1.25) {
+            bar(height: 8)
+            bar(height: 11)
+            bar(height: 14)
+            bar(height: 16)
+        }
+        .frame(width: 18, height: 18, alignment: .center)
+    }
+
+    private func bar(height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 0.75, style: .continuous)
+            .frame(width: 3.5, height: height)
     }
 }
 
