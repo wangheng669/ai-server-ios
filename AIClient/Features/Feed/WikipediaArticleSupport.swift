@@ -527,7 +527,7 @@ final class WikipediaBrowserModel: ObservableObject {
 extension View {
     func wikipediaReaderPresentation() -> some View {
         presentationDetents([.fraction(0.82), .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
     }
 }

@@ -90,7 +90,7 @@ struct FamousHoldingsView: View {
                 }
             }
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }

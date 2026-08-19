@@ -272,7 +272,7 @@ struct KnowledgeConceptDetailSheet: View {
                 .padding(16)
         }
         .presentationDetents([.medium, .large], selection: $selectedDetent)
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .presentationContentInteraction(.resizes)
         .sheet(item: $wikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)

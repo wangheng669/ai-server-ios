@@ -283,7 +283,7 @@ struct CompanyResearchView: View {
             .sheet(item: $presentedCompany) { company in
                 companyPage(company)
                     .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
+                    .presentationDragIndicator(.hidden)
                     .presentationCornerRadius(28)
             }
         }
@@ -1794,7 +1794,7 @@ struct CompanyResearchView: View {
     private func valuationHistorySheet(_ route: CompanyValuationHistoryRoute) -> some View {
         CompanyValuationHistorySheet(route: route)
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
     }
 

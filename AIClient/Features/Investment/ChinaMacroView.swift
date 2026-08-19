@@ -411,7 +411,7 @@ struct ChinaMacroView: View {
                 updatedAt: store.lastUpdatedAt
             )
                 .presentationDetents([.fraction(0.72), .large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
         }
     }
 

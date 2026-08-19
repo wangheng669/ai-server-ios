@@ -77,7 +77,7 @@ struct PeopleView: View {
                 onClose: { selectedPerson = nil }
             )
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
@@ -3107,7 +3107,7 @@ private struct PersonDetailPage: View {
                 )
             }
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
@@ -3119,7 +3119,7 @@ private struct PersonDetailPage: View {
                 )
             }
             .presentationDetents([.medium, .large], selection: $articleSheetDetent)
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
@@ -3133,7 +3133,7 @@ private struct PersonDetailPage: View {
                 PostDetailView(post: post, presentedAsSheet: true)
             }
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }

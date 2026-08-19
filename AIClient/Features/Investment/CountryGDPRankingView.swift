@@ -237,7 +237,7 @@ struct CountryGDPRankingView: View {
         .sheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
                 .presentationBackground(InvestmentDesign.surface)
         }

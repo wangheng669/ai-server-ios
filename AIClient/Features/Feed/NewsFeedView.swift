@@ -264,12 +264,13 @@ struct NewsFeedView: View {
                     PostDetailView(
                         post: post,
                         preloadedNewYorkTimesArticle: model.preloadedNewYorkTimesArticle(for: post.id),
+                        rssAvatarURL: rssDirectoryAvatarURL(for: post),
                         presentedAsSheet: true
                     )
                 }
             }
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
