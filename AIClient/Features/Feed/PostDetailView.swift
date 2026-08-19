@@ -2,6 +2,19 @@ import SwiftUI
 import AVKit
 import WebKit
 
+enum RSSDetailSummaryPolicy {
+    static let maximumVisibleLength = 220
+
+    static func visibleSummary(summary: String?, title: String, content: String) -> String? {
+        guard let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !summary.isEmpty,
+              summary.count <= maximumVisibleLength,
+              summary != title,
+              summary != content else { return nil }
+        return summary
+    }
+}
+
 private struct XBrandMark: View {
     var body: some View {
         XBrandLogoShape()
@@ -422,41 +435,51 @@ struct PostDetailView: View {
     }
 
     private var rssDetail: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                rssSourceHeader
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id("rss-detail-top")
 
-                Text(post.displayTitle)
-                    .font(.system(size: 24, weight: .bold))
-                    .tracking(-0.25)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 18)
+                    rssSourceHeader
 
-                if let summary = rssDetailSummary {
-                    Text(summary)
-                        .font(.system(size: 16.5))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(5)
+                    Text(post.displayTitle)
+                        .font(.system(size: 24, weight: .bold))
+                        .tracking(-0.25)
+                        .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
-                }
+                        .padding(.top, 18)
 
-                rssMetadata
-                    .padding(.top, 16)
+                    if let summary = rssDetailSummary {
+                        Text(summary)
+                            .font(.system(size: 16.5))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(5)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 12)
+                    }
 
-                Divider()
-                    .padding(.vertical, 22)
+                    rssMetadata
+                        .padding(.top, 16)
 
-                LazyVStack(alignment: .leading, spacing: 24) {
-                    ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
-                        rssArticleBlock(block, isWeChat: false)
+                    Divider()
+                        .padding(.vertical, 22)
+
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
+                            rssArticleBlock(block, isWeChat: false)
+                        }
                     }
                 }
+                .padding(.horizontal, 22)
+                .padding(.top, 22)
+                .padding(.bottom, 36)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 14)
-            .padding(.bottom, 36)
+            .task(id: post.id) {
+                await Task.yield()
+                proxy.scrollTo("rss-detail-top", anchor: .top)
+            }
         }
         .background(Color(uiColor: .systemBackground))
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
@@ -473,11 +496,11 @@ struct PostDetailView: View {
     }
 
     private var rssDetailSummary: String? {
-        guard let summary = post.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !summary.isEmpty,
-              summary != post.displayTitle,
-              summary != post.displayContent else { return nil }
-        return summary
+        RSSDetailSummaryPolicy.visibleSummary(
+            summary: post.summary,
+            title: post.displayTitle,
+            content: post.displayContent
+        )
     }
 
     private var isWeChatArticle: Bool {

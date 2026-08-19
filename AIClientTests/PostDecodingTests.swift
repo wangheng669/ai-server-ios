@@ -1451,3 +1451,28 @@ final class RSSSourcePresentationTests: XCTestCase {
         XCTAssertEqual(ready.preferredAvatarURL?.path, "/api/ios/v1/rss/feeds/46/avatar")
     }
 }
+
+final class RSSDetailSummaryPolicyTests: XCTestCase {
+    func testHidesLongSummaryThatWouldDuplicateArticleBody() {
+        let summary = String(repeating: "观点网文章正文", count: 40)
+
+        XCTAssertNil(
+            RSSDetailSummaryPolicy.visibleSummary(
+                summary: summary,
+                title: "文章标题",
+                content: "完整正文"
+            )
+        )
+    }
+
+    func testKeepsShortEditorialSummary() {
+        XCTAssertEqual(
+            RSSDetailSummaryPolicy.visibleSummary(
+                summary: "这是一段简短导语。",
+                title: "文章标题",
+                content: "完整正文"
+            ),
+            "这是一段简短导语。"
+        )
+    }
+}
