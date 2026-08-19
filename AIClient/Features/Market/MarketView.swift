@@ -2264,36 +2264,35 @@ private struct MarketSessionColumn: View {
 private struct MarketLiveStatus: View {
     let store: MarketStore
 
+    @ViewBuilder
     var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(statusColor).frame(width: 7, height: 7)
-            if store.isLoading && store.dashboard == nil {
-                Text("加载中")
-            } else if let age = store.cachedSnapshotAge {
-                Text(cacheLabel(age: age))
-            } else if store.hasOpenMarket && store.realtimeIsFresh {
-                if store.maximumOpenMarketDelayMinutes != nil {
-                    Text("行情已连接 · 延迟以品种标注为准")
-                } else {
+        if !(store.hasOpenMarket && store.realtimeIsFresh && store.maximumOpenMarketDelayMinutes != nil) {
+            HStack(spacing: 5) {
+                Circle().fill(statusColor).frame(width: 7, height: 7)
+                if store.isLoading && store.dashboard == nil {
+                    Text("加载中")
+                } else if let age = store.cachedSnapshotAge {
+                    Text(cacheLabel(age: age))
+                } else if store.hasOpenMarket && store.realtimeIsFresh {
                     Text("实时连接")
-                }
-            } else if store.realtimeStatus == .connecting || store.realtimeStatus == .reconnecting {
-                if let date = store.latestQuoteDate {
-                    Text("截至 \(date.formatted(date: .omitted, time: .shortened)) · 连接恢复中")
+                } else if store.realtimeStatus == .connecting || store.realtimeStatus == .reconnecting {
+                    if let date = store.latestQuoteDate {
+                        Text("截至 \(date.formatted(date: .omitted, time: .shortened)) · 连接恢复中")
+                    } else {
+                        Text("实时连接恢复中")
+                    }
+                } else if store.realtimeStatus == .connected {
+                    Text("等待实时行情")
+                } else if let date = store.latestQuoteDate {
+                    Text("截至 \(date.formatted(date: .omitted, time: .shortened))")
                 } else {
-                    Text("实时连接恢复中")
+                    Text("等待行情")
                 }
-            } else if store.realtimeStatus == .connected {
-                Text("等待实时行情")
-            } else if let date = store.latestQuoteDate {
-                Text("截至 \(date.formatted(date: .omitted, time: .shortened))")
-            } else {
-                Text("等待行情")
             }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(accessibilityStatus)
         }
-        .font(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
-        .accessibilityLabel(accessibilityStatus)
     }
 
     private var statusColor: Color {
