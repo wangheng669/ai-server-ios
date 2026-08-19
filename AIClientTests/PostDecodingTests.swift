@@ -607,6 +607,21 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertTrue(post.needsXStoredDetailRefresh)
     }
 
+    func testXTranslationRefreshesLongEnglishPassageLeftInChineseText() throws {
+        let data = #"{"id":2834177,"source":"x","content":"Today we're launching Gemini 3.7 Flash for coding and agentic workflows.","content_zh":"今天，我们推出 Gemini 3.7 Flash，面向编码和智能体工作流程。⚡️ We have been iterating rapidly with the Flash series, making it more helpful across a wide range of tasks.","post_link":"https://x.com/koraykv/status/2087948169552490845","meta":{"lang":"en"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertTrue(post.hasTranslation)
+        XCTAssertTrue(post.needsXTranslation)
+    }
+
+    func testXTranslationAllowsEnglishProductNamesInsideChineseText() throws {
+        let data = #"{"id":7,"source":"x","content":"A model comparison.","content_zh":"GPT 5.6 Luna、Grok 4.6、Gemini 3.7 Flash 和 Cursor Composer 2.5 都属于第一梯队。","post_link":"https://x.com/example/status/123","meta":{"lang":"en"}}"#.data(using: .utf8)!
+        let post = try JSONDecoder().decode(Post.self, from: data)
+
+        XCTAssertFalse(post.needsXTranslation)
+    }
+
     func testChineseXPostTreatsContentZHAsEnrichedOriginalRatherThanTranslation() throws {
         let data = #"{"id":7,"source":"x","content":"列表摘要…","content_zh":"被压平的完整中文正文","post_link":"https://x.com/example/status/123","meta":{"lang":"zh","note_text":"第一段。\n\n第二段。"}}"#.data(using: .utf8)!
         let post = try JSONDecoder().decode(Post.self, from: data)
