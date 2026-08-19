@@ -208,6 +208,7 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchPostDetail: (Int) async throws -> Post
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
+    private var loadingXLiveDetailIDs: Set<Int> = []
     private var loadingRSSTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
     private var selectedRSSPage = 1
@@ -620,6 +621,25 @@ final class NewsFeedViewModel: ObservableObject {
             return
         } catch {
             // Translation is best-effort. Keep the original post visible on failure.
+        }
+    }
+
+    func loadXEngagementIfNeeded(_ post: Post) async {
+        guard !post.isXRetweetWrapper,
+              post.meta?.metrics == nil,
+              let tweetID = post.xTweetID,
+              xLiveDetails[post.id] == nil,
+              !loadingXLiveDetailIDs.contains(post.id) else { return }
+        loadingXLiveDetailIDs.insert(post.id)
+        defer { loadingXLiveDetailIDs.remove(post.id) }
+        do {
+            let detail = try await fetchXTweetDetail(tweetID)
+            guard !Task.isCancelled else { return }
+            xLiveDetails[post.id] = detail
+        } catch is CancellationError {
+            return
+        } catch {
+            // Engagement counts are best-effort. Keep the stored post visible on failure.
         }
     }
 

@@ -1376,6 +1376,10 @@ struct NewsFeedView: View {
             guard rootTabIsActive, source == .x, source == model.source else { return }
             await model.translateXPostIfNeeded(post)
         }
+        .task(id: "\(rootTabIsActive)-x-engagement-\(post.id)") {
+            guard rootTabIsActive, source == .x, source == model.source else { return }
+            await model.loadXEngagementIfNeeded(post)
+        }
         .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
             await model.translateRSSPostIfNeeded(post)
         }
@@ -3444,9 +3448,10 @@ struct NewsCardView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onOpen?() }
 
-                    XFeedMediaView(post: post)
-
-                    FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+                    VStack(alignment: .leading, spacing: 0) {
+                        XFeedMediaView(post: post)
+                        FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
