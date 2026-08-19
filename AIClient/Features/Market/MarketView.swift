@@ -530,7 +530,6 @@ private struct MarketTerminalHero: View {
             VStack(alignment: .leading, spacing: 7) {
                 sessionStatus
                 HStack(spacing: 8) {
-                    Text(heroDateLabel)
                     MarketLiveStatus(store: store)
                 }
                 .font(.system(size: 13, weight: .medium))
@@ -541,7 +540,6 @@ private struct MarketTerminalHero: View {
             VStack(alignment: .leading, spacing: 4) {
                 sessionStatus
                 Group {
-                    Text(heroDateLabel)
                     MarketLiveStatus(store: store)
                 }
                 .font(.caption.weight(.medium))
@@ -632,19 +630,6 @@ private struct MarketTerminalHero: View {
             trend: store.trendValues(for: displayedQuote),
             isOvernight: overnightQuote != nil
         )
-    }
-
-    private var heroDateLabel: String {
-        "\(region == .crypto ? "行情日期" : "交易日") \(heroDate)"
-    }
-
-    private var heroDate: String {
-        if let tradingDate = quote?.quality?.tradingDate,
-           let date = DateFormatter.marketTradingDate.date(from: tradingDate) {
-            return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
-        }
-        let date = quote?.marketAsOfTimestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
-        return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
     }
 
     private var heroAccessibilityLabel: String {
