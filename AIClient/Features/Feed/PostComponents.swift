@@ -2000,9 +2000,9 @@ struct FeedEngagementRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            Spacer(minLength: 0)
             metric("heart", post.meta?.metrics?.likes, label: "喜欢")
             bookmarkButton
-            Spacer(minLength: 0)
         }
         .foregroundStyle(xToolbarColor)
         .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)
