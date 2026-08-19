@@ -951,6 +951,36 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testXCardLoadsLiveEngagementWhenListOmitsMetrics() async throws {
+        let post = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":8,"source":"x","content":"Hello","post_link":"https://x.com/example/status/456","user":{"user_name":"Example","user_screen_name":"example"}}"#.utf8)
+        )
+        let detail = try JSONDecoder().decode(
+            XTweetDetailResponse.self,
+            from: Data(#"{"success":true,"data":{"item":{"id":"456","text":"Hello","author":{"name":"Example","screenName":"example"},"metrics":{"replies":13,"retweets":4,"likes":100,"views":5638}}}}"#.utf8)
+        ).data.item
+        var requestedTweetIDs: [String] = []
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXTweetDetail: { tweetID in
+                requestedTweetIDs.append(tweetID)
+                return detail
+            }
+        )
+
+        await model.loadXEngagementIfNeeded(post)
+        let displayed = model.postForDisplay(post)
+
+        XCTAssertEqual(requestedTweetIDs, ["456"])
+        XCTAssertEqual(displayed.meta?.metrics?.replies, 13)
+        XCTAssertEqual(displayed.meta?.metrics?.retweets, 4)
+        XCTAssertEqual(displayed.meta?.metrics?.likes, 100)
+        XCTAssertEqual(displayed.meta?.metrics?.views, 5638)
+    }
+
+    @MainActor
     func testXueqiuSelectionUsesDedicatedServerFeedAndPaginatesWithinIt() async throws {
         var requests: [(page: Int, feedID: Int?)] = []
         let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:14"}"#.utf8))

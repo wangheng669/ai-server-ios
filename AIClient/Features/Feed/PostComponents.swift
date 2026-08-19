@@ -1987,6 +1987,7 @@ private struct XPlayerLayerView: UIViewRepresentable {
 struct FeedEngagementRow: View {
     let post: Post
     var showsOnlyLikeAndBookmark = false
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isBookmarking = false
     @State private var isBookmarked = false
     @State private var bookmarkError: String?
@@ -2011,27 +2012,27 @@ struct FeedEngagementRow: View {
                     metric("bubble.left", post.meta?.metrics?.replies, label: "回复")
                     metric("arrow.2.squarepath", post.meta?.metrics?.retweets, label: "转发")
                     metric("heart", post.meta?.metrics?.likes, label: "喜欢")
-                    metric("chart.bar.xaxis", post.meta?.metrics?.views, label: "浏览")
+                    metric("chart.bar.fill", post.meta?.metrics?.views, label: "浏览")
                     bookmarkButton
                     if let link = post.linkURL {
                         ShareLink(item: link) {
                             Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 14, weight: .regular))
-                                .frame(maxWidth: .infinity, minHeight: 32, alignment: .trailing)
+                                .font(.system(size: 16, weight: .regular))
+                                .frame(width: 24, height: 32, alignment: .trailing)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("分享")
                     } else {
                         Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 14, weight: .regular))
-                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .trailing)
+                            .font(.system(size: 16, weight: .regular))
+                            .frame(width: 24, height: 32, alignment: .trailing)
                             .accessibilityHidden(true)
                     }
                 }
             }
         }
-        .foregroundStyle(Color(uiColor: .secondaryLabel))
+        .foregroundStyle(xToolbarColor)
         .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)
         .contentShape(Rectangle())
         .sensoryFeedback(.success, trigger: isBookmarked)
@@ -2049,19 +2050,18 @@ struct FeedEngagementRow: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                        .font(.system(size: 14, weight: .regular))
+                        .font(.system(size: 16, weight: .regular))
                 }
             }
             .frame(
-                maxWidth: showsOnlyLikeAndBookmark ? nil : .infinity,
                 minHeight: showsOnlyLikeAndBookmark ? 44 : 32,
-                alignment: showsOnlyLikeAndBookmark ? .center : .trailing
+                alignment: .center
             )
-            .frame(width: showsOnlyLikeAndBookmark ? 44 : nil)
+            .frame(width: showsOnlyLikeAndBookmark ? 44 : 24)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isBookmarked ? Color.blue : Color.secondary)
+        .foregroundStyle(isBookmarked ? xAccentColor : xToolbarColor)
         .disabled(isBookmarking || isBookmarked || post.xTweetID == nil)
         .accessibilityLabel(isBookmarked ? "已加入书签" : "加入书签")
     }
@@ -2090,13 +2090,13 @@ struct FeedEngagementRow: View {
     }
 
     private func metric(_ symbol: String, _ value: Int?, label: String? = nil) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: .regular))
-                .frame(width: 16)
+                .font(.system(size: 16, weight: .regular))
+                .frame(width: 18)
             if let value, value > 0 {
                 Text(compactCount(value))
-                    .font(.system(size: 12, weight: .regular))
+                    .font(.system(size: 13, weight: .regular))
                     .monospacedDigit()
             }
         }
@@ -2109,6 +2109,16 @@ struct FeedEngagementRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label ?? "互动数据")
         .accessibilityValue(value.map(compactCount) ?? "0")
+    }
+
+    private var xToolbarColor: Color {
+        colorScheme == .dark
+            ? Color(red: 113 / 255, green: 118 / 255, blue: 123 / 255)
+            : Color(red: 83 / 255, green: 100 / 255, blue: 113 / 255)
+    }
+
+    private var xAccentColor: Color {
+        Color(red: 29 / 255, green: 155 / 255, blue: 240 / 255)
     }
 
     private func compactCount(_ value: Int) -> String {
