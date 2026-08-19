@@ -5,7 +5,78 @@ struct XueqiuTextLink: Equatable {
     let url: URL
 }
 
+struct XueqiuPresentation {
+    let bodyContent: String
+    let bodyLinks: [XueqiuTextLink]
+    let bodyInlineEmojis: [WeiboInlineEmoji]
+    let standaloneInlineEmoji: WeiboInlineEmoji?
+    let bodyImageURLs: [URL]
+    let quoteContent: String?
+    let quoteAuthor: String?
+    let quoteBody: String?
+    let quoteLinks: [XueqiuTextLink]
+    let quoteImageURLs: [URL]
+    let unplacedImageURLs: [URL]
+    let stockTag: String?
+}
+
+private final class XueqiuPresentationBox: NSObject {
+    let value: XueqiuPresentation
+    private let title: String?
+    private let text: String?
+    private let summary: String?
+    private let content: String?
+    private let contentZH: String?
+    private let images: [PostImage]?
+
+    init(post: Post, value: XueqiuPresentation) {
+        self.value = value
+        title = post.title
+        text = post.text
+        summary = post.summary
+        content = post.content
+        contentZH = post.contentZH
+        images = post.images
+    }
+
+    func matches(_ post: Post) -> Bool {
+        title == post.title
+            && text == post.text
+            && summary == post.summary
+            && content == post.content
+            && contentZH == post.contentZH
+            && images == post.images
+    }
+}
+
+private final class RSSInlineAssetURLsBox: NSObject {
+    let content: String
+    let value: Set<URL>
+
+    init(content: String, value: Set<URL>) {
+        self.content = content
+        self.value = value
+    }
+}
+
 struct PostListResponse: Decodable { let data: [Post] }
+
+struct XFeedUser: Decodable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let screenName: String
+    let avatarURL: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case screenName = "screen_name"
+        case avatarURL = "avatar_url"
+    }
+}
+
+struct XFeedUsersResponse: Decodable {
+    let data: [XFeedUser]
+}
 struct RSSFeedPostsResponse: Decodable {
     let data: Payload
     struct Payload: Decodable { let posts: [Post] }
@@ -71,6 +142,7 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
     }
 
     var preferredAvatarURL: URL? {
+        guard avatarStatus?.lowercased() != "fallback" else { return nil }
         if let avatar, !avatar.isEmpty,
            let url = URL(string: avatar, relativeTo: ServerConfiguration.currentURL)?.absoluteURL {
             return url
@@ -185,6 +257,10 @@ struct XTweetDetailItem: Decodable, Equatable {
         var isVideo: Bool {
             ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
         }
+
+        var displayURL: URL? {
+            (thumbnailURL ?? url).flatMap(MediaURL.image)
+        }
     }
 
     var fullText: String {
@@ -208,6 +284,14 @@ struct XTweetDetailItem: Decodable, Equatable {
 
     var videoPreviewURL: URL? {
         videoMedia?.thumbnailURL.flatMap(MediaURL.image)
+    }
+
+    var imageMedia: [Media] {
+        (media ?? []).filter { !$0.isVideo && $0.displayURL != nil }
+    }
+
+    var imageURLs: [URL] {
+        imageMedia.compactMap(\.displayURL)
     }
 }
 
@@ -413,6 +497,48 @@ struct Post: Codable, Identifiable, Hashable {
         cache.totalCostLimit = 12 * 1024 * 1024
         return cache
     }()
+    private static let xueqiuPresentationCache: NSCache<NSString, XueqiuPresentationBox> = {
+        let cache = NSCache<NSString, XueqiuPresentationBox>()
+        cache.countLimit = 800
+        cache.totalCostLimit = 12 * 1024 * 1024
+        return cache
+    }()
+    private static let rssInlineAssetURLsCache: NSCache<NSString, RSSInlineAssetURLsBox> = {
+        let cache = NSCache<NSString, RSSInlineAssetURLsBox>()
+        cache.countLimit = 800
+        cache.totalCostLimit = 8 * 1024 * 1024
+        return cache
+    }()
+    private static let htmlImageTagRegex = try! NSRegularExpression(
+        pattern: #"<img\b[^>]*>"#,
+        options: .caseInsensitive
+    )
+    private static let xueqiuTextLinkRegex = try! NSRegularExpression(
+        pattern: #"<a\b[^>]*\bhref\s*=\s*([\"'])(.*?)\1[^>]*>(.*?)</a>"#,
+        options: [.caseInsensitive, .dotMatchesLineSeparators]
+    )
+    private static let xueqiuStockTagRegex = try! NSRegularExpression(pattern: #"\$[^$\n]{2,40}\$"#)
+    private static let htmlAttributeRegexes: [String: NSRegularExpression] = Dictionary(
+        uniqueKeysWithValues: ["src", "data-src", "data-original", "alt", "title", "href"].map { name in
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            return (name, try! NSRegularExpression(
+                pattern: #"\b"# + escapedName + #"\s*=\s*[\"']([^\"']+)[\"']"#,
+                options: .caseInsensitive
+            ))
+        }
+    )
+    private static let htmlNumericAttributeRegexes: [String: NSRegularExpression] = Dictionary(
+        uniqueKeysWithValues: ["width", "height", "data-w", "data-h"].map { name in
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            return (name, try! NSRegularExpression(
+                pattern: #"\b"# + escapedName + #"\s*=\s*[\"']?(\d+)"#,
+                options: .caseInsensitive
+            ))
+        }
+    )
+    private static let numericHTMLEntityRegex = try! NSRegularExpression(
+        pattern: #"&#(?:x([0-9A-Fa-f]+)|([0-9]+));"#
+    )
 
     let id: Int
     let title, text, summary, content, contentZH, source, formattedTime, weightReason: String?
@@ -427,6 +553,8 @@ struct Post: Codable, Identifiable, Hashable {
     // Runtime-only card translations. The backend payload and offline cache remain unchanged.
     var rssTitleZH: String? = nil
     var rssExcerptZH: String? = nil
+    // Runtime-only attribution retained when an X repost wrapper is replaced by its live original.
+    var xReposterName: String? = nil
 
     var displayTitle: String {
         clean(rssTitleZH)
@@ -504,8 +632,9 @@ struct Post: Codable, Identifiable, Hashable {
     var hasTranslation: Bool { clean(contentZH) != nil && clean(contentZH) != clean(content) }
     var needsXTranslation: Bool {
         guard sourceName == "X", xTweetID != nil else { return false }
-        guard let language = meta?.lang?.lowercased() else { return false }
-        guard !language.hasPrefix("zh") else { return false }
+        let language = meta?.lang?.lowercased()
+        guard language?.hasPrefix("zh") != true else { return false }
+        guard language != nil || !Self.containsHanCharacters(xStoredOriginalContent) else { return false }
         guard hasTranslation else { return true }
         let translation = displayContent
         if XPostTextFormatter.isTruncated(translation) { return true }
@@ -527,14 +656,79 @@ struct Post: Codable, Identifiable, Hashable {
             && meta?.replyContext?.displayText == nil
     }
 
+    var isXRetweetWrapper: Bool {
+        guard sourceName == "X" else { return false }
+        return originalDisplayContent.range(
+            of: #"^\s*RT\s+@[A-Za-z0-9_]{1,15}\s*:"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
+    var xRepostAttributionText: String? {
+        clean(xReposterName).map { "\($0) 已转帖" }
+    }
+
+    var xQuotedPost: XQuotedPost? {
+        sourceName == "X" ? meta?.quotedTweet : nil
+    }
+
     func replacingTranslation(with translation: String) -> Post {
-        Post(
+        var replaced = Post(
             id: id, title: title, text: text, summary: summary, content: content,
             contentZH: translation, source: source, formattedTime: formattedTime,
             weightReason: weightReason, finalScore: finalScore, weight: weight,
             postLink: postLink, articlePostAt: articlePostAt, user: user,
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
         )
+        replaced.xReposterName = xReposterName
+        return replaced
+    }
+
+    func replacingXLiveDetail(with detail: XTweetDetailItem) -> Post {
+        let liveImages = detail.imageMedia.compactMap { media -> PostImage? in
+            guard let url = media.thumbnailURL ?? media.url else { return nil }
+            return PostImage(url: url, width: media.width, height: media.height)
+        }
+        let liveVideos = (detail.media ?? []).filter(\.isVideo).compactMap { media -> PostVideo? in
+            guard let url = media.url else { return nil }
+            return PostVideo(
+                url: url,
+                playURL: url,
+                coverURL: media.thumbnailURL,
+                previewImageURL: media.thumbnailURL,
+                preview: media.thumbnailURL,
+                width: media.width,
+                height: media.height
+            )
+        }
+        let liveAuthor = detail.author.map { author in
+            PostUser(
+                userID: user?.userID,
+                personID: user?.personID,
+                userName: author.name,
+                userScreenName: author.screenName,
+                avatarURL: author.profileImageURL,
+                userDesc: user?.userDesc,
+                platform: user?.platform,
+                verified: author.verified,
+                verifiedType: user?.verifiedType
+            )
+        } ?? user
+
+        var replaced = Post(
+            id: id, title: title, text: text, summary: summary, content: detail.fullText,
+            contentZH: nil, source: source, formattedTime: formattedTime,
+            weightReason: weightReason, finalScore: finalScore, weight: weight,
+            postLink: postLink, articlePostAt: articlePostAt, user: liveAuthor,
+            postTags: postTags,
+            images: liveImages.isEmpty ? images : liveImages,
+            videos: liveVideos.isEmpty ? videos : liveVideos,
+            feedRank: feedRank,
+            meta: meta?.replacingXLiveDetail(with: detail)
+                ?? PostMeta.xLiveDetail(detail)
+        )
+        replaced.xReposterName = xReposterName ?? (isXRetweetWrapper ? authorName : nil)
+        return replaced
     }
     func replacingRSSCardTranslation(title: String, excerpt: String?) -> Post {
         var translated = self
@@ -659,84 +853,130 @@ struct Post: Codable, Identifiable, Hashable {
         meta?.rssArticleLink?.localizedCaseInsensitiveContains("xueqiu.com") == true ||
         linkURL?.host()?.localizedCaseInsensitiveContains("xueqiu.com") == true
     }
-    var xueqiuBodyContent: String {
-        guard let raw = clean(content),
-              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else {
-            return xueqiuText(content) ?? displayContent
+    var xueqiuPresentation: XueqiuPresentation {
+        let cacheKey = NSString(string: String(id))
+        if let cached = Self.xueqiuPresentationCache.object(forKey: cacheKey), cached.matches(self) {
+            return cached.value
         }
-        return xueqiuText(String(raw[..<quoteStart.lowerBound])) ?? ""
-    }
-    var xueqiuBodyLinks: [XueqiuTextLink] {
-        guard let raw = clean(content) else { return [] }
-        let body = raw.range(of: "<blockquote", options: .caseInsensitive)
-            .map { String(raw[..<$0.lowerBound]) } ?? raw
-        return xueqiuTextLinks(in: body)
-    }
-    var xueqiuQuoteContent: String? {
-        guard let raw = clean(content),
-              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return nil }
-        return xueqiuText(String(raw[quoteStart.lowerBound...]))
-    }
-    var xueqiuQuoteLinks: [XueqiuTextLink] {
-        guard let raw = clean(content),
-              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return [] }
-        return xueqiuTextLinks(in: String(raw[quoteStart.lowerBound...]))
-    }
-    var xueqiuBodyInlineEmojis: [WeiboInlineEmoji] {
+
+        let raw = clean(content)
+        let quoteStart = raw?.range(of: "<blockquote", options: .caseInsensitive)
+        let bodyHTML = raw.map { value in
+            quoteStart.map { String(value[..<$0.lowerBound]) } ?? value
+        }
+        let quoteHTML = raw.flatMap { value in
+            quoteStart.map { String(value[$0.lowerBound...]) }
+        }
+
+        let bodyContent: String
+        if quoteStart != nil {
+            bodyContent = xueqiuText(bodyHTML) ?? ""
+        } else {
+            bodyContent = xueqiuText(content) ?? displayContent
+        }
+        let bodyLinks = bodyHTML.map(xueqiuTextLinks) ?? []
+        let quoteContent = quoteHTML.flatMap(xueqiuText)
+        let quoteLinks = quoteHTML.map(xueqiuTextLinks) ?? []
+
         let serverEmojis = (images ?? []).compactMap { image -> WeiboInlineEmoji? in
             guard image.isKnownInlineAsset,
                   let token = clean(image.altText),
                   let url = MediaURL.image(image.url) else { return nil }
             return .init(token: token, url: url)
         }
-        if !serverEmojis.isEmpty { return serverEmojis }
+        let bodyInlineEmojis = serverEmojis.isEmpty
+            ? bodyHTML.map { inlineEmojis(in: [$0]) } ?? []
+            : serverEmojis
+        let standaloneInlineEmoji = bodyInlineEmojis.count == 1
+            && bodyContent.trimmingCharacters(in: .whitespacesAndNewlines) == bodyInlineEmojis[0].token
+            ? bodyInlineEmojis[0]
+            : nil
 
-        guard let raw = clean(content) else { return [] }
-        let body = raw.range(of: "<blockquote", options: .caseInsensitive)
-            .map { String(raw[..<$0.lowerBound]) } ?? raw
-        return inlineEmojis(in: [body])
+        let quoteSeparator = quoteContent?.firstIndex(where: { $0 == ":" || $0 == "：" })
+        let quoteAuthor = quoteContent.flatMap { quote -> String? in
+            guard let quoteSeparator else { return nil }
+            let author = quote[..<quoteSeparator].trimmingCharacters(in: .whitespacesAndNewlines)
+            return author.isEmpty ? nil : author
+        }
+        let quoteBody = quoteContent.flatMap { quote -> String? in
+            guard let quoteSeparator else { return quote }
+            let body = quote[quote.index(after: quoteSeparator)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return body.isEmpty ? nil : body
+        }
+        let bodyImageURLs = bodyHTML.map(xueqiuImageURLs) ?? []
+        let quoteImageURLs = quoteHTML.map(xueqiuImageURLs) ?? []
+        let placedImageURLs = Set(bodyImageURLs + quoteImageURLs)
+        let unplacedImageURLs = imageURLs.filter { !placedImageURLs.contains($0) }
+        let renderedContent = displayContent
+        let renderedContentSource = renderedContent as NSString
+        let stockTag = Self.xueqiuStockTagRegex
+            .firstMatch(
+                in: renderedContent,
+                range: NSRange(location: 0, length: renderedContentSource.length)
+            )
+            .map { renderedContentSource.substring(with: $0.range) }
+
+        let presentation = XueqiuPresentation(
+            bodyContent: bodyContent,
+            bodyLinks: bodyLinks,
+            bodyInlineEmojis: bodyInlineEmojis,
+            standaloneInlineEmoji: standaloneInlineEmoji,
+            bodyImageURLs: bodyImageURLs,
+            quoteContent: quoteContent,
+            quoteAuthor: quoteAuthor,
+            quoteBody: quoteBody,
+            quoteLinks: quoteLinks,
+            quoteImageURLs: quoteImageURLs,
+            unplacedImageURLs: unplacedImageURLs,
+            stockTag: stockTag
+        )
+        let estimatedCost = bodyContent.utf8.count
+            + (quoteContent?.utf8.count ?? 0)
+            + (bodyLinks.count + quoteLinks.count) * 96
+            + (bodyImageURLs.count + quoteImageURLs.count + unplacedImageURLs.count) * 128
+        Self.xueqiuPresentationCache.setObject(
+            XueqiuPresentationBox(post: self, value: presentation),
+            forKey: cacheKey,
+            cost: max(1, estimatedCost)
+        )
+        return presentation
+    }
+    var xueqiuBodyContent: String {
+        xueqiuPresentation.bodyContent
+    }
+    var xueqiuBodyLinks: [XueqiuTextLink] {
+        xueqiuPresentation.bodyLinks
+    }
+    var xueqiuQuoteContent: String? {
+        xueqiuPresentation.quoteContent
+    }
+    var xueqiuQuoteLinks: [XueqiuTextLink] {
+        xueqiuPresentation.quoteLinks
+    }
+    var xueqiuBodyInlineEmojis: [WeiboInlineEmoji] {
+        xueqiuPresentation.bodyInlineEmojis
     }
     var xueqiuStandaloneInlineEmoji: WeiboInlineEmoji? {
-        let emojis = xueqiuBodyInlineEmojis
-        guard emojis.count == 1,
-              let emoji = emojis.first,
-              xueqiuBodyContent.trimmingCharacters(in: .whitespacesAndNewlines) == emoji.token else {
-            return nil
-        }
-        return emoji
+        xueqiuPresentation.standaloneInlineEmoji
     }
     var xueqiuQuoteAuthor: String? {
-        guard let quote = xueqiuQuoteContent,
-              let separator = quote.firstIndex(where: { $0 == ":" || $0 == "：" }) else { return nil }
-        let author = quote[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
-        return author.isEmpty ? nil : author
+        xueqiuPresentation.quoteAuthor
     }
     var xueqiuQuoteBody: String? {
-        guard let quote = xueqiuQuoteContent else { return nil }
-        guard let separator = quote.firstIndex(where: { $0 == ":" || $0 == "：" }) else { return quote }
-        let body = quote[quote.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
-        return body.isEmpty ? nil : body
+        xueqiuPresentation.quoteBody
     }
     var xueqiuBodyImageURLs: [URL] {
-        guard let raw = clean(content) else { return [] }
-        let body = raw.range(of: "<blockquote", options: .caseInsensitive)
-            .map { String(raw[..<$0.lowerBound]) } ?? raw
-        return xueqiuImageURLs(in: body)
+        xueqiuPresentation.bodyImageURLs
     }
     var xueqiuQuoteImageURLs: [URL] {
-        guard let raw = clean(content),
-              let quoteStart = raw.range(of: "<blockquote", options: .caseInsensitive) else { return [] }
-        return xueqiuImageURLs(in: String(raw[quoteStart.lowerBound...]))
+        xueqiuPresentation.quoteImageURLs
     }
     var xueqiuUnplacedImageURLs: [URL] {
-        let placed = Set(xueqiuBodyImageURLs + xueqiuQuoteImageURLs)
-        return imageURLs.filter { !placed.contains($0) }
+        xueqiuPresentation.unplacedImageURLs
     }
     var xueqiuStockTag: String? {
-        let text = displayContent as NSString
-        guard let match = try? NSRegularExpression(pattern: #"\$[^$\n]{2,40}\$"#)
-            .firstMatch(in: displayContent, range: NSRange(location: 0, length: text.length)) else { return nil }
-        return text.substring(with: match.range)
+        xueqiuPresentation.stockTag
     }
     var hasXueqiuFeedMedia: Bool {
         (images ?? []).contains { image in
@@ -765,12 +1005,9 @@ struct Post: Codable, Identifiable, Hashable {
 
     private func xueqiuTextLinks(in html: String) -> [XueqiuTextLink] {
         let source = html as NSString
-        guard let regex = try? NSRegularExpression(
-            pattern: #"<a\b[^>]*\bhref\s*=\s*([\"'])(.*?)\1[^>]*>(.*?)</a>"#,
-            options: [.caseInsensitive, .dotMatchesLineSeparators]
-        ) else { return [] }
-
-        return regex.matches(in: html, range: NSRange(location: 0, length: source.length)).compactMap { match in
+        return Self.xueqiuTextLinkRegex
+            .matches(in: html, range: NSRange(location: 0, length: source.length))
+            .compactMap { match in
             guard match.numberOfRanges == 4 else { return nil }
             let href = source.substring(with: match.range(at: 2))
                 .replacingOccurrences(of: "&amp;", with: "&")
@@ -783,13 +1020,12 @@ struct Post: Codable, Identifiable, Hashable {
     }
     var rssArticleBlocks: [RSSArticleBlock] {
         let preferredContent = clean(contentZH) ?? clean(content)
-        guard let preferredContent,
-              let imageRegex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
+        guard let preferredContent else {
             return [.paragraph(text: displayContent, emojis: [])]
         }
 
         let source = preferredContent as NSString
-        let matches = imageRegex.matches(
+        let matches = Self.htmlImageTagRegex.matches(
             in: preferredContent,
             range: NSRange(location: 0, length: source.length)
         )
@@ -921,11 +1157,14 @@ struct Post: Codable, Identifiable, Hashable {
 
     private func htmlNumericAttribute(_ name: String, in tag: String) -> Int? {
         let source = tag as NSString
-        let escapedName = NSRegularExpression.escapedPattern(for: name)
-        guard let regex = try? NSRegularExpression(
-            pattern: #"\b"# + escapedName + #"\s*=\s*[\"']?(\d+)"#,
-            options: .caseInsensitive
-        ), let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: source.length)),
+        let regex = Self.htmlNumericAttributeRegexes[name] ?? {
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            return try! NSRegularExpression(
+                pattern: #"\b"# + escapedName + #"\s*=\s*[\"']?(\d+)"#,
+                options: .caseInsensitive
+            )
+        }()
+        guard let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: source.length)),
            match.numberOfRanges > 1 else { return nil }
         return Int(source.substring(with: match.range(at: 1)))
     }
@@ -933,11 +1172,7 @@ struct Post: Codable, Identifiable, Hashable {
     private func htmlTextPreservingRSSInlineEmoji(_ input: String?) -> String? {
         guard var value = clean(input) else { return nil }
         let source = value as NSString
-        guard let regex = try? NSRegularExpression(
-            pattern: #"<img\b[^>]*>"#,
-            options: .caseInsensitive
-        ) else { return htmlText(value) }
-        for match in regex.matches(
+        for match in Self.htmlImageTagRegex.matches(
             in: value,
             range: NSRange(location: 0, length: source.length)
         ).reversed() {
@@ -1051,28 +1286,27 @@ struct Post: Codable, Identifiable, Hashable {
     }
     var htmlInlineAssetURLs: Set<URL> {
         guard isRSS, let content, !content.isEmpty else { return [] }
-        let source = content as NSString
-        guard let tagRegex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive),
-              let srcRegex = try? NSRegularExpression(
-                pattern: #"\bsrc\s*=\s*["']([^"']+)["']"#,
-                options: .caseInsensitive
-              ) else { return [] }
+        let cacheKey = NSString(string: String(id))
+        if let cached = Self.rssInlineAssetURLsCache.object(forKey: cacheKey),
+           cached.content == content {
+            return cached.value
+        }
 
+        let source = content as NSString
         var urls = Set<URL>()
         let fullRange = NSRange(location: 0, length: source.length)
-        for match in tagRegex.matches(in: content, range: fullRange) {
+        for match in Self.htmlImageTagRegex.matches(in: content, range: fullRange) {
             let tag = source.substring(with: match.range)
             let loweredTag = tag.lowercased()
             guard loweredTag.contains("emoji") || loweredTag.contains("emoticon") else { continue }
-
-            let tagSource = tag as NSString
-            let tagRange = NSRange(location: 0, length: tagSource.length)
-            guard let srcMatch = srcRegex.firstMatch(in: tag, range: tagRange),
-                  srcMatch.numberOfRanges > 1 else { continue }
-            let rawURL = tagSource.substring(with: srcMatch.range(at: 1))
-                .replacingOccurrences(of: "&amp;", with: "&")
+            guard let rawURL = htmlAttribute("src", in: tag) else { continue }
             if let url = MediaURL.image(rawURL) { urls.insert(url) }
         }
+        Self.rssInlineAssetURLsCache.setObject(
+            RSSInlineAssetURLsBox(content: content, value: urls),
+            forKey: cacheKey,
+            cost: max(1, content.utf8.count + urls.count * 128)
+        )
         return urls
     }
     var videoURLs: [URL] { (videos ?? []).compactMap { $0.playURL ?? $0.url }.compactMap(MediaURL.video) }
@@ -1310,10 +1544,9 @@ struct Post: Codable, Identifiable, Hashable {
     private func htmlTextPreservingInlineImages(_ input: String?) -> String? {
         guard var value = clean(input) else { return nil }
         let source = value as NSString
-        guard let regex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
-            return htmlText(value) ?? value
-        }
-        for match in regex.matches(in: value, range: NSRange(location: 0, length: source.length)).reversed() {
+        for match in Self.htmlImageTagRegex
+            .matches(in: value, range: NSRange(location: 0, length: source.length))
+            .reversed() {
             let tag = source.substring(with: match.range)
             let replacement = htmlAttribute("alt", in: tag) ?? htmlAttribute("title", in: tag) ?? ""
             guard let range = Range(match.range, in: value) else { continue }
@@ -1339,20 +1572,20 @@ struct Post: Codable, Identifiable, Hashable {
 
     private func htmlImageTags(in value: String) -> [String] {
         let source = value as NSString
-        guard let regex = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: .caseInsensitive) else {
-            return []
-        }
-        return regex.matches(in: value, range: NSRange(location: 0, length: source.length))
+        return Self.htmlImageTagRegex.matches(in: value, range: NSRange(location: 0, length: source.length))
             .map { source.substring(with: $0.range) }
     }
 
     private func htmlAttribute(_ name: String, in tag: String) -> String? {
         let source = tag as NSString
-        let escapedName = NSRegularExpression.escapedPattern(for: name)
-        guard let regex = try? NSRegularExpression(
-            pattern: #"\b"# + escapedName + #"\s*=\s*["']([^"']+)["']"#,
-            options: .caseInsensitive
-        ), let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: source.length)),
+        let regex = Self.htmlAttributeRegexes[name] ?? {
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            return try! NSRegularExpression(
+                pattern: #"\b"# + escapedName + #"\s*=\s*["']([^"']+)["']"#,
+                options: .caseInsensitive
+            )
+        }()
+        guard let match = regex.firstMatch(in: tag, range: NSRange(location: 0, length: source.length)),
            match.numberOfRanges > 1 else { return nil }
         let value = source.substring(with: match.range(at: 1))
             .replacingOccurrences(of: "&amp;", with: "&")
@@ -1411,11 +1644,11 @@ struct Post: Codable, Identifiable, Hashable {
     ]
 
     private func decodeNumericHTMLEntities(_ value: String) -> String {
-        let pattern = #"&#(?:x([0-9A-Fa-f]+)|([0-9]+));"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return value }
         let source = value as NSString
         var result = value
-        for match in regex.matches(in: value, range: NSRange(location: 0, length: source.length)).reversed() {
+        for match in Self.numericHTMLEntityRegex
+            .matches(in: value, range: NSRange(location: 0, length: source.length))
+            .reversed() {
             let hexRange = match.range(at: 1)
             let decimalRange = match.range(at: 2)
             let number: UInt32?
@@ -1586,6 +1819,50 @@ struct PostMeta: Codable, Hashable {
             flashSimilarCount: similarCount,
             flashPlatformCount: platformCount,
             flashPlatforms: platforms
+        )
+    }
+
+    static func xLiveDetail(_ detail: XTweetDetailItem) -> PostMeta {
+        PostMeta(
+            metrics: detail.metrics, lang: detail.lang, urls: nil,
+            rawText: detail.fullText, noteText: detail.noteText,
+            inReplyToScreenName: nil, inReplyToStatusID: nil,
+            replyContext: nil, quotedTweet: nil, photoCredit: nil,
+            zhihuRank: nil, zhihuHeat: nil, zhihuAnswers: nil, zhihuFollowerCount: nil,
+            zhihuQuestionID: nil, zhihuURL: nil, zhihuAnswerExcerpt: nil,
+            zhihuAnswerContent: nil, zhihuAnswerAuthor: nil,
+            zhihuAnswerVoteupCount: nil, zhihuAnswerCommentCount: nil,
+            rssFeedName: nil, rssFeedIcon: nil, rssArticleLink: nil,
+            flashCategory: nil, flashSimilarityGroupId: nil, flashSimilarityScore: nil,
+            flashSimilarCount: nil, flashPlatformCount: nil, flashPlatforms: nil
+        )
+    }
+
+    func replacingXLiveDetail(with detail: XTweetDetailItem) -> PostMeta {
+        PostMeta(
+            metrics: detail.metrics ?? metrics,
+            lang: detail.lang ?? lang,
+            urls: urls,
+            rawText: detail.fullText,
+            noteText: detail.noteText ?? noteText,
+            inReplyToScreenName: inReplyToScreenName,
+            inReplyToStatusID: inReplyToStatusID,
+            replyContext: replyContext,
+            quotedTweet: quotedTweet,
+            photoCredit: photoCredit,
+            zhihuRank: zhihuRank, zhihuHeat: zhihuHeat, zhihuAnswers: zhihuAnswers,
+            zhihuFollowerCount: zhihuFollowerCount, zhihuQuestionID: zhihuQuestionID,
+            zhihuURL: zhihuURL, zhihuAnswerExcerpt: zhihuAnswerExcerpt,
+            zhihuAnswerContent: zhihuAnswerContent, zhihuAnswerAuthor: zhihuAnswerAuthor,
+            zhihuAnswerVoteupCount: zhihuAnswerVoteupCount,
+            zhihuAnswerCommentCount: zhihuAnswerCommentCount,
+            rssFeedName: rssFeedName, rssFeedIcon: rssFeedIcon,
+            rssArticleLink: rssArticleLink, flashCategory: flashCategory,
+            flashSimilarityGroupId: flashSimilarityGroupId,
+            flashSimilarityScore: flashSimilarityScore,
+            flashSimilarCount: flashSimilarCount,
+            flashPlatformCount: flashPlatformCount,
+            flashPlatforms: flashPlatforms
         )
     }
 }
@@ -1840,6 +2117,14 @@ struct PostImage: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case url, width, height, kind
         case altText = "alt_text"
+    }
+
+    init(url: String, width: Int?, height: Int?, altText: String? = nil, kind: String? = nil) {
+        self.url = url
+        self.width = width
+        self.height = height
+        self.altText = altText
+        self.kind = kind
     }
 
     init(from decoder: Decoder) throws {

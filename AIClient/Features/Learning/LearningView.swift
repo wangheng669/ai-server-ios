@@ -53,7 +53,9 @@ struct LearningView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedRoute) { route in
+        .sheet(item: $selectedRoute, onDismiss: {
+            showsDetail = selectedIdeologyPerson != nil
+        }) { route in
             NavigationStack {
                 switch route {
                 case let .topic(topic, lessonTitle, lessonNumber, lessonCount):
@@ -74,7 +76,9 @@ struct LearningView: View {
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
         }
-        .sheet(isPresented: ideologyPersonIsPresented) {
+        .sheet(isPresented: ideologyPersonIsPresented, onDismiss: {
+            showsDetail = selectedRoute != nil
+        }) {
             PersonDetailSheet(
                 selectedPerson: $selectedIdeologyPerson,
                 people: ideologyPeople,
@@ -132,10 +136,14 @@ struct LearningView: View {
             }
         }
         .onChange(of: selectedRoute, initial: true) { _, route in
-            showsDetail = route != nil || selectedIdeologyPerson != nil
+            if route != nil || selectedIdeologyPerson != nil {
+                showsDetail = true
+            }
         }
         .onChange(of: selectedIdeologyPerson) { _, person in
-            showsDetail = selectedRoute != nil || person != nil
+            if selectedRoute != nil || person != nil {
+                showsDetail = true
+            }
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
@@ -1111,25 +1119,9 @@ private struct LearningVideoLessonDetailView: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .overlay(alignment: .topLeading) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.58), in: Circle())
-                    .overlay {
-                        Circle().stroke(.white.opacity(0.18), lineWidth: 0.8)
-                    }
-                    .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭视频详情")
-            .padding(.leading, 14)
-            .padding(.top, 6)
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
+                .padding(16)
         }
         .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)

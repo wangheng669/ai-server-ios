@@ -67,7 +67,9 @@ struct PeopleView: View {
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .navigationBarHidden(true)
         }
-        .sheet(isPresented: detailIsPresented) {
+        .sheet(isPresented: detailIsPresented, onDismiss: {
+            showsDetail = false
+        }) {
             PersonDetailSheet(
                 selectedPerson: $selectedPerson,
                 people: store.people,
@@ -93,7 +95,9 @@ struct PeopleView: View {
         }
         .onAppear { showsDetail = selectedPerson != nil }
         .onChange(of: selectedPerson) { _, person in
-            showsDetail = person != nil
+            if person != nil {
+                showsDetail = true
+            }
         }
         .onChange(of: notificationPersonID) { _, _ in
             openNotificationPersonIfNeeded()
@@ -2822,7 +2826,7 @@ struct PersonDetailSheet: View {
     var body: some View {
         NavigationStack {
             if let person = selectedPerson {
-                ZStack(alignment: .topTrailing) {
+                ZStack(alignment: .bottomTrailing) {
                     Color(uiColor: .systemBackground)
                         .ignoresSafeArea()
 
@@ -2838,7 +2842,7 @@ struct PersonDetailSheet: View {
                     .disabled(isHorizontalDragging)
 
                     closeButton
-                        .padding(.top, 12)
+                        .padding(.bottom, 16)
                         .padding(.trailing, 15)
                 }
                 .clipped()
@@ -2877,20 +2881,7 @@ struct PersonDetailSheet: View {
     }
 
     private var closeButton: some View {
-        Button(action: onClose) {
-            Image(systemName: "xmark")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.primary.opacity(0.72))
-                .frame(width: 34, height: 34)
-                .background(.regularMaterial, in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(0.09), radius: 8, y: 3)
-        }
-        .buttonStyle(PeoplePressStyle())
-        .accessibilityLabel("关闭人物详情")
+        DetailSheetCloseButton(action: onClose, accessibilityLabel: "关闭人物详情")
     }
 
     private func switchPerson(_ value: DragGesture.Value) {
@@ -4003,10 +3994,9 @@ private struct PersonPhotoViewer: View {
             }
             .navigationTitle(photos.count > 1 ? "人物影像 \(selectedIndex + 1)/\(photos.count)" : "人物影像")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭人物影像")
+                    .padding(16)
             }
         }
     }
@@ -4055,49 +4045,58 @@ private struct PersonRelatedPostRow: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 12) {
-                AvatarView(
-                    url: post.avatarURL,
-                    name: post.authorName,
-                    size: 42
-                )
+            VStack(alignment: .leading, spacing: 6) {
+                if let attribution = post.xRepostAttributionText {
+                    Label(attribution, systemImage: "arrow.2.squarepath")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 54)
+                }
 
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(post.authorName)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if let handle = post.authorHandle {
-                            Text(handle)
+                HStack(alignment: .top, spacing: 12) {
+                    AvatarView(
+                        url: post.avatarURL,
+                        name: post.authorName,
+                        size: 42
+                    )
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(post.authorName)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if let handle = post.authorHandle {
+                                Text(handle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 6)
+                            Text(post.formattedTime ?? "")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        Spacer(minLength: 6)
-                        Text(post.formattedTime ?? "")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
 
-                    if post.needsXTranslation {
-                        HStack(spacing: 7) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("正在翻译为中文…")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
+                        if post.needsXTranslation {
+                            HStack(spacing: 7) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("正在翻译为中文…")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(minHeight: 42, alignment: .leading)
+                        } else {
+                            Text(post.displayContent)
+                                .font(.system(size: 15))
+                                .foregroundStyle(.primary)
+                                .lineSpacing(3)
+                                .lineLimit(6)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(minHeight: 42, alignment: .leading)
-                    } else {
-                        Text(post.displayContent)
-                            .font(.system(size: 15))
-                            .foregroundStyle(.primary)
-                            .lineSpacing(3)
-                            .lineLimit(6)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -4337,15 +4336,11 @@ private struct PersonArticleDetailView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭文章详情")
+                .padding(16)
+        }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Label("收起", systemImage: "chevron.down")
-                }
-                .accessibilityHint("收起文章阅读弹窗")
-            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if let url = article.canonicalURL {
                     ShareLink(item: url) {
@@ -4594,6 +4589,11 @@ private struct PersonPostTimelineRow: View {
                 Text([post.formattedTime, post.sourceName].compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
+                if let attribution = post.xRepostAttributionText {
+                    Label(attribution, systemImage: "arrow.2.squarepath")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
                 Button(action: onOpen) {
                     Text(displayContent)
                         .font(.system(size: compact ? 15 : 16))
@@ -4899,7 +4899,6 @@ private struct PersonProfileView: View {
 private struct XQuotedPostCard: View {
     let quote: XQuotedPost
     @State private var liveTranslation: String?
-    @State private var showsOriginal = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -4916,14 +4915,6 @@ private struct XQuotedPostCard: View {
             if let text = displayedText {
                 Text(text).font(.subheadline).lineSpacing(2).foregroundStyle(.primary)
             }
-            if hasTranslation, quote.originalText != nil {
-                Button(showsOriginal ? "显示翻译" : "显示原文") {
-                    showsOriginal.toggle()
-                }
-                .font(.caption.weight(.medium))
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-            }
             let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
             if !media.isEmpty {
                 XQuotedMediaGrid(urls: media)
@@ -4939,17 +4930,9 @@ private struct XQuotedPostCard: View {
     }
 
     private var displayedText: String? {
-        if showsOriginal {
-            return quote.originalText ?? quote.displayText
-        }
         return nonempty(quote.textZH)
             ?? liveTranslation
             ?? quote.originalText
-    }
-
-    private var hasTranslation: Bool {
-        nonempty(quote.textZH) != nil
-            || liveTranslation != nil
     }
 
     private func loadTranslationIfNeeded() async {

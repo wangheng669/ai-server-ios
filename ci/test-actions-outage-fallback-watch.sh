@@ -21,5 +21,13 @@ grep -Fq 'git merge-base --is-ancestor "$run_sha" origin/main' <<<"$watch_source
 grep -Fq '/bin/bash ./ci/actions-outage-fallback-watch.sh' < ci/install-actions-outage-fallback-watch.sh
 grep -Fq 'gh run cancel "$run_id"' <<<"$merge_source"
 grep -Fq 'skips sources already merged into main' <<<"$merge_source"
+grep -Fq 'repository_variable IOS_DEVICE_UDID' <<<"$merge_source"
+grep -Fq 'report_local_delivery installed-local-fallback' <<<"$merge_source"
+grep -Fq 'gh workflow run local-central-delivery-report.yml' <<<"$merge_source"
+
+workflow_source=$(<.github/workflows/local-central-delivery-report.yml)
+grep -Fq 'workflow_dispatch:' <<<"$workflow_source"
+grep -Fq 'IOS_DEPLOYMENT_COMMIT:' <<<"$workflow_source"
+grep -Fq 'report-ios-deployment.sh succeeded 1' <<<"$workflow_source"
 
 echo "Actions outage fallback safety checks passed."

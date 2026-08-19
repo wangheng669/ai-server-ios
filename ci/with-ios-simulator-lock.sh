@@ -3,8 +3,8 @@
 set -euo pipefail
 
 lock_dir=${IOS_SIMULATOR_LOCK_DIR:-/tmp/ai-server-ios-iphone16e.lock}
-wait_seconds=${IOS_SIMULATOR_LOCK_WAIT_SECONDS:-1200}
-hold_seconds=${IOS_SIMULATOR_LOCK_HOLD_SECONDS:-600}
+wait_seconds=${IOS_SIMULATOR_LOCK_WAIT_SECONDS:-15}
+hold_seconds=${IOS_SIMULATOR_LOCK_HOLD_SECONDS:-180}
 label=${IOS_SIMULATOR_LOCK_LABEL:-$(basename "$PWD")}
 hold=false
 show_status=false
@@ -13,14 +13,15 @@ assert_held=false
 usage() {
   cat <<'EOF'
 Usage:
-  with-ios-simulator-lock.sh [--label NAME] -- COMMAND [ARG ...]
-  with-ios-simulator-lock.sh [--label NAME] [--hold-seconds SECONDS] --hold
+  with-ios-simulator-lock.sh [--label NAME] [--wait-seconds SECONDS] -- COMMAND [ARG ...]
+  with-ios-simulator-lock.sh [--label NAME] [--wait-seconds SECONDS] [--hold-seconds SECONDS] --hold
   with-ios-simulator-lock.sh [--label NAME] --assert-held
   with-ios-simulator-lock.sh --status
 
 Use --hold to reserve the shared iPhone 16e during interactive UI checks.
-Interactive holds expire after 600 seconds by default. Stop the holding
-process as soon as verification is complete to release the lock earlier.
+Commands wait up to 15 seconds by default; central workflows opt into a longer
+queue explicitly. Interactive holds expire after 180 seconds by default. Stop
+the holding process as soon as verification is complete to release the lock.
 EOF
 }
 
@@ -38,6 +39,11 @@ while [[ $# -gt 0 ]]; do
     --hold-seconds)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       hold_seconds=$2
+      shift 2
+      ;;
+    --wait-seconds)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      wait_seconds=$2
       shift 2
       ;;
     --status)
@@ -74,6 +80,11 @@ if ! [[ "$hold_seconds" =~ ^[0-9]+$ ]] || (( hold_seconds < 30 || hold_seconds >
   exit 2
 fi
 
+if ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || (( wait_seconds > 1200 )); then
+  echo "Wait duration must be between 0 and 1200 seconds." >&2
+  exit 2
+fi
+
 owner_file="$lock_dir/owner"
 host_name=$(hostname)
 
@@ -98,7 +109,7 @@ find_unmanaged_automation() {
   done < <(ps ax -o pid=,command= | awk -v self="$$" '
     $1 == self { next }
     /[w]ith-ios-simulator-lock\.sh/ { next }
-    /[x]codebuild .*test/ ||
+    /[x]codebuild( [^ ]+)* (test|test-without-building)( |$)/ ||
     /[m]aestro .*test/ ||
     /[i]db (ui|xctest|record|launch)/ ||
     /[f]b-idb .* (ui|xctest|record|launch)/ ||

@@ -1,20 +1,22 @@
 import SwiftUI
 
 private enum HoldingDetailFilter: String, CaseIterable, Identifiable {
-    case all = "全部持仓"
+    case current = "当前持仓"
+    case new = "新建仓"
     case increased = "增持"
     case decreased = "减持"
-    case new = "新建仓"
+    case unchanged = "未变动"
     case exited = "清仓"
 
     var id: Self { self }
 
     func matches(_ action: FamousHoldingAction) -> Bool {
         switch self {
-        case .all: true
+        case .current: action != .exited
         case .new: action == .new
         case .increased: action == .increased
         case .decreased: action == .decreased
+        case .unchanged: action == .unchanged
         case .exited: action == .exited
         }
     }
@@ -24,25 +26,32 @@ struct FamousHoldingDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let manager: FamousHoldingsManager
     let store: FamousHoldingsStore
-    @State private var filter = HoldingDetailFilter.all
-    @State private var compactRows = false
+    @State private var filter = HoldingDetailFilter.current
 
     private var resolvedManager: FamousHoldingsManager {
         store.managerDetails[manager.key] ?? manager
     }
 
     private var changes: [FamousHoldingChange] {
-        resolvedManager.changes
-            .filter { filter.matches($0.action) }
-            .sorted { $0.weightPct > $1.weightPct }
+        let records: [FamousHoldingChange]
+        if filter == .exited {
+            records = resolvedManager.exitedPositions ?? resolvedManager.changes.filter { $0.action == .exited }
+        } else {
+            let positions = resolvedManager.positions ?? resolvedManager.changes.filter { $0.action != .exited }
+            records = filter == .current ? positions : positions.filter { filter.matches($0.action) }
+        }
+        return records.sorted {
+            filter == .exited
+                ? ($0.previousValueUsd ?? $0.valueUsd) > ($1.previousValueUsd ?? $1.valueUsd)
+                : $0.valueUsd > $1.valueUsd
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             navigationHeader
             filterBar
-            summaryCard
-            listControls
+            listHeader
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if store.loadingManagerKeys.contains(manager.key) && store.managerDetails[manager.key] == nil {
@@ -50,191 +59,154 @@ struct FamousHoldingDetailView: View {
                             .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
                         ForEach(Array(changes.enumerated()), id: \.element.id) { index, change in
-                            holdingRow(change, index: index)
-                            Divider().overlay(HoldingsPalette.divider).padding(.leading, 70)
-                        }
-                        if filter == .all, resolvedManager.positionsCount > changes.count {
-                            otherHoldingsRow
+                            holdingRow(change)
+                            if index < changes.count - 1 {
+                                Divider().overlay(HoldingsPalette.divider).padding(.leading, 72)
+                            }
                         }
                     }
                     footer
                 }
             }
             .scrollIndicators(.hidden)
+            .background(HoldingsPalette.card)
         }
         .background(HoldingsPalette.canvas.ignoresSafeArea())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭持仓详情")
+                .padding(16)
+        }
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadDetail(managerKey: manager.key) }
     }
 
     private var navigationHeader: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .background(Color.secondary.opacity(0.10), in: Circle())
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("\(resolvedManager.displayName)的持仓")
+                    .font(.system(size: 21, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text(quarterLabel(resolvedManager.reportDate))
+                    Text("·")
+                    Text("\(resolvedManager.positionsCount) 只")
+                    Text("·")
+                    Text(compactUSD(resolvedManager.totalValueUsd))
+                }
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.secondary)
             }
-            .accessibilityLabel("关闭持仓详情")
-            Spacer()
-            Text("持仓详情")
-                .font(.system(size: 19, weight: .semibold))
-            Spacer()
-            HStack(spacing: 8) {
-                Image(systemName: "line.3.horizontal.decrease")
-                Image(systemName: "magnifyingglass")
-            }
-            .font(.system(size: 16, weight: .semibold))
-            .frame(width: 76, height: 40)
+            Spacer(minLength: 8)
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
     }
 
     private var filterBar: some View {
-        HStack(spacing: 0) {
-            ForEach(HoldingDetailFilter.allCases) { item in
-                Button { filter = item } label: {
-                    VStack(spacing: 9) {
-                        Text("\(item.rawValue) (\(filterCount(item)))")
-                            .font(.system(size: 14, weight: filter == item ? .medium : .regular))
-                            .foregroundStyle(filter == item ? HoldingsPalette.blue : .secondary)
-                        Capsule()
-                            .fill(filter == item ? HoldingsPalette.blue : .clear)
-                            .frame(height: 3)
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(HoldingDetailFilter.allCases) { item in
+                    Button { filter = item } label: {
+                        Text("\(item.rawValue) \(filterCount(item))")
+                            .font(.system(size: 12, weight: filter == item ? .semibold : .medium))
+                            .foregroundStyle(filter == item ? Color.white : Color.secondary)
+                            .padding(.horizontal, 13)
+                            .frame(height: 32)
+                            .background(
+                                filter == item ? HoldingsPalette.blue : Color.secondary.opacity(0.09),
+                                in: Capsule()
+                            )
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(filter == item ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
             }
+            .padding(.horizontal, 20)
         }
+        .scrollIndicators(.hidden)
+        .padding(.bottom, 14)
+    }
+
+    private var listHeader: some View {
+        HStack {
+            Text(filter == .exited ? "清仓记录" : filter.rawValue)
+                .font(.system(size: 15, weight: .semibold))
+            Text("\(changes.count) 条")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(filter == .exited ? "按上期市值从高到低" : "按持仓市值从高到低")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 42)
+        .background(HoldingsPalette.card)
+        .overlay(alignment: .top) { Divider().overlay(HoldingsPalette.divider) }
         .overlay(alignment: .bottom) { Divider().overlay(HoldingsPalette.divider) }
     }
 
-    private var summaryCard: some View {
-        HStack(spacing: 0) {
-            detailMetric("总市值（USD）", compactUSD(resolvedManager.totalValueUsd), .primary)
-            Divider().frame(height: 42).overlay(HoldingsPalette.divider)
-            detailMetric("持仓数量", String(resolvedManager.positionsCount), .primary)
-            Divider().frame(height: 42).overlay(HoldingsPalette.divider)
-            detailMetric("较上期变化", signedPercent(totalChange), totalChange >= 0 ? HoldingsPalette.green : HoldingsPalette.orange)
-        }
-        .padding(.vertical, 16)
-        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).stroke(HoldingsPalette.divider) }
-        .padding(12)
-    }
-
-    private func detailMetric(_ title: String, _ value: String, _ color: Color) -> some View {
-        VStack(spacing: 7) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 17, weight: .semibold)).foregroundStyle(color).monospacedDigit()
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var listControls: some View {
-        HStack {
-            HStack(spacing: 0) {
-                controlButton("list.bullet", selected: !compactRows) { compactRows = false }
-                controlButton("list.dash", selected: compactRows) { compactRows = true }
-            }
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            Spacer()
-            Label("市值排序", systemImage: "chevron.down")
-                .font(.system(size: 13, weight: .medium))
-                .padding(.horizontal, 13)
-                .frame(height: 38)
-                .background(Color.secondary.opacity(0.10), in: Capsule())
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 8)
-    }
-
-    private func controlButton(_ icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon).frame(width: 54, height: 38)
-                .background(selected ? Color.secondary.opacity(0.10) : .clear)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func holdingRow(_ change: FamousHoldingChange, index: Int) -> some View {
+    private func holdingRow(_ change: FamousHoldingChange) -> some View {
         let color = actionColor(change.action)
         return HStack(spacing: 12) {
-            HoldingsCompanyLogo(path: change.companyLogo, symbol: change.symbol, color: color)
-            VStack(alignment: .leading, spacing: 7) {
+            HoldingsCompanyLogo(path: change.companyLogo, symbol: change.symbol, color: color, size: 40)
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 7) {
                     Text(change.symbol ?? "—")
                         .font(.system(size: 15, weight: .semibold))
-                    Text(change.name)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Text(actionLabel(change))
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(color)
+                        .padding(.horizontal, 6)
+                        .frame(height: 18)
+                        .background(color.opacity(0.11), in: Capsule())
                 }
-                Text(actionLabel(change))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(color)
+                Text(change.name)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .trailing, spacing: 8) {
-                Text(compactUSD(change.valueUsd))
-                    .font(.system(size: 15, weight: .medium))
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(filter == .exited ? percent(change.previousWeightPct) : percent(change.weightPct))
+                    .font(.system(size: 15, weight: .semibold))
                     .monospacedDigit()
-                TrendLine(direction: change.weightChangePct, seed: index)
-                    .stroke(color, style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
-                    .frame(width: 51, height: 18)
+                Text(filter == .exited
+                     ? "上期 \(compactUSD(change.previousValueUsd ?? change.valueUsd))"
+                     : compactUSD(change.valueUsd))
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
-            Text(percent(change.weightPct))
-                .font(.system(size: 15, weight: .medium))
-                .monospacedDigit()
-                .frame(width: 48, alignment: .trailing)
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: compactRows ? 64 : 78)
+        .padding(.horizontal, 20)
+        .frame(minHeight: 72)
         .accessibilityElement(children: .combine)
     }
 
     private func actionLabel(_ change: FamousHoldingChange) -> String {
+        if change.action == .unchanged { return change.action.title }
         let arrow = change.weightChangePct >= 0 ? "↑" : "↓"
         return "\(arrow) \(change.action.title) \(percent(abs(change.weightChangePct)))"
     }
 
     private func filterCount(_ item: HoldingDetailFilter) -> Int {
-        if item == .all { return resolvedManager.positionsCount }
-        return resolvedManager.changes.count { item.matches($0.action) }
-    }
-
-    private var otherHoldingsRow: some View {
-        HStack {
-            Text("其他持仓")
-                .font(.system(size: 15, weight: .semibold))
-            Text("(\(resolvedManager.positionsCount - changes.count) 只)")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(compactUSD(otherValue))
-                .font(.system(size: 15, weight: .medium))
-            Text(percent(otherWeight))
-                .font(.system(size: 15, weight: .medium))
-                .frame(width: 52, alignment: .trailing)
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 62)
-        .background(HoldingsPalette.card, in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).stroke(HoldingsPalette.divider) }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
+        if item == .current { return resolvedManager.positions?.count ?? resolvedManager.positionsCount }
+        if item == .exited { return resolvedManager.exitedPositions?.count ?? resolvedManager.summary.exited }
+        return (resolvedManager.positions ?? resolvedManager.changes).count { item.matches($0.action) }
     }
 
     private var footer: some View {
         HStack {
             Text("数据来源：SEC 13F 申报")
             Spacer()
-            Text("货币单位：USD")
+            if let holdingsCount = resolvedManager.holdingsCount, holdingsCount != resolvedManager.positionsCount {
+                Text("USD · 原始 \(holdingsCount) 条 · 合并 \(resolvedManager.positionsCount) 只")
+            } else {
+                Text("货币单位：USD")
+            }
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -242,37 +214,4 @@ struct FamousHoldingDetailView: View {
         .padding(.vertical, 20)
     }
 
-    private var disclosedWeight: Double {
-        resolvedManager.changes.reduce(0) { $0 + max(0, $1.weightPct) }
-    }
-
-    private var totalChange: Double {
-        resolvedManager.changes.reduce(0) { $0 + $1.weightChangePct }
-    }
-
-    private var otherWeight: Double { max(0, 100 - min(disclosedWeight, 100)) }
-    private var otherValue: Double { resolvedManager.totalValueUsd * otherWeight / 100 }
-}
-
-private struct TrendLine: Shape {
-    let direction: Double
-    let seed: Int
-
-    func path(in rect: CGRect) -> Path {
-        let rising = direction >= 0
-        let base: [CGFloat] = rising
-            ? [0.78, 0.38, 0.12, 0.32, 0.46, 0.68, 0.58, 0.74, 0.48, 0.28]
-            : [0.74, 0.16, 0.38, 0.54, 0.72, 0.60, 0.82, 0.69, 0.86, 0.80]
-        let offset = seed % 3
-        var path = Path()
-        for index in base.indices {
-            let value = base[(index + offset) % base.count]
-            let point = CGPoint(
-                x: rect.minX + rect.width * CGFloat(index) / CGFloat(base.count - 1),
-                y: rect.minY + rect.height * value
-            )
-            index == 0 ? path.move(to: point) : path.addLine(to: point)
-        }
-        return path
-    }
 }

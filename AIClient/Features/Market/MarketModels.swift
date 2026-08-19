@@ -1183,6 +1183,19 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
     }
 }
 
+func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 60) -> [Double] {
+    let values = marketChartDisplayPoints(points)
+        .sorted { $0.timestamp < $1.timestamp }
+        .compactMap(\.displayValue)
+        .filter { $0.isFinite && $0 > 0 }
+    guard limit > 1, values.count > limit else { return values }
+    let lastIndex = values.count - 1
+    return (0..<limit).map { index in
+        let fraction = Double(index) / Double(limit - 1)
+        return values[Int((fraction * Double(lastIndex)).rounded())]
+    }
+}
+
 func marketShouldUseFallbackChart(
     primaryPoints: [MarketChartPoint],
     fallbackPoints: [MarketChartPoint]

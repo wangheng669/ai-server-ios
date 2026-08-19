@@ -921,7 +921,6 @@ private struct GoogleSignalEventDetailView: View {
     @StateObject private var evidenceStore: GoogleSignalEvidenceStore
     @StateObject private var translationStore = GoogleSignalXTranslationStore()
     @Environment(\.dismiss) private var dismiss
-    @State private var showsRepresentativeOriginal = false
     @State private var representativeExpanded = false
 
     init(event: GoogleSignalEvent) {
@@ -948,10 +947,9 @@ private struct GoogleSignalEventDetailView: View {
             .background(Color(uiColor: .systemBackground))
             .navigationTitle("信号详情")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭信号详情")
+                    .padding(16)
             }
             .task { await evidenceStore.load(reset: true) }
         }
@@ -1044,19 +1042,8 @@ private struct GoogleSignalEventDetailView: View {
                 }
             }
 
-            if representativeTranslation != nil {
-                HStack(spacing: 5) {
-                    Image(systemName: "character.bubble")
-                    Text(showsRepresentativeOriginal ? "X 原文" : "X 自动翻译")
-                    Spacer()
-                    Button(showsRepresentativeOriginal ? "显示译文" : "显示原文") {
-                        showsRepresentativeOriginal.toggle()
-                    }
-                    .foregroundStyle(.blue)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            } else if translationStore.isLoading(event.representativeSourceURL) {
+            if representativeTranslation == nil,
+               translationStore.isLoading(event.representativeSourceURL) {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
                     Text("正在翻译为中文")
@@ -1103,7 +1090,7 @@ private struct GoogleSignalEventDetailView: View {
     }
 
     private var representativeContent: String {
-        if !showsRepresentativeOriginal, let representativeTranslation {
+        if let representativeTranslation {
             return representativeTranslation
         }
         let original = event.originalContent.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -147,6 +147,7 @@ jobs:
           set -o pipefail
           ./ci/with-ios-simulator-lock.sh \
             --label "TestFlight tests $GITHUB_RUN_ID" \
+            --wait-seconds 1200 \
             -- xcodebuild test \
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \

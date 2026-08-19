@@ -29,7 +29,9 @@ struct APIClient {
         page: Int,
         limit: Int = 20,
         source: FeedSource,
-        flashCategory: String? = nil
+        flashCategory: String? = nil,
+        youtubePerson: String? = nil,
+        xUserID: String? = nil
     ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin, .baidu:
@@ -50,9 +52,18 @@ struct APIClient {
             return try await fetchXueqiuPosts(page: page, limit: limit)
         case .wechat:
             return try await fetchWeChatPosts(page: page, limit: limit)
+        case .youtube:
+            return try await fetchYouTubePosts(page: page, limit: limit, person: youtubePerson)
         default:
-            return try await fetchRegularPosts(page: page, limit: limit, source: source)
+            return try await fetchRegularPosts(page: page, limit: limit, source: source, xUserID: xUserID)
         }
+    }
+
+    func fetchXFeedUsers() async throws -> [XFeedUser] {
+        let response: XFeedUsersResponse = try await get(
+            baseURL.appending(path: "api/ios/v1/x/users")
+        )
+        return response.data
     }
 
     func fetchRSSFeeds() async throws -> [RSSFeedSource] {
@@ -107,12 +118,27 @@ struct APIClient {
         feedID: Int,
         page: Int = 1,
         limit: Int = 20,
-        includesAllScores: Bool = false
+        includesAllScores: Bool = true
     ) async throws -> [Post] {
         var parts = URLComponents(
             url: baseURL.appending(path: "api/ios/v1/rss/feeds/\(feedID)/posts"),
             resolvingAgainstBaseURL: false
         )
+        parts?.queryItems = Self.rssFeedPostQueryItems(
+            page: page,
+            limit: limit,
+            includesAllScores: includesAllScores
+        )
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let response: RSSFeedPostsResponse = try await get(url)
+        return response.data.posts
+    }
+
+    static func rssFeedPostQueryItems(
+        page: Int,
+        limit: Int,
+        includesAllScores: Bool = true
+    ) -> [URLQueryItem] {
         var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)),
             .init(name: "limit", value: String(limit)),
@@ -122,13 +148,22 @@ struct APIClient {
         if !includesAllScores {
             queryItems.append(.init(name: "final_score", value: String(Post.minimumFeedScore)))
         }
-        parts?.queryItems = queryItems
-        guard let url = parts?.url else { throw APIError.invalidURL }
-        let response: RSSFeedPostsResponse = try await get(url)
-        return response.data.posts
+        return queryItems
     }
 
-    func fetchWeiboFollowingPosts(page: Int, limit: Int = 20) async throws -> [Post] {
+    func fetchWeiboFollowingPosts(
+        page: Int,
+        limit: Int = 20,
+        feedID: Int? = nil
+    ) async throws -> [Post] {
+        if let feedID {
+            return try await fetchRSSFeedPosts(
+                feedID: feedID,
+                page: page,
+                limit: limit,
+                includesAllScores: true
+            )
+        }
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         components?.queryItems = Self.weiboFollowingQueryItems(page: page, limit: limit)
         guard let url = components?.url else { throw APIError.invalidURL }
@@ -200,8 +235,16 @@ struct APIClient {
             .filter { seen.insert($0.id).inserted }
     }
 
-    private func fetchXueqiuPosts(page: Int, limit: Int) async throws -> [Post] {
-        try await withThrowingTaskGroup(of: [Post].self) { group in
+    func fetchXueqiuPosts(page: Int, limit: Int, feedID: Int? = nil) async throws -> [Post] {
+        if let feedID {
+            return try await fetchRSSFeedPosts(
+                feedID: feedID,
+                page: page,
+                limit: limit,
+                includesAllScores: true
+            )
+        }
+        return try await withThrowingTaskGroup(of: [Post].self) { group in
             for feedID in [14, 16] {
                 group.addTask {
                     var parts = URLComponents(
@@ -231,10 +274,20 @@ struct APIClient {
         }
     }
 
-    private func fetchRegularPosts(page: Int, limit: Int, source: FeedSource) async throws -> [Post] {
+    private func fetchRegularPosts(
+        page: Int,
+        limit: Int,
+        source: FeedSource,
+        xUserID: String? = nil
+    ) async throws -> [Post] {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
-        var queryItems = Self.regularPostQueryItems(page: page, limit: limit, source: source)
+        var queryItems = Self.regularPostQueryItems(
+            page: page,
+            limit: limit,
+            source: source,
+            xUserID: xUserID
+        )
         if isSpecialRSS {
             let name = source == .laozhong ? "老中" : "YouTube"
             queryItems.append(.init(name: "categoryId", value: String(try await categoryID(named: name))))
@@ -245,21 +298,52 @@ struct APIClient {
         return response.data
     }
 
-    static func regularPostQueryItems(page: Int, limit: Int, source: FeedSource) -> [URLQueryItem] {
+    private func fetchYouTubePosts(page: Int, limit: Int, person: String? = nil) async throws -> [Post] {
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/youtube/videos"), resolvingAgainstBaseURL: false)
+        components?.queryItems = Self.youtubeVideoQueryItems(page: page, limit: limit, person: person)
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: PostListResponse = try await get(url)
+        return response.data
+    }
+
+    static func youtubeVideoQueryItems(page: Int, limit: Int, person: String? = nil) -> [URLQueryItem] {
+        var items = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        if let person = person?.trimmingCharacters(in: .whitespacesAndNewlines), !person.isEmpty {
+            items.append(.init(name: "person", value: person))
+        }
+        return items
+    }
+
+    static func regularPostQueryItems(
+        page: Int,
+        limit: Int,
+        source: FeedSource,
+        xUserID: String? = nil
+    ) -> [URLQueryItem] {
         let isSpecialRSS = source == .laozhong || source == .youtube
         let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube
+        let normalizedXUserID = source == .x
+            ? xUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            : nil
+        let filtersXUser = normalizedXUserID?.isEmpty == false
         var queryItems: [URLQueryItem] = [
             .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
             .init(name: "sort", value: "time_desc"),
             .init(name: "group_similar", value: "1"), .init(name: "group_threshold", value: "70"),
             .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue),
-            .init(name: "include_zero_score", value: includesAllScores ? "true" : "false")
+            .init(name: "include_zero_score", value: includesAllScores || filtersXUser ? "true" : "false")
         ]
-        if !includesAllScores {
+        if !includesAllScores && !filtersXUser {
             let minimumScore = source == .rss ? 6 : Post.minimumFeedScore
             queryItems.append(.init(name: "final_score", value: String(minimumScore)))
         }
         if source == .x { queryItems.append(.init(name: "x_feed_view", value: "tracked")) }
+        if let normalizedXUserID, !normalizedXUserID.isEmpty {
+            queryItems.append(.init(name: "x_user_id", value: normalizedXUserID))
+        }
         return queryItems
     }
 
@@ -542,19 +626,20 @@ struct APIClient {
     }
 
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
-        let response = try await fetchArticlePreview(url: url)
+        let response = try await fetchArticlePreview(url: url, preferRemote: true)
         if let article = NewYorkTimesArticleParser.extract(from: response.data.content) { return article }
-        let paragraphs = response.data.textContent
-            .components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map(NewYorkTimesArticleBlock.paragraph)
-        guard !paragraphs.isEmpty else { throw APIError.decoding(NYTimesArticleError.bodyMissing) }
-        return NewYorkTimesArticle(blocks: paragraphs)
+        guard let article = NewYorkTimesArticle.storedText(response.data.textContent) else {
+            throw APIError.decoding(NYTimesArticleError.bodyMissing)
+        }
+        return article
     }
 
-    func fetchArticlePreview(url: URL) async throws -> ArticlePreviewResponse {
-        guard let previewURL = Self.articlePreviewURL(for: url, baseURL: baseURL) else { throw APIError.invalidURL }
+    func fetchArticlePreview(url: URL, preferRemote: Bool = false) async throws -> ArticlePreviewResponse {
+        guard let previewURL = Self.articlePreviewURL(
+            for: url,
+            baseURL: baseURL,
+            preferRemote: preferRemote
+        ) else { throw APIError.invalidURL }
         return try await get(previewURL)
     }
 
@@ -588,11 +673,19 @@ struct APIClient {
         return response.article
     }
 
-    static func articlePreviewURL(for articleURL: URL, baseURL: URL) -> URL? {
+    static func articlePreviewURL(
+        for articleURL: URL,
+        baseURL: URL,
+        preferRemote: Bool = false
+    ) -> URL? {
         var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/preview"), resolvingAgainstBaseURL: false)
-        parts?.queryItems = [
+        var queryItems: [URLQueryItem] = [
             .init(name: "url", value: articleURL.absoluteString),
         ]
+        if preferRemote {
+            queryItems.append(.init(name: "prefer_remote", value: "true"))
+        }
+        parts?.queryItems = queryItems
         return parts?.url
     }
 

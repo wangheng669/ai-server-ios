@@ -5,6 +5,29 @@ import AVKit
 import CryptoKit
 import WebKit
 
+struct DetailSheetCloseButton: View {
+    let action: () -> Void
+    var accessibilityLabel = "关闭详情"
+
+    var body: some View {
+        Button(action: action) {
+            Label("关闭", systemImage: "xmark")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .background(.regularMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 struct InAppBrowserDestination: Identifiable, Equatable {
     let url: URL
     var id: String { url.absoluteString }
@@ -12,12 +35,14 @@ struct InAppBrowserDestination: Identifiable, Equatable {
 
 struct InAppBrowserSheet: View {
     let url: URL
+    var showsTitleHeader = true
+    var onDismiss: (() -> Void)?
     @State private var title = ""
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
-            if !title.isEmpty {
+            if showsTitleHeader && !title.isEmpty {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
@@ -29,7 +54,7 @@ struct InAppBrowserSheet: View {
                     .gesture(
                         DragGesture(minimumDistance: 20)
                             .onEnded { value in
-                                if value.translation.height > 80 { dismiss() }
+                                if value.translation.height > 80 { close() }
                             }
                     )
                 Divider().opacity(0.55)
@@ -41,7 +66,20 @@ struct InAppBrowserSheet: View {
             }
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
-        .accessibilityAction(.escape) { dismiss() }
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(action: close, accessibilityLabel: "关闭网页详情")
+                .padding(16)
+        }
+        .accessibilityIdentifier("in-app-browser")
+        .accessibilityAction(.escape) { close() }
+    }
+
+    private func close() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
     }
 }
 
@@ -342,7 +380,13 @@ struct AvatarView: View {
     var body: some View {
         Group {
             if let assetName { Image(assetName).resizable().scaledToFill() }
-            else if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .scaledToFill()
+            }
             else {
                 RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
                     .fill(Color.blue.opacity(0.11))
@@ -353,7 +397,10 @@ struct AvatarView: View {
         .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
         .task(id: url) {
             guard assetName == nil else { return }
-            let loaded = await ImageLoader.load(url, targetSize: CGSize(width: size, height: size))
+            let loaded = await ImageLoader.load(
+                url,
+                targetSize: CGSize(width: size * 2, height: size * 2)
+            )
             if rejectsUpscaledImages,
                let cgImage = loaded?.cgImage,
                min(cgImage.width, cgImage.height) < Int(size * UIScreen.main.scale * 0.9) {
@@ -503,6 +550,19 @@ private struct InlineEmojiTextView: UIViewRepresentable {
     let textColor: UIColor
     let allowsTextSelection: Bool
 
+    final class Coordinator {
+        var text: String?
+        var emojis: [WeiboInlineEmoji] = []
+        var imageURLs: Set<URL> = []
+        var fontSize: CGFloat?
+        var lineSpacing: CGFloat?
+        var maximumNumberOfLines: Int?
+        var textColor: UIColor?
+        var allowsTextSelection: Bool?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
         view.backgroundColor = .clear
@@ -517,12 +577,33 @@ private struct InlineEmojiTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
+        let imageURLs = Set(images.keys)
+        let coordinator = context.coordinator
+        let needsUpdate = coordinator.text != text
+            || coordinator.emojis != emojis
+            || coordinator.imageURLs != imageURLs
+            || coordinator.fontSize != fontSize
+            || coordinator.lineSpacing != lineSpacing
+            || coordinator.maximumNumberOfLines != maximumNumberOfLines
+            || coordinator.textColor != textColor
+            || coordinator.allowsTextSelection != allowsTextSelection
+        guard needsUpdate else { return }
+
         view.isSelectable = allowsTextSelection
         view.isUserInteractionEnabled = allowsTextSelection
         view.textContainer.maximumNumberOfLines = maximumNumberOfLines
         view.textContainer.lineBreakMode = maximumNumberOfLines > 0 ? .byTruncatingTail : .byWordWrapping
         view.attributedText = attributedText
         view.accessibilityLabel = text
+
+        coordinator.text = text
+        coordinator.emojis = emojis
+        coordinator.imageURLs = imageURLs
+        coordinator.fontSize = fontSize
+        coordinator.lineSpacing = lineSpacing
+        coordinator.maximumNumberOfLines = maximumNumberOfLines
+        coordinator.textColor = textColor
+        coordinator.allowsTextSelection = allowsTextSelection
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -592,8 +673,36 @@ actor ImageLoader {
 
     static func load(_ url: URL?, targetSize: CGSize? = nil) async -> UIImage? {
         guard let url else { return nil }
-        let relayedURL = MediaURL.image(url.absoluteString) ?? url
-        return await shared.image(for: relayedURL, targetSize: targetSize, scale: UIScreen.main.scale)
+        for sourceURL in avatarCandidateURLs(url) {
+            let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
+            if let image = await shared.image(
+                for: relayedURL,
+                targetSize: targetSize,
+                scale: UIScreen.main.scale
+            ) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    static func avatarCandidateURLs(_ url: URL) -> [URL] {
+        let highResolutionURL = highResolutionAvatarURL(url)
+        guard highResolutionURL != url else { return [url] }
+        return [highResolutionURL, url]
+    }
+
+    static func highResolutionAvatarURL(_ url: URL) -> URL {
+        guard let host = url.host?.lowercased(),
+              host == "pbs.twimg.com" || host.hasSuffix(".twimg.com"),
+              url.path.contains("/profile_images/") else { return url }
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let upgradedPath = url.path
+            .replacingOccurrences(of: "_40_normal.", with: "_200x200.")
+            .replacingOccurrences(of: "_normal.", with: "_200x200.")
+        components?.path = upgradedPath
+        return components?.url ?? url
     }
 
     private func image(for url: URL, targetSize: CGSize?, scale: CGFloat) async -> UIImage? {
@@ -821,6 +930,7 @@ struct PostMediaGrid: View {
     var cornerRadius: CGFloat = 8
     var videoContentMode: ContentMode = .fit
     var videoMaxHeight: CGFloat? = nil
+    var onImageTap: (() -> Void)? = nil
     @State private var gallerySelection: ImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
@@ -916,6 +1026,14 @@ struct PostMediaGrid: View {
         }
     }
 
+    private func handleImageTap(at url: URL, urls: [URL]) {
+        if let onImageTap {
+            onImageTap()
+        } else {
+            showGallery(startingAt: url, urls: urls)
+        }
+    }
+
     @MainActor
     private func loadVideoAspectRatio(for url: URL) async {
         let asset = AVURLAsset(url: url)
@@ -946,7 +1064,7 @@ struct PostMediaGrid: View {
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     .frame(maxWidth: .infinity, alignment: .center)
             } else if urls.count == 1, let url = urls.first {
-                Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
+                Button { handleImageTap(at: url, urls: allContentImageURLs) } label: {
                     RemoteImage(
                         url: url,
                         height: resolvedSingleImageHeight,
@@ -957,11 +1075,11 @@ struct PostMediaGrid: View {
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.plain)
-                .accessibilityLabel("查看图片")
+                .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
-                        Button { showGallery(startingAt: url, urls: allContentImageURLs) } label: {
+                        Button { handleImageTap(at: url, urls: allContentImageURLs) } label: {
                             RemoteImage(
                                 url: url,
                                 height: multiImageHeight,
@@ -972,11 +1090,11 @@ struct PostMediaGrid: View {
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("查看图片")
+                        .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
                     }
                 }
             } else if let preview = post.previewURL {
-                Button { showGallery(startingAt: preview, urls: [preview]) } label: {
+                Button { handleImageTap(at: preview, urls: [preview]) } label: {
                     RemoteImage(
                         url: preview,
                         height: resolvedSingleImageHeight,
@@ -985,7 +1103,7 @@ struct PostMediaGrid: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("查看图片")
+                .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
             }
         }
         .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
@@ -1018,23 +1136,29 @@ struct XFeedMediaView: View {
     let post: Post
 
     var body: some View {
-        if let videoURL = post.feedPlaybackURL {
-            XVideoPlayerView(
-                url: videoURL,
-                fallbackURL: post.feedPlaybackFallbackURL,
-                thumbnailURL: post.previewURL,
-                observationSurface: "x-feed"
-            )
+        VStack(alignment: .leading, spacing: 10) {
+            if let videoURL = post.feedPlaybackURL {
+                XVideoPlayerView(
+                    url: videoURL,
+                    fallbackURL: post.feedPlaybackFallbackURL,
+                    thumbnailURL: post.previewURL,
+                    observationSurface: "x-feed"
+                )
                 .id(videoURL)
                 .frame(height: videoHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        } else {
-            PostMediaGrid(
-                post: post,
-                singleImageMaxHeight: 420,
-                availableWidth: availableWidth,
-                cornerRadius: 12
-            )
+            } else {
+                PostMediaGrid(
+                    post: post,
+                    singleImageMaxHeight: 420,
+                    availableWidth: availableWidth,
+                    cornerRadius: 12
+                )
+            }
+
+            if let quote = post.xQuotedPost {
+                XFeedQuotedPostCard(quote: quote, availableWidth: availableWidth)
+            }
         }
     }
 
@@ -1051,6 +1175,100 @@ struct XFeedMediaView: View {
             return availableWidth * 9 / 16
         }
         return min(availableWidth * CGFloat(height) / CGFloat(width), 440)
+    }
+}
+
+struct XFeedQuotedPostCard: View {
+    let quote: XQuotedPost
+    let availableWidth: CGFloat
+    var enablesTextSelection = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                if let avatarURL = quote.author?.profileImageURL.flatMap(URL.init(string:)) {
+                    AvatarView(
+                        url: avatarURL,
+                        name: quote.author?.name ?? "引用动态",
+                        size: 28
+                    )
+                }
+
+                Text(quote.author?.name ?? "引用动态")
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+
+                if let handle = quote.author?.handle {
+                    Text(handle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if let text = quote.displayText {
+                quotedText(text)
+            }
+
+            ForEach(Array((quote.media ?? []).enumerated()), id: \.offset) { _, media in
+                quotedMedia(media)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
+        }
+    }
+
+    @ViewBuilder
+    private func quotedText(_ text: String) -> some View {
+        if enablesTextSelection {
+            Text(text)
+                .font(.system(size: 15))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        } else {
+            Text(text)
+                .font(.system(size: 15))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func quotedMedia(_ media: XQuotedMedia) -> some View {
+        if let videoURL = media.playbackURL {
+            XVideoPlayerView(
+                url: videoURL,
+                fallbackURL: nil,
+                thumbnailURL: media.previewURL,
+                generatesThumbnailWhenMissing: false
+            )
+            .frame(height: quotedMediaHeight(media))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else if let imageURL = media.displayURL {
+            RemoteImage(
+                url: imageURL,
+                height: quotedMediaHeight(media),
+                cornerRadius: 8,
+                contentMode: .fit
+            )
+            .frame(maxWidth: .infinity)
+            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+            .clipped()
+        }
+    }
+
+    private func quotedMediaHeight(_ media: XQuotedMedia) -> CGFloat {
+        guard let mediaWidth = media.width,
+              let mediaHeight = media.height,
+              mediaWidth > 0,
+              mediaHeight > 0 else { return 190 }
+        return min(availableWidth * CGFloat(mediaHeight) / CGFloat(mediaWidth), 460)
     }
 }
 
@@ -1778,6 +1996,7 @@ private struct XPlayerLayerView: UIViewRepresentable {
 struct FeedEngagementRow: View {
     let post: Post
     var showsOnlyLikeAndBookmark = false
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isBookmarking = false
     @State private var isBookmarked = false
     @State private var bookmarkError: String?
@@ -1789,45 +2008,13 @@ struct FeedEngagementRow: View {
     }
 
     var body: some View {
-        Group {
-            if showsOnlyLikeAndBookmark {
-                HStack {
-                    metric("heart", post.meta?.metrics?.likes)
-                        .accessibilityLabel("喜欢")
-                    Spacer()
-                    bookmarkButton
-                }
-            } else {
-                HStack(spacing: 0) {
-                    metric("bubble", post.meta?.metrics?.replies, label: "回复")
-                    Spacer()
-                    metric("arrow.2.squarepath", post.meta?.metrics?.retweets, label: "转发")
-                    Spacer()
-                    metric("heart", post.meta?.metrics?.likes, label: "喜欢")
-                    Spacer()
-                    metric("chart.bar", post.meta?.metrics?.views, label: "浏览")
-                    Spacer()
-                    bookmarkButton
-                    Spacer()
-                    if let link = post.linkURL {
-                        ShareLink(item: link) {
-                            Image(systemName: "square.and.arrow.up")
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("分享")
-                    } else {
-                        Image(systemName: "square.and.arrow.up")
-                            .frame(width: 44, height: 44)
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
+        HStack(spacing: 12) {
+            Spacer(minLength: 0)
+            metric("heart", post.meta?.metrics?.likes, label: "喜欢")
+            bookmarkButton
         }
-        .font(.system(size: 16, weight: .regular))
-        .foregroundStyle(.secondary)
-        .frame(height: 44)
+        .foregroundStyle(xToolbarColor)
+        .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)
         .contentShape(Rectangle())
         .sensoryFeedback(.success, trigger: isBookmarked)
         .alert("书签保存失败", isPresented: bookmarkErrorBinding) {
@@ -1844,13 +2031,18 @@ struct FeedEngagementRow: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 14, weight: .regular))
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(
+                minHeight: showsOnlyLikeAndBookmark ? 44 : 32,
+                alignment: .center
+            )
+            .frame(width: showsOnlyLikeAndBookmark ? 44 : 24)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isBookmarked ? Color.blue : Color.secondary)
+        .foregroundStyle(isBookmarked ? xAccentColor : xToolbarColor)
         .disabled(isBookmarking || isBookmarked || post.xTweetID == nil)
         .accessibilityLabel(isBookmarked ? "已加入书签" : "加入书签")
     }
@@ -1878,15 +2070,33 @@ struct FeedEngagementRow: View {
         }
     }
 
-    private func metric(_ symbol: String, _ value: Int?, label: String? = nil) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: symbol)
-            if let value, value > 0 { Text(compactCount(value)).font(.system(size: 13)) }
+    private func metric(_ icon: String, _ value: Int?, label: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .regular))
+                .frame(width: 18, height: 18)
+            if let value, value > 0 {
+                Text(compactCount(value))
+                    .font(.system(size: 13, weight: .regular))
+            }
         }
-        .frame(minWidth: 44, minHeight: 44)
+        .frame(
+            minHeight: showsOnlyLikeAndBookmark ? 44 : 32,
+            alignment: .leading
+        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label ?? "互动数据")
         .accessibilityValue(value.map(compactCount) ?? "0")
+    }
+
+    private var xToolbarColor: Color {
+        colorScheme == .dark
+            ? Color(red: 113 / 255, green: 118 / 255, blue: 123 / 255)
+            : Color(red: 83 / 255, green: 100 / 255, blue: 113 / 255)
+    }
+
+    private var xAccentColor: Color {
+        Color(red: 29 / 255, green: 155 / 255, blue: 240 / 255)
     }
 
     private func compactCount(_ value: Int) -> String {
@@ -1894,7 +2104,7 @@ struct FeedEngagementRow: View {
             return String(format: "%.1f万", Double(value) / 10_000)
                 .replacingOccurrences(of: ".0万", with: "万")
         }
-        return value.formatted()
+        return String(value)
     }
 }
 

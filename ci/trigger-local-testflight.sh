@@ -160,6 +160,7 @@ plutil -replace CFBundleShortVersionString \
 log "Running tests for TestFlight $TESTFLIGHT_MARKETING_VERSION."
 ./ci/with-ios-simulator-lock.sh \
   --label "Local TestFlight $GITHUB_RUN_ID" \
+  --wait-seconds 1200 \
   -- xcodebuild test \
   -project AIServerClient.xcodeproj \
   -scheme AIServerClient \

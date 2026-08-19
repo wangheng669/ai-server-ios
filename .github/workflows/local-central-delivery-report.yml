@@ -1,0 +1,46 @@
+name: Reconcile local central delivery status
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Delivered task commit
+        required: true
+        type: string
+      source_branch:
+        description: Delivered task branch
+        required: true
+        type: string
+      originating_run_id:
+        description: Failed central workflow run
+        required: true
+        type: string
+      stage:
+        description: Successful local delivery stage
+        required: true
+        type: choice
+        options:
+          - installed-local-fallback
+          - published-local-fallback
+
+run-name: Reconcile local delivery for ${{ inputs.source_branch }}
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 64
+
+      - name: Report successful local central delivery
+        env:
+          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
+          IOS_DEPLOYMENT_COMMIT: ${{ inputs.source_sha }}
+          IOS_DEPLOYMENT_SOURCE_BRANCH: ${{ inputs.source_branch }}
+          IOS_DEPLOYMENT_RUN_ID: ${{ inputs.originating_run_id }}
+        run: ./ci/report-ios-deployment.sh succeeded 1 '${{ inputs.stage }}'

@@ -24,11 +24,16 @@ if ! git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
   echo "Preflight merge base remains unavailable after bounded deepening." >&2
   exit 1
 fi
-app_changed=$(
-  ./ci/classify-ios-test-scope.sh \
-    < <(git diff --name-only origin/main "$source_sha") \
-    | awk -F= '$1 == "app_changed" { print $2 }'
+low_risk_change=false
+if ./ci/is-low-risk-ios-diff.sh origin/main "$source_sha"; then
+  low_risk_change=true
+fi
+scope=$(
+  IOS_LOW_RISK_CHANGE="$low_risk_change" ./ci/classify-ios-test-scope.sh \
+    < <(git diff --name-only origin/main "$source_sha")
 )
+app_changed=$(awk -F= '$1 == "app_changed" { print $2 }' <<<"$scope")
+test_scope=$(awk -F= '$1 == "test_scope" { print $2 }' <<<"$scope")
 preflight_started_epoch=$workflow_started_epoch
 preflight_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-preflight-finished.XXXXXX")
 
@@ -48,7 +53,7 @@ device_warm_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-warm-f
   if [[ "$app_changed" == true && -n "${DEVICE_UDID:-}" ]]; then
     ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
     if ! ./ci/probe-ios-device.sh; then
-      ./ci/report-ios-deployment.sh failed 0 device-gate-failed || true
+      ./ci/report-ios-deployment.sh running 0.01 device-install-deferred || true
       status=1
     else
       ./ci/report-ios-deployment.sh running 0.01 device-gate-ready || true
@@ -65,7 +70,8 @@ prepare_started_epoch=$(date +%s)
 prepare_metrics_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-prepare-metrics.XXXXXX")
 export IOS_PREPARE_METRICS_FILE="$prepare_metrics_file"
 if [[ "$app_changed" == true ]]; then
-  ./ci/prepare-central-runner.sh
+  IOS_SKIP_SIMULATOR_WARM=$([[ "$test_scope" == build ]] && echo true || echo false) \
+    ./ci/prepare-central-runner.sh
 else
   echo "Configuration-only change; skipping Xcode dependency and build cache warming."
   {
@@ -102,6 +108,7 @@ preflight_duration_seconds=$((preflight_finished_epoch - preflight_started_epoch
   echo "dependency_duration_seconds=$dependency_seconds"
   echo "device_build_warm_duration_seconds=$device_build_warm_seconds"
   echo "simulator_warm_duration_seconds=$simulator_warm_seconds"
+  echo "device_gate_failed=$([[ "$device_warm_status" -ne 0 ]] && echo true || echo false)"
 } >> "$GITHUB_OUTPUT"
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
@@ -134,6 +141,9 @@ if ((preflight_status != 0)); then
   exit "$preflight_status"
 fi
 if ((device_warm_status != 0)); then
-  echo "iPhone stability gate failed with exit code $device_warm_status." >&2
-  exit "$device_warm_status"
+  if [[ "${IOS_REQUIRE_DEVICE_GATE:-false}" == true ]]; then
+    echo "Required iPhone stability gate failed with exit code $device_warm_status." >&2
+    exit "$device_warm_status"
+  fi
+  echo "iPhone is not ready; main delivery will continue and installation will be retried after publish." >&2
 fi

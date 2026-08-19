@@ -15,6 +15,11 @@ enum InvestmentDesign {
     static let cornerRadius: CGFloat = 14
 }
 
+private enum InvestmentMotion {
+    static let selection = Animation.smooth(duration: 0.28, extraBounce: 0)
+    static let reveal = Animation.snappy(duration: 0.26, extraBounce: 0.03)
+}
+
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
     case sentiment = "情绪"
@@ -48,6 +53,18 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         case .gdp: "全球排行"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .market: "chart.line.uptrend.xyaxis"
+        case .sentiment: "gauge.with.dots.needle.50percent"
+        case .chinaMacro: "building.columns"
+        case .institutionResearch: "doc.text.magnifyingglass"
+        case .holdings: "person.crop.circle.badge.checkmark"
+        case .industries: "square.3.layers.3d"
+        case .gdp: "list.number"
+        }
+    }
 }
 
 private enum InvestmentCategory: String, CaseIterable, Identifiable {
@@ -71,170 +88,357 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
     var defaultSection: InvestmentSection {
         sections[0]
     }
+
+    var icon: String {
+        switch self {
+        case .market: "chart.xyaxis.line"
+        case .macro: "globe.asia.australia"
+        case .research: "doc.text.magnifyingglass"
+        }
+    }
 }
 
 struct InvestmentView: View {
     @Binding private var showsDetail: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var section: InvestmentSection
+    @State private var displayedSection: InvestmentSection
+    @State private var contentOpacity = 1.0
+    @State private var contentScale: CGFloat = 1
+    @State private var contentOffset: CGFloat = 0
+    @State private var transitionTask: Task<Void, Never>?
     @State private var marketShowsDetail = false
     @State private var holdingsShowsDetail = false
-    @State private var headerIsCompact = false
     @State private var marketStore = MarketStore()
     @State private var sentimentStore = RetailSentimentStore()
     @State private var holdingsStore = FamousHoldingsStore()
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
         _showsDetail = showsDetail
+        let initialSection: InvestmentSection
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--holdings-preview") {
-            _section = State(initialValue: .holdings)
+            initialSection = .holdings
         } else if ProcessInfo.processInfo.arguments.contains("--industries-preview") {
-            _section = State(initialValue: .industries)
+            initialSection = .industries
         } else if ProcessInfo.processInfo.arguments.contains("--china-macro-preview") {
-            _section = State(initialValue: .chinaMacro)
+            initialSection = .chinaMacro
         } else if ProcessInfo.processInfo.arguments.contains("--institution-research-preview") {
-            _section = State(initialValue: .institutionResearch)
+            initialSection = .institutionResearch
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
                     ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
-            _section = State(initialValue: .sentiment)
+            initialSection = .sentiment
         } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
                     ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) {
-            _section = State(initialValue: .gdp)
+            initialSection = .gdp
         } else {
-            _section = State(initialValue: .market)
+            initialSection = .market
         }
         #else
-        _section = State(initialValue: .market)
+        initialSection = .market
         #endif
+        _section = State(initialValue: initialSection)
+        _displayedSection = State(initialValue: initialSection)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if !showsDetail {
-                InvestmentHeader(selection: $section, isCompact: headerIsCompact && section == .market)
+            ZStack {
+                sectionLayer(.market) {
+                    MarketView(
+                        store: marketStore,
+                        showsDetail: $marketShowsDetail
+                    )
+                }
+
+                sectionLayer(.sentiment) {
+                    RetailInvestorView(
+                        store: sentimentStore,
+                        marketStore: marketStore,
+                        showsDetail: $showsDetail
+                    )
+                }
+
+                sectionLayer(.chinaMacro) {
+                    ChinaMacroView()
+                }
+
+                sectionLayer(.institutionResearch) {
+                    InstitutionResearchView()
+                }
+
+                sectionLayer(.holdings) {
+                    FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
+                }
+
+                sectionLayer(.industries) {
+                    IndustryPanoramaView()
+                }
+
+                sectionLayer(.gdp) {
+                    CountryGDPRankingView(showsDetail: $showsDetail)
+                }
             }
-
-            TabView(selection: $section) {
-                MarketView(
-                    store: marketStore,
-                    showsDetail: $marketShowsDetail,
-                    onCompactHeaderChange: { compact in
-                        guard section == .market, headerIsCompact != compact else { return }
-                        withAnimation(.easeOut(duration: 0.18)) { headerIsCompact = compact }
-                    }
-                )
-                    .tag(InvestmentSection.market)
-
-                RetailInvestorView(
-                    store: sentimentStore,
-                    marketStore: marketStore,
-                    showsDetail: $showsDetail
-                )
-                .tag(InvestmentSection.sentiment)
-
-                ChinaMacroView()
-                    .tag(InvestmentSection.chinaMacro)
-
-                InstitutionResearchView()
-                    .tag(InvestmentSection.institutionResearch)
-
-                FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
-                    .tag(InvestmentSection.holdings)
-
-                IndustryPanoramaView()
-                    .tag(InvestmentSection.industries)
-
-                CountryGDPRankingView(showsDetail: $showsDetail)
-                    .tag(InvestmentSection.gdp)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .opacity(contentOpacity)
+            .scaleEffect(contentScale)
+            .offset(y: contentOffset)
         }
         .background(InvestmentDesign.canvas)
+        .overlay(alignment: .bottomTrailing) {
+            if !showsDetail {
+                HStack(alignment: .bottom, spacing: 8) {
+                    InvestmentSectionSelector(selection: $section)
+                    InvestmentCategorySelector(selection: $section)
+                }
+                .padding(.trailing, 14)
+                .padding(.bottom, 10)
+            }
+        }
         .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
         .onChange(of: holdingsShowsDetail) { _, value in
             showsDetail = value
         }
         .onChange(of: section) { _, value in
+            transitionPage(to: value)
             marketShowsDetail = false
             holdingsShowsDetail = false
             showsDetail = false
-            headerIsCompact = false
         }
         .onDisappear {
+            transitionTask?.cancel()
             showsDetail = false
+        }
+    }
+
+    private func sectionLayer<Content: View>(
+        _ target: InvestmentSection,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isSelected = displayedSection == target
+
+        return content()
+            .opacity(isSelected ? 1 : 0)
+            .allowsHitTesting(isSelected)
+            .accessibilityHidden(!isSelected)
+            .zIndex(isSelected ? 1 : 0)
+    }
+
+    private func transitionPage(to target: InvestmentSection) {
+        transitionTask?.cancel()
+        guard displayedSection != target else { return }
+
+        guard !reduceMotion else {
+            displayedSection = target
+            contentOpacity = 1
+            contentScale = 1
+            contentOffset = 0
+            return
+        }
+
+        transitionTask = Task { @MainActor in
+            withAnimation(.easeIn(duration: 0.10)) {
+                contentOpacity = 0
+                contentScale = 0.996
+                contentOffset = -2
+            }
+
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled, section == target else { return }
+
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                displayedSection = target
+                contentScale = 1.004
+                contentOffset = 3
+            }
+
+            withAnimation(.easeOut(duration: 0.18)) {
+                contentOpacity = 1
+                contentScale = 1
+                contentOffset = 0
+            }
         }
     }
 }
 
-private struct InvestmentHeader: View {
+private struct InvestmentSectionSelector: View {
     @Binding var selection: InvestmentSection
-    let isCompact: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isExpanded = false
+
+    private var sections: [InvestmentSection] {
+        selection.category.sections
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 7) {
+            if isExpanded {
+                VStack(alignment: .trailing, spacing: 7) {
+                    ForEach(sections.filter { $0 != selection }) { item in
+                        Button {
+                            withAnimation(reduceMotion ? nil : InvestmentMotion.selection) {
+                                selection = item
+                                isExpanded = false
+                            }
+                        } label: {
+                            selectorLabel(item, showsChevron: false)
+                                .foregroundStyle(.primary)
+                                .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                                }
+                                .shadow(color: Color.black.opacity(0.08), radius: 7, y: 3)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(item.subsectionTitle)
+                    }
+                }
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .scale(scale: 0.96, anchor: .bottomTrailing))
+                        .combined(with: .opacity)
+                )
+            }
+
+            Button {
+                withAnimation(reduceMotion ? nil : InvestmentMotion.reveal) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                selectorLabel(selection, showsChevron: true)
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(InvestmentDesign.accent.opacity(0.24), lineWidth: 0.8)
+                    }
+                    .shadow(color: Color.black.opacity(0.10), radius: 8, y: 3)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("投资子栏目")
+            .accessibilityValue(selection.subsectionTitle)
+            .accessibilityHint(isExpanded ? "轻点收起" : "轻点展开")
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+        .onChange(of: selection.category) { _, _ in
+            isExpanded = false
+        }
+    }
+
+    private func selectorLabel(
+        _ item: InvestmentSection,
+        showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: item.icon)
+                .font(.system(size: 14, weight: .semibold))
+
+            Text(item.subsectionTitle)
+                .font(.system(size: 14, weight: .semibold))
+
+            if showsChevron {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minWidth: 94, minHeight: 40)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct InvestmentCategorySelector: View {
+    @Binding var selection: InvestmentSection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isExpanded = false
 
     private var category: InvestmentCategory {
         selection.category
     }
 
     var body: some View {
-        Group {
-            if !isCompact {
-                compactHeader
-                    .padding(.horizontal, 16)
-                    .padding(.top, 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 8)
-                    .background(InvestmentDesign.surface)
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(InvestmentDesign.divider)
-                            .frame(height: 0.5)
+        VStack(alignment: .trailing, spacing: 7) {
+            if isExpanded {
+                VStack(alignment: .trailing, spacing: 7) {
+                    ForEach(InvestmentCategory.allCases.filter { $0 != category }) { item in
+                        categoryButton(item)
                     }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                .transition(
+                    .move(edge: .bottom)
+                        .combined(with: .scale(scale: 0.96, anchor: .bottomTrailing))
+                        .combined(with: .opacity)
+                )
             }
-        }
-        .animation(.easeOut(duration: 0.18), value: category)
-        .animation(.easeOut(duration: 0.18), value: isCompact)
-    }
 
-    private var compactHeader: some View {
-        HStack(spacing: 8) {
-            Menu {
-                ForEach(InvestmentCategory.allCases) { item in
-                    Button(item.rawValue) { selection = item.defaultSection }
+            Button {
+                withAnimation(reduceMotion ? nil : InvestmentMotion.reveal) {
+                    isExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Text(category.rawValue).font(.subheadline.weight(.semibold))
-                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
-                }
-                .foregroundStyle(primaryColor(isSelected: true))
-                .frame(minHeight: 36)
+                selectorLabel(category, showsChevron: true)
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(InvestmentDesign.accent.opacity(0.24), lineWidth: 0.8)
+                    }
+                    .shadow(color: Color.black.opacity(0.10), radius: 8, y: 3)
             }
-            Divider().frame(height: 22)
-            ForEach(category.sections) { section in
-                Button { selection = section } label: {
-                    Text(section.subsectionTitle)
-                        .font(.subheadline.weight(selection == section ? .semibold : .regular))
-                        .foregroundStyle(secondaryColor(isSelected: selection == section))
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 36)
-                        .background(secondaryBackground(isSelected: selection == section), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == section ? .isSelected : [])
-            }
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
+            .accessibilityLabel("投资栏目")
+            .accessibilityValue(category.rawValue)
+            .accessibilityHint(isExpanded ? "轻点收起" : "轻点展开")
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+        .onChange(of: category) { _, _ in
+            isExpanded = false
         }
     }
 
-    private func primaryColor(isSelected: Bool) -> Color {
-        return isSelected ? .primary : .secondary
+    private func categoryButton(_ item: InvestmentCategory) -> some View {
+        Button {
+            withAnimation(reduceMotion ? nil : InvestmentMotion.selection) {
+                selection = item.defaultSection
+                isExpanded = false
+            }
+        } label: {
+            selectorLabel(item, showsChevron: false)
+                .foregroundStyle(.primary)
+                .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                }
+                .shadow(color: Color.black.opacity(0.08), radius: 7, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.rawValue)
     }
 
-    private func secondaryColor(isSelected: Bool) -> Color {
-        return isSelected ? InvestmentDesign.accent : .secondary
-    }
+    private func selectorLabel(
+        _ item: InvestmentCategory,
+        showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: item.icon)
+                .font(.system(size: 14, weight: .semibold))
 
-    private func secondaryBackground(isSelected: Bool) -> Color {
-        return isSelected ? InvestmentDesign.accentSoft : InvestmentDesign.secondarySurface
+            Text(item.rawValue)
+                .font(.system(size: 14, weight: .semibold))
+
+            if showsChevron {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minWidth: 94, minHeight: 40)
+        .contentShape(Rectangle())
     }
 }

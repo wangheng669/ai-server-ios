@@ -997,11 +997,9 @@ private struct ChinaMacroMetricSheet: View {
             .background(InvestmentDesign.canvas)
             .navigationTitle(metric.title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                        .fontWeight(.semibold)
-                }
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭宏观指标详情")
+                    .padding(16)
             }
         }
         .onAppear { selectedYear = initialYear ?? points.last?.year }

@@ -19,6 +19,7 @@ struct FamousHoldingsSummary: Codable {
     let increased: Int
     let decreased: Int
     let exited: Int
+    let unchanged: Int?
 }
 
 struct FamousHoldingsManager: Codable, Identifiable {
@@ -29,16 +30,61 @@ struct FamousHoldingsManager: Codable, Identifiable {
     let portraitUrl: String?
     let reportDate: String
     let filingDate: String
+    let holdingsCount: Int?
     let positionsCount: Int
     let totalValueUsd: Double
     let summary: FamousHoldingsSummary
     let changesCount: Int
     let changes: [FamousHoldingChange]
+    let positions: [FamousHoldingChange]?
+    let exitedPositions: [FamousHoldingChange]?
 
     var id: String { key }
+
+    var valueChangeFromPreviousReport: FamousHoldingsValueChange? {
+        guard let positions,
+              let exitedPositions,
+              positions.count == positionsCount,
+              exitedPositions.count == summary.exited,
+              positions.count(where: { $0.action == .new }) == summary.new,
+              positions.count(where: { $0.action == .increased }) == summary.increased,
+              positions.count(where: { $0.action == .decreased }) == summary.decreased,
+              summary.unchanged.map({ unchangedCount in
+                  positions.count(where: { $0.action == .unchanged }) == unchangedCount
+              }) ?? true,
+              positions.allSatisfy({ $0.action != .exited && $0.previousValueUsd != nil }),
+              exitedPositions.allSatisfy({ $0.action == .exited && $0.previousValueUsd != nil }) else {
+            return nil
+        }
+
+        let currentTotalValueUsd = positions.reduce(0) { $0 + $1.valueUsd }
+        let currentTotalTolerance = max(1, abs(totalValueUsd) * 0.000_000_001)
+        guard abs(currentTotalValueUsd - totalValueUsd) <= currentTotalTolerance else { return nil }
+
+        let previousCurrentPositionsValueUsd = positions.reduce(0) { partialResult, change in
+            partialResult + (change.previousValueUsd ?? 0)
+        }
+        let previousExitedPositionsValueUsd = exitedPositions.reduce(0) { partialResult, change in
+            partialResult + (change.previousValueUsd ?? 0)
+        }
+        let previousTotalValueUsd = previousCurrentPositionsValueUsd + previousExitedPositionsValueUsd
+        guard previousTotalValueUsd > 0 else { return nil }
+
+        let amountUsd = totalValueUsd - previousTotalValueUsd
+        return FamousHoldingsValueChange(
+            amountUsd: amountUsd,
+            percent: amountUsd / previousTotalValueUsd * 100
+        )
+    }
+}
+
+struct FamousHoldingsValueChange: Equatable {
+    let amountUsd: Double
+    let percent: Double
 }
 
 struct FamousHoldingChange: Codable, Identifiable {
+    private let recordId: String?
     let symbol: String?
     let name: String
     let companyLogo: String?
@@ -47,8 +93,16 @@ struct FamousHoldingChange: Codable, Identifiable {
     let weightPct: Double
     let weightChangePct: Double
     let valueUsd: Double
+    let previousValueUsd: Double?
 
-    var id: String { "\(symbol ?? name)-\(action.rawValue)" }
+    var id: String {
+        recordId ?? "\(symbol ?? name)-\(action.rawValue)-\(weightPct)-\(valueUsd)"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case recordId = "id"
+        case symbol, name, companyLogo, action, previousWeightPct, weightPct, weightChangePct, valueUsd, previousValueUsd
+    }
 }
 
 enum FamousHoldingAction: String, Codable {
@@ -56,6 +110,7 @@ enum FamousHoldingAction: String, Codable {
     case increased
     case decreased
     case exited
+    case unchanged
 
     var title: String {
         switch self {
@@ -63,6 +118,7 @@ enum FamousHoldingAction: String, Codable {
         case .increased: "增持"
         case .decreased: "减持"
         case .exited: "清仓"
+        case .unchanged: "未变动"
         }
     }
 }

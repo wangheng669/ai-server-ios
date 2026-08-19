@@ -46,18 +46,21 @@ if [[ "$workflow_started" != null ]]; then
 fi
 
 commit_message=${IOS_COMMIT_MESSAGE:-}
-if [[ -z "$commit_message" && -n "${GITHUB_SHA:-}" ]] && git cat-file -e "${GITHUB_SHA}^{commit}" 2>/dev/null; then
-  commit_message=$(git log -1 --format=%s "$GITHUB_SHA")
+deployment_commit=${IOS_DEPLOYMENT_COMMIT:-${GITHUB_SHA:-}}
+deployment_source_branch=${IOS_DEPLOYMENT_SOURCE_BRANCH:-${GITHUB_REF_NAME:-}}
+deployment_run_id=${IOS_DEPLOYMENT_RUN_ID:-${GITHUB_RUN_ID:-}}
+if [[ -z "$commit_message" && -n "$deployment_commit" ]] && git cat-file -e "${deployment_commit}^{commit}" 2>/dev/null; then
+  commit_message=$(git log -1 --format=%s "$deployment_commit")
 fi
 
 payload=$(jq -cn \
   --arg phase "$phase" \
   --argjson progress "$progress" \
   --arg stage "$stage" \
-  --arg commit "${GITHUB_SHA:-}" \
+  --arg commit "$deployment_commit" \
   --arg commitMessage "$commit_message" \
-  --arg sourceBranch "${GITHUB_REF_NAME:-}" \
-  --arg runId "${GITHUB_RUN_ID:-}" \
+  --arg sourceBranch "$deployment_source_branch" \
+  --arg runId "$deployment_run_id" \
   --argjson preflight "$preflight_seconds" \
   --argjson prepare "$prepare_seconds" \
   --argjson deviceWarm "$device_warm_seconds" \

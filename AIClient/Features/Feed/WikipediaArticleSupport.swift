@@ -315,6 +315,14 @@ struct WikipediaReaderView: View {
             }
         }
         .background(archivePaper.ignoresSafeArea())
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetCloseButton(
+                action: dismiss.callAsFunction,
+                accessibilityLabel: entity.url.isWikipediaURL ? "关闭维基百科" : "关闭网页"
+            )
+            .padding(.trailing, 16)
+            .padding(.bottom, 76)
+        }
         .task(id: entity.url) { await loadArticle() }
         .sheet(item: $presentedLink) { linkedEntity in
             if linkedEntity.url.isWikipediaURL {
@@ -322,6 +330,13 @@ struct WikipediaReaderView: View {
                     .wikipediaReaderPresentation()
             } else {
                 ServerArticleReaderView(url: linkedEntity.url)
+                    .overlay(alignment: .bottomTrailing) {
+                        DetailSheetCloseButton(
+                            action: { presentedLink = nil },
+                            accessibilityLabel: "关闭网页详情"
+                        )
+                        .padding(16)
+                    }
             }
         }
     }
@@ -359,14 +374,6 @@ struct WikipediaReaderView: View {
                             .foregroundStyle(.secondary)
                             .padding(.trailing, 8)
                     }
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(archiveAccent)
-                            .frame(width: 40, height: 40)
-                            .background(archiveAccent.opacity(0.07), in: Circle())
-                    }
-                    .accessibilityLabel(entity.url.isWikipediaURL ? "关闭维基百科" : "关闭网页")
                 }
             }
             .padding(.horizontal, 18)

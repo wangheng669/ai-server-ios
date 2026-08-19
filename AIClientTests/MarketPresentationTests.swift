@@ -2,6 +2,23 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testCompanyLogoPathsSurviveMarketStoreRecreation() throws {
+        let suiteName = "MarketPresentationTests.companyLogoPaths.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let paths = ["AAPL": "/img/company-logos/aapl.png", "MSFT": "/img/company-logos/msft.png"]
+
+        MarketCompanyLogoPathCache.save(paths, defaults: defaults)
+
+        XCTAssertEqual(MarketCompanyLogoPathCache.load(defaults: defaults), paths)
+        XCTAssertTrue(
+            MarketCompanyLogoPathCache.load(
+                defaults: defaults,
+                now: Date(timeIntervalSinceNow: 31 * 24 * 60 * 60)
+            ).isEmpty
+        )
+    }
+
     func testChartFallsBackOnlyWhenPrimaryHasNoDrawableLine() {
         let primary = [chartPoint(timestamp: 1, close: 10)]
         let fallback = [chartPoint(timestamp: 1, close: 10), chartPoint(timestamp: 2, close: 11)]
@@ -1029,6 +1046,26 @@ final class MarketPresentationTests: XCTestCase {
         let points = try JSONDecoder().decode([MarketChartPoint].self, from: data)
 
         XCTAssertEqual(marketChartDisplayPoints(points).map(\.timestamp), [2])
+    }
+
+    func testMarketSampledChartTrendUsesWholeDayAndKeepsEndpoints() {
+        var points: [MarketChartPoint] = []
+        for index in 0..<120 {
+            let value = Double(index + 1)
+            let point = MarketChartPoint(
+                timestamp: Int64(index), open: value, high: value,
+                low: value, close: value, volume: nil,
+                state: "confirmed", source: "tradingview", session: "regular"
+            )
+            points.append(point)
+        }
+
+        let values = marketSampledChartTrend(points, limit: 40)
+
+        XCTAssertEqual(values.count, 40)
+        XCTAssertEqual(values.first, 1)
+        XCTAssertEqual(values.last, 120)
+        XCTAssertTrue(values.contains { $0 > 40 && $0 < 80 })
     }
 
     func testVolumeScaleUsesRobustPercentileCeiling() throws {

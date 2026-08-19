@@ -37,7 +37,7 @@ if git diff --name-only "$merge_base"...HEAD -- ci/sign-and-install-ios.sh ci/te
   bash ci/test-sign-and-install-ios.sh
 fi
 
-if git diff --name-only "$merge_base"...HEAD -- ci/classify-ios-test-scope.sh ci/test-classify-ios-test-scope.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
+if git diff --name-only "$merge_base"...HEAD -- ci/classify-ios-test-scope.sh ci/is-low-risk-ios-diff.sh ci/test-classify-ios-test-scope.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
   bash ci/test-classify-ios-test-scope.sh
 fi
 
@@ -45,8 +45,16 @@ if git diff --name-only "$merge_base"...HEAD -- ci/verify-ios-device-stability.s
   bash ci/test-verify-ios-device-stability.sh
 fi
 
+if git diff --name-only "$merge_base"...HEAD -- ci/prepare-central-runner-parallel.sh ci/test-central-device-delivery-policy.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
+  bash ci/test-central-device-delivery-policy.sh
+fi
+
 if git diff --name-only "$merge_base"...HEAD -- ci/local-central-merge.sh ci/actions-outage-fallback-watch.sh | grep -q .; then
   bash ci/test-actions-outage-fallback-watch.sh
+fi
+
+if git diff --name-only "$merge_base"...HEAD -- ci/with-ios-simulator-lock.sh ci/test-with-ios-simulator-lock.sh | grep -q .; then
+  bash ci/test-with-ios-simulator-lock.sh
 fi
 
 if python3 -c 'import yaml' >/dev/null 2>&1; then

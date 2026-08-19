@@ -42,35 +42,44 @@ device_started_epoch=$(date +%s)
 ) &
 device_pid=$!
 
-simulator_started_epoch=$(date +%s)
-(
-  # The inner script intentionally expands its positional parameters in the
-  # child shell rather than in this parent process.
-  # shellcheck disable=SC2016
-  ./ci/with-ios-simulator-lock.sh \
-    --label "central cache warm ${GITHUB_RUN_ID:-local}" \
-    -- bash -c '
-      set -euo pipefail
-      xcrun simctl boot "iPhone 16e" 2>/dev/null || true
-      xcrun simctl bootstatus "iPhone 16e" -b
-      xcodebuild build-for-testing \
-        -project AIServerClient.xcodeproj \
-        -scheme AIServerClient \
-        -destination "platform=iOS Simulator,name=iPhone 16e" \
-        -derivedDataPath "$1/central-merge-simulator" \
-        -clonedSourcePackagesDirPath "$1/source-packages" \
-        CODE_SIGNING_ALLOWED=NO
-    ' _ "$cache_root"
-) &
-simulator_pid=$!
+simulator_seconds=0
+simulator_status=0
+simulator_pid=
+if [[ "${IOS_SKIP_SIMULATOR_WARM:-false}" != true ]]; then
+  simulator_started_epoch=$(date +%s)
+  (
+    ./ci/with-ios-simulator-lock.sh \
+      --label "central cache warm ${GITHUB_RUN_ID:-local}" \
+      --wait-seconds 1200 \
+      -- bash -c '
+        set -euo pipefail
+        xcrun simctl boot "iPhone 16e" 2>/dev/null || true
+        xcrun simctl bootstatus "iPhone 16e" -b
+      '
+    # Compilation uses isolated DerivedData and does not install or launch the
+    # test runner, so it must not extend the shared simulator reservation.
+    xcodebuild build-for-testing \
+      -project AIServerClient.xcodeproj \
+      -scheme AIServerClient \
+      -destination "platform=iOS Simulator,name=iPhone 16e" \
+      -derivedDataPath "$cache_root/central-merge-simulator" \
+      -clonedSourcePackagesDirPath "$cache_root/source-packages" \
+      CODE_SIGNING_ALLOWED=NO
+  ) &
+  simulator_pid=$!
+else
+  echo "Low-risk App change; skipping shared simulator cache warm."
+fi
 
 set +e
 wait "$device_pid"
 device_status=$?
 device_seconds=$(($(date +%s) - device_started_epoch))
-wait "$simulator_pid"
-simulator_status=$?
-simulator_seconds=$(($(date +%s) - simulator_started_epoch))
+if [[ -n "$simulator_pid" ]]; then
+  wait "$simulator_pid"
+  simulator_status=$?
+  simulator_seconds=$(($(date +%s) - simulator_started_epoch))
+fi
 set -e
 
 echo "Dependency resolution completed in ${dependency_seconds}s."
@@ -92,6 +101,8 @@ if ((simulator_status != 0)); then
   exit "$simulator_status"
 fi
 
-# The merge job may reuse this exact build-for-testing output when the merged
-# tree is byte-for-byte identical to the task commit that produced it.
-git rev-parse HEAD > "$cache_root/central-merge-simulator/prewarmed-source-sha"
+if [[ "${IOS_SKIP_SIMULATOR_WARM:-false}" != true ]]; then
+  # The merge job may reuse this exact build-for-testing output when the merged
+  # tree is byte-for-byte identical to the task commit that produced it.
+  git rev-parse HEAD > "$cache_root/central-merge-simulator/prewarmed-source-sha"
+fi

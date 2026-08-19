@@ -2,8 +2,49 @@ import SwiftUI
 import AVKit
 import WebKit
 
+private struct XBrandMark: View {
+    var body: some View {
+        XBrandLogoShape()
+            .fill(.primary, style: FillStyle(eoFill: true))
+            .accessibilityHidden(true)
+    }
+}
+
+private struct XBrandLogoShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let scaleX = rect.width / 24
+        let scaleY = rect.height / 24
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * scaleX, y: rect.minY + y * scaleY)
+        }
+
+        var path = Path()
+        path.move(to: point(18.244, 2.25))
+        path.addLine(to: point(21.552, 2.25))
+        path.addLine(to: point(14.325, 10.51))
+        path.addLine(to: point(22.827, 21.75))
+        path.addLine(to: point(16.17, 21.75))
+        path.addLine(to: point(10.956, 14.933))
+        path.addLine(to: point(4.99, 21.75))
+        path.addLine(to: point(1.68, 21.75))
+        path.addLine(to: point(9.41, 12.915))
+        path.addLine(to: point(1.254, 2.25))
+        path.addLine(to: point(8.08, 2.25))
+        path.addLine(to: point(12.793, 8.481))
+        path.closeSubpath()
+
+        path.move(to: point(17.083, 19.77))
+        path.addLine(to: point(18.916, 19.77))
+        path.addLine(to: point(7.084, 4.126))
+        path.addLine(to: point(5.117, 4.126))
+        path.closeSubpath()
+        return path
+    }
+}
+
 struct PostDetailView: View {
     private let presentedAsSheet: Bool
+    private let shouldRefreshNewYorkTimesArticle: Bool
     @State private var post: Post
     @State private var player: AVPlayer?
     @State private var detectedVideoAspectRatio: CGFloat?
@@ -67,6 +108,7 @@ struct PostDetailView: View {
         presentedAsSheet: Bool = false
     ) {
         self.presentedAsSheet = presentedAsSheet
+        self.shouldRefreshNewYorkTimesArticle = post.isNewYorkTimes && preloadedNewYorkTimesArticle == nil
         let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
             ? (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
             : nil)
@@ -111,6 +153,18 @@ struct PostDetailView: View {
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
+        .overlay {
+            if let destination = presentedXueqiuLink {
+                xueqiuBrowserOverlay(destination)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if presentedAsSheet {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
+                    .padding(.trailing, 16)
+                    .padding(.bottom, sheetCloseBottomPadding)
+            }
+        }
         .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) || isWeChatArticle ? "" : "详情")))))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar((post.isRSS || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
@@ -120,7 +174,6 @@ struct PostDetailView: View {
             WikipediaReaderView(entity: entity)
                 .wikipediaReaderPresentation()
         }
-        .inAppBrowserCover(item: $presentedXueqiuLink)
         .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
         // navigation pop recognizer on this screen prevents a scrub from popping
@@ -136,14 +189,6 @@ struct PostDetailView: View {
             }
         }
         .toolbar {
-            if presentedAsSheet && !usesCustomDismissControl {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("关闭动态详情")
-                }
-            }
             if post.isBilibili {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if let link = post.linkURL {
@@ -207,6 +252,11 @@ struct PostDetailView: View {
         } message: {
             Text(speechErrorMessage ?? "请稍后重试")
         }
+    }
+
+    private var sheetCloseBottomPadding: CGFloat {
+        post.isWeiboRSS || isWeChatArticle || isGenericRSSDetail
+            || ["知乎", "Truth", "雪球"].contains(post.sourceName) ? 72 : 16
     }
 
     @ViewBuilder
@@ -315,6 +365,9 @@ struct PostDetailView: View {
                     .frame(width: 44, height: 44)
             }
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer(minLength: 0)
 
@@ -413,7 +466,13 @@ struct PostDetailView: View {
     }
 
     private var isGenericRSSDetail: Bool {
-        post.isRSS && !post.isNewYorkTimes && !isWeChatArticle && !post.isWeiboRSS
+        post.isRSS
+            && !post.isNewYorkTimes
+            && !isWeChatArticle
+            && !post.isBilibili
+            && !post.isYouTube
+            && !post.isXueqiu
+            && !post.isWeiboRSS
     }
 
     private var rssDetailSummary: String? {
@@ -438,6 +497,9 @@ struct PostDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(dismissAccessibilityLabel)
+                .opacity(presentedAsSheet ? 0 : 1)
+                .disabled(presentedAsSheet)
+                .accessibilityHidden(presentedAsSheet)
 
                 Spacer(minLength: 0)
             }
@@ -502,6 +564,9 @@ struct PostDetailView: View {
                     .frame(width: 44, height: 44)
             }
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer(minLength: 0)
             Text(post.sourceName)
@@ -788,6 +853,9 @@ struct PostDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(dismissAccessibilityLabel)
+                .opacity(presentedAsSheet ? 0 : 1)
+                .disabled(presentedAsSheet)
+                .accessibilityHidden(presentedAsSheet)
 
                 Spacer()
 
@@ -1132,6 +1200,41 @@ struct PostDetailView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) { xueqiuDetailBottomBar }
+        .accessibilityIdentifier("xueqiu-post-detail-\(post.id)")
+    }
+
+    private func xueqiuBrowserOverlay(_ destination: InAppBrowserDestination) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button { presentedXueqiuLink = nil } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("返回雪球详情")
+
+                Text(destination.url.host ?? "网页")
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+
+                Spacer(minLength: 34)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 50)
+            .background(.bar)
+
+            Divider().opacity(0.55)
+
+            InAppBrowserSheet(
+                url: destination.url,
+                showsTitleHeader: false,
+                onDismiss: { presentedXueqiuLink = nil }
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityIdentifier("xueqiu-browser-overlay")
     }
 
     private var xueqiuDetailAuthor: some View {
@@ -1159,7 +1262,7 @@ struct PostDetailView: View {
             Spacer(minLength: 0)
 
             if post.linkURL != nil {
-                Button { openOriginal() } label: {
+                Button { openXueqiuOriginal() } label: {
                     Image("XueqiuMark")
                         .resizable()
                         .renderingMode(.original)
@@ -1273,6 +1376,11 @@ struct PostDetailView: View {
             presentedXueqiuLink = InAppBrowserDestination(url: url)
             return .handled
         }
+    }
+
+    private func openXueqiuOriginal() {
+        guard let url = post.linkURL else { return }
+        presentedXueqiuLink = InAppBrowserDestination(url: url)
     }
 
     private var youtubeDetail: some View {
@@ -1398,6 +1506,9 @@ struct PostDetailView: View {
             }
             .foregroundStyle(.primary)
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer()
             Text("Truth")
@@ -1566,6 +1677,9 @@ struct PostDetailView: View {
             }
             .foregroundStyle(.primary)
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             HStack(spacing: 5) {
                 Text("知乎")
@@ -2101,19 +2215,6 @@ struct PostDetailView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 0) {
                         xAuthorHeader
-                        if !post.isChineseXSource,
-                           post.hasTranslation || xLiveTranslationText != nil {
-                            HStack(spacing: 5) {
-                                Image(systemName: "character.bubble")
-                                Text(showsOriginal ? xOriginalLanguageLabel : "翻译自英语")
-                                Button(showsOriginal ? "显示翻译" : "显示原文") { showsOriginal.toggle() }
-                                    .foregroundStyle(.blue)
-                            }
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 16)
-                        }
-
                         Group {
                             if isLoadingXFullText {
                                 xFullTextLoadingPlaceholder
@@ -2151,8 +2252,12 @@ struct PostDetailView: View {
                                 .padding(.top, 14)
                         }
 
-                        if let quote = post.meta?.quotedTweet {
-                            xQuotedPostCard(quote)
+                        if let quote = post.xQuotedPost {
+                            XFeedQuotedPostCard(
+                                quote: quote,
+                                availableWidth: UIScreen.main.bounds.width - 42,
+                                enablesTextSelection: true
+                            )
                                 .padding(.top, 16)
                         }
 
@@ -2211,24 +2316,18 @@ struct PostDetailView: View {
                     .frame(width: 40, height: 48)
             }
             .accessibilityLabel(dismissAccessibilityLabel)
+            .opacity(presentedAsSheet ? 0 : 1)
+            .disabled(presentedAsSheet)
+            .accessibilityHidden(presentedAsSheet)
 
             Spacer()
             Text("帖子")
                 .font(.system(size: 17, weight: .bold))
             Spacer()
 
-            Menu {
-                if let link = post.linkURL {
-                    ShareLink(item: link) {
-                        Label("分享帖子", systemImage: "square.and.arrow.up")
-                    }
-                }
-                Button("在 X 中打开") { openOriginal() }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .bold))
-                    .frame(width: 40, height: 48)
-            }
+            Color.clear
+                .frame(width: 40, height: 48)
+                .accessibilityHidden(true)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 8)
@@ -2249,10 +2348,6 @@ struct PostDetailView: View {
         return XPostTextFormatter.detailText(value)
     }
 
-    private var xOriginalLanguageLabel: String {
-        post.isChineseXSource ? "原文" : "英语原文"
-    }
-
     private var xDisplayedDetailParagraphs: [String] {
         XPostTextFormatter.paragraphs(xDisplayedDetailText)
     }
@@ -2271,24 +2366,49 @@ struct PostDetailView: View {
 
     private var xAuthorHeader: some View {
         HStack(spacing: 9) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 40)
+            AvatarView(url: xDetailAuthorAvatarURL, name: xDetailAuthorName, size: 40)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(post.authorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
-                    Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
+                    Text(xDetailAuthorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
+                    if xDetailAuthorIsVerified {
+                        Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
+                    }
                 }
-                if let handle = post.authorHandle {
+                if let handle = xDetailAuthorHandle {
                     Text(handle).font(.system(size: 14)).foregroundStyle(.secondary)
                 }
             }
             Spacer()
-            Button { openOriginal() } label: {
-                Text("X.com")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.primary)
+            Button { openXOriginal() } label: {
+                XBrandMark()
+                    .frame(width: 22, height: 22)
+                    .frame(width: 40, height: 40)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("在 X App 中打开")
         }
+    }
+
+    private var xDetailAuthorName: String {
+        let name = xLiveDetail?.author?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? post.authorName : name
+    }
+
+    private var xDetailAuthorHandle: String? {
+        if let screenName = xLiveDetail?.author?.screenName?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t")),
+           !screenName.isEmpty {
+            return "@\(screenName)"
+        }
+        return post.authorHandle
+    }
+
+    private var xDetailAuthorAvatarURL: URL? {
+        xLiveDetail?.author?.profileImageURL.flatMap(MediaURL.image) ?? post.avatarURL
+    }
+
+    private var xDetailAuthorIsVerified: Bool {
+        xLiveDetail?.author?.verified ?? post.user?.verified ?? false
     }
 
     private func xStyledParagraph(_ paragraph: String) -> AttributedString {
@@ -2407,83 +2527,13 @@ struct PostDetailView: View {
         return xLiveReplyContext
     }
 
-    private func xQuotedPostCard(_ quote: XQuotedPost) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                if let avatar = quote.author?.profileImageURL.flatMap(MediaURL.image) {
-                    RemoteImage(url: avatar, height: 28, cornerRadius: 14)
-                        .frame(width: 28, height: 28)
-                        .clipped()
-                }
-
-                Text(quote.author?.name ?? "引用动态")
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-
-                if let handle = quote.author?.handle {
-                    Text(handle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-
-            if let text = quote.displayText {
-                Text(text)
-                    .font(.system(size: 15))
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-
-            ForEach(Array((quote.media ?? []).enumerated()), id: \.offset) { _, media in
-                xQuotedMedia(media)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
-        }
-    }
-
-    @ViewBuilder
-    private func xQuotedMedia(_ media: XQuotedMedia) -> some View {
-        if let videoURL = media.playbackURL {
-            XVideoPlayerView(
-                url: videoURL,
-                fallbackURL: nil,
-                thumbnailURL: media.previewURL,
-                generatesThumbnailWhenMissing: false
-            )
-                .frame(height: xQuotedMediaHeight(media))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else if let imageURL = media.displayURL {
-            RemoteImage(
-                url: imageURL,
-                height: xQuotedMediaHeight(media),
-                cornerRadius: 8,
-                contentMode: .fit
-            )
-            .frame(maxWidth: .infinity)
-            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-            .clipped()
-        }
-    }
-
-    private func xQuotedMediaHeight(_ media: XQuotedMedia) -> CGFloat {
-        let width = UIScreen.main.bounds.width - 42
-        guard let mediaWidth = media.width,
-              let mediaHeight = media.height,
-              mediaWidth > 0,
-              mediaHeight > 0 else { return 190 }
-        return min(width * CGFloat(mediaHeight) / CGFloat(mediaWidth), 460)
-    }
-
     private var detailImageHeight: CGFloat {
-        guard let image = post.images?.first, let width = image.width, let height = image.height, width > 0 else { return 300 }
+        let dimensions = post.images?.first.map { ($0.width, $0.height) }
+            ?? xLiveDetail?.imageMedia.first.map { ($0.width, $0.height) }
+        guard let dimensions,
+              let width = dimensions.0,
+              let height = dimensions.1,
+              width > 0 else { return 300 }
         let availableWidth = UIScreen.main.bounds.width - 16
         return min(availableWidth * CGFloat(height) / CGFloat(width), 620)
     }
@@ -2520,7 +2570,9 @@ struct PostDetailView: View {
         } else {
             PostMediaGrid(
                 post: post,
-                imageURLs: post.isXueqiu ? post.xueqiuUnplacedImageURLs : nil,
+                imageURLs: post.sourceName == "X"
+                    ? xDetailImageURLs
+                    : (post.isXueqiu ? post.xueqiuUnplacedImageURLs : nil),
                 singleImageHeight: detailImageHeight,
                 availableWidth: UIScreen.main.bounds.width - 16,
                 cornerRadius: 6
@@ -2532,6 +2584,10 @@ struct PostDetailView: View {
         post.videoURLs.first ?? xLiveDetail?.videoURL
     }
 
+    private var xDetailImageURLs: [URL] {
+        post.imageURLs.isEmpty ? (xLiveDetail?.imageURLs ?? []) : post.imageURLs
+    }
+
     private var xDetailVideoFallbackURL: URL? {
         nil
     }
@@ -2541,7 +2597,7 @@ struct PostDetailView: View {
     }
 
     private var xDetailHasMedia: Bool {
-        xDetailVideoURL != nil || !post.imageURLs.isEmpty
+        xDetailVideoURL != nil || !xDetailImageURLs.isEmpty
     }
 
     private var xVideoHeight: CGFloat {
@@ -2569,6 +2625,36 @@ struct PostDetailView: View {
 
     private func openOriginal() {
         if let link = post.linkURL { openURL(link) }
+    }
+
+    private func openXOriginal() {
+        guard let link = post.linkURL else { return }
+        guard let appURL = xAppURL(for: link) else {
+            openURL(link)
+            return
+        }
+
+        UIApplication.shared.open(appURL, options: [:]) { didOpen in
+            guard !didOpen else { return }
+            DispatchQueue.main.async {
+                openURL(link)
+            }
+        }
+    }
+
+    private func xAppURL(for link: URL) -> URL? {
+        let pathComponents = link.pathComponents.filter { $0 != "/" }
+        guard let statusIndex = pathComponents.firstIndex(where: { $0.lowercased() == "status" }),
+              pathComponents.indices.contains(statusIndex + 1) else { return nil }
+
+        let statusID = pathComponents[statusIndex + 1]
+        guard !statusID.isEmpty, statusID.allSatisfy(\.isNumber) else { return nil }
+
+        var components = URLComponents()
+        components.scheme = "twitter"
+        components.host = "status"
+        components.queryItems = [URLQueryItem(name: "id", value: statusID)]
+        return components.url
     }
 
     private func loadDetail() async {
@@ -2689,28 +2775,31 @@ struct PostDetailView: View {
     }
 
     private func loadNewYorkTimesDetail() async {
-        guard !post.isSynthetic, let link = post.linkURL else {
+        guard !post.isSynthetic else {
             isLoadingNewYorkTimesBody = false
             return
         }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
 
-        // The feed already carries the article body. Render it immediately and
-        // keep network refreshes and Wikipedia enrichment off the first-paint path.
-        if newYorkTimesArticle != nil {
+        // A preloaded article has already gone through the remote NYT parser.
+        // Direct/deep-link navigation may only have database text, so show that
+        // immediately and replace it with the structured article when available.
+        if !shouldRefreshNewYorkTimesArticle {
             isLoadingNewYorkTimesBody = false
         } else {
-            if let detail = try? await client.fetchPost(id: post.id) {
-                post = detail
-            }
+            if let detail = try? await client.fetchPost(id: post.id) { post = detail }
             guard !Task.isCancelled else { return }
-            let storedArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
-            if let storedArticle {
-                newYorkTimesArticle = storedArticle
-            } else {
-                newYorkTimesArticle = try? await client.fetchNewYorkTimesArticle(url: link)
+
+            if newYorkTimesArticle == nil {
+                newYorkTimesArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
             }
             isLoadingNewYorkTimesBody = false
+
+            if let link = post.linkURL,
+               let remoteArticle = try? await client.fetchNewYorkTimesArticle(url: link),
+               !Task.isCancelled {
+                newYorkTimesArticle = remoteArticle
+            }
         }
 
         guard !Task.isCancelled, let article = newYorkTimesArticle else { return }
@@ -3050,8 +3139,6 @@ private struct XCommentRow: View {
     let translation: String?
     let isTranslating: Bool
     let translate: () async -> Void
-    @State private var showsOriginal = false
-
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             AvatarView(url: comment.author.avatarURL, name: comment.author.name, size: 40)
@@ -3080,18 +3167,7 @@ private struct XCommentRow: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
-                if translation != nil {
-                    HStack(spacing: 5) {
-                        Image(systemName: "character.bubble")
-                        Text(showsOriginal ? "查看译文" : "X 自动翻译")
-                        Button(showsOriginal ? "显示翻译" : "显示原文") {
-                            showsOriginal.toggle()
-                        }
-                        .foregroundStyle(.blue)
-                    }
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                } else if isTranslating {
+                if isTranslating {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                         Text("正在翻译…")
@@ -3099,7 +3175,7 @@ private struct XCommentRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 }
-                Text(showsOriginal || translation == nil ? displayedCommentText : translation ?? displayedCommentText)
+                Text(translation ?? displayedCommentText)
                     .font(.system(size: 16))
                     .lineSpacing(3)
                     .textSelection(.enabled)

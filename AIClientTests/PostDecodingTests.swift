@@ -485,6 +485,16 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(item.videoPreviewURL?.path, "/api/ios/v1/image-proxy")
     }
 
+    func testDecodesLiveXTweetPhotoForDetailFallback() throws {
+        let data = #"{"success":true,"data":{"item":{"id":"2083612366155984927","text":"Jensen is back!!","media":[{"type":"photo","url":"https://pbs.twimg.com/media/demo.jpg","width":1200,"height":1500}]}}}"#.data(using: .utf8)!
+        let item = try JSONDecoder().decode(XTweetDetailResponse.self, from: data).data.item
+
+        XCTAssertEqual(item.imageMedia.count, 1)
+        XCTAssertEqual(item.imageMedia.first?.width, 1200)
+        XCTAssertEqual(item.imageMedia.first?.height, 1500)
+        XCTAssertEqual(item.imageURLs.first?.path, "/api/ios/v1/image-proxy")
+    }
+
     func testXDetailPrefersCompleteStoredTranslationOverLiveSummary() {
         let storedBody = "这是已经存储的完整中文正文，包含第一段和第二段。"
         let liveSummary = "中文摘要…"
@@ -831,6 +841,34 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(post.xueqiuQuoteLinks, [
             XueqiuTextLink(label: "@示例用户", url: URL(string: "https://xueqiu.com/n/example")!)
         ])
+    }
+
+    func testXueqiuPresentationCacheInvalidatesWhenPostContentChanges() throws {
+        let first = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":23,"source":"xueqiu","content":"第一版正文"}"#.utf8)
+        )
+        let updated = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":23,"source":"xueqiu","content":"更新后的正文"}"#.utf8)
+        )
+
+        XCTAssertEqual(first.xueqiuBodyContent, "第一版正文")
+        XCTAssertEqual(updated.xueqiuBodyContent, "更新后的正文")
+    }
+
+    func testRSSInlineAssetCacheInvalidatesWhenPostContentChanges() throws {
+        let first = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":24,"source":"rss:12","content":"<img class=\"emoji\" src=\"https://example.com/one.png\">"}"#.utf8)
+        )
+        let updated = try JSONDecoder().decode(
+            Post.self,
+            from: Data(#"{"id":24,"source":"rss:12","content":"<img class=\"emoji\" src=\"https://example.com/two.png\">"}"#.utf8)
+        )
+
+        XCTAssertEqual(try first.htmlInlineAssetURLs.map { try proxyTarget($0).lastPathComponent }, ["one.png"])
+        XCTAssertEqual(try updated.htmlInlineAssetURLs.map { try proxyTarget($0).lastPathComponent }, ["two.png"])
     }
 
     func testXueqiuEmojiOnlyBodyDoesNotDuplicateQuotedPost() throws {
@@ -1353,7 +1391,7 @@ final class RSSSourcePresentationTests: XCTestCase {
         XCTAssertEqual(post.rssCardAvatarURL?.path, "/api/ios/v1/rss/feeds/46/avatar")
     }
 
-    func testRSSFeedDirectoryUsesGeneratedFallbackAvatar() throws {
+    func testRSSFeedDirectoryRejectsGeneratedFallbackAvatar() throws {
         let fallback = try JSONDecoder().decode(
             RSSFeedSource.self,
             from: Data(#"{"id":96,"name":"观点网","avatar_url":"/api/ios/v1/rss/feeds/96/avatar?v=1","avatar_status":"fallback","is_enabled":true}"#.utf8)
@@ -1363,7 +1401,7 @@ final class RSSSourcePresentationTests: XCTestCase {
             from: Data(#"{"id":46,"name":"爱范儿","avatar_url":"/api/ios/v1/rss/feeds/46/avatar?v=1","avatar_status":"ready","is_enabled":true}"#.utf8)
         )
 
-        XCTAssertEqual(fallback.preferredAvatarURL?.path, "/api/ios/v1/rss/feeds/96/avatar")
+        XCTAssertNil(fallback.preferredAvatarURL)
         XCTAssertEqual(ready.preferredAvatarURL?.path, "/api/ios/v1/rss/feeds/46/avatar")
     }
 }
