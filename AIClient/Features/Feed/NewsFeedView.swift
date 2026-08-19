@@ -362,7 +362,7 @@ struct NewsFeedView: View {
     }
 
     private var sourceSelector: some View {
-        VStack(alignment: .trailing, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             if isSourceSelectorExpanded {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
@@ -391,8 +391,8 @@ struct NewsFeedView: View {
                 .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
                 .transition(
                     .asymmetric(
-                        insertion: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity),
-                        removal: .scale(scale: 0.97, anchor: .bottomTrailing).combined(with: .opacity)
+                        insertion: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.97, anchor: .trailing).combined(with: .opacity)
                     )
                 )
             }
@@ -424,7 +424,8 @@ struct NewsFeedView: View {
 
     private var sourceSelectorExpandedWidth: CGFloat {
         let contentWidth = CGFloat(FeedSource.allCases.count) * 55 + 8
-        return min(contentWidth, max(54, UIScreen.main.bounds.width - 32))
+        let availableWidth = UIScreen.main.bounds.width - 32 - 52
+        return min(contentWidth, max(54, availableWidth))
     }
 
     private var userSelectorTransition: AnyTransition {
