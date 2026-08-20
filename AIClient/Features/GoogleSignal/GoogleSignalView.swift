@@ -519,9 +519,6 @@ struct GoogleSignalView: View {
             content
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .refreshable {
-                await store.load(section: section, sentiment: sentiment, reset: true)
-            }
         }
         .sheet(item: $selectedEvent) { event in
             GoogleSignalEventDetailView(event: event)

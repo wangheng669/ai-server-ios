@@ -17,7 +17,6 @@ struct GlobalAssetsRankingView: View {
                     .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
-                .refreshable { await load() }
             } else if isLoading {
                 VStack(spacing: 12) {
                     ProgressView()

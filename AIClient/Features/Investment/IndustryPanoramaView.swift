@@ -179,7 +179,6 @@ struct IndustryPanoramaView: View {
             guard rootTabIsActive, industries.isEmpty else { return }
             await load()
         }
-        .refreshable { await load() }
         .onChange(of: selectedID) { _, _ in
             selectedStageID = nil
         }

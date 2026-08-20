@@ -95,7 +95,6 @@ struct CountryGDPDetailView: View {
                     }
                 }
                 .scrollIndicators(.hidden)
-                .refreshable { await load() }
             } else if isLoading {
                 VStack(spacing: 20) {
                     hero(nil)

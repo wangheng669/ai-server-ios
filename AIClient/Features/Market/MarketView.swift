@@ -177,7 +177,6 @@ private struct MarketHomeView: View {
                 .background(MarketStyle.surface)
                 .coordinateSpace(name: "market-scroll")
                 .scrollIndicators(.hidden)
-                .refreshable { await store.refresh() }
                 .simultaneousGesture(regionSwipeGesture)
                 .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
                     onCompactHeaderChange(offset < -28)

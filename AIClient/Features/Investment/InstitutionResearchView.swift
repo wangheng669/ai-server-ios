@@ -161,7 +161,6 @@ struct InstitutionResearchView: View {
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
-        .refreshable { await store.load(force: true) }
     }
 
     private func trustBanner(_ institutionsCount: Int) -> some View {

@@ -235,20 +235,6 @@ struct LearningView: View {
             }
         }
         .safeAreaPadding(.bottom, section == .concepts ? 0 : 90)
-        .refreshable {
-            switch section {
-            case .investment:
-                async let catalog: Void = store.load(force: true)
-                async let videoLibrary: Void = store.loadVideoLibrary(force: true)
-                _ = await (catalog, videoLibrary)
-            case .books:
-                await store.loadBookshelf(force: true)
-            case .concepts:
-                await store.loadConceptLibrary(force: true)
-            case .ideology:
-                await peopleStore.load(force: true)
-            }
-        }
     }
 
     private var sectionPicker: some View {
