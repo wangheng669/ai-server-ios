@@ -80,10 +80,10 @@ struct MarketView: View {
             )
             .id(route.symbol)
             .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
+            .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
             .presentationBackground(MarketStyle.surface)
-            .presentationContentInteraction(.scrolls)
+            .presentationContentInteraction(.resizes)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
