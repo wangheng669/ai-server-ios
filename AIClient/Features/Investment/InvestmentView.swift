@@ -144,46 +144,13 @@ struct InvestmentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                sectionLayer(.market) {
-                    MarketView(
-                        store: marketStore,
-                        showsDetail: $marketShowsDetail
-                    )
-                }
-
-                sectionLayer(.sentiment) {
-                    RetailInvestorView(
-                        store: sentimentStore,
-                        marketStore: marketStore,
-                        showsDetail: $showsDetail
-                    )
-                }
-
-                sectionLayer(.chinaMacro) {
-                    ChinaMacroView()
-                }
-
-                sectionLayer(.institutionResearch) {
-                    InstitutionResearchView()
-                }
-
-                sectionLayer(.holdings) {
-                    FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
-                }
-
-                sectionLayer(.industries) {
-                    IndustryPanoramaView()
-                }
-
-                sectionLayer(.gdp) {
-                    CountryGDPRankingView(showsDetail: $showsDetail)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .opacity(contentOpacity)
-            .scaleEffect(contentScale)
-            .offset(y: contentOffset)
+            selectedSectionContent
+                .environment(\.rootTabIsActive, rootTabIsActive)
+                .id(displayedSection)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .opacity(contentOpacity)
+                .scaleEffect(contentScale)
+                .offset(y: contentOffset)
         }
         .background(InvestmentDesign.canvas)
         .overlay(alignment: .bottomTrailing) {
@@ -212,18 +179,31 @@ struct InvestmentView: View {
         }
     }
 
-    private func sectionLayer<Content: View>(
-        _ target: InvestmentSection,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        let isSelected = displayedSection == target
-
-        return content()
-            .environment(\.rootTabIsActive, rootTabIsActive && isSelected)
-            .opacity(isSelected ? 1 : 0)
-            .allowsHitTesting(isSelected)
-            .accessibilityHidden(!isSelected)
-            .zIndex(isSelected ? 1 : 0)
+    @ViewBuilder
+    private var selectedSectionContent: some View {
+        switch displayedSection {
+        case .market:
+            MarketView(
+                store: marketStore,
+                showsDetail: $marketShowsDetail
+            )
+        case .sentiment:
+            RetailInvestorView(
+                store: sentimentStore,
+                marketStore: marketStore,
+                showsDetail: $showsDetail
+            )
+        case .chinaMacro:
+            ChinaMacroView()
+        case .institutionResearch:
+            InstitutionResearchView()
+        case .holdings:
+            FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
+        case .industries:
+            IndustryPanoramaView()
+        case .gdp:
+            CountryGDPRankingView(showsDetail: $showsDetail)
+        }
     }
 
     private func transitionPage(to target: InvestmentSection) {

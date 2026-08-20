@@ -4,9 +4,12 @@ import Observation
 @MainActor
 @Observable
 final class MarketStore {
+    private static let realtimeUIFlushInterval = Duration.milliseconds(750)
+
     private(set) var dashboard: MarketDashboard?
     private(set) var charts: [ChartKey: MarketChart] = [:]
     private(set) var chartPresentations: [ChartKey: MarketChartPresentation] = [:]
+    private(set) var listTrendPresentations: [ChartKey: [Double]] = [:]
     private(set) var loadingCharts: Set<ChartKey> = []
     private(set) var chartErrors: [ChartKey: String] = [:]
     private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
@@ -50,7 +53,10 @@ final class MarketStore {
         realtime.onQuote = { [weak self] update in
             self?.enqueueRealtimeUpdate(update)
         }
-        realtime.onStatus = { [weak self] status in self?.realtimeStatus = status }
+        realtime.onStatus = { [weak self] status in
+            guard let self, realtimeStatus != status else { return }
+            realtimeStatus = status
+        }
         realtime.start()
         defer {
             realtime.stop()
@@ -112,6 +118,7 @@ final class MarketStore {
             let value = try await service.chart(symbol: symbol, range: range, refresh: force)
             charts[key] = value
             chartPresentations[key] = MarketChartPresentation(chart: value)
+            listTrendPresentations[key] = marketSampledChartTrend(value.candles)
             if marketChartNeedsRetry(value) {
                 scheduleChartRetry(symbol: symbol, range: range, key: key)
             } else {
@@ -225,9 +232,9 @@ final class MarketStore {
 
     func listTrendValues(for quote: MarketQuote?) -> [Double] {
         guard let quote else { return [] }
-        if let chart = chart(symbol: quote.symbol, range: .day) {
-            let values = marketSampledChartTrend(chart.candles)
-            if values.count > 1 { return values }
+        if let values = listTrendPresentations[ChartKey(symbol: quote.symbol, range: .day)],
+           values.count > 1 {
+            return values
         }
         return trendValues(for: quote)
     }
@@ -355,7 +362,8 @@ final class MarketStore {
         pendingRealtimeUpdates[update.symbol] = update
         guard realtimeFlushTask == nil else { return }
         realtimeFlushTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(150))
+            // Keep receiving every quote, but bound expensive dashboard-driven view updates.
+            try? await Task.sleep(for: Self.realtimeUIFlushInterval)
             guard !Task.isCancelled else { return }
             self?.flushRealtimeUpdates()
         }
