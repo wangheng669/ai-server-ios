@@ -209,7 +209,6 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchWeChatFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchPostDetail: (Int) async throws -> Post
     private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
-    private let shouldPreloadXIdentities: Bool
     private var loadingXTranslationIDs: Set<Int> = []
     private var loadingXQuotedTranslationIDs: Set<Int> = []
     private var loadingXReplyContextIDs: Set<Int> = []
@@ -244,8 +243,6 @@ final class NewsFeedViewModel: ObservableObject {
         fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil,
         diskCache: FeedDiskCache = .shared
     ) {
-        shouldPreloadXIdentities = fetchXTweetDetail != nil
-            || (fetchPosts == nil && fetchXPosts == nil)
         #if DEBUG
         let override = ProcessInfo.processInfo.environment["AI_FEED_SOURCE"]
         let usesXFeedPreview = ProcessInfo.processInfo.arguments.contains("--x-feed-preview")
@@ -613,29 +610,6 @@ final class NewsFeedViewModel: ObservableObject {
             )
         }
         return displayed
-    }
-
-    private func preloadXIdentities(for posts: [Post]) async {
-        guard shouldPreloadXIdentities else { return }
-        let candidates = posts.compactMap { post -> (Int, String)? in
-            guard post.user?.verified == nil,
-                  xLiveDetails[post.id] == nil,
-                  let tweetID = post.xTweetID else { return nil }
-            return (post.id, tweetID)
-        }
-        guard !candidates.isEmpty else { return }
-
-        await withTaskGroup(of: (Int, XTweetDetailItem?).self) { group in
-            for (postID, tweetID) in candidates {
-                group.addTask { [fetchXTweetDetail] in
-                    (postID, try? await fetchXTweetDetail(tweetID))
-                }
-            }
-            for await (postID, detail) in group {
-                guard let detail else { continue }
-                xLiveDetails[postID] = detail
-            }
-        }
     }
 
     func preloadedNewYorkTimesArticle(for postID: Int) -> NewYorkTimesArticle? {
@@ -1029,11 +1003,7 @@ final class NewsFeedViewModel: ObservableObject {
             do {
                 let pageSize = pageSize(for: candidate)
                 let result = try await fetchPage(1, limit: pageSize, source: candidate)
-                async let presentationWarm: Void = FeedPresentationPrewarmer.shared.warm(result)
-                async let identityWarm: Void = candidate == .x
-                    ? preloadXIdentities(for: result)
-                    : ()
-                _ = await (presentationWarm, identityWarm)
+                await FeedPresentationPrewarmer.shared.warm(result)
                 guard !Task.isCancelled, cache[candidate] == nil else { continue }
                 cache[candidate] = .init(
                     posts: result,
@@ -1107,11 +1077,7 @@ final class NewsFeedViewModel: ObservableObject {
                   selectedXUserID == requestedXUserID,
                   selectedXueqiuFeedID == requestedXueqiuFeedID,
                   activeRefreshID == refreshID else { return }
-            async let presentationWarm: Void = FeedPresentationPrewarmer.shared.warm(result)
-            async let identityWarm: Void = requestedSource == .x
-                ? preloadXIdentities(for: result)
-                : ()
-            _ = await (presentationWarm, identityWarm)
+            await FeedPresentationPrewarmer.shared.warm(result)
             guard source == requestedSource,
                   selectedFlashCategory == requestedFlashCategory,
                   selectedYouTubePerson == requestedYouTubePerson,
@@ -1168,11 +1134,7 @@ final class NewsFeedViewModel: ObservableObject {
                   selectedYouTubePerson == requestedYouTubePerson else { return }
             guard selectedXUserID == requestedXUserID else { return }
             guard selectedXueqiuFeedID == requestedXueqiuFeedID else { return }
-            async let presentationWarm: Void = FeedPresentationPrewarmer.shared.warm(result)
-            async let identityWarm: Void = requestedSource == .x
-                ? preloadXIdentities(for: result)
-                : ()
-            _ = await (presentationWarm, identityWarm)
+            await FeedPresentationPrewarmer.shared.warm(result)
             guard source == requestedSource, selectedFlashCategory == requestedFlashCategory,
                   selectedYouTubePerson == requestedYouTubePerson else { return }
             guard selectedXUserID == requestedXUserID else { return }
