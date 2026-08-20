@@ -164,14 +164,17 @@ private struct MarketHomeView: View {
                             }
                         }
                         .padding(.top, MarketStyle.pageSpacing)
-                        // Keep the final market rows clear of the floating root navigation capsule.
-                        .padding(.bottom, 76)
+                        // The root navigation already reserves its own safe-area inset. Keep only
+                        // enough room for the investment selectors that float above the final row.
+                        .padding(.bottom, 24)
                         .background(MarketStyle.canvas)
                     }
                     .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .top)
                     .background(MarketStyle.canvas)
                 }
-                .background(MarketStyle.canvas.ignoresSafeArea())
+                // Match the hero surface above the scroll view so the status-bar area does not
+                // appear as a detached strip before the first section.
+                .background(MarketStyle.surface)
                 .coordinateSpace(name: "market-scroll")
                 .scrollIndicators(.hidden)
                 .refreshable { await store.refresh() }
