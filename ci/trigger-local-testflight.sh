@@ -166,7 +166,8 @@ log "Running tests for TestFlight $TESTFLIGHT_MARKETING_VERSION."
   -scheme AIServerClient \
   -destination 'platform=iOS Simulator,name=iPhone 16e' \
   -derivedDataPath "$work_dir/TestDerivedData" \
-  CODE_SIGNING_ALLOWED=NO
+  CODE_SIGNING_ALLOWED=NO \
+  COMPILER_INDEX_STORE_ENABLE=NO
 
 log "Creating the signed App Store archive."
 xcodebuild archive \
@@ -180,7 +181,8 @@ xcodebuild archive \
   -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
   -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
   DEVELOPMENT_TEAM=9M7P4VLHY3 \
-  CODE_SIGN_STYLE=Automatic
+  CODE_SIGN_STYLE=Automatic \
+  COMPILER_INDEX_STORE_ENABLE=NO
 
 log "Uploading the archive directly from this Mac."
 xcodebuild -exportArchive \

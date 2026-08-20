@@ -33,7 +33,8 @@ device_started_epoch=$(date +%s)
     -allowProvisioningUpdates \
     -allowProvisioningDeviceRegistration \
     DEVELOPMENT_TEAM="${TEAM_ID:?TEAM_ID is required}" \
-    CODE_SIGN_STYLE=Automatic
+    CODE_SIGN_STYLE=Automatic \
+    COMPILER_INDEX_STORE_ENABLE=NO
   app_path="$cache_root/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
   codesign --verify --deep --strict --verbose=2 "$app_path"
   ditto -c -k --sequesterRsrc --keepParent \
@@ -64,7 +65,8 @@ if [[ "${IOS_SKIP_SIMULATOR_WARM:-false}" != true ]]; then
       -destination "platform=iOS Simulator,name=iPhone 16e" \
       -derivedDataPath "$cache_root/central-merge-simulator" \
       -clonedSourcePackagesDirPath "$cache_root/source-packages" \
-      CODE_SIGNING_ALLOWED=NO
+      CODE_SIGNING_ALLOWED=NO \
+      COMPILER_INDEX_STORE_ENABLE=NO
   ) &
   simulator_pid=$!
 else

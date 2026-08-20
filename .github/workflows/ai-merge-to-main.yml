@@ -284,7 +284,8 @@ jobs:
               -allowProvisioningUpdates \
               -allowProvisioningDeviceRegistration \
               DEVELOPMENT_TEAM="$TEAM_ID" \
-              CODE_SIGN_STYLE=Automatic > "$build_log" 2>&1
+              CODE_SIGN_STYLE=Automatic \
+              COMPILER_INDEX_STORE_ENABLE=NO > "$build_log" 2>&1
               build_status=$?
               if ((build_status == 0)); then
                 app_path="$IOS_BUILD_CACHE_ROOT/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
@@ -317,7 +318,8 @@ jobs:
                 -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
                 -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
                 ${test_arguments[@]+"${test_arguments[@]}"} \
-                CODE_SIGNING_ALLOWED=NO
+                CODE_SIGNING_ALLOWED=NO \
+                COMPILER_INDEX_STORE_ENABLE=NO
             test_status=$?
           fi
           wait "$build_pid"

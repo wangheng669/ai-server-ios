@@ -63,7 +63,8 @@ jobs:
               -destination 'platform=iOS Simulator,name=iPhone 16e' \
               -collect-test-diagnostics never \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/manual-install-simulator" \
-              CODE_SIGNING_ALLOWED=NO
+              CODE_SIGNING_ALLOWED=NO \
+              COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Report tests completed
         continue-on-error: true
@@ -90,7 +91,8 @@ jobs:
               -destination 'generic/platform=iOS' \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/manual-install-device" \
               CODE_SIGNING_ALLOWED=NO \
-              CODE_SIGNING_REQUIRED=NO
+              CODE_SIGNING_REQUIRED=NO \
+              COMPILER_INDEX_STORE_ENABLE=NO
 
           app_path="$IOS_BUILD_CACHE_ROOT/manual-install-device/Build/Products/Debug-iphoneos/AIServerClient.app"
           test -d "$app_path"
