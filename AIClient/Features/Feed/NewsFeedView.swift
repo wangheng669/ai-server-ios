@@ -1373,10 +1373,6 @@ struct NewsFeedView: View {
                 .allowsHitTesting(false)
             }
         }
-        .task(id: "\(rootTabIsActive)-x-engagement-\(post.id)") {
-            guard rootTabIsActive, source == .x, source == model.source else { return }
-            await model.loadXEngagementIfNeeded(post)
-        }
         .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
             await model.translateRSSPostIfNeeded(post)
         }
