@@ -1048,6 +1048,35 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketChartDisplayPoints(points).map(\.timestamp), [2])
     }
 
+    func testChartPresentationPrecomputesStableDrawingInputs() throws {
+        let data = Data(#"""
+        {
+          "symbol":"TEST","market":"US","tradingDate":"2026-08-20",
+          "timezone":"America/New_York","session":"regular","interval":"1m",
+          "quality":{"status":"complete","expected":3,"actual":3,"missing":[],"freshnessSeconds":0,"isFinal":true},
+          "quote":{"previousClose":10,"changePercent":10,"source":"test"},
+          "candles":[
+            {"timestamp":3,"open":11,"high":12,"low":10,"close":12,"volume":300,"state":"confirmed","source":"test","session":"regular"},
+            {"timestamp":1,"open":9,"high":10,"low":8,"close":10,"volume":100,"state":"confirmed","source":"test","session":"regular"},
+            {"timestamp":2,"open":10,"high":11,"low":9,"close":11,"volume":200,"state":"confirmed","source":"test","session":"regular"},
+            {"timestamp":4,"open":12,"high":12,"low":12,"close":12,"volume":400,"state":"invalid","source":"test","session":"regular"}
+          ]
+        }
+        """#.utf8)
+        let chart = try JSONDecoder().decode(MarketChart.self, from: data)
+
+        let presentation = MarketChartPresentation(chart: chart)
+
+        XCTAssertEqual(presentation.points.map(\.timestamp), [1, 2, 3])
+        XCTAssertEqual(presentation.values, [10, 11, 12])
+        XCTAssertEqual(presentation.xFractions, [0, 0.5, 1])
+        XCTAssertEqual(presentation.low, 10)
+        XCTAssertEqual(presentation.high, 12)
+        XCTAssertTrue(presentation.hasVolume)
+        XCTAssertEqual(presentation.volumeCeiling, 200)
+        XCTAssertEqual(presentation.volumeFractionGap, 0.5)
+    }
+
     func testMarketSampledChartTrendUsesWholeDayAndKeepsEndpoints() {
         var points: [MarketChartPoint] = []
         for index in 0..<120 {

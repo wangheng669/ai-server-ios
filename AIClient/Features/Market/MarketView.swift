@@ -9,7 +9,6 @@ private enum MarketStyle {
     static let gain = InvestmentDesign.gain
     static let loss = InvestmentDesign.loss
     static let accent = InvestmentDesign.accent
-    static let chartTransition = Animation.smooth(duration: 0.6)
     static let regionTransition = Animation.smooth(duration: 0.26, extraBounce: 0)
     static let purple = accent
     static let pageSpacing: CGFloat = 10
@@ -81,9 +80,9 @@ struct MarketView: View {
             )
             .id(route.symbol)
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(32)
-            .presentationBackground(MarketStyle.canvas)
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(28)
+            .presentationBackground(MarketStyle.surface)
             .presentationContentInteraction(.scrolls)
         }
         .task(id: rootTabIsActive) {
@@ -2703,49 +2702,40 @@ private struct MarketIndexDetailView: View {
 
     var body: some View {
         ZStack {
-            MarketStyle.canvas.ignoresSafeArea()
-            VStack(spacing: 0) {
-                detailNavigation
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        VStack(spacing: 0) {
-                            detailHeader
-                            keyData
-                        }
-                        .marketDetailSectionCard()
+            MarketStyle.surface.ignoresSafeArea()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    detailHeader
+                    keyData
 
-                        MarketDetailChart(
-                            selectedRange: $selectedRange,
-                            symbol: chartSymbol,
-                            fallbackSymbol: chartFallbackSymbol,
-                            store: store
+                    MarketDetailChart(
+                        selectedRange: $selectedRange,
+                        symbol: chartSymbol,
+                        fallbackSymbol: chartFallbackSymbol,
+                        store: store
+                    )
+                    .id(chartSymbol)
+
+                    if showsCompanyProfile { companyProfile }
+                    if isIndex {
+                        MarketDetailBreadth(
+                            title: isAShareIndex ? "市场温度" : "成分表现",
+                            breadth: detailBreadth
                         )
-                        .id(chartSymbol)
-                        .marketDetailSectionCard()
-
-                        if showsCompanyProfile { companyProfile }
-                        if isIndex {
-                            MarketDetailBreadth(
-                                title: isAShareIndex ? "市场温度" : "成分表现",
-                                breadth: detailBreadth
-                            )
-                        }
-                        MarketSummary(quote: quote, isIndex: isIndex)
-                            .padding(.bottom, 18)
-                            .marketDetailSectionCard()
-                        if isIndex { componentStocks }
-                        Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                        Color.clear.frame(height: 12)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 4)
+                    MarketSummary(quote: quote, isIndex: isIndex)
+                        .padding(.bottom, 18)
+                        .overlay(alignment: .top) { Divider().padding(.horizontal, 18) }
+                    if isIndex { componentStocks }
+                    Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 22)
+                        .padding(.bottom, 28)
                 }
-                .scrollIndicators(.hidden)
             }
+            .scrollIndicators(.hidden)
         }
         .accessibilityAction(.escape) { dismiss() }
         .toolbar(.hidden, for: .navigationBar)
@@ -2771,45 +2761,6 @@ private struct MarketIndexDetailView: View {
             }
             #endif
         }
-    }
-
-    private var detailNavigation: some View {
-        HStack(spacing: 10) {
-            Button(action: dismiss.callAsFunction) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                    .background(MarketStyle.surface, in: Circle())
-                    .padding(4)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("关闭行情详情")
-            Spacer(minLength: 4)
-            VStack(spacing: 1) {
-                Text(quote?.presentationName ?? CoreDescriptor(symbol: symbol).name)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Text(quote?.displayCode ?? CoreDescriptor(symbol: symbol).code)
-                    .font(.caption2.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            ShareLink(item: shareText) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                    .background(MarketStyle.surface, in: Circle())
-                    .padding(4)
-            }
-            .accessibilityLabel("分享行情")
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .background(.ultraThinMaterial)
     }
 
     private var detailHeader: some View {
@@ -2855,7 +2806,6 @@ private struct MarketIndexDetailView: View {
                     .monospacedDigit()
                     .tracking(-1.2)
                     .foregroundStyle(quoteTint(quote))
-                    .contentTransition(.numericText())
                 Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
                     .font(.system(size: 18, weight: .semibold))
                     .monospacedDigit()
@@ -2866,8 +2816,8 @@ private struct MarketIndexDetailView: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.top, 24)
+        .padding(.bottom, 14)
     }
 
     private var keyData: some View {
@@ -2880,14 +2830,6 @@ private struct MarketIndexDetailView: View {
                 metricDivider
                 metric("最低", quote?.low, MarketStyle.loss)
                 metricDivider
-                if !isIndex && !isCrypto {
-                    metric(
-                        "52周最低",
-                        quote?.week52Low ?? market52WeekLow(store.chart(symbol: historicalSymbol, range: .year)),
-                        MarketStyle.loss
-                    )
-                    metricDivider
-                }
                 metric("昨收", quote?.previousClose)
             }
             Divider()
@@ -2897,14 +2839,20 @@ private struct MarketIndexDetailView: View {
                 textMetric("振幅", amplitudeText)
                 metricDivider
                 textMetric("涨跌额", quote.map { signed($0.changeValue, digits: cryptoChangeDigits($0)) } ?? "—", quoteTint(quote))
-                metricDivider
-                textMetric("状态", sessionText)
+                if !isIndex && !isCrypto {
+                    metricDivider
+                    metric(
+                        "52周最低",
+                        quote?.week52Low ?? market52WeekLow(store.chart(symbol: historicalSymbol, range: .year)),
+                        MarketStyle.loss
+                    )
+                }
             }
             Divider()
         }
         .padding(.horizontal, 18)
         .padding(.top, 4)
-        .padding(.bottom, 18)
+        .padding(.bottom, 4)
     }
 
     private var showsCompanyProfile: Bool {
@@ -2912,31 +2860,35 @@ private struct MarketIndexDetailView: View {
     }
 
     private var companyProfile: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("公司资料").font(.system(size: 17, weight: .semibold))
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("公司资料").font(.system(size: 19, weight: .semibold))
+            HStack(alignment: .center, spacing: 12) {
                 if let quote { CompanyLogo(quote: quote, path: companyLogoPath) }
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(quote?.presentationName ?? symbol).font(.subheadline.weight(.semibold))
-                    Text("股票代码  \(quote?.displayCode ?? symbol)")
-                    Text("上市市场  \(companyMarketLabel(symbol))")
-                    if let marketCap = quote?.marketCap { Text("总市值  \(compactNumber(marketCap))") }
-                    valuationMetric(.staticPE, value: quote?.peStatic)
-                    valuationMetric(.ttm, value: quote?.pe)
-                    Text("归母净利润（TTM）  \(formattedNetIncome)")
-                    if let fiscalYear = quote?.fiscalYear, !fiscalYear.isEmpty {
-                        Text("财报基准  FY\(fiscalYear)")
-                    }
-                    if let source = quote?.fundamentalsSource, !source.isEmpty {
-                        Text("基础数据  \(source)")
-                    }
+                    Text("\(quote?.displayCode ?? symbol) · \(companyMarketLabel(symbol))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.footnote).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
-            .padding(14).marketCard(cornerRadius: 10)
+            Divider()
+            if let marketCap = quote?.marketCap {
+                companyMetric("总市值", value: compactNumber(marketCap))
+            }
+            valuationMetric(.staticPE, value: quote?.peStatic)
+            valuationMetric(.ttm, value: quote?.pe)
+            companyMetric("归母净利润（TTM）", value: formattedNetIncome)
+            if let fiscalYear = quote?.fiscalYear, !fiscalYear.isEmpty {
+                companyMetric("财报基准", value: "FY\(fiscalYear)")
+            }
+            if let source = quote?.fundamentalsSource, !source.isEmpty {
+                companyMetric("基础数据", value: source)
+            }
         }
         .padding(.horizontal, 18)
+        .padding(.vertical, 20)
+        .overlay(alignment: .top) { Divider().padding(.horizontal, 18) }
     }
 
     private var formattedNetIncome: String {
@@ -2948,18 +2900,34 @@ private struct MarketIndexDetailView: View {
         Button {
             presentedValuation = valuationRoute(kind: kind)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Text(kind.metricTitle)
+                    .foregroundStyle(.secondary)
                 Text(value.map { number($0, digits: 2) } ?? "—")
                     .monospacedDigit()
+                    .foregroundStyle(.primary)
+                Spacer()
                 Image(systemName: "chart.xyaxis.line")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(kind.color)
             }
+            .font(.footnote)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityHint("查看历史变化曲线")
+    }
+
+    private func companyMetric(_ title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(.footnote)
     }
 
     private func valuationRoute(kind: CompanyPEKind) -> CompanyValuationHistoryRoute {
@@ -3063,10 +3031,6 @@ private struct MarketIndexDetailView: View {
     private var isCommodity: Bool { quote?.instrumentType == "commodity-future" || symbol.hasSuffix("1!") }
     private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
 
-    private var shareText: String {
-        guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
-        return "\(quote.presentationName)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(quote.marketAsOfLabel)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
-    }
 }
 
 enum CompanyPEKind: String, CaseIterable, Identifiable {
@@ -3641,27 +3605,31 @@ private struct MarketDetailChart: View {
         guard let fallbackSymbol else { return nil }
         return store.chart(symbol: fallbackSymbol, range: selectedRange)
     }
+    private var primaryPresentation: MarketChartPresentation? {
+        store.chartPresentation(symbol: symbol, range: selectedRange)
+    }
+    private var fallbackPresentation: MarketChartPresentation? {
+        guard let fallbackSymbol else { return nil }
+        return store.chartPresentation(symbol: fallbackSymbol, range: selectedRange)
+    }
     private var usesFallbackChart: Bool {
-        marketShouldUseFallbackChart(
-            primaryPoints: primaryChart?.candles ?? [],
-            fallbackPoints: fallbackChart?.candles ?? []
-        )
+        (primaryPresentation?.points.count ?? 0) < 2
+            && (fallbackPresentation?.points.count ?? 0) >= 2
     }
     private var displayedSymbol: String { usesFallbackChart ? fallbackSymbol ?? symbol : symbol }
     private var chart: MarketChart? { usesFallbackChart ? fallbackChart : primaryChart }
-    private var points: [MarketChartPoint] {
-        marketChartDisplayPoints(chart?.candles ?? []).sorted { $0.timestamp < $1.timestamp }
+    private var presentation: MarketChartPresentation? {
+        usesFallbackChart ? fallbackPresentation : primaryPresentation
     }
-    private var values: [Double] {
-        points.compactMap(\.displayValue)
-    }
+    private var points: [MarketChartPoint] { presentation?.points ?? [] }
+    private var values: [Double] { presentation?.values ?? [] }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(MarketRange.allCases) { range in
                     Button {
-                        withAnimation(MarketStyle.chartTransition) { selectedRange = range }
+                        selectedRange = range
                     } label: {
                         VStack(spacing: 5) {
                             Text(range.rawValue).font(.footnote.weight(selectedRange == range ? .semibold : .regular))
@@ -3675,7 +3643,11 @@ private struct MarketDetailChart: View {
             }
             Divider()
             ZStack {
-                ChartGrid(values: values)
+                ChartGrid(
+                    low: presentation?.low,
+                    high: presentation?.high,
+                    digits: presentation?.axisDigits ?? 2
+                )
                 if values.isEmpty {
                     if isLoadingChart {
                         VStack(spacing: 10) {
@@ -3696,32 +3668,33 @@ private struct MarketDetailChart: View {
                 } else {
                     MarketSessionLineChart(
                         points: points,
-                        regularColor: quoteTint(store.quote(symbol: displayedSymbol)),
+                        xFractions: presentation?.xFractions ?? [],
+                        low: presentation?.low,
+                        high: presentation?.high,
+                        regularColor: chartColor,
                         interval: chart?.interval
                     )
                         .id(selectedRange)
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
-                    if let sessionBreak = marketChartLunchBreak(
-                        points: points,
-                        market: chart?.market,
-                        interval: chart?.interval,
-                        timezone: chart?.timezone
-                    ) {
+                    if let sessionBreak = presentation?.sessionBreak {
                         MarketSessionBreakMarker(
                             sessionBreak: sessionBreak,
                             points: points,
-                            interval: chart?.interval
+                            xFractions: presentation?.xFractions ?? []
                         )
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
                     }
-                    if let previousClose = store.quote(symbol: displayedSymbol)?.previousClose {
-                        ChartReferenceLine(value: previousClose, values: values)
+                    if let previousClose = chart?.quote.previousClose {
+                        ChartReferenceLine(
+                            value: previousClose,
+                            low: presentation?.low,
+                            high: presentation?.high
+                        )
                     }
                 }
             }
             .frame(height: 210)
             .padding(.top, 10)
-            .animation(MarketStyle.chartTransition, value: selectedRange)
             HStack {
                 ForEach(Array(timelineLabels.enumerated()), id: \.offset) { index, label in
                     Text(label)
@@ -3733,8 +3706,13 @@ private struct MarketDetailChart: View {
             .padding(.leading, 48)
             .padding(.trailing, 5)
             .padding(.top, 5)
-            if hasVolume {
-                VolumeBars(points: points, interval: chart?.interval)
+            if presentation?.hasVolume == true {
+                VolumeBars(
+                    points: points,
+                    xFractions: presentation?.xFractions ?? [],
+                    volumeCeiling: presentation?.volumeCeiling ?? 1,
+                    fractionGap: presentation?.volumeFractionGap ?? 1
+                )
                     .frame(height: 22)
                     .padding(.leading, 48)
                     .padding(.top, 4)
@@ -3770,13 +3748,21 @@ private struct MarketDetailChart: View {
         return [first, points[points.count / 2], last].map { chartTime($0.timestamp, range: selectedRange, timezone: chart?.timezone) }
     }
 
-    private var hasVolume: Bool { points.contains { ($0.volume ?? 0) > 0 } }
     private var chartCaption: String {
         let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
         let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
-        let sessionText = marketChartExtendedSessionLabel(points).map { " · \($0)" } ?? ""
+        let sessionText = presentation?.extendedSessionLabel.map { " · \($0)" } ?? ""
         let referenceText = usesFallbackChart ? " · 参考 \(displayedSymbol)" : ""
-        return hasVolume ? "\(dated)\(sessionText)\(referenceText) · 成交量" : "\(dated)\(sessionText)\(referenceText)"
+        return presentation?.hasVolume == true
+            ? "\(dated)\(sessionText)\(referenceText) · 成交量"
+            : "\(dated)\(sessionText)\(referenceText)"
+    }
+    private var chartColor: Color {
+        let change = chart?.quote.changePercent ?? {
+            guard let first = values.first, let last = values.last else { return 0 }
+            return last - first
+        }()
+        return change >= 0 ? MarketStyle.gain : MarketStyle.loss
     }
     private var isLoadingChart: Bool {
         store.loadingCharts.contains(ChartKey(symbol: symbol, range: selectedRange))
@@ -3825,15 +3811,14 @@ private struct MarketDetailChart: View {
 private struct MarketSessionBreakMarker: View {
     let sessionBreak: MarketChartSessionBreak
     let points: [MarketChartPoint]
-    let interval: String?
+    let xFractions: [CGFloat]
 
     var body: some View {
         GeometryReader { proxy in
-            let sorted = points.sorted { $0.timestamp < $1.timestamp }
-            let fractions = marketChartXFractions(timestamps: sorted.map(\.timestamp), interval: interval)
-            let fractionByTimestamp = Dictionary(uniqueKeysWithValues: zip(sorted.map(\.timestamp), fractions))
-            let start = fractionByTimestamp[sessionBreak.previousTimestamp] ?? 0
-            let end = fractionByTimestamp[sessionBreak.currentTimestamp] ?? start
+            let startIndex = points.firstIndex { $0.timestamp == sessionBreak.previousTimestamp } ?? 0
+            let endIndex = points.firstIndex { $0.timestamp == sessionBreak.currentTimestamp } ?? startIndex
+            let start = xFractions.indices.contains(startIndex) ? xFractions[startIndex] : 0
+            let end = xFractions.indices.contains(endIndex) ? xFractions[endIndex] : start
             let x = proxy.size.width * (start + end) / 2
             ZStack(alignment: .topLeading) {
                 Path { path in
@@ -3856,30 +3841,14 @@ private struct MarketSessionBreakMarker: View {
     }
 }
 
-private struct MarketDetailSectionCard: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .background(MarketStyle.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(MarketStyle.divider.opacity(0.72), lineWidth: 0.5)
-            }
-    }
-}
-
-private extension View {
-    func marketDetailSectionCard() -> some View {
-        modifier(MarketDetailSectionCard())
-    }
-}
-
 private struct ChartReferenceLine: View {
     let value: Double
-    let values: [Double]
+    let low: Double?
+    let high: Double?
 
     var body: some View {
         GeometryReader { proxy in
-            if let low = values.min(), let high = values.max(), high > low, value >= low, value <= high {
+            if let low, let high, high > low, value >= low, value <= high {
                 let topInset: CGFloat = 19
                 let bottomInset: CGFloat = 6
                 let chartHeight = max(proxy.size.height - topInset - bottomInset, 1)
@@ -3897,7 +3866,10 @@ private struct ChartReferenceLine: View {
 }
 
 private struct ChartGrid: View {
-    let values: [Double]
+    let low: Double?
+    let high: Double?
+    let digits: Int
+
     var body: some View {
         VStack(spacing: 0) {
             ForEach(0..<5, id: \.self) { index in
@@ -3905,7 +3877,6 @@ private struct ChartGrid: View {
                     Text(axisLabel(index))
                         .font(.caption2)
                         .monospacedDigit()
-                        .contentTransition(.numericText())
                         .foregroundStyle(.secondary)
                         .frame(width: 42, alignment: .leading)
                     Rectangle().fill(MarketStyle.divider).frame(height: 0.5)
@@ -3913,12 +3884,11 @@ private struct ChartGrid: View {
                 if index < 4 { Spacer() }
             }
         }
-        .animation(MarketStyle.chartTransition, value: values)
     }
 
     private func axisLabel(_ index: Int) -> String {
-        guard let min = values.min(), let max = values.max(), max > min else { return "—" }
-        return number(max - (max - min) * Double(index) / 4, digits: marketAxisDigits(values: values))
+        guard let low, let high, high > low else { return "—" }
+        return number(high - (high - low) * Double(index) / 4, digits: digits)
     }
 }
 
@@ -3942,36 +3912,42 @@ private struct MarketLineChart: View {
 
 private struct MarketSessionLineChart: View {
     let points: [MarketChartPoint]
+    let xFractions: [CGFloat]
+    let low: Double?
+    let high: Double?
     let regularColor: Color
     let interval: String?
 
     var body: some View {
         Canvas { context, size in
-            let sorted = points.sorted { $0.timestamp < $1.timestamp }
-            guard sorted.count > 1 else { return }
-            let fractions = marketChartXFractions(timestamps: sorted.map(\.timestamp), interval: interval)
-            let fractionByTimestamp = Dictionary(uniqueKeysWithValues: zip(sorted.map(\.timestamp), fractions))
-            let low = sorted.map(\.close).min() ?? 0
-            let high = sorted.map(\.close).max() ?? low
+            guard points.count > 1,
+                  xFractions.count == points.count,
+                  let low,
+                  let high else { return }
             let span = max(high - low, 0.000_001)
-            func canvasPoint(_ point: MarketChartPoint) -> CGPoint {
+            func canvasPoint(_ point: MarketChartPoint, at index: Int) -> CGPoint {
                 CGPoint(
-                    x: size.width * (fractionByTimestamp[point.timestamp] ?? 0),
+                    x: size.width * xFractions[index],
                     y: size.height * (0.06 + CGFloat((high - point.close) / span) * 0.88)
                 )
             }
 
-            var segment: [MarketChartPoint] = []
+            var segmentIndices: [Int] = []
             func drawSegment() {
-                guard segment.count > 1 else { return }
+                guard segmentIndices.count > 1,
+                      let firstIndex = segmentIndices.first,
+                      let lastIndex = segmentIndices.last else { return }
                 var path = Path()
-                path.move(to: canvasPoint(segment[0]))
-                segment.dropFirst().forEach { path.addLine(to: canvasPoint($0)) }
-                let isRegular = segment[0].session == nil || segment[0].session == "regular"
-                if isRegular, let first = segment.first, let last = segment.last {
+                path.move(to: canvasPoint(points[firstIndex], at: firstIndex))
+                segmentIndices.dropFirst().forEach { index in
+                    path.addLine(to: canvasPoint(points[index], at: index))
+                }
+                let firstPoint = points[firstIndex]
+                let isRegular = firstPoint.session == nil || firstPoint.session == "regular"
+                if isRegular {
                     var fill = path
-                    fill.addLine(to: CGPoint(x: canvasPoint(last).x, y: size.height))
-                    fill.addLine(to: CGPoint(x: canvasPoint(first).x, y: size.height))
+                    fill.addLine(to: CGPoint(x: canvasPoint(points[lastIndex], at: lastIndex).x, y: size.height))
+                    fill.addLine(to: CGPoint(x: canvasPoint(firstPoint, at: firstIndex).x, y: size.height))
                     fill.closeSubpath()
                     context.fill(
                         fill,
@@ -3989,14 +3965,16 @@ private struct MarketSessionLineChart: View {
                 )
             }
 
-            for point in sorted {
-                if let previous = segment.last {
+            for index in points.indices {
+                let point = points[index]
+                if let previousIndex = segmentIndices.last {
+                    let previous = points[previousIndex]
                     if marketChartShouldSplitSegment(previous: previous, current: point, interval: interval) {
                         drawSegment()
-                        segment = []
+                        segmentIndices = []
                     }
                 }
-                segment.append(point)
+                segmentIndices.append(index)
             }
             drawSegment()
         }
@@ -4076,20 +4054,19 @@ private struct AnimatedLineCanvas: View, Animatable {
 
 private struct VolumeBars: View {
     let points: [MarketChartPoint]
-    let interval: String?
+    let xFractions: [CGFloat]
+    let volumeCeiling: Double
+    let fractionGap: CGFloat
+
     var body: some View {
         Canvas { context, size in
-            let sorted = points.sorted { $0.timestamp < $1.timestamp }
-            guard sorted.count > 1 else { return }
-            let maxVolume = marketChartVolumeCeiling(sorted)
-            let fractions = marketChartXFractions(timestamps: sorted.map(\.timestamp), interval: interval)
-            let minimumGap = zip(fractions, fractions.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }.min() ?? 1
-            let barWidth = min(max(size.width * minimumGap * 0.72, 1), 8)
+            guard points.count > 1, xFractions.count == points.count else { return }
+            let barWidth = min(max(size.width * fractionGap * 0.72, 1), 8)
 
-            for (index, point) in sorted.enumerated() {
+            for (index, point) in points.enumerated() {
                 guard let volume = point.volume, volume > 0 else { continue }
-                let height = max(2, size.height * CGFloat(min(volume, maxVolume) / maxVolume))
-                let x = marketVolumeBarX(fraction: fractions[index], width: size.width, barWidth: barWidth)
+                let height = max(2, size.height * CGFloat(min(volume, volumeCeiling) / volumeCeiling))
+                let x = marketVolumeBarX(fraction: xFractions[index], width: size.width, barWidth: barWidth)
                 let rect = CGRect(x: x - barWidth / 2, y: size.height - height, width: barWidth, height: height)
                 let color = point.close >= point.open ? MarketStyle.gain : MarketStyle.loss
                 context.fill(Path(rect), with: .color(color.opacity(0.68)))

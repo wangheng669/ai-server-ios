@@ -1183,6 +1183,49 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
     }
 }
 
+struct MarketChartPresentation {
+    let points: [MarketChartPoint]
+    let values: [Double]
+    let xFractions: [CGFloat]
+    let low: Double?
+    let high: Double?
+    let axisDigits: Int
+    let hasVolume: Bool
+    let volumeCeiling: Double
+    let volumeFractionGap: CGFloat
+    let extendedSessionLabel: String?
+    let sessionBreak: MarketChartSessionBreak?
+
+    init(chart: MarketChart) {
+        let points = marketChartDisplayPoints(chart.candles)
+            .sorted { $0.timestamp < $1.timestamp }
+        let values = points.compactMap(\.displayValue)
+        self.points = points
+        self.values = values
+        let xFractions = marketChartXFractions(
+            timestamps: points.map(\.timestamp),
+            interval: chart.interval
+        )
+        self.xFractions = xFractions
+        low = values.min()
+        high = values.max()
+        axisDigits = marketAxisDigits(values: values)
+        hasVolume = points.contains { ($0.volume ?? 0) > 0 }
+        volumeCeiling = marketChartVolumeCeiling(points)
+        volumeFractionGap = zip(xFractions, xFractions.dropFirst())
+            .map { $1 - $0 }
+            .filter { $0 > 0 }
+            .min() ?? 1
+        extendedSessionLabel = marketChartExtendedSessionLabel(points)
+        sessionBreak = marketChartLunchBreak(
+            points: points,
+            market: chart.market,
+            interval: chart.interval,
+            timezone: chart.timezone
+        )
+    }
+}
+
 func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 60) -> [Double] {
     let values = marketChartDisplayPoints(points)
         .sorted { $0.timestamp < $1.timestamp }
