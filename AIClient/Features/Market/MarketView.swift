@@ -1040,7 +1040,8 @@ private struct MarketIndexTable: View {
             }
 
         }
-        .padding(.horizontal, 18)
+        .padding(.leading, 12)
+        .padding(.trailing, 24)
         .padding(.vertical, 8)
         .background(MarketStyle.surface)
         .overlay(alignment: .top) {
