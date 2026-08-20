@@ -558,13 +558,15 @@ private struct MarketTerminalHero: View {
 
     @ViewBuilder private var heroInstrumentTitle: some View {
         let name = displayedQuote?.presentationName ?? quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
-        let code = overnightQuote.map { "\($0.displayCode) · 指数期货夜盘" }
-            ?? quote?.displayCode
-            ?? CoreDescriptor(symbol: region.primarySymbol).code
+        let code = overnightQuote == nil
+            ? (quote?.displayCode ?? CoreDescriptor(symbol: region.primarySymbol).code)
+            : nil
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 3) {
                 Text(name).font(.title3.weight(.semibold)).lineLimit(2)
-                Text(code).font(.caption.weight(.medium)).foregroundStyle(Color.secondary).lineLimit(1)
+                if let code {
+                    Text(code).font(.caption.weight(.medium)).foregroundStyle(Color.secondary).lineLimit(1)
+                }
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -572,11 +574,13 @@ private struct MarketTerminalHero: View {
                     .font(.system(size: 18, weight: .semibold))
                     .lineLimit(1)
                     .layoutPriority(1)
-                Text(code)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Color.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                if let code {
+                    Text(code)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
                 Spacer(minLength: 0)
             }
         }
