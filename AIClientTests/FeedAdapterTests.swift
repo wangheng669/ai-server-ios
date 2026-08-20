@@ -186,7 +186,7 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testNewYorkTimesSourceDoesNotPublishCardsUntilFullBodiesAreReady() async throws {
+    func testNewYorkTimesSourcePublishesCardsBeforeFullBodiesAreReady() async throws {
         let feedPosts = try (1...5).map { id in
             try JSONDecoder().decode(
                 Post.self,
@@ -197,7 +197,8 @@ final class FeedAdapterTests: XCTestCase {
             source: .newYorkTimes,
             fetchPosts: { _, _, _ in feedPosts },
             fetchPostDetail: { id in
-                try JSONDecoder().decode(
+                try await Task.sleep(for: .milliseconds(500))
+                return try JSONDecoder().decode(
                     Post.self,
                     from: Data(#"{"id":\#(id),"source":"rss:47","title":"Article \#(id)","content":"数据库完整正文 \#(id)。这是正文的第二段。","post_link":"https://example.com/\#(id)"}"#.utf8)
                 )
@@ -210,9 +211,20 @@ final class FeedAdapterTests: XCTestCase {
             }
         )
 
+        let clock = ContinuousClock()
+        let startedAt = clock.now
         await model.refresh()
+        let listLatency = startedAt.duration(to: clock.now)
 
         XCTAssertEqual(model.posts.count, feedPosts.count)
+        XCTAssertLessThan(listLatency, .milliseconds(200))
+        XCTAssertTrue(model.posts.allSatisfy {
+            model.preloadedNewYorkTimesArticle(for: $0.id) == nil
+        })
+
+        for _ in 0..<20 where model.preloadedNewYorkTimesArticle(for: 1) == nil {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         XCTAssertTrue(model.posts.allSatisfy {
             model.preloadedNewYorkTimesArticle(for: $0.id) == NewYorkTimesArticle(
                 blocks: [
@@ -281,6 +293,9 @@ final class FeedAdapterTests: XCTestCase {
         )
 
         await model.refresh()
+        for _ in 0..<20 where model.posts.first?.content != "数据库正文第一句。 数据库正文第二句。" {
+            try await Task.sleep(for: .milliseconds(50))
+        }
 
         XCTAssertNil(model.preloadedNewYorkTimesArticle(for: 7))
         XCTAssertEqual(model.posts.first?.content, "数据库正文第一句。 数据库正文第二句。")
