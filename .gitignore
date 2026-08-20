@@ -2,11 +2,13 @@ DerivedData/
 DerivedDataSim/
 .derived-data/
 .derived-data-device/
+.derived-data-reference/
 .codex-remote-ai-server/
 .codex-derived-device/
 .codex-derived-sim/
 .codex/DerivedData-*/
 .codex/config.toml
+.xcodebuildmcp/
 artifacts/device-derived/
 artifacts/test-derived/
 artifacts/device-build/
@@ -14,6 +16,10 @@ artifacts/device-install/
 artifacts/signing-backup/
 build/
 .build/
+*.xcresult
+*.app.zip
+*.ipa
+*.dSYM/
 *.xcuserstate
 xcuserdata/
 .DS_Store

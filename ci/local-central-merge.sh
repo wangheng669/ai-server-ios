@@ -237,7 +237,8 @@ if [[ "$app_changed" == true ]]; then
         -collect-test-diagnostics never \
         -derivedDataPath "$IOS_BUILD_CACHE_ROOT/local-central-simulator" \
         -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-        CODE_SIGNING_ALLOWED=NO
+        CODE_SIGNING_ALLOWED=NO \
+        COMPILER_INDEX_STORE_ENABLE=NO
   fi
 
   signing_path="$IOS_BUILD_CACHE_ROOT/local-central-signing"
@@ -251,7 +252,8 @@ if [[ "$app_changed" == true ]]; then
     -allowProvisioningUpdates \
     -allowProvisioningDeviceRegistration \
     DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_STYLE=Automatic
+    CODE_SIGN_STYLE=Automatic \
+    COMPILER_INDEX_STORE_ENABLE=NO
   app_path="$signing_path/Build/Products/Debug-iphoneos/AIServerClient.app"
   test -d "$app_path"
   codesign --verify --deep --strict --verbose=2 "$app_path"

@@ -12,6 +12,7 @@ device_wait_duration_seconds=0
 direct_install_seconds=0
 xcode_recovery_seconds=0
 final_install_seconds=0
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 sync_metrics_env() {
   export IOS_DEVICE_WAIT_DURATION_SECONDS="$device_wait_duration_seconds"
@@ -27,7 +28,19 @@ write_metrics() {
       "$device_wait_duration_seconds" "$direct_install_seconds" "$xcode_recovery_seconds" "$final_install_seconds" >> "$GITHUB_OUTPUT"
   fi
 }
-trap write_metrics EXIT
+
+finish() {
+  local status=$?
+  set +e
+  write_metrics
+  if ((status == 0)) && [[ "${IOS_PRUNE_INSTALL_DELTAS:-true}" == true ]]; then
+    BUNDLE_ID="$BUNDLE_ID" \
+      "$script_dir/prune-ios-install-deltas.sh" --apply \
+      || echo "Warning: unable to prune old iOS installation deltas." >&2
+  fi
+  return "$status"
+}
+trap finish EXIT
 
 # Self-hosted runners do not always inherit the interactive login session's
 # unlocked keychain state. The office installer uses an empty local keychain
@@ -150,7 +163,8 @@ refresh_signing_with_xcode() {
       -allowProvisioningUpdates \
       -allowProvisioningDeviceRegistration \
       DEVELOPMENT_TEAM="$TEAM_ID" \
-      CODE_SIGN_STYLE=Automatic 2>&1 | tee "$build_log"; then
+      CODE_SIGN_STYLE=Automatic \
+      COMPILER_INDEX_STORE_ENABLE=NO 2>&1 | tee "$build_log"; then
       xcode_refreshed_app="$refreshed_derived_data/Build/Products/Debug-iphoneos/AIServerClient.app"
       test -d "$xcode_refreshed_app"
       codesign --verify --deep --strict --verbose=2 "$xcode_refreshed_app"

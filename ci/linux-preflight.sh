@@ -37,6 +37,14 @@ if git diff --name-only "$merge_base"...HEAD -- ci/sign-and-install-ios.sh ci/te
   bash ci/test-sign-and-install-ios.sh
 fi
 
+if git diff --name-only "$merge_base"...HEAD -- ci/prune-ios-install-deltas.sh ci/test-prune-ios-install-deltas.sh ci/sign-and-install-ios.sh | grep -q .; then
+  bash ci/test-prune-ios-install-deltas.sh
+fi
+
+if git diff --name-only "$merge_base"...HEAD -- .gitignore .derived-data-reference ci .github/workflows | grep -q .; then
+  bash ci/test-ios-build-storage-policy.sh
+fi
+
 if git diff --name-only "$merge_base"...HEAD -- ci/classify-ios-test-scope.sh ci/is-low-risk-ios-diff.sh ci/test-classify-ios-test-scope.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
   bash ci/test-classify-ios-test-scope.sh
 fi

@@ -5,6 +5,16 @@ sandbox=$(mktemp -d "${TMPDIR:-/tmp}/ios-sign-install-test.XXXXXX")
 trap 'rm -rf "$sandbox"' EXIT
 mock_bin="$sandbox/bin"
 mkdir -p "$mock_bin" "$sandbox/runner" "$sandbox/signed-app"
+delta_root="$sandbox/AppInstallationBinaryDeltas"
+delta_bundle="$delta_root/com.example.app"
+mkdir -p "$delta_bundle"
+for entry in \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc \
+  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd; do
+  mkdir "$delta_bundle/$entry"
+done
 
 cat >"$mock_bin/security" <<'EOF'
 #!/usr/bin/env bash
@@ -36,6 +46,8 @@ output=$(
   PATH="$mock_bin:$PATH" \
   RUNNER_TEMP="$sandbox/runner" \
   IOS_TEST_CALLS="$sandbox/calls" \
+  IOS_INSTALL_DELTA_CACHE_ROOT="$delta_root" \
+  IOS_INSTALL_DELTA_CACHE_KEEP=2 \
   APP_ARCHIVE="$sandbox/app.zip" \
   APP_PATH="$sandbox/signed-app/AIServerClient.app" \
   BUNDLE_ID="com.example.app" \
@@ -45,6 +57,8 @@ output=$(
 )
 
 grep -Fq "using the prepared signed build" <<<"$output"
+grep -Fq "Pruned 2 old installation delta(s)" <<<"$output"
 grep -Fq "device info details" "$sandbox/calls"
 grep -Fq "device install app" "$sandbox/calls"
+test "$(find "$delta_bundle" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d '[:space:]')" = 2
 echo "Prepared signed app fast path passed."

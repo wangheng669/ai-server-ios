@@ -153,7 +153,8 @@ jobs:
             -scheme AIServerClient \
             -destination 'platform=iOS Simulator,name=iPhone 16e' \
             -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Create App Store archive
         env:
@@ -172,7 +173,8 @@ jobs:
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM=9M7P4VLHY3 \
-            CODE_SIGN_STYLE=Automatic
+            CODE_SIGN_STYLE=Automatic \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Upload archive to TestFlight
         env:
