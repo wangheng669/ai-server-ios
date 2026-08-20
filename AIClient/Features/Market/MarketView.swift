@@ -352,10 +352,15 @@ private struct MarketTerminalHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
-                heroChart
+                ZStack(alignment: .topTrailing) {
+                    heroChart
+                    heroValueOverlay
+                        .padding(.top, 8)
+                        .padding(.trailing, 8)
+                }
                     .frame(maxWidth: .infinity)
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 260 : 244)
-                    .padding(.trailing, 106)
+                    .padding(.trailing, 80)
                     .contentShape(Rectangle())
             }
             .buttonStyle(MarketPressStyle())
@@ -514,6 +519,27 @@ private struct MarketTerminalHero: View {
             trend: store.trendValues(for: displayedQuote),
             isOvernight: overnightQuote != nil
         )
+    }
+
+    private var heroValueOverlay: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.primary)
+            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(quoteTint(displayedQuote))
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            MarketTerminalPalette.header.opacity(0.88),
+            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+        )
+        .dynamicTypeSize(.large)
     }
 
     private var heroAccessibilityLabel: String {
@@ -864,7 +890,7 @@ private struct MarketRegionPicker: View {
             }
         }
         .padding(3)
-        .frame(width: 94)
+        .frame(width: 68)
         .background(Color.clear)
     }
 
@@ -876,24 +902,15 @@ private struct MarketRegionPicker: View {
         let overnightQuote = region == .unitedStates && quote?.tradingSession != .regular
             ? marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol])
             : nil
-        let displayedQuote = overnightQuote ?? quote
         let status = tabStatus(for: region, quote: quote, overnightQuote: overnightQuote)
 
         return Button {
             selection = region
         } label: {
             VStack(spacing: 1) {
-                HStack(spacing: 3) {
-                    Text(region.rawValue)
-                        .font(.system(size: 12, weight: weight))
-                        .foregroundStyle(foreground)
-                    Spacer(minLength: 0)
-                    Text(displayedQuote?.formattedPercent ?? "—")
-                        .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(quoteTint(displayedQuote))
-                        .minimumScaleFactor(0.75)
-                }
+                Text(region.rawValue)
+                    .font(.system(size: 12, weight: weight))
+                    .foregroundStyle(foreground)
                 HStack(spacing: 3) {
                     Circle()
                         .fill(status.tint)
@@ -904,8 +921,7 @@ private struct MarketRegionPicker: View {
                 }
             }
                 .lineLimit(1)
-                .padding(.horizontal, 5)
-                .frame(width: 88, height: 33)
+                .frame(width: 62, height: 33)
                 .background(Color.clear)
                 .overlay {
                     if isSelected {
@@ -917,7 +933,7 @@ private struct MarketRegionPicker: View {
         }
         .id(region)
         .buttonStyle(.plain)
-        .accessibilityLabel("\(region.rawValue)，\(status.accessibilityLabel)，\(displayedQuote?.formattedPercent ?? "涨跌幅等待更新")")
+        .accessibilityLabel("\(region.rawValue)，\(status.accessibilityLabel)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
