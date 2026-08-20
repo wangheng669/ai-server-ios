@@ -143,7 +143,7 @@ private struct MarketHomeView: View {
                             MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: selectIndex)
                             MarketRegionPicker(store: store, selection: $selectedMarket)
                                 .padding(.top, 14)
-                                .padding(.trailing, 8)
+                                .padding(.trailing, 4)
                         }
                         .background(MarketStyle.surface)
 
@@ -351,18 +351,12 @@ private struct MarketTerminalHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            MarketLiveStatus(store: store)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Color.secondary)
-                .padding(.trailing, 76)
-
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    heroInstrumentTitle
-                    heroPriceAndChart
-                }
-                .foregroundStyle(.primary)
-                .padding(.trailing, 76)
+                heroChart
+                    .frame(maxWidth: .infinity)
+                    .frame(height: dynamicTypeSize.isAccessibilitySize ? 260 : 244)
+                    .padding(.trailing, 106)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(MarketPressStyle())
             .accessibilityLabel(heroAccessibilityLabel)
@@ -512,75 +506,6 @@ private struct MarketTerminalHero: View {
             tint: quoteTint(store.quote(symbol: "^TNX")),
             trend: store.trendValues(for: store.quote(symbol: "^TNX"))
         )
-    }
-
-    @ViewBuilder private var heroInstrumentTitle: some View {
-        let name = displayedQuote?.presentationName ?? quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
-        let code = overnightQuote == nil
-            ? (quote?.displayCode ?? CoreDescriptor(symbol: region.primarySymbol).code)
-            : nil
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(name).font(.title3.weight(.semibold)).lineLimit(2)
-                if let code {
-                    Text(code).font(.caption.weight(.medium)).foregroundStyle(Color.secondary).lineLimit(1)
-                }
-            }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(name)
-                    .font(.system(size: 18, weight: .semibold))
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                if let code {
-                    Text(code)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                }
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    @ViewBuilder private var heroPriceAndChart: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 12) {
-                heroPriceSummary
-                heroChart.frame(maxWidth: .infinity, minHeight: 112)
-            }
-        } else {
-            GeometryReader { geometry in
-                HStack(alignment: .bottom, spacing: 12) {
-                    heroPriceSummary
-                        .frame(width: max(120, geometry.size.width - 182), alignment: .leading)
-                        .clipped()
-                    heroChart.frame(width: 170, height: 128)
-                }
-            }
-            .frame(height: 128)
-        }
-    }
-
-    private var heroPriceSummary: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                .font(.system(.largeTitle, design: .default, weight: .semibold))
-                .monospacedDigit()
-                .tracking(-0.8)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
-                .font(.headline.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(quoteTint(displayedQuote))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .allowsTightening(true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
     }
 
     private var heroChart: some View {
@@ -939,7 +864,7 @@ private struct MarketRegionPicker: View {
             }
         }
         .padding(3)
-        .frame(width: 68)
+        .frame(width: 94)
         .background(Color.clear)
     }
 
@@ -948,15 +873,27 @@ private struct MarketRegionPicker: View {
         let weight: Font.Weight = isSelected ? .semibold : .medium
         let foreground = isSelected ? MarketStyle.accent : Color.secondary
         let quote = store.quote(symbol: region.primarySymbol)
-        let status = tabStatus(for: region, quote: quote)
+        let overnightQuote = region == .unitedStates && quote?.tradingSession != .regular
+            ? marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol])
+            : nil
+        let displayedQuote = overnightQuote ?? quote
+        let status = tabStatus(for: region, quote: quote, overnightQuote: overnightQuote)
 
         return Button {
             selection = region
         } label: {
             VStack(spacing: 1) {
-                Text(region.rawValue)
-                    .font(.system(size: 12, weight: weight))
-                    .foregroundStyle(foreground)
+                HStack(spacing: 3) {
+                    Text(region.rawValue)
+                        .font(.system(size: 12, weight: weight))
+                        .foregroundStyle(foreground)
+                    Spacer(minLength: 0)
+                    Text(displayedQuote?.formattedPercent ?? "—")
+                        .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(quoteTint(displayedQuote))
+                        .minimumScaleFactor(0.75)
+                }
                 HStack(spacing: 3) {
                     Circle()
                         .fill(status.tint)
@@ -967,7 +904,8 @@ private struct MarketRegionPicker: View {
                 }
             }
                 .lineLimit(1)
-                .frame(width: 62, height: 33)
+                .padding(.horizontal, 5)
+                .frame(width: 88, height: 33)
                 .background(Color.clear)
                 .overlay {
                     if isSelected {
@@ -979,14 +917,16 @@ private struct MarketRegionPicker: View {
         }
         .id(region)
         .buttonStyle(.plain)
-        .accessibilityLabel("\(region.rawValue)，\(status.accessibilityLabel)")
+        .accessibilityLabel("\(region.rawValue)，\(status.accessibilityLabel)，\(displayedQuote?.formattedPercent ?? "涨跌幅等待更新")")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func tabStatus(for region: MarketRegion, quote: MarketQuote?) -> (label: String, accessibilityLabel: String, tint: Color) {
-        if region == .unitedStates,
-           quote?.tradingSession != .regular,
-           marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol]) != nil {
+    private func tabStatus(
+        for region: MarketRegion,
+        quote: MarketQuote?,
+        overnightQuote: MarketQuote?
+    ) -> (label: String, accessibilityLabel: String, tint: Color) {
+        if region == .unitedStates, overnightQuote != nil {
             return ("夜盘", "期指夜盘交易中", MarketStyle.live)
         }
 
@@ -2223,61 +2163,6 @@ private struct MarketSessionColumn: View {
     }
 
     private var sessionTint: Color { quote?.marketSession == "regular" ? MarketStyle.loss : .secondary }
-}
-
-private struct MarketLiveStatus: View {
-    let store: MarketStore
-
-    @ViewBuilder
-    var body: some View {
-        if !(store.hasOpenMarket && store.realtimeIsFresh && store.maximumOpenMarketDelayMinutes != nil) {
-            HStack(spacing: 5) {
-                Circle().fill(statusColor).frame(width: 7, height: 7)
-                if store.isLoading && store.dashboard == nil {
-                    Text("加载中")
-                } else if let age = store.cachedSnapshotAge {
-                    Text(cacheLabel(age: age))
-                } else if store.hasOpenMarket && store.realtimeIsFresh {
-                    Text("实时连接")
-                } else if store.realtimeStatus == .connecting || store.realtimeStatus == .reconnecting {
-                    if let date = store.latestQuoteDate {
-                        Text("截至 \(date.formatted(date: .omitted, time: .shortened)) · 连接恢复中")
-                    } else {
-                        Text("实时连接恢复中")
-                    }
-                } else if store.realtimeStatus == .connected {
-                    Text("等待实时行情")
-                } else if let date = store.latestQuoteDate {
-                    Text("截至 \(date.formatted(date: .omitted, time: .shortened))")
-                } else {
-                    Text("等待行情")
-                }
-            }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .accessibilityLabel(accessibilityStatus)
-        }
-    }
-
-    private var statusColor: Color {
-        if store.errorMessage != nil || store.realtimeStatus == .reconnecting || (store.cachedSnapshotAge ?? 0) >= 300 { return .orange }
-        if store.hasOpenMarket && store.realtimeIsFresh { return MarketStyle.loss }
-        return .secondary
-    }
-
-    private var accessibilityStatus: String {
-        if let error = store.errorMessage { return "行情更新异常：\(error)" }
-        if let age = store.cachedSnapshotAge { return "当前显示\(cacheLabel(age: age))" }
-        if store.hasOpenMarket && store.realtimeIsFresh { return "行情实时连接正常" }
-        if let date = store.latestQuoteDate { return "行情截至 \(date.formatted(date: .abbreviated, time: .shortened))" }
-        return "行情等待更新"
-    }
-
-    private func cacheLabel(age: TimeInterval) -> String {
-        if age >= 86_400 { return "历史缓存 · 超过1天" }
-        if age >= 300 { return "缓存数据 · \(max(5, Int(age / 60)))分钟前" }
-        return "缓存数据"
-    }
 }
 
 private struct MarketErrorBanner: View {
