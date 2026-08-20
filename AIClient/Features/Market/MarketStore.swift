@@ -6,6 +6,7 @@ import Observation
 final class MarketStore {
     private(set) var dashboard: MarketDashboard?
     private(set) var charts: [ChartKey: MarketChart] = [:]
+    private(set) var chartPresentations: [ChartKey: MarketChartPresentation] = [:]
     private(set) var loadingCharts: Set<ChartKey> = []
     private(set) var chartErrors: [ChartKey: String] = [:]
     private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
@@ -35,6 +36,8 @@ final class MarketStore {
     private var loadingConstituentSymbols: Set<String> = []
     private var loadingCompanyLogoSymbols: Set<String> = []
     private var trendBackfillTask: Task<Void, Never>?
+    @ObservationIgnored private var dashboardQuotesBySymbol: [String: MarketQuote] = [:]
+    @ObservationIgnored private var constituentsBySymbol: [String: MarketIndexConstituent] = [:]
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -83,6 +86,7 @@ final class MarketStore {
             for update in latestRealtimeUpdates.values {
                 value.merge(update)
             }
+            dashboardQuotesBySymbol = Self.quoteIndex(for: value)
             dashboard = value
             lastSnapshotRefreshAt = Date()
             isShowingCachedSnapshot = false
@@ -107,6 +111,7 @@ final class MarketStore {
         do {
             let value = try await service.chart(symbol: symbol, range: range, refresh: force)
             charts[key] = value
+            chartPresentations[key] = MarketChartPresentation(chart: value)
             if marketChartNeedsRetry(value) {
                 scheduleChartRetry(symbol: symbol, range: range, key: key)
             } else {
@@ -146,6 +151,10 @@ final class MarketStore {
         charts[ChartKey(symbol: symbol, range: range)]
     }
 
+    func chartPresentation(symbol: String, range: MarketRange) -> MarketChartPresentation? {
+        chartPresentations[ChartKey(symbol: symbol, range: range)]
+    }
+
     func chartError(symbol: String, range: MarketRange) -> String? {
         chartErrors[ChartKey(symbol: symbol, range: range)]
     }
@@ -158,6 +167,7 @@ final class MarketStore {
         do {
             let value = try await service.indexConstituents(symbol: symbol, refresh: force)
             indexConstituents[symbol] = value
+            rebuildConstituentIndex()
             constituentErrors[symbol] = nil
             scheduleConstituentRetryIfNeeded(symbol: symbol, pendingSymbols: value.symbolsPendingRefresh)
         } catch is CancellationError {
@@ -292,21 +302,14 @@ final class MarketStore {
     }
 
     func quote(symbol: String) -> MarketQuote? {
-        if let quote = dashboard?.coreIndices.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = dashboard?.referenceIndices.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = dashboard?.metrics.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = dashboard?.allRegionalComponents.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = dashboard?.crypto.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = dashboard?.commodities.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = dashboard?.indexSessions?.values.first(where: { $0.symbol == symbol }) { return quote }
-        return indexConstituents.values.lazy
-            .flatMap(\.items)
-            .first(where: { $0.quote.symbol == symbol })?
-            .quote
+        _ = dashboard
+        _ = indexConstituents.count
+        return dashboardQuotesBySymbol[symbol] ?? constituentsBySymbol[symbol]?.quote
     }
 
     func constituent(symbol: String) -> MarketIndexConstituent? {
-        indexConstituents.values.lazy.flatMap(\.items).first(where: { $0.quote.symbol == symbol })
+        _ = indexConstituents.count
+        return constituentsBySymbol[symbol]
     }
 
     func loadCompanyLogo(symbol: String, name: String) async {
@@ -329,6 +332,7 @@ final class MarketStore {
         guard !loadedCache else { return }
         loadedCache = true
         guard let snapshot = MarketSnapshotCache.load() else { return }
+        dashboardQuotesBySymbol = Self.quoteIndex(for: snapshot.dashboard)
         dashboard = snapshot.dashboard
         cacheSavedAt = snapshot.savedAt
         isShowingCachedSnapshot = true
@@ -369,8 +373,35 @@ final class MarketStore {
         for update in updates {
             dashboard.merge(update)
             mergeConstituent(update)
+            if let current = dashboardQuotesBySymbol[update.symbol],
+               marketRealtimeUpdateIsCurrent(update, current: current) {
+                dashboardQuotesBySymbol[update.symbol] = update.merging(into: current)
+            }
+            if var constituent = constituentsBySymbol[update.symbol],
+               marketRealtimeUpdateIsCurrent(update, current: constituent.quote) {
+                constituent.quote = update.merging(into: constituent.quote)
+                constituentsBySymbol[update.symbol] = constituent
+            }
         }
         self.dashboard = dashboard
+    }
+
+    private static func quoteIndex(for dashboard: MarketDashboard) -> [String: MarketQuote] {
+        let quotes = dashboard.coreIndices
+            + dashboard.referenceIndices
+            + dashboard.metrics
+            + dashboard.allRegionalComponents
+            + dashboard.crypto
+            + dashboard.commodities
+            + (dashboard.indexSessions.map { Array($0.values) } ?? [])
+        return Dictionary(quotes.map { ($0.symbol, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func rebuildConstituentIndex() {
+        constituentsBySymbol = Dictionary(
+            indexConstituents.values.flatMap(\.items).map { ($0.quote.symbol, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     private func maintainFreshness(now: Date = Date()) async {
