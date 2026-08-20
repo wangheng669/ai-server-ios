@@ -894,11 +894,12 @@ private struct MarketRegionPicker: View {
     private func regionButton(_ region: MarketRegion) -> some View {
         let isSelected = selection == region
         let weight: Font.Weight = isSelected ? .semibold : .medium
-        let foreground = isSelected ? MarketStyle.accent : Color.secondary
         let quote = store.quote(symbol: region.primarySymbol)
         let overnightQuote = region == .unitedStates && quote?.tradingSession != .regular
             ? marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol])
             : nil
+        let movementQuote = overnightQuote ?? quote
+        let movementTint = tabMovementTint(for: movementQuote)
         let status = tabStatus(for: region, quote: quote, overnightQuote: overnightQuote)
 
         return Button {
@@ -907,7 +908,7 @@ private struct MarketRegionPicker: View {
             VStack(spacing: 1) {
                 Text(region.rawValue)
                     .font(.system(size: 12, weight: weight))
-                    .foregroundStyle(foreground)
+                    .foregroundStyle(movementTint)
                 HStack(spacing: 3) {
                     Circle()
                         .fill(status.tint)
@@ -919,7 +920,12 @@ private struct MarketRegionPicker: View {
             }
                 .lineLimit(1)
                 .frame(width: 62, height: 33)
-                .background(Color.clear)
+                .background {
+                    if movementQuote != nil {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(movementTint.opacity(isSelected ? 0.12 : 0.07))
+                    }
+                }
                 .overlay {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -930,8 +936,23 @@ private struct MarketRegionPicker: View {
         }
         .id(region)
         .buttonStyle(.plain)
-        .accessibilityLabel("\(region.rawValue)，\(status.accessibilityLabel)")
+        .accessibilityLabel("\(region.rawValue)，\(tabMovementLabel(for: movementQuote))，\(status.accessibilityLabel)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func tabMovementTint(for quote: MarketQuote?) -> Color {
+        guard let quote else { return Color.secondary }
+        if quote.marketDisplayPercentValue > 0 { return MarketStyle.gain }
+        if quote.marketDisplayPercentValue < 0 { return MarketStyle.loss }
+        return Color.secondary
+    }
+
+    private func tabMovementLabel(for quote: MarketQuote?) -> String {
+        guard let quote else { return "涨跌幅更新中" }
+        let change = quote.marketDisplayPercentValue
+        if change > 0 { return String(format: "上涨 %.2f%%", change) }
+        if change < 0 { return String(format: "下跌 %.2f%%", abs(change)) }
+        return "平盘"
     }
 
     private func tabStatus(
