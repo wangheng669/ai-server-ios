@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct GlobalAssetsRankingView: View {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var ranking: GlobalAssetsRanking?
     @State private var isLoading = true
 
@@ -39,8 +40,8 @@ struct GlobalAssetsRankingView: View {
             }
         }
         .background(InvestmentDesign.surface)
-        .task {
-            if ranking == nil { await load() }
+        .task(id: rootTabIsActive) {
+            if rootTabIsActive, ranking == nil { await load() }
         }
     }
 

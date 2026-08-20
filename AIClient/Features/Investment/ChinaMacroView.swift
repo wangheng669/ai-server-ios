@@ -306,6 +306,8 @@ final class ChinaMacroStore {
             years = snapshot.years
             loadError = years.isEmpty
             lastUpdatedAt = snapshot.generatedAt
+        } catch is CancellationError {
+            return
         } catch {
             loadError = true
         }
@@ -353,6 +355,7 @@ private struct ChinaMacroPresentation: Identifiable {
 }
 
 struct ChinaMacroView: View {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var store = ChinaMacroStore()
     @State private var section = ChinaMacroSection.overview
     @State private var metric = ChinaMacroMetric.gdpGrowth
@@ -383,7 +386,8 @@ struct ChinaMacroView: View {
         }
         .background(InvestmentDesign.canvas)
         .refreshable { await store.load() }
-        .task {
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
             if store.years.isEmpty { await store.load() }
             if ProcessInfo.processInfo.arguments.contains("--china-macro-household-preview") {
                 presentation = ChinaMacroPresentation(metric: .householdLeverage, year: nil)

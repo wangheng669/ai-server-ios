@@ -101,6 +101,7 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
 struct InvestmentView: View {
     @Binding private var showsDetail: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var section: InvestmentSection
     @State private var displayedSection: InvestmentSection
     @State private var contentOpacity = 1.0
@@ -218,6 +219,7 @@ struct InvestmentView: View {
         let isSelected = displayedSection == target
 
         return content()
+            .environment(\.rootTabIsActive, rootTabIsActive && isSelected)
             .opacity(isSelected ? 1 : 0)
             .allowsHitTesting(isSelected)
             .accessibilityHidden(!isSelected)

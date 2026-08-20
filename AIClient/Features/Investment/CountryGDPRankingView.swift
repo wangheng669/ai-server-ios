@@ -180,6 +180,7 @@ struct GlobalAssetsService {
 }
 
 struct CountryGDPRankingView: View {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Binding var showsDetail: Bool
     @State private var category: GlobalRankingCategory
     @State private var ranking: CountryGDPRanking?
@@ -241,8 +242,8 @@ struct CountryGDPRankingView: View {
                 .presentationCornerRadius(28)
                 .presentationBackground(InvestmentDesign.surface)
         }
-        .task(id: category) {
-            if category == .countryGDP, ranking == nil {
+        .task(id: "\(rootTabIsActive):\(category.rawValue)") {
+            if rootTabIsActive, category == .countryGDP, ranking == nil {
                 await load()
             }
         }
@@ -513,6 +514,8 @@ struct CountryGDPRankingView: View {
                 selectedCountry = CountryGDPRoute(country: country)
             }
             #endif
+        } catch is CancellationError {
+            return
         } catch {
             if ranking == nil { loadFailed = true }
         }

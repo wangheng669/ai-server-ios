@@ -94,6 +94,8 @@ final class InstitutionResearchStore: ObservableObject {
         defer { isLoading = false }
         do {
             payload = try await fetch()
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = "机构研究暂时无法载入"
         }
@@ -103,6 +105,7 @@ final class InstitutionResearchStore: ObservableObject {
 @MainActor
 struct InstitutionResearchView: View {
     @StateObject private var store: InstitutionResearchStore
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     init() {
         _store = StateObject(wrappedValue: InstitutionResearchStore())
@@ -132,7 +135,10 @@ struct InstitutionResearchView: View {
             }
         }
         .background(InvestmentDesign.canvas)
-        .task { await store.load() }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.load()
+        }
     }
 
     private func content(_ payload: InstitutionResearchPayload) -> some View {

@@ -211,26 +211,45 @@ final class CompanyResearchStore: ObservableObject {
     @Published private(set) var companies: [CompanyResearchProfile] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    private(set) var lastLoadedAt: Date?
     private let fetch: () async throws -> CompanyResearchPayload
+    private let refreshInterval: TimeInterval
 
-    init(service: CompanyResearchService = CompanyResearchService()) {
+    init(
+        service: CompanyResearchService = CompanyResearchService(),
+        refreshInterval: TimeInterval = 5 * 60
+    ) {
         fetch = { try await service.fetch() }
+        self.refreshInterval = refreshInterval
     }
 
-    init(fetch: @escaping () async throws -> CompanyResearchPayload) {
+    init(
+        refreshInterval: TimeInterval = 5 * 60,
+        fetch: @escaping () async throws -> CompanyResearchPayload
+    ) {
         self.fetch = fetch
+        self.refreshInterval = refreshInterval
     }
 
-    func load(force: Bool = false) async {
+    func load(force: Bool = false, now: Date = Date()) async {
         guard !isLoading, force || companies.isEmpty else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
             companies = try await fetch().companies
+            lastLoadedAt = now
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = "公司研究暂时无法载入"
         }
+    }
+
+    func loadIfNeeded(now: Date = Date()) async {
+        let isStale = lastLoadedAt.map { now.timeIntervalSince($0) >= refreshInterval } ?? true
+        guard lastLoadedAt == nil || isStale else { return }
+        await load(force: true, now: now)
     }
 }
 
@@ -289,11 +308,11 @@ struct CompanyResearchView: View {
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
-            await store.load(force: true)
+            await store.loadIfNeeded()
         }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
-            Task { await store.load(force: true) }
+            Task { await store.loadIfNeeded() }
         }
     }
 
