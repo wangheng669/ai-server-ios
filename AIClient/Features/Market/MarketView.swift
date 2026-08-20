@@ -764,12 +764,9 @@ private struct TerminalLeadChart: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 7) {
             ZStack {
-                VStack(spacing: 0) {
-                    ForEach(0..<3, id: \.self) { index in
-                        Rectangle().fill(Color.secondary.opacity(index == 1 ? 0.20 : 0.11)).frame(height: 0.5)
-                        if index < 2 { Spacer() }
-                    }
-                }
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.20))
+                    .frame(height: 0.5)
                 Sparkline(values: trend, color: quoteTint(quote))
                     .padding(.vertical, 5)
             }
@@ -972,7 +969,6 @@ private struct MarketIndexTable: View {
 
     @State private var chinaScope: ChinaIndexScope = .core
     @State private var displayedLogoPaths: [String: String]
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(region: MarketRegion, store: MarketStore, onSelectIndex: @escaping (String) -> Void) {
         self.region = region
@@ -991,20 +987,6 @@ private struct MarketIndexTable: View {
         VStack(spacing: 0) {
             if region == .china {
                 ChinaIndexScopePicker(selection: $chinaScope)
-            }
-            if !dynamicTypeSize.isAccessibilitySize {
-                HStack(spacing: 8) {
-                    Text("名称 / 代码").frame(width: 132, alignment: .leading)
-                    Text("最新价").frame(maxWidth: .infinity, alignment: .trailing)
-                    Text("涨跌幅").frame(width: 62, alignment: .trailing)
-                    Text("走势").frame(width: 50, alignment: .trailing)
-                }
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 18)
-                .frame(height: 32)
-
-                Divider().opacity(0.45)
             }
 
             if quotes.isEmpty {
