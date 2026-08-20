@@ -215,6 +215,7 @@ final class NewsFeedViewModel: ObservableObject {
     private var loadingXLiveDetailIDs: Set<Int> = []
     private var loadingRSSTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
+    private var newYorkTimesPrefetchTask: Task<Void, Never>?
     private var selectedRSSPage = 1
     private let selectedRSSPageSize = 20
     private var selectedWeChatPage = 1
@@ -1096,6 +1097,9 @@ final class NewsFeedViewModel: ObservableObject {
             }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            if requestedSource == .newYorkTimes {
+                scheduleNewYorkTimesPrefetch(for: result)
+            }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             guard source == requestedSource, activeRefreshID == refreshID else { return }
@@ -1149,6 +1153,9 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            if requestedSource == .newYorkTimes {
+                scheduleNewYorkTimesPrefetch(for: result)
+            }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             errorMessage = NetworkErrorPresentation.message(for: error)
@@ -1180,9 +1187,6 @@ final class NewsFeedViewModel: ObservableObject {
                 } else {
                     result = try await fetchPosts(page, limit, source)
                 }
-                if source == .newYorkTimes {
-                    return try await prefetchNewYorkTimesBodies(for: result)
-                }
                 return result
             } catch is CancellationError {
                 throw CancellationError()
@@ -1193,6 +1197,29 @@ final class NewsFeedViewModel: ObservableObject {
             }
         }
         throw lastError ?? APIError.invalidResponse
+    }
+
+    private func scheduleNewYorkTimesPrefetch(for posts: [Post]) {
+        newYorkTimesPrefetchTask?.cancel()
+        newYorkTimesPrefetchTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let warmed = try await self.prefetchNewYorkTimesBodies(for: posts)
+                guard !Task.isCancelled, self.source == .newYorkTimes else { return }
+                let warmedByID = Dictionary(uniqueKeysWithValues: warmed.map { ($0.id, $0) })
+                self.posts = self.posts.map { warmedByID[$0.id] ?? $0 }
+                self.cache[.newYorkTimes] = .init(
+                    posts: self.posts,
+                    page: self.page,
+                    canLoadMore: self.canLoadMore
+                )
+                self.persistCurrentSnapshot()
+            } catch is CancellationError {
+                return
+            } catch {
+                // The feed cards are already usable. Detail prefetch is best-effort.
+            }
+        }
     }
 
     private func handleRealtime(_ event: RealtimeFeedClient.Event) {
