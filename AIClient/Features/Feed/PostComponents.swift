@@ -405,7 +405,8 @@ struct AvatarView: View {
             guard assetName == nil else { return }
             let loaded = await ImageLoader.load(
                 url,
-                targetSize: CGSize(width: size * 2, height: size * 2)
+                targetSize: CGSize(width: size, height: size),
+                prefersCompactXAvatar: true
             )
             if rejectsUpscaledImages,
                let cgImage = loaded?.cgImage,
@@ -420,6 +421,7 @@ struct AvatarView: View {
 
 struct RemoteImage: View {
     let url: URL
+    var targetWidth: CGFloat? = nil
     var height: CGFloat? = nil
     var cornerRadius: CGFloat = 0
     var contentMode: ContentMode = .fill
@@ -452,7 +454,10 @@ struct RemoteImage: View {
             let targetHeight = height ?? UIScreen.main.bounds.height
             let loadedImage = await ImageLoader.load(
                 url,
-                targetSize: CGSize(width: UIScreen.main.bounds.width, height: targetHeight)
+                targetSize: CGSize(
+                    width: targetWidth ?? UIScreen.main.bounds.width,
+                    height: targetHeight
+                )
             )
             image = loadedImage
             if let loadedImage { onImageLoaded?(loadedImage) }
@@ -677,9 +682,16 @@ actor ImageLoader {
         dataCache.countLimit = 180
     }
 
-    static func load(_ url: URL?, targetSize: CGSize? = nil) async -> UIImage? {
+    static func load(
+        _ url: URL?,
+        targetSize: CGSize? = nil,
+        prefersCompactXAvatar: Bool = false
+    ) async -> UIImage? {
         guard let url else { return nil }
-        for sourceURL in avatarCandidateURLs(url) {
+        let candidateURLs = prefersCompactXAvatar
+            ? compactAvatarCandidateURLs(url)
+            : avatarCandidateURLs(url)
+        for sourceURL in candidateURLs {
             let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
             if let image = await shared.image(
                 for: relayedURL,
@@ -696,6 +708,24 @@ actor ImageLoader {
         let highResolutionURL = highResolutionAvatarURL(url)
         guard highResolutionURL != url else { return [url] }
         return [highResolutionURL, url]
+    }
+
+    static func compactAvatarCandidateURLs(_ url: URL) -> [URL] {
+        let upgradedURL = highResolutionAvatarURL(url)
+        guard let host = upgradedURL.host?.lowercased(),
+              (host == "pbs.twimg.com" || host.hasSuffix(".twimg.com")),
+              upgradedURL.path.contains("/profile_images/") else {
+            return avatarCandidateURLs(url)
+        }
+
+        var components = URLComponents(url: upgradedURL, resolvingAgainstBaseURL: false)
+        components?.path = upgradedURL.path
+            .replacingOccurrences(of: "_bigger.", with: "_200x200.")
+            .replacingOccurrences(of: "_mini.", with: "_200x200.")
+            .replacingOccurrences(of: "_400x400.", with: "_200x200.")
+        let compactURL = components?.url ?? upgradedURL
+        guard compactURL != url else { return [url] }
+        return [compactURL, url]
     }
 
     static func highResolutionAvatarURL(_ url: URL) -> URL {
@@ -928,6 +958,7 @@ enum XueqiuMediaDisplayPolicy {
 struct PostMediaGrid: View {
     let post: Post
     var imageURLs: [URL]? = nil
+    var usesFeedSizedImages = false
     var singleImageHeight: CGFloat? = nil
     var singleImageMaxHeight: CGFloat? = nil
     var singleImageContentMode: ContentMode = .fit
@@ -949,7 +980,7 @@ struct PostMediaGrid: View {
     }
 
     private var allContentImageURLs: [URL] {
-        (imageURLs ?? post.imageURLs)
+        (imageURLs ?? (usesFeedSizedImages ? post.feedImageURLs : post.imageURLs))
             .filter { !knownCompactImageURLs.contains($0) && !compactImageURLs.contains($0) }
             .filter {
                 XueqiuMediaDisplayPolicy.shouldDisplay(
@@ -958,6 +989,12 @@ struct PostMediaGrid: View {
                     usesExplicitPlacement: imageURLs != nil
                 )
             }
+    }
+
+    private var allGalleryImageURLs: [URL] {
+        guard imageURLs == nil else { return allContentImageURLs }
+        let originals = post.originalImageURLs
+        return originals.count == allContentImageURLs.count ? originals : allContentImageURLs
     }
 
     private var contentImageURLs: [URL] {
@@ -1036,7 +1073,10 @@ struct PostMediaGrid: View {
         if let onImageTap {
             onImageTap()
         } else {
-            showGallery(startingAt: url, urls: urls)
+            let index = urls.firstIndex(of: url) ?? 0
+            let galleryURLs = allGalleryImageURLs
+            let galleryURL = galleryURLs.indices.contains(index) ? galleryURLs[index] : url
+            showGallery(startingAt: galleryURL, urls: galleryURLs)
         }
     }
 
@@ -1063,6 +1103,7 @@ struct PostMediaGrid: View {
                     fallbackURL: post.feedPlaybackFallbackURL,
                     thumbnailURL: post.previewURL,
                     contentMode: videoContentMode,
+                    reportsPlaybackEvents: post.sourceName == "X",
                     observationSurface: "feed-grid"
                 )
                     .id(videoURL)
@@ -1073,6 +1114,7 @@ struct PostMediaGrid: View {
                 Button { handleImageTap(at: url, urls: allContentImageURLs) } label: {
                     RemoteImage(
                         url: url,
+                        targetWidth: availableWidth,
                         height: resolvedSingleImageHeight,
                         cornerRadius: cornerRadius,
                         contentMode: singleImageContentMode,
@@ -1088,6 +1130,7 @@ struct PostMediaGrid: View {
                         Button { handleImageTap(at: url, urls: allContentImageURLs) } label: {
                             RemoteImage(
                                 url: url,
+                                targetWidth: ((availableWidth ?? UIScreen.main.bounds.width) - 3) / 2,
                                 height: multiImageHeight,
                                 cornerRadius: 6,
                                 contentMode: .fit,
@@ -1103,6 +1146,7 @@ struct PostMediaGrid: View {
                 Button { handleImageTap(at: preview, urls: [preview]) } label: {
                     RemoteImage(
                         url: preview,
+                        targetWidth: availableWidth,
                         height: resolvedSingleImageHeight,
                         cornerRadius: cornerRadius,
                         contentMode: singleImageContentMode
@@ -1115,6 +1159,13 @@ struct PostMediaGrid: View {
         .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
         .clipped()
         .task(id: post.videoURLs.first) {
+            if let video = post.videos?.first,
+               let width = video.width,
+               let height = video.height,
+               width > 0,
+               height > 0 {
+                return
+            }
             guard let videoURL = post.videoURLs.first else { return }
             await loadVideoAspectRatio(for: videoURL)
         }
@@ -1148,6 +1199,7 @@ struct XFeedMediaView: View {
                     url: videoURL,
                     fallbackURL: post.feedPlaybackFallbackURL,
                     thumbnailURL: post.previewURL,
+                    reportsPlaybackEvents: true,
                     observationSurface: "x-feed"
                 )
                 .id(videoURL)
@@ -1156,6 +1208,7 @@ struct XFeedMediaView: View {
             } else {
                 PostMediaGrid(
                     post: post,
+                    usesFeedSizedImages: true,
                     singleImageMaxHeight: 420,
                     availableWidth: availableWidth,
                     cornerRadius: 12
@@ -1252,13 +1305,16 @@ struct XFeedQuotedPostCard: View {
                 url: videoURL,
                 fallbackURL: nil,
                 thumbnailURL: media.previewURL,
-                generatesThumbnailWhenMissing: false
+                generatesThumbnailWhenMissing: false,
+                reportsPlaybackEvents: true,
+                observationSurface: "x-quoted"
             )
             .frame(height: quotedMediaHeight(media))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else if let imageURL = media.displayURL {
+        } else if let imageURL = media.feedDisplayURL {
             RemoteImage(
                 url: imageURL,
+                targetWidth: availableWidth - 24,
                 height: quotedMediaHeight(media),
                 cornerRadius: 8,
                 contentMode: .fit
@@ -1357,6 +1413,7 @@ struct XVideoPlayerView: View {
     private let chromeStyle: XVideoPlayerChromeStyle
     private let isPlaybackActive: Bool
     private let generatesThumbnailWhenMissing: Bool
+    private let reportsPlaybackEvents: Bool
     private let onAspectRatioResolved: ((CGFloat) -> Void)?
     private let observationSurface: String
 
@@ -1369,6 +1426,7 @@ struct XVideoPlayerView: View {
         chromeStyle: XVideoPlayerChromeStyle = .standard,
         isPlaybackActive: Bool = true,
         generatesThumbnailWhenMissing: Bool = true,
+        reportsPlaybackEvents: Bool = false,
         observationSurface: String = "x-video",
         onAspectRatioResolved: ((CGFloat) -> Void)? = nil
     ) {
@@ -1380,6 +1438,7 @@ struct XVideoPlayerView: View {
         self.chromeStyle = chromeStyle
         self.isPlaybackActive = isPlaybackActive
         self.generatesThumbnailWhenMissing = generatesThumbnailWhenMissing
+        self.reportsPlaybackEvents = reportsPlaybackEvents
         self.observationSurface = observationSurface
         self.onAspectRatioResolved = onAspectRatioResolved
     }
@@ -1496,7 +1555,7 @@ struct XVideoPlayerView: View {
 
     private func beginPlayback(with sourceURL: URL) {
         guard isPlaybackActive else { return }
-        if observationSessionID == nil, fallbackURL != nil {
+        if reportsPlaybackEvents, observationSessionID == nil {
             observationSessionID = UUID().uuidString
             observationStartedAt = Date()
             reportPlaybackEvent("started", route: playbackRoute(for: sourceURL))
@@ -1609,7 +1668,7 @@ struct XVideoPlayerView: View {
     }
 
     private func playbackRoute(for url: URL) -> String {
-        url == fallbackURL ? "proxy" : "direct"
+        url.path.hasSuffix("/media-proxy") || url == fallbackURL ? "proxy" : "direct"
     }
 
     private func reportPlaybackEvent(_ phase: String, route: String, message: String? = nil) {
@@ -1655,7 +1714,10 @@ struct XVideoPlayerView: View {
             guard !Task.isCancelled else { return }
             guard let remoteThumbnail = await ImageLoader.load(
                 thumbnailURL,
-                targetSize: CGSize(width: 720, height: 720)
+                targetSize: CGSize(
+                    width: UIScreen.main.bounds.width,
+                    height: min(UIScreen.main.bounds.height, 440)
+                )
             ) else { continue }
             guard !Task.isCancelled else { return }
             Self.thumbnailCache.setObject(remoteThumbnail, forKey: playbackURL as NSURL)

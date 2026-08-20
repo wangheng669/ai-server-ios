@@ -1545,6 +1545,46 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, "https://pbs.twimg.com/media/demo.jpg")
     }
 
+    func testXFeedImageUsesSmallVariantThroughServerProxy() throws {
+        let url = try XCTUnwrap(MediaURL.feedImage("https://pbs.twimg.com/media/demo.jpg?format=jpg&name=large"))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let target = try XCTUnwrap(components.queryItems?.first(where: { $0.name == "url" })?.value)
+        let targetComponents = try XCTUnwrap(URLComponents(string: target))
+
+        XCTAssertEqual(targetComponents.queryItems?.first(where: { $0.name == "format" })?.value, "jpg")
+        XCTAssertEqual(targetComponents.queryItems?.first(where: { $0.name == "name" })?.value, "small")
+    }
+
+    func testXFeedSingleImageCanUseMediumVariantThroughServerProxy() throws {
+        let url = try XCTUnwrap(
+            MediaURL.feedImage("https://pbs.twimg.com/media/demo.jpg?format=jpg&name=large", variant: "medium")
+        )
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let target = try XCTUnwrap(components.queryItems?.first(where: { $0.name == "url" })?.value)
+        let targetComponents = try XCTUnwrap(URLComponents(string: target))
+
+        XCTAssertEqual(targetComponents.queryItems?.first(where: { $0.name == "name" })?.value, "medium")
+    }
+
+    func testCompactXAvatarUses200PixelVariantAndKeepsOriginalFallback() throws {
+        let original = try XCTUnwrap(URL(string: "https://pbs.twimg.com/profile_images/123/avatar_400x400.jpg"))
+
+        XCTAssertEqual(
+            ImageLoader.compactAvatarCandidateURLs(original).map(\.absoluteString),
+            ["https://pbs.twimg.com/profile_images/123/avatar_200x200.jpg", original.absoluteString]
+        )
+    }
+
+    func testOrdinaryImageResolutionKeepsLargeXAvatarForNonFeedSurfaces() throws {
+        let url = try XCTUnwrap(MediaURL.image("https://pbs.twimg.com/profile_images/123/avatar_400x400.jpg"))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+
+        XCTAssertEqual(
+            components.queryItems?.first(where: { $0.name == "url" })?.value,
+            "https://pbs.twimg.com/profile_images/123/avatar_400x400.jpg"
+        )
+    }
+
     func testXAvatarLoaderRequestsHighResolutionProfileImage() throws {
         let original = try XCTUnwrap(URL(string: "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg"))
 
