@@ -476,6 +476,54 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertFalse(marketQuoteNeedsTrendBackfill(regular))
     }
 
+    func testTrendBackfillProtectsRegionalLeadIndicesFromBoundedQueue() throws {
+        let decoder = JSONDecoder()
+        let regionalStocks = try (0..<30).map { index in
+            try decoder.decode(
+                MarketQuote.self,
+                from: Data("{\"symbol\":\"STOCK\(index)\",\"name\":\"Stock \(index)\",\"price\":100,\"marketSession\":\"closed\",\"trend\":[]}".utf8)
+            )
+        }
+        let leadIndices = try ["SPY", "000001.SS", "^N225", "^KS11", "^STOXX50E"].map { symbol in
+            try decoder.decode(
+                MarketQuote.self,
+                from: Data("{\"symbol\":\"\(symbol)\",\"name\":\"Index\",\"price\":100,\"marketSession\":\"closed\",\"trend\":[]}".utf8)
+            )
+        }
+        let dashboard = try decoder.decode(
+            MarketDashboardResponse.self,
+            from: Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-20T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"componentsByRegion":{},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
+        ).data
+        var populatedDashboard = dashboard
+        populatedDashboard.coreIndices = leadIndices
+        populatedDashboard.componentsByRegion = ["us": regionalStocks]
+
+        let symbols = marketTrendBackfillSymbols(for: populatedDashboard, limit: 24)
+
+        XCTAssertEqual(Array(symbols.prefix(leadIndices.count)), leadIndices.map(\.symbol))
+        XCTAssertTrue(symbols.contains("^N225"))
+        XCTAssertEqual(symbols.count, 24)
+    }
+
+    func testTrendBackfillSkipsQuotesThatAlreadyHaveUsableTrends() throws {
+        let decoder = JSONDecoder()
+        let complete = try decoder.decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"SPY","name":"S&P 500","price":100,"marketSession":"closed","trend":[99,100]}"#.utf8)
+        )
+        let missing = try decoder.decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"^N225","name":"Nikkei 225","price":100,"marketSession":"closed","trend":[]}"#.utf8)
+        )
+        var dashboard = try decoder.decode(
+            MarketDashboardResponse.self,
+            from: Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-20T08:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"componentsByRegion":{},"crypto":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]}}"#.utf8)
+        ).data
+        dashboard.coreIndices = [complete, missing]
+
+        XCTAssertEqual(marketTrendBackfillSymbols(for: dashboard), ["^N225"])
+    }
+
     func testTradingSessionUsesExplicitSession() {
         XCTAssertEqual(MarketTradingSession(rawValue: "pre"), .premarket)
         XCTAssertEqual(MarketTradingSession(rawValue: "after"), .postmarket)

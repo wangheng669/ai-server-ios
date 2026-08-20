@@ -241,22 +241,7 @@ final class MarketStore {
 
     private func backfillMissingTrends() async {
         guard let dashboard else { return }
-        var seen: Set<String> = []
-        var symbols: [String] = []
-        // Core stocks are the visible rows most affected by an empty sparkline. Keep US first so
-        // its pre-market rows cannot be displaced by the bounded index/metric backfill queue.
-        let quotes = (dashboard.componentsByRegion["us"] ?? [])
-            + dashboard.allRegionalComponents
-            + dashboard.coreIndices
-            + dashboard.referenceIndices
-            + dashboard.metrics
-            + dashboard.commodities
-        for quote in quotes
-        where marketQuoteNeedsTrendBackfill(quote) && seen.insert(quote.symbol).inserted {
-            symbols.append(quote.symbol)
-            if symbols.count >= 24 { break }
-        }
-        for symbol in symbols {
+        for symbol in marketTrendBackfillSymbols(for: dashboard) {
             guard !Task.isCancelled else { return }
             await loadTrendFallback(symbol: symbol)
         }
@@ -343,6 +328,7 @@ final class MarketStore {
         dashboard = snapshot.dashboard
         cacheSavedAt = snapshot.savedAt
         isShowingCachedSnapshot = true
+        scheduleMissingTrendBackfill()
     }
 
     private func enqueueRealtimeUpdate(_ update: MarketQuoteUpdate) {
@@ -446,6 +432,26 @@ enum MarketCompanyLogoPathCache {
 
 func marketQuoteNeedsTrendBackfill(_ quote: MarketQuote) -> Bool {
     quote.trend.count <= 1 && quote.tradingSession != .regular && quote.tradingSession != .alwaysOpen
+}
+
+func marketTrendBackfillSymbols(for dashboard: MarketDashboard, limit: Int = 24) -> [String] {
+    guard limit > 0 else { return [] }
+    var seen: Set<String> = []
+    var symbols: [String] = []
+    // Regional lead indices drive both the hero and index rows, so protect them from the bounded
+    // queue before filling gaps in the larger stock lists.
+    let quotes = dashboard.coreIndices
+        + (dashboard.componentsByRegion["us"] ?? [])
+        + dashboard.allRegionalComponents
+        + dashboard.referenceIndices
+        + dashboard.metrics
+        + dashboard.commodities
+    for quote in quotes
+    where marketQuoteNeedsTrendBackfill(quote) && seen.insert(quote.symbol).inserted {
+        symbols.append(quote.symbol)
+        if symbols.count >= limit { break }
+    }
+    return symbols
 }
 
 func marketChartNeedsRetry(_ chart: MarketChart) -> Bool {
