@@ -888,6 +888,23 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
+    func testXPullToRefreshBypassesHTTPResponseCache() async {
+        var bypassCacheValues: [Bool] = []
+        let model = NewsFeedViewModel(
+            source: .x,
+            fetchPosts: { _, _, _ in [] },
+            fetchXPostsWithCachePolicy: { _, _, _, bypassCache in
+                bypassCacheValues.append(bypassCache)
+                return []
+            }
+        )
+
+        await model.refresh()
+
+        XCTAssertEqual(bypassCacheValues, [true])
+    }
+
+    @MainActor
     func testXQuotedPostWaitsForPersistedServerTranslation() async throws {
         let post = try JSONDecoder().decode(
             Post.self,

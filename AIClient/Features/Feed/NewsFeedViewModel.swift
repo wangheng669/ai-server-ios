@@ -197,7 +197,7 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchPosts: (Int, Int, FeedSource) async throws -> [Post]
     private let fetchFlashPosts: (Int, Int, String?) async throws -> [Post]
     private let fetchYouTubePosts: (Int, Int, String?) async throws -> [Post]
-    private let fetchXPosts: (Int, Int, String?) async throws -> [Post]
+    private let fetchXPosts: (Int, Int, String?, Bool) async throws -> [Post]
     private let fetchXFeedUsers: () async throws -> [XFeedUser]
     private let fetchXueqiuPosts: (Int, Int, Int?) async throws -> [Post]
     private let fetchXTranslation: (String) async throws -> XTranslation
@@ -230,6 +230,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchYouTubePosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
+        fetchXPostsWithCachePolicy: ((Int, Int, String?, Bool) async throws -> [Post])? = nil,
         fetchXFeedUsers: (() async throws -> [XFeedUser])? = nil,
         fetchXueqiuPosts: ((Int, Int, Int?) async throws -> [Post])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
@@ -278,13 +279,23 @@ final class NewsFeedViewModel: ObservableObject {
                 try await client.fetchXueqiuPosts(page: page, limit: limit, feedID: feedID)
             }
         }
-        if let fetchXPosts {
-            self.fetchXPosts = fetchXPosts
+        if let fetchXPostsWithCachePolicy {
+            self.fetchXPosts = fetchXPostsWithCachePolicy
+        } else if let fetchXPosts {
+            self.fetchXPosts = { page, limit, author, _ in
+                try await fetchXPosts(page, limit, author)
+            }
         } else if let fetchPosts {
-            self.fetchXPosts = { page, limit, _ in try await fetchPosts(page, limit, .x) }
+            self.fetchXPosts = { page, limit, _, _ in try await fetchPosts(page, limit, .x) }
         } else {
-            self.fetchXPosts = { page, limit, author in
-                try await client.fetchPosts(page: page, limit: limit, source: .x, xUserID: author)
+            self.fetchXPosts = { page, limit, author, bypassCache in
+                try await client.fetchPosts(
+                    page: page,
+                    limit: limit,
+                    source: .x,
+                    xUserID: author,
+                    bypassCache: bypassCache
+                )
             }
         }
         self.translateRSSCard = translateRSSCard ?? { title, excerpt in
@@ -1087,7 +1098,8 @@ final class NewsFeedViewModel: ObservableObject {
                 flashCategory: requestedFlashCategory,
                 youtubePerson: requestedYouTubePerson,
                 xAuthor: requestedXUserID,
-                xueqiuFeedID: requestedXueqiuFeedID
+                xueqiuFeedID: requestedXueqiuFeedID,
+                bypassCache: true
             )
             guard source == requestedSource,
                   selectedFlashCategory == requestedFlashCategory,
@@ -1188,7 +1200,8 @@ final class NewsFeedViewModel: ObservableObject {
         flashCategory: String? = nil,
         youtubePerson: String? = nil,
         xAuthor: String? = nil,
-        xueqiuFeedID: Int? = nil
+        xueqiuFeedID: Int? = nil,
+        bypassCache: Bool = false
     ) async throws -> [Post] {
         var lastError: Error?
         for attempt in 0..<2 {
@@ -1199,7 +1212,7 @@ final class NewsFeedViewModel: ObservableObject {
                 } else if source == .youtube {
                     result = try await fetchYouTubePosts(page, limit, youtubePerson)
                 } else if source == .x {
-                    result = try await fetchXPosts(page, limit, xAuthor)
+                    result = try await fetchXPosts(page, limit, xAuthor, bypassCache)
                 } else if source == .xueqiu {
                     result = try await fetchXueqiuPosts(page, limit, xueqiuFeedID)
                 } else {
