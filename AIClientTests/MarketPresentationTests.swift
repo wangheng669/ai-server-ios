@@ -33,6 +33,9 @@ final class MarketPresentationTests: XCTestCase {
                 projectedHorizontalDistance: -60
             )
         )
+        XCTAssertTrue(marketRegionSwipeBlocksSelection(horizontalDistance: 14, verticalDistance: 2))
+        XCTAssertFalse(marketRegionSwipeBlocksSelection(horizontalDistance: 8, verticalDistance: 1))
+        XCTAssertFalse(marketRegionSwipeBlocksSelection(horizontalDistance: 18, verticalDistance: 20))
     }
 
     func testMarketRegionSwipeStopsAtRegionBoundaries() {
@@ -474,6 +477,29 @@ final class MarketPresentationTests: XCTestCase {
 
         XCTAssertTrue(marketQuoteNeedsTrendBackfill(preMarket))
         XCTAssertFalse(marketQuoteNeedsTrendBackfill(regular))
+    }
+
+    func testExtendedSessionUsesSameDisplayedQuoteInListAndDetail() throws {
+        let quote = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":217.56,"previousClose":219.74,"marketSession":"overnight","sessionPrice":219.195,"sessionChangePercent":-0.2480203877}"#.utf8)
+        )
+
+        XCTAssertEqual(quote.marketDisplayPrice, 219.195)
+        XCTAssertEqual(quote.marketDisplayChangeValue, -0.545, accuracy: 0.0001)
+        XCTAssertEqual(quote.marketDisplayPercentValue, -0.2480203877, accuracy: 0.0001)
+        XCTAssertEqual(quote.marketDisplayFormattedPercent, "−0.25%")
+    }
+
+    func testRegularSessionKeepsSnapshotQuoteForDisplay() throws {
+        let quote = try JSONDecoder().decode(
+            MarketQuote.self,
+            from: Data(#"{"symbol":"NVDA","name":"英伟达","price":217.56,"previousClose":219.74,"marketSession":"regular","sessionPrice":219.195,"sessionChangePercent":-0.248}"#.utf8)
+        )
+
+        XCTAssertEqual(quote.marketDisplayPrice, 217.56)
+        XCTAssertEqual(quote.marketDisplayChangeValue, -2.18, accuracy: 0.0001)
+        XCTAssertEqual(quote.marketDisplayPercentValue, quote.percentValue)
     }
 
     func testTrendBackfillProtectsRegionalLeadIndicesFromBoundedQueue() throws {
