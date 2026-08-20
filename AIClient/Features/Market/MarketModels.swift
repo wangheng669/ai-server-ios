@@ -358,6 +358,28 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         sessionPrice != nil && tradingSession.isExtended
     }
 
+    var marketDisplayPrice: Double {
+        hasActiveExtendedSessionQuote ? sessionPrice ?? price : price
+    }
+
+    var marketDisplayPercentValue: Double {
+        guard hasActiveExtendedSessionQuote else { return percentValue }
+        if let sessionChangePercent { return sessionChangePercent }
+        guard let previousClose, previousClose > 0 else { return percentValue }
+        return (marketDisplayPrice - previousClose) / previousClose * 100
+    }
+
+    var marketDisplayChangeValue: Double {
+        guard let previousClose else { return changeValue }
+        return marketDisplayPrice - previousClose
+    }
+
+    var marketDisplayFormattedPercent: String {
+        if hasSuspiciousIndexMove { return "待核验" }
+        let value = marketDisplayPercentValue
+        return String(format: "%@%.2f%%", value >= 0 ? "+" : "−", abs(value))
+    }
+
     var formattedSessionPercent: String? {
         sessionChangePercent.map { String(format: "%@%.2f%%", $0 >= 0 ? "+" : "−", abs($0)) }
     }

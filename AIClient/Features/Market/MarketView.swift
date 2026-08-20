@@ -106,6 +106,7 @@ private struct MarketHomeView: View {
     let store: MarketStore
     let onCompactHeaderChange: (Bool) -> Void
     let onSelectIndex: (String) -> Void
+    @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
         #if DEBUG
         guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-region=") }) else {
@@ -138,7 +139,7 @@ private struct MarketHomeView: View {
                         .frame(height: 1)
 
                         ZStack(alignment: .topTrailing) {
-                            MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
+                            MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: selectIndex)
                             MarketRegionPicker(store: store, selection: $selectedMarket)
                                 .padding(.top, 14)
                                 .padding(.trailing, 8)
@@ -155,7 +156,7 @@ private struct MarketHomeView: View {
                             MarketIndexTable(
                                 region: selectedMarket,
                                 store: store,
-                                onSelectIndex: onSelectIndex
+                                onSelectIndex: selectIndex
                             )
                             if selectedMarket == .china {
                                 ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
@@ -205,15 +206,33 @@ private struct MarketHomeView: View {
 
     private var regionSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                if marketRegionSwipeBlocksSelection(
+                    horizontalDistance: value.translation.width,
+                    verticalDistance: value.translation.height
+                ) {
+                    blocksSelectionDuringRegionSwipe = true
+                }
+            }
             .onEnded { value in
-                guard let offset = marketRegionSwipeOffset(
+                if let offset = marketRegionSwipeOffset(
                     horizontalDistance: value.translation.width,
                     verticalDistance: value.translation.height,
                     projectedHorizontalDistance: value.predictedEndTranslation.width
-                ), let destination = marketAdjacentRegion(from: selectedMarket, offset: offset) else { return }
-                selectedMarket = destination
-                UIAccessibility.post(notification: .announcement, argument: destination.rawValue)
+                ), let destination = marketAdjacentRegion(from: selectedMarket, offset: offset) {
+                    selectedMarket = destination
+                    UIAccessibility.post(notification: .announcement, argument: destination.rawValue)
+                }
+                Task { @MainActor in
+                    await Task.yield()
+                    blocksSelectionDuringRegionSwipe = false
+                }
             }
+    }
+
+    private func selectIndex(_ symbol: String) {
+        guard !blocksSelectionDuringRegionSwipe else { return }
+        onSelectIndex(symbol)
     }
 }
 
@@ -299,6 +318,10 @@ func marketRegionSwipeOffset(
         ? horizontalDistance
         : projectedHorizontalDistance
     return directionDistance < 0 ? 1 : -1
+}
+
+func marketRegionSwipeBlocksSelection(horizontalDistance: CGFloat, verticalDistance: CGFloat) -> Bool {
+    abs(horizontalDistance) >= 12 && abs(horizontalDistance) > abs(verticalDistance) * 1.2
 }
 
 func marketAdjacentRegion(from current: MarketRegion, offset: Int) -> MarketRegion? {
@@ -1643,8 +1666,7 @@ private struct MarketIndexTableRow: View {
 
     private var displayedPrice: Double {
         if let overnightQuote { return overnightQuote.price }
-        if usesEmbeddedExtendedSession, let sessionPrice = quote.sessionPrice { return sessionPrice }
-        return quote.price
+        return quote.marketDisplayPrice
     }
 
     private var displayedSymbol: String {
@@ -1661,13 +1683,7 @@ private struct MarketIndexTableRow: View {
 
     private var displayedPercentValue: Double {
         if let overnightQuote { return overnightQuote.percentValue }
-        if usesEmbeddedExtendedSession {
-            if let sessionChangePercent = quote.sessionChangePercent { return sessionChangePercent }
-            if let previousClose = quote.previousClose, previousClose > 0 {
-                return (displayedPrice - previousClose) / previousClose * 100
-            }
-        }
-        return quote.percentValue
+        return quote.marketDisplayPercentValue
     }
 
     private var displayedPercent: String {
@@ -1684,7 +1700,7 @@ private struct MarketIndexTableRow: View {
         if let previousClose = overnightQuote?.previousClose ?? quote.previousClose {
             return displayedPrice - previousClose
         }
-        return overnightQuote?.changeValue ?? quote.changeValue
+        return overnightQuote?.changeValue ?? quote.marketDisplayChangeValue
     }
 
     private var displayedTint: Color {
@@ -2770,15 +2786,15 @@ private struct MarketIndexDetailView: View {
                 }
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(quote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                Text(quote.map { number($0.marketDisplayPrice, digits: cryptoPriceDigits($0.marketDisplayPrice, symbol: $0.symbol)) } ?? "—")
                     .font(.system(size: 40, weight: .bold))
                     .monospacedDigit()
                     .tracking(-1.2)
-                    .foregroundStyle(quoteTint(quote))
-                Text(quote.map { "\(signed($0.changeValue, digits: cryptoChangeDigits($0)))  \($0.formattedPercent)" } ?? "等待行情数据")
+                    .foregroundStyle(marketDisplayTint(quote))
+                Text(quote.map { "\(signed($0.marketDisplayChangeValue, digits: cryptoChangeDigits($0)))  \($0.marketDisplayFormattedPercent)" } ?? "等待行情数据")
                     .font(.system(size: 18, weight: .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(quoteTint(quote))
+                    .foregroundStyle(marketDisplayTint(quote))
                 Text(quote?.marketAsOfLabel ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2807,7 +2823,7 @@ private struct MarketIndexDetailView: View {
                 metricDivider
                 textMetric("振幅", amplitudeText)
                 metricDivider
-                textMetric("涨跌额", quote.map { signed($0.changeValue, digits: cryptoChangeDigits($0)) } ?? "—", quoteTint(quote))
+                textMetric("涨跌额", quote.map { signed($0.marketDisplayChangeValue, digits: cryptoChangeDigits($0)) } ?? "—", marketDisplayTint(quote))
                 if !isIndex && !isCrypto {
                     metricDivider
                     metric(
@@ -4432,6 +4448,10 @@ private func chartPoints(_ values: [Double], size: CGSize) -> [CGPoint] {
 }
 
 private func quoteTint(_ quote: MarketQuote?) -> Color { guard let quote else { return .secondary }; return quote.isUp ? MarketStyle.gain : MarketStyle.loss }
+private func marketDisplayTint(_ quote: MarketQuote?) -> Color {
+    guard let quote else { return .secondary }
+    return quote.marketDisplayPercentValue >= 0 ? MarketStyle.gain : MarketStyle.loss
+}
 private func companyMarketLabel(_ symbol: String) -> String {
     if symbol.hasSuffix(".SS") { return "上海证券交易所" }
     if symbol.hasSuffix(".SZ") { return "深圳证券交易所" }
