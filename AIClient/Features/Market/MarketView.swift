@@ -152,6 +152,7 @@ private struct MarketHomeView: View {
                                     message: error,
                                     isRetrying: store.isRetrying
                                 ) { await store.refresh() }
+                                .padding(.top, MarketStyle.pageSpacing)
                             }
                             MarketIndexTable(
                                 region: selectedMarket,
@@ -163,7 +164,6 @@ private struct MarketHomeView: View {
                                     .id("market-structure")
                             }
                         }
-                        .padding(.top, MarketStyle.pageSpacing)
                         // The root navigation already reserves its own safe-area inset. Keep only
                         // enough room for the investment selectors that float above the final row.
                         .padding(.bottom, 24)
