@@ -30,6 +30,7 @@ private struct HoldingDetailRoute: Identifiable, Equatable {
 struct FamousHoldingsView: View {
     let store: FamousHoldingsStore
     @Binding var showsDetail: Bool
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var selectedIndex = 0
     @State private var selectedDetail: HoldingDetailRoute?
     @State private var isManagerSelectorExpanded = false
@@ -68,7 +69,8 @@ struct FamousHoldingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(HoldingsPalette.canvas.ignoresSafeArea())
-            .task {
+            .task(id: rootTabIsActive) {
+                guard rootTabIsActive else { return }
                 await store.load()
                 #if DEBUG
                 if selectedDetail == nil,
@@ -122,7 +124,10 @@ struct FamousHoldingsView: View {
         }
         .scrollIndicators(.hidden)
         .refreshable { await store.load(force: true) }
-        .task(id: manager.key) { await store.loadDetail(managerKey: manager.key) }
+        .task(id: "\(rootTabIsActive):\(manager.key)") {
+            guard rootTabIsActive else { return }
+            await store.loadDetail(managerKey: manager.key)
+        }
     }
 
     private var managerSelector: some View {

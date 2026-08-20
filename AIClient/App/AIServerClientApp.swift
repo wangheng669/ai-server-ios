@@ -487,7 +487,6 @@ private struct RootNavigationBar: View {
     let dynamicTarget: EditorialTab
     let researchTarget: EditorialTab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var selectionAnimation
 
     var body: some View {
         HStack(spacing: 0) {
@@ -616,7 +615,6 @@ private struct RootNavigationBar: View {
             if isSelected {
                 Capsule()
                     .fill(InvestmentDesign.accent.opacity(0.1))
-                    .matchedGeometryEffect(id: "root-tab-selection", in: selectionAnimation)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
             }

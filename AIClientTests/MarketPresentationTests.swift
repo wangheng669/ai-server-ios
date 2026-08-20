@@ -194,6 +194,23 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(store.companies.first?.market?.pe, 34.3)
     }
 
+    @MainActor
+    func testCompanyResearchStoreOnlyRefreshesAfterCacheExpires() async {
+        var fetchCount = 0
+        let store = CompanyResearchStore(refreshInterval: 300) {
+            fetchCount += 1
+            return CompanyResearchPayload(companies: [], updatedAt: nil)
+        }
+        let initialDate = Date(timeIntervalSince1970: 1_000)
+
+        await store.loadIfNeeded(now: initialDate)
+        await store.loadIfNeeded(now: initialDate.addingTimeInterval(299))
+        XCTAssertEqual(fetchCount, 1)
+
+        await store.loadIfNeeded(now: initialDate.addingTimeInterval(300))
+        XCTAssertEqual(fetchCount, 2)
+    }
+
     func testDecodesUnifiedCompanyFundamentalsFromMarketQuote() throws {
         let data = Data(#"{"symbol":"AAPL","name":"Apple","price":220.1,"pe":31.2,"peStatic":32.78,"marketCap":3350000000000,"peType":"ttm","netIncomeTTM":122575000000,"week52Low":169.21,"currency":"USD","fundamentalsCurrency":"USD","fiscalYear":"2025","fundamentalsSource":"TradingView","fundamentalsAsOf":"2026-08-10T08:00:00Z","trend":[],"nightTrend":[]}"#.utf8)
 

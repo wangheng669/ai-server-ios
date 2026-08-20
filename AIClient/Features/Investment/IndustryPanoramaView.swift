@@ -144,6 +144,7 @@ private struct IndustryPanoramaService {
 }
 
 struct IndustryPanoramaView: View {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var industries: [IndustryPayload] = []
     @State private var selectedID: String?
     @State private var selectedStageID: String?
@@ -174,7 +175,10 @@ struct IndustryPanoramaView: View {
         }
         .scrollIndicators(.hidden)
         .background(InvestmentDesign.canvas)
-        .task { await load() }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive, industries.isEmpty else { return }
+            await load()
+        }
         .refreshable { await load() }
         .onChange(of: selectedID) { _, _ in
             selectedStageID = nil
@@ -825,6 +829,8 @@ struct IndustryPanoramaView: View {
                 selectedID = loaded.first?.id
             }
             loadError = false
+        } catch is CancellationError {
+            return
         } catch {
             industries = []
             loadError = true
