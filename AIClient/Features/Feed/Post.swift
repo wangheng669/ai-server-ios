@@ -1049,9 +1049,18 @@ struct Post: Codable, Identifiable, Hashable {
     }
     var score: Double? { finalScore ?? weight }
     var imageURLs: [URL] {
+        feedContentImages.compactMap { MediaURL.image($0.url) }
+    }
+    var feedImageURLs: [URL] {
+        let variant = feedContentImages.count == 1 ? "medium" : "small"
+        return feedContentImages.compactMap { MediaURL.feedImage($0.url, variant: variant) }
+    }
+    private var feedContentImages: [PostImage] {
         (images ?? [])
             .filter { !$0.isKnownInlineAsset }
-            .compactMap { MediaURL.image($0.url) }
+    }
+    var originalImageURLs: [URL] {
+        imageURLs
     }
 
     private func xueqiuImageURLs(in html: String) -> [URL] {
@@ -1998,6 +2007,9 @@ struct XQuotedMedia: Codable, Hashable {
     }
 
     var displayURL: URL? { (thumbnailURL ?? url).flatMap(MediaURL.image) }
+    var feedDisplayURL: URL? {
+        (thumbnailURL ?? url).flatMap { MediaURL.feedImage($0, variant: "medium") }
+    }
     var isVideo: Bool {
         ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
     }
@@ -2222,6 +2234,17 @@ enum MediaURL {
         let decoded = highResolutionXueqiuImageURL(
             raw.replacingOccurrences(of: "&amp;", with: "&")
         )
+        return resolvedImage(decoded)
+    }
+
+    static func feedImage(_ raw: String, variant: String = "small") -> URL? {
+        let decoded = feedSizedXMediaURL(highResolutionXueqiuImageURL(
+            raw.replacingOccurrences(of: "&amp;", with: "&")
+        ), variant: variant)
+        return resolvedImage(decoded)
+    }
+
+    private static func resolvedImage(_ decoded: String) -> URL? {
         if let proxyURL = URL(string: decoded),
            proxyURL.host?.lowercased() == "wechat2rss.xlab.app",
            proxyURL.path.hasSuffix("/img-proxy"),
@@ -2241,6 +2264,18 @@ enum MediaURL {
             return parts?.url
         }
         return resolved(decoded, proxy: "image-proxy")
+    }
+
+    private static func feedSizedXMediaURL(_ raw: String, variant: String) -> String {
+        guard var components = URLComponents(string: raw),
+              components.host?.lowercased() == "pbs.twimg.com",
+              components.path.hasPrefix("/media/") else { return raw }
+
+        var queryItems = components.queryItems ?? []
+        queryItems.removeAll { $0.name.caseInsensitiveCompare("name") == .orderedSame }
+        queryItems.append(URLQueryItem(name: "name", value: variant == "medium" ? "medium" : "small"))
+        components.queryItems = queryItems
+        return components.string ?? raw
     }
 
     private static func highResolutionXueqiuImageURL(_ raw: String) -> String {

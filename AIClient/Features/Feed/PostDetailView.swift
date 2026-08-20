@@ -2479,6 +2479,8 @@ struct PostDetailView: View {
                 fallbackURL: xDetailVideoFallbackURL,
                 thumbnailURL: xDetailVideoPreviewURL,
                 generatesThumbnailWhenMissing: false,
+                reportsPlaybackEvents: true,
+                observationSurface: "x-detail",
                 onAspectRatioResolved: xVideoMetadataAspectRatio == nil
                     ? { detectedVideoAspectRatio = $0 }
                     : nil
