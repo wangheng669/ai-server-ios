@@ -1229,16 +1229,16 @@ struct MarketChartPresentation {
             interval: chart.interval
         )
         self.xFractions = xFractions
-        low = values.min()
-        high = values.max()
-        axisDigits = marketAxisDigits(values: values)
+        low = points.map(\.low).filter(\.isFinite).min()
+        high = points.map(\.high).filter(\.isFinite).max()
+        axisDigits = marketAxisDigits(values: [low, high].compactMap { $0 })
         hasVolume = points.contains { ($0.volume ?? 0) > 0 }
         volumeCeiling = marketChartVolumeCeiling(points)
         volumeFractionGap = zip(xFractions, xFractions.dropFirst())
             .map { $1 - $0 }
             .filter { $0 > 0 }
             .min() ?? 1
-        extendedSessionLabel = marketChartExtendedSessionLabel(points)
+        extendedSessionLabel = chart.interval == "1m" ? marketChartExtendedSessionLabel(points) : nil
         sessionBreak = marketChartLunchBreak(
             points: points,
             market: chart.market,
@@ -1439,6 +1439,29 @@ func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [Market
             volume: volumes.isEmpty ? nil : volumes.reduce(0, +)
         )
     }
+}
+
+func marketMovingAverageValues(_ points: [MarketChartPoint], period: Int) -> [Double?] {
+    guard period > 0 else { return Array(repeating: nil, count: points.count) }
+    var values = Array<Double?>(repeating: nil, count: points.count)
+    var sum = 0.0
+    for index in points.indices {
+        sum += points[index].close
+        if index >= period { sum -= points[index - period].close }
+        if index >= period - 1 { values[index] = sum / Double(period) }
+    }
+    return values
+}
+
+func marketEvenChartFractions(count: Int) -> [CGFloat] {
+    guard count > 1 else { return count == 1 ? [0.5] : [] }
+    return (0..<count).map { CGFloat($0) / CGFloat(count - 1) }
+}
+
+func marketNearestChartIndex(fraction: CGFloat, fractions: [CGFloat]) -> Int? {
+    guard !fractions.isEmpty else { return nil }
+    let target = min(max(fraction, 0), 1)
+    return fractions.indices.min { abs(fractions[$0] - target) < abs(fractions[$1] - target) }
 }
 
 func marketTrendIsUp(values: [Double], fallbackIsUp: Bool) -> Bool {

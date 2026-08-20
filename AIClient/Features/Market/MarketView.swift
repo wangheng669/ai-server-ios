@@ -3478,11 +3478,18 @@ struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
     }
 }
 
+private struct MarketMovingAverageSeries {
+    let period: Int
+    let color: Color
+    let values: [Double?]
+}
+
 private struct MarketDetailChart: View {
     @Binding var selectedRange: MarketRange
     let symbol: String
     let fallbackSymbol: String?
     let store: MarketStore
+    @State private var selectedPointIndex: Int?
 
     private var primaryChart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
     private var fallbackChart: MarketChart? {
@@ -3507,6 +3514,28 @@ private struct MarketDetailChart: View {
     }
     private var points: [MarketChartPoint] { presentation?.points ?? [] }
     private var values: [Double] { presentation?.values ?? [] }
+    private var showsCandles: Bool { selectedRange != .day }
+    private var plotFractions: [CGFloat] {
+        showsCandles ? marketEvenChartFractions(count: points.count) : presentation?.xFractions ?? []
+    }
+    private var plotFractionGap: CGFloat {
+        zip(plotFractions, plotFractions.dropFirst())
+            .map { $1 - $0 }
+            .filter { $0 > 0 }
+            .min() ?? 1
+    }
+    private var movingAverages: [MarketMovingAverageSeries] {
+        [
+            MarketMovingAverageSeries(period: 5, color: .orange, values: marketMovingAverageValues(points, period: 5)),
+            MarketMovingAverageSeries(period: 10, color: .purple, values: marketMovingAverageValues(points, period: 10)),
+            MarketMovingAverageSeries(period: 20, color: MarketStyle.accent, values: marketMovingAverageValues(points, period: 20)),
+            MarketMovingAverageSeries(period: 60, color: .secondary, values: marketMovingAverageValues(points, period: 60))
+        ]
+    }
+    private var inspectedPointIndex: Int? {
+        guard !points.isEmpty else { return nil }
+        return min(max(selectedPointIndex ?? points.count - 1, 0), points.count - 1)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3526,6 +3555,9 @@ private struct MarketDetailChart: View {
                 }
             }
             Divider()
+            if let inspectedPointIndex {
+                chartReadout(point: points[inspectedPointIndex], index: inspectedPointIndex)
+            }
             ZStack {
                 ChartGrid(
                     low: presentation?.low,
@@ -3549,10 +3581,20 @@ private struct MarketDetailChart: View {
                                 .font(.system(size: 12, weight: .semibold)).frame(minWidth: 88, minHeight: 44)
                         }
                     } else { Text(chartStatusMessage).font(.system(size: 12)).foregroundStyle(.secondary) }
+                } else if showsCandles {
+                    MarketCandlestickChart(
+                        points: points,
+                        xFractions: plotFractions,
+                        low: presentation?.low,
+                        high: presentation?.high,
+                        movingAverages: movingAverages
+                    )
+                        .id(selectedRange)
+                        .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
                 } else {
                     MarketSessionLineChart(
                         points: points,
-                        xFractions: presentation?.xFractions ?? [],
+                        xFractions: plotFractions,
                         low: presentation?.low,
                         high: presentation?.high,
                         regularColor: chartColor,
@@ -3564,21 +3606,61 @@ private struct MarketDetailChart: View {
                         MarketSessionBreakMarker(
                             sessionBreak: sessionBreak,
                             points: points,
-                            xFractions: presentation?.xFractions ?? []
+                            xFractions: plotFractions
                         )
                         .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
                     }
-                    if let previousClose = chart?.quote.previousClose {
-                        ChartReferenceLine(
-                            value: previousClose,
-                            low: presentation?.low,
-                            high: presentation?.high
-                        )
-                    }
+                }
+                if !values.isEmpty, let previousClose = chart?.quote.previousClose {
+                    ChartReferenceLine(
+                        value: previousClose,
+                        low: presentation?.low,
+                        high: presentation?.high
+                    )
+                }
+                if !values.isEmpty, let inspectedPointIndex {
+                    let inspectedPoint = points[inspectedPointIndex]
+                    let displayPrice = selectedPointIndex == nil
+                        ? chart?.quote.price ?? inspectedPoint.close
+                        : inspectedPoint.close
+                    MarketChartPriceOverlay(
+                        value: displayPrice,
+                        xFraction: plotFractions.indices.contains(inspectedPointIndex) ? plotFractions[inspectedPointIndex] : 1,
+                        low: presentation?.low,
+                        high: presentation?.high,
+                        digits: presentation?.axisDigits ?? 2,
+                        tint: selectedPointIndex == nil
+                            ? chartTint
+                            : inspectedPoint.close >= inspectedPoint.open ? MarketStyle.gain : MarketStyle.loss,
+                        showsCrosshair: selectedPointIndex != nil
+                    )
+                    .padding(.leading, 48).padding(.top, 9).padding(.bottom, 6)
                 }
             }
-            .frame(height: 210)
+            .frame(height: showsCandles ? 230 : 210)
             .padding(.top, 10)
+            .overlay {
+                GeometryReader { proxy in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    guard abs(value.translation.width) >= abs(value.translation.height) else {
+                                        selectedPointIndex = nil
+                                        return
+                                    }
+                                    let plotWidth = max(proxy.size.width - 48, 1)
+                                    let fraction = (value.location.x - 48) / plotWidth
+                                    selectedPointIndex = marketNearestChartIndex(
+                                        fraction: fraction,
+                                        fractions: plotFractions
+                                    )
+                                }
+                                .onEnded { _ in selectedPointIndex = nil }
+                        )
+                }
+            }
             HStack {
                 ForEach(Array(timelineLabels.enumerated()), id: \.offset) { index, label in
                     Text(label)
@@ -3593,11 +3675,11 @@ private struct MarketDetailChart: View {
             if presentation?.hasVolume == true {
                 VolumeBars(
                     points: points,
-                    xFractions: presentation?.xFractions ?? [],
+                    xFractions: plotFractions,
                     volumeCeiling: presentation?.volumeCeiling ?? 1,
-                    fractionGap: presentation?.volumeFractionGap ?? 1
+                    fractionGap: plotFractionGap
                 )
-                    .frame(height: 22)
+                    .frame(height: 48)
                     .padding(.leading, 48)
                     .padding(.top, 4)
             }
@@ -3617,6 +3699,7 @@ private struct MarketDetailChart: View {
         .padding(.horizontal, 18)
         .padding(.bottom, 10)
         .task(id: ChartKey(symbol: symbol, range: selectedRange)) {
+            selectedPointIndex = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
             if marketChartDisplayPoints(primaryChart?.candles ?? []).count < 2,
                let fallbackSymbol {
@@ -3627,13 +3710,62 @@ private struct MarketDetailChart: View {
         .accessibilityLabel("\(selectedRange.rawValue)行情图表")
     }
 
+    private func chartReadout(point: MarketChartPoint, index: Int) -> some View {
+        VStack(spacing: 5) {
+            HStack(spacing: 2) {
+                Text(chartTime(point.timestamp, range: selectedRange, timezone: chart?.timezone))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                readoutValue("开", point.open)
+                readoutValue("高", point.high)
+                readoutValue("低", point.low)
+                readoutValue("收", point.close)
+            }
+            HStack(spacing: 9) {
+                Text("量 \(point.volume.map(compactNumber) ?? "—")")
+                    .foregroundStyle(.secondary)
+                if showsCandles {
+                    ForEach(movingAverages, id: \.period) { series in
+                        let value = series.values.indices.contains(index) ? series.values[index] : nil
+                        Text("MA\(series.period) \(value.map { number($0, digits: presentation?.axisDigits ?? 2) } ?? "—")")
+                            .foregroundStyle(series.color)
+                    }
+                } else if presentation?.extendedSessionLabel != nil {
+                    legendDot("常规", color: chartColor)
+                    legendDot("盘前/盘后/夜盘", color: MarketStyle.purple)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .font(.system(size: 9.5, weight: .medium))
+        .monospacedDigit()
+        .padding(.horizontal, 2)
+        .padding(.top, 8)
+    }
+
+    private func readoutValue(_ label: String, _ value: Double) -> some View {
+        Text("\(label) \(number(value, digits: presentation?.axisDigits ?? 2))")
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func legendDot(_ label: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(color).frame(width: 4, height: 4)
+            Text(label).foregroundStyle(.secondary)
+        }
+    }
+
     private var timelineLabels: [String] {
         guard let first = points.first, let last = points.last else { return ["—", "—", "—"] }
         return [first, points[points.count / 2], last].map { chartTime($0.timestamp, range: selectedRange, timezone: chart?.timezone) }
     }
 
     private var chartCaption: String {
-        let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日线走势"
+        let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日 K 线"
         let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
         let sessionText = presentation?.extendedSessionLabel.map { " · \($0)" } ?? ""
         let referenceText = usesFallbackChart ? " · 参考 \(displayedSymbol)" : ""
@@ -3647,6 +3779,12 @@ private struct MarketDetailChart: View {
             return last - first
         }()
         return change >= 0 ? MarketStyle.gain : MarketStyle.loss
+    }
+    private var chartTint: Color {
+        guard let change = chart?.quote.changePercent else { return chartColor }
+        if change > 0 { return MarketStyle.gain }
+        if change < 0 { return MarketStyle.loss }
+        return .secondary
     }
     private var isLoadingChart: Bool {
         store.loadingCharts.contains(ChartKey(symbol: symbol, range: selectedRange))
@@ -3862,6 +4000,132 @@ private struct MarketSessionLineChart: View {
             }
             drawSegment()
         }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MarketCandlestickChart: View {
+    let points: [MarketChartPoint]
+    let xFractions: [CGFloat]
+    let low: Double?
+    let high: Double?
+    let movingAverages: [MarketMovingAverageSeries]
+
+    var body: some View {
+        Canvas { context, size in
+            guard points.count > 1,
+                  xFractions.count == points.count,
+                  let low,
+                  let high,
+                  high > low else { return }
+            let span = max(high - low, 0.000_001)
+            let fractionGap = zip(xFractions, xFractions.dropFirst())
+                .map { $1 - $0 }
+                .filter { $0 > 0 }
+                .min() ?? 1
+            let candleWidth = min(max(size.width * fractionGap * 0.64, 1.2), 8)
+
+            func y(_ value: Double) -> CGFloat {
+                size.height * (0.06 + CGFloat((high - value) / span) * 0.88)
+            }
+
+            for index in points.indices {
+                let point = points[index]
+                let x = size.width * xFractions[index]
+                let color: Color = point.close > point.open
+                    ? MarketStyle.gain
+                    : point.close < point.open ? MarketStyle.loss : .secondary
+                var wick = Path()
+                wick.move(to: CGPoint(x: x, y: y(point.high)))
+                wick.addLine(to: CGPoint(x: x, y: y(point.low)))
+                context.stroke(wick, with: .color(color), lineWidth: 0.8)
+
+                let openY = y(point.open)
+                let closeY = y(point.close)
+                let bodyHeight = max(abs(closeY - openY), 1.2)
+                let body = CGRect(
+                    x: x - candleWidth / 2,
+                    y: min(openY, closeY),
+                    width: candleWidth,
+                    height: bodyHeight
+                )
+                context.fill(Path(body), with: .color(color.opacity(0.9)))
+            }
+
+            for series in movingAverages {
+                var path = Path()
+                var hasCurrentSegment = false
+                for index in points.indices {
+                    guard series.values.indices.contains(index), let value = series.values[index] else {
+                        hasCurrentSegment = false
+                        continue
+                    }
+                    let chartPoint = CGPoint(x: size.width * xFractions[index], y: y(value))
+                    if hasCurrentSegment {
+                        path.addLine(to: chartPoint)
+                    } else {
+                        path.move(to: chartPoint)
+                        hasCurrentSegment = true
+                    }
+                }
+                context.stroke(
+                    path,
+                    with: .color(series.color.opacity(0.9)),
+                    style: StrokeStyle(lineWidth: 1.05, lineCap: .round, lineJoin: .round)
+                )
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MarketChartPriceOverlay: View {
+    let value: Double
+    let xFraction: CGFloat
+    let low: Double?
+    let high: Double?
+    let digits: Int
+    let tint: Color
+    let showsCrosshair: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let low, let high, high > low {
+                let x = proxy.size.width * min(max(xFraction, 0), 1)
+                let normalizedY = 0.06 + CGFloat((high - value) / (high - low)) * 0.88
+                let y = proxy.size.height * min(max(normalizedY, 0.02), 0.98)
+                ZStack(alignment: .topLeading) {
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                        if showsCrosshair {
+                            path.move(to: CGPoint(x: x, y: 0))
+                            path.addLine(to: CGPoint(x: x, y: proxy.size.height))
+                        }
+                    }
+                    .stroke(tint.opacity(showsCrosshair ? 0.55 : 0.28), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
+
+                    if showsCrosshair {
+                        Circle()
+                            .fill(MarketStyle.surface)
+                            .overlay { Circle().stroke(tint, lineWidth: 1.5) }
+                            .frame(width: 7, height: 7)
+                            .position(x: x, y: y)
+                    }
+
+                    Text(number(value, digits: digits))
+                        .font(.system(size: 9, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(tint, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .fixedSize()
+                        .position(x: max(proxy.size.width - 24, 24), y: min(max(y, 10), proxy.size.height - 10))
+                }
+            }
+        }
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }

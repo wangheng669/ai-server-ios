@@ -1201,7 +1201,7 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.points.map(\.timestamp), [1, 2, 3])
         XCTAssertEqual(presentation.values, [10, 11, 12])
         XCTAssertEqual(presentation.xFractions, [0, 0.5, 1])
-        XCTAssertEqual(presentation.low, 10)
+        XCTAssertEqual(presentation.low, 8)
         XCTAssertEqual(presentation.high, 12)
         XCTAssertTrue(presentation.hasVolume)
         XCTAssertEqual(presentation.volumeCeiling, 200)
@@ -1251,6 +1251,31 @@ final class MarketPresentationTests: XCTestCase {
         ]
         let candle = marketCandleSamples(points, maxCount: 1).first
         XCTAssertEqual(candle, MarketCandleSample(timestamp: 2, open: 10, high: 15, low: 9, close: 14, volume: 10))
+    }
+
+    func testMovingAverageStartsAfterFullPeriod() {
+        let points = (1...5).map { chartPoint(timestamp: Int64($0), close: Double($0)) }
+
+        let values = marketMovingAverageValues(points, period: 3)
+
+        XCTAssertNil(values[0])
+        XCTAssertNil(values[1])
+        XCTAssertEqual(values[2], 2)
+        XCTAssertEqual(values[3], 3)
+        XCTAssertEqual(values[4], 4)
+    }
+
+    func testEvenChartFractionsCoverFullPlot() {
+        XCTAssertEqual(marketEvenChartFractions(count: 3), [0, 0.5, 1])
+        XCTAssertEqual(marketEvenChartFractions(count: 1), [0.5])
+        XCTAssertEqual(marketEvenChartFractions(count: 0), [])
+    }
+
+    func testNearestChartIndexClampsAndSelectsClosestPoint() {
+        let fractions: [CGFloat] = [0, 0.25, 0.5, 0.75, 1]
+        XCTAssertEqual(marketNearestChartIndex(fraction: -1, fractions: fractions), 0)
+        XCTAssertEqual(marketNearestChartIndex(fraction: 0.62, fractions: fractions), 2)
+        XCTAssertEqual(marketNearestChartIndex(fraction: 2, fractions: fractions), 4)
     }
 
     private func chartPoint(
