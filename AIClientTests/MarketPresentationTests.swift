@@ -2,6 +2,46 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testMarketRegionSwipeAcceptsOnlyDeliberateHorizontalGestures() {
+        XCTAssertEqual(
+            marketRegionSwipeOffset(
+                horizontalDistance: -60,
+                verticalDistance: 8,
+                projectedHorizontalDistance: -75
+            ),
+            1
+        )
+        XCTAssertEqual(
+            marketRegionSwipeOffset(
+                horizontalDistance: 20,
+                verticalDistance: 4,
+                projectedHorizontalDistance: 95
+            ),
+            -1
+        )
+        XCTAssertNil(
+            marketRegionSwipeOffset(
+                horizontalDistance: 35,
+                verticalDistance: 70,
+                projectedHorizontalDistance: 120
+            )
+        )
+        XCTAssertNil(
+            marketRegionSwipeOffset(
+                horizontalDistance: -30,
+                verticalDistance: 5,
+                projectedHorizontalDistance: -60
+            )
+        )
+    }
+
+    func testMarketRegionSwipeStopsAtRegionBoundaries() {
+        XCTAssertEqual(marketAdjacentRegion(from: .unitedStates, offset: 1), .china)
+        XCTAssertEqual(marketAdjacentRegion(from: .china, offset: -1), .unitedStates)
+        XCTAssertNil(marketAdjacentRegion(from: .unitedStates, offset: -1))
+        XCTAssertNil(marketAdjacentRegion(from: .crypto, offset: 1))
+    }
+
     func testCompanyLogoPathsSurviveMarketStoreRecreation() throws {
         let suiteName = "MarketPresentationTests.companyLogoPaths.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
