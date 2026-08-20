@@ -81,9 +81,10 @@ struct MarketView: View {
             )
             .id(route.symbol)
             .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationBackground(MarketStyle.surface)
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(32)
+            .presentationBackground(MarketStyle.canvas)
+            .presentationContentInteraction(.scrolls)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -2671,9 +2672,6 @@ private struct MarketIndexDetailView: View {
     let onSelectSymbol: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedRange = MarketRange.day
-    @State private var isScrollAtTop = true
-    @State private var isTrackingDismissalDrag = false
-    @State private var dismissalDragStartedAtTop = false
     @State private var presentedValuation: CompanyValuationHistoryRoute?
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
@@ -2705,30 +2703,26 @@ private struct MarketIndexDetailView: View {
 
     var body: some View {
         ZStack {
-            MarketStyle.surface.ignoresSafeArea()
+            MarketStyle.canvas.ignoresSafeArea()
             VStack(spacing: 0) {
                 detailNavigation
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        Color.clear
-                            .frame(height: 1)
-                            .background {
-                                GeometryReader { geometry in
-                                    Color.clear.preference(
-                                        key: MarketDetailScrollTopPreferenceKey.self,
-                                        value: geometry.frame(in: .named("market-detail-scroll")).minY
-                                    )
-                                }
-                            }
-                        detailHeader
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        VStack(spacing: 0) {
+                            detailHeader
+                            keyData
+                        }
+                        .marketDetailSectionCard()
+
                         MarketDetailChart(
                             selectedRange: $selectedRange,
                             symbol: chartSymbol,
                             fallbackSymbol: chartFallbackSymbol,
                             store: store
                         )
-                            .id(chartSymbol)
-                        keyData
+                        .id(chartSymbol)
+                        .marketDetailSectionCard()
+
                         if showsCompanyProfile { companyProfile }
                         if isIndex {
                             MarketDetailBreadth(
@@ -2737,23 +2731,22 @@ private struct MarketIndexDetailView: View {
                             )
                         }
                         MarketSummary(quote: quote, isIndex: isIndex)
+                            .padding(.bottom, 18)
+                            .marketDetailSectionCard()
                         if isIndex { componentStocks }
                         Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity)
-                            .padding(.top, 16)
-                            .padding(.horizontal, 18)
-                        Color.clear.frame(height: 28)
+                            .padding(.vertical, 8)
+                        Color.clear.frame(height: 12)
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
                 }
-                .modifier(MarketDetailScrollTopTracker(isAtTop: $isScrollAtTop))
                 .scrollIndicators(.hidden)
             }
         }
-        .contentShape(Rectangle())
-        .simultaneousGesture(oneHandDismissGesture)
-        .accessibilityHint("在详情内容区域向下滑动即可收起")
         .accessibilityAction(.escape) { dismiss() }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -2780,49 +2773,43 @@ private struct MarketIndexDetailView: View {
         }
     }
 
-    private var oneHandDismissGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onChanged { _ in
-                guard !isTrackingDismissalDrag else { return }
-                isTrackingDismissalDrag = true
-                dismissalDragStartedAtTop = isScrollAtTop
-            }
-            .onEnded { value in
-                let startedAtTop = dismissalDragStartedAtTop
-                isTrackingDismissalDrag = false
-                dismissalDragStartedAtTop = false
-
-                let verticalDistance = value.translation.height
-                let projectedDistance = value.predictedEndTranslation.height
-                guard startedAtTop,
-                      verticalDistance > abs(value.translation.width) * 1.2,
-                      verticalDistance >= 88 || projectedDistance >= 180 else {
-                    return
-                }
-                dismiss()
-            }
-    }
-
     private var detailNavigation: some View {
-        HStack {
+        HStack(spacing: 10) {
             Button(action: dismiss.callAsFunction) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 36, height: 36)
+                    .background(MarketStyle.surface, in: Circle())
+                    .padding(4)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("关闭行情详情")
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
+            VStack(spacing: 1) {
+                Text(quote?.presentationName ?? CoreDescriptor(symbol: symbol).name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(quote?.displayCode ?? CoreDescriptor(symbol: symbol).code)
+                    .font(.caption2.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
             ShareLink(item: shareText) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 20, weight: .medium))
-                    .frame(width: 44, height: 44, alignment: .trailing)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 36, height: 36)
+                    .background(MarketStyle.surface, in: Circle())
+                    .padding(4)
             }
             .accessibilityLabel("分享行情")
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 18)
-        .background(MarketStyle.surface)
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial)
     }
 
     private var detailHeader: some View {
@@ -3079,35 +3066,6 @@ private struct MarketIndexDetailView: View {
     private var shareText: String {
         guard let quote else { return "\(CoreDescriptor(symbol: symbol).name)行情更新中" }
         return "\(quote.presentationName)（\(quote.displayCode)）\n最新价：\(number(quote.price, digits: 2))\n涨跌：\(signed(quote.changeValue, digits: 2))  \(quote.formattedPercent)\n状态：\(quote.freshnessLabel) · \(quote.marketAsOfLabel)\n来源：\(quote.dataSource ?? "行情服务")\n仅供行情参考，不构成投资建议。"
-    }
-}
-
-private struct MarketDetailScrollTopPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct MarketDetailScrollTopTracker: ViewModifier {
-    @Binding var isAtTop: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.contentInsets.top <= 4
-            } action: { _, newValue in
-                isAtTop = newValue
-            }
-        } else {
-            content
-                .coordinateSpace(name: "market-detail-scroll")
-                .onPreferenceChange(MarketDetailScrollTopPreferenceKey.self) { offset in
-                    isAtTop = offset >= -4
-                }
-        }
     }
 }
 
@@ -3677,7 +3635,6 @@ private struct MarketDetailChart: View {
     let symbol: String
     let fallbackSymbol: String?
     let store: MarketStore
-    @State private var inspectedPoint: MarketChartPoint?
 
     private var primaryChart: MarketChart? { store.chart(symbol: symbol, range: selectedRange) }
     private var fallbackChart: MarketChart? {
@@ -3760,14 +3717,6 @@ private struct MarketDetailChart: View {
                     if let previousClose = store.quote(symbol: displayedSymbol)?.previousClose {
                         ChartReferenceLine(value: previousClose, values: values)
                     }
-                    ChartInspectionOverlay(
-                        points: points,
-                        interval: chart?.interval,
-                        range: selectedRange,
-                        timezone: chart?.timezone,
-                        tint: quoteTint(store.quote(symbol: displayedSymbol)),
-                        selected: $inspectedPoint
-                    )
                 }
             }
             .frame(height: 210)
@@ -3806,7 +3755,6 @@ private struct MarketDetailChart: View {
         .padding(.horizontal, 18)
         .padding(.bottom, 10)
         .task(id: ChartKey(symbol: symbol, range: selectedRange)) {
-            inspectedPoint = nil
             await store.loadChart(symbol: symbol, range: selectedRange)
             if marketChartDisplayPoints(primaryChart?.candles ?? []).count < 2,
                let fallbackSymbol {
@@ -3814,7 +3762,7 @@ private struct MarketDetailChart: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(selectedRange.rawValue)行情图表，可拖动查看具体时间和价格")
+        .accessibilityLabel("\(selectedRange.rawValue)行情图表")
     }
 
     private var timelineLabels: [String] {
@@ -3908,69 +3856,20 @@ private struct MarketSessionBreakMarker: View {
     }
 }
 
-private struct ChartInspectionOverlay: View {
-    let points: [MarketChartPoint]
-    let interval: String?
-    let range: MarketRange
-    let timezone: String?
-    let tint: Color
-    @Binding var selected: MarketChartPoint?
-
-    var body: some View {
-        GeometryReader { proxy in
-            let leftInset: CGFloat = 48
-            let usableWidth = max(proxy.size.width - leftInset, 1)
-            let topInset: CGFloat = 9
-            let bottomInset: CGFloat = 6
-            let usableHeight = max(proxy.size.height - topInset - bottomInset, 1)
-            let fractions = marketChartXFractions(timestamps: points.map(\.timestamp), interval: interval)
-            ZStack(alignment: .topLeading) {
-                if let selected, let index = points.firstIndex(where: { $0.id == selected.id }) {
-                    let x = leftInset + usableWidth * fractions[index]
-                    let y = topInset + usableHeight * normalizedY(selected.displayValue ?? selected.close)
-                    Path { path in
-                        path.move(to: CGPoint(x: x, y: topInset))
-                        path.addLine(to: CGPoint(x: x, y: proxy.size.height - bottomInset))
-                    }
-                    .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
-                    Circle()
-                        .fill(MarketStyle.surface)
-                        .frame(width: 8, height: 8)
-                        .overlay { Circle().stroke(tint, lineWidth: 2) }
-                        .position(x: x, y: y)
-                    Text("\(chartTime(selected.timestamp, range: range, timezone: timezone))  \(number(selected.displayValue ?? selected.close, digits: 2))")
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 7)
-                                .stroke(MarketStyle.divider, lineWidth: 0.5)
-                        }
-                        .shadow(color: Color.black.opacity(0.08), radius: 5, y: 2)
-                        .fixedSize()
-                        .position(
-                            x: min(max(x, 84), proxy.size.width - 84),
-                            y: max(y - 28, 20)
-                        )
-                }
-                Color.clear.contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                        guard !points.isEmpty else { return }
-                        let fraction = min(max((value.location.x - leftInset) / usableWidth, 0), 1)
-                        let index = fractions.enumerated().min { abs($0.element - fraction) < abs($1.element - fraction) }?.offset ?? 0
-                        selected = points[index]
-                    })
+private struct MarketDetailSectionCard: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(MarketStyle.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(MarketStyle.divider.opacity(0.72), lineWidth: 0.5)
             }
-        }
     }
+}
 
-    private func normalizedY(_ value: Double) -> CGFloat {
-        let displayValues = points.compactMap(\.displayValue)
-        guard let low = displayValues.min(), let high = displayValues.max(), high > low else { return 0.5 }
-        return 0.06 + CGFloat((high - value) / (high - low)) * 0.88
+private extension View {
+    func marketDetailSectionCard() -> some View {
+        modifier(MarketDetailSectionCard())
     }
 }
 
