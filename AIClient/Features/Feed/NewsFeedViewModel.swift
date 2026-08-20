@@ -400,12 +400,12 @@ final class NewsFeedViewModel: ObservableObject {
         do {
             let result = try await fetchRSSFeedPosts(feedID, 1, selectedRSSPageSize)
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
-            let warmedPosts = try await warmNewYorkTimesPostsIfNeeded(result)
-            await FeedPresentationPrewarmer.shared.warm(warmedPosts)
-            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
-            selectedRSSPosts = warmedPosts
+            selectedRSSPosts = result
             canLoadMoreRSSSelection = !result.isEmpty
-            scheduleRSSCardTranslations(for: warmedPosts)
+            errorMessage = nil
+            schedulePresentationPrewarm(for: result)
+            scheduleSelectedRSSNewYorkTimesPrefetch(for: result, feedID: feedID)
+            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError {
             return
         } catch {
@@ -426,15 +426,14 @@ final class NewsFeedViewModel: ObservableObject {
         do {
             let result = try await fetchRSSFeedPosts(feedID, nextPage, selectedRSSPageSize)
             guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
-            let warmedPosts = try await warmNewYorkTimesPostsIfNeeded(result)
-            await FeedPresentationPrewarmer.shared.warm(warmedPosts)
-            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
             let existingIDs = Set(selectedRSSPosts.map(\.id))
-            selectedRSSPosts += warmedPosts.filter { !existingIDs.contains($0.id) }
+            selectedRSSPosts += result.filter { !existingIDs.contains($0.id) }
             selectedRSSPage = nextPage
             canLoadMoreRSSSelection = !result.isEmpty
             errorMessage = nil
-            scheduleRSSCardTranslations(for: warmedPosts)
+            schedulePresentationPrewarm(for: result)
+            scheduleSelectedRSSNewYorkTimesPrefetch(for: result, feedID: feedID)
+            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError {
             return
         } catch {
@@ -491,11 +490,6 @@ final class NewsFeedViewModel: ObservableObject {
             guard selectedWeChatFeedID == feedID else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
-    }
-
-    private func warmNewYorkTimesPostsIfNeeded(_ posts: [Post]) async throws -> [Post] {
-        guard posts.contains(where: \.isNewYorkTimes) else { return posts }
-        return try await prefetchNewYorkTimesBodies(for: posts)
     }
 
     func selectFlashCategory(_ category: String?) async {
@@ -1004,13 +998,13 @@ final class NewsFeedViewModel: ObservableObject {
             do {
                 let pageSize = pageSize(for: candidate)
                 let result = try await fetchPage(1, limit: pageSize, source: candidate)
-                await FeedPresentationPrewarmer.shared.warm(result)
                 guard !Task.isCancelled, cache[candidate] == nil else { continue }
                 cache[candidate] = .init(
                     posts: result,
                     page: 1,
                     canLoadMore: !result.isEmpty
                 )
+                schedulePresentationPrewarm(for: result)
             } catch is CancellationError {
                 return
             } catch {
@@ -1078,13 +1072,6 @@ final class NewsFeedViewModel: ObservableObject {
                   selectedXUserID == requestedXUserID,
                   selectedXueqiuFeedID == requestedXueqiuFeedID,
                   activeRefreshID == refreshID else { return }
-            await FeedPresentationPrewarmer.shared.warm(result)
-            guard source == requestedSource,
-                  selectedFlashCategory == requestedFlashCategory,
-                  selectedYouTubePerson == requestedYouTubePerson,
-                  selectedXUserID == requestedXUserID,
-                  selectedXueqiuFeedID == requestedXueqiuFeedID,
-                  activeRefreshID == refreshID else { return }
             posts = result
             if requestedSource == .xueqiu, requestedXueqiuFeedID == nil {
                 xueqiuDirectoryPosts = result
@@ -1097,8 +1084,9 @@ final class NewsFeedViewModel: ObservableObject {
             }
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            schedulePresentationPrewarm(for: result)
             if requestedSource == .newYorkTimes {
-                scheduleNewYorkTimesPrefetch(for: result)
+                scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: true)
             }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
@@ -1138,11 +1126,6 @@ final class NewsFeedViewModel: ObservableObject {
                   selectedYouTubePerson == requestedYouTubePerson else { return }
             guard selectedXUserID == requestedXUserID else { return }
             guard selectedXueqiuFeedID == requestedXueqiuFeedID else { return }
-            await FeedPresentationPrewarmer.shared.warm(result)
-            guard source == requestedSource, selectedFlashCategory == requestedFlashCategory,
-                  selectedYouTubePerson == requestedYouTubePerson else { return }
-            guard selectedXUserID == requestedXUserID else { return }
-            guard selectedXueqiuFeedID == requestedXueqiuFeedID else { return }
             let ids = Set(posts.map(\.id))
             posts += result.filter { !ids.contains($0.id) }
             if requestedSource == .xueqiu, requestedXueqiuFeedID == nil {
@@ -1153,8 +1136,9 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
+            schedulePresentationPrewarm(for: result)
             if requestedSource == .newYorkTimes {
-                scheduleNewYorkTimesPrefetch(for: result)
+                scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: false)
             }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
@@ -1199,8 +1183,12 @@ final class NewsFeedViewModel: ObservableObject {
         throw lastError ?? APIError.invalidResponse
     }
 
-    private func scheduleNewYorkTimesPrefetch(for posts: [Post]) {
-        newYorkTimesPrefetchTask?.cancel()
+    private func schedulePresentationPrewarm(for posts: [Post]) {
+        Task { await FeedPresentationPrewarmer.shared.warm(posts) }
+    }
+
+    private func scheduleNewYorkTimesPrefetch(for posts: [Post], cancelsPrevious: Bool) {
+        if cancelsPrevious { newYorkTimesPrefetchTask?.cancel() }
         newYorkTimesPrefetchTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -1222,13 +1210,29 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
+    private func scheduleSelectedRSSNewYorkTimesPrefetch(for posts: [Post], feedID: Int) {
+        guard posts.contains(where: \.isNewYorkTimes) else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let warmed = try await self.prefetchNewYorkTimesBodies(for: posts)
+                guard !Task.isCancelled, self.selectedRSSFeedID == feedID else { return }
+                let warmedByID = Dictionary(uniqueKeysWithValues: warmed.map { ($0.id, $0) })
+                self.selectedRSSPosts = self.selectedRSSPosts.map { warmedByID[$0.id] ?? $0 }
+            } catch is CancellationError {
+                return
+            } catch {
+                // The selected RSS list remains usable without detail prefetch.
+            }
+        }
+    }
+
     private func handleRealtime(_ event: RealtimeFeedClient.Event) {
         switch event {
         case .post(let post):
             Task { @MainActor [weak self] in
-                await FeedPresentationPrewarmer.shared.warm([post])
-                guard !Task.isCancelled else { return }
                 self?.receiveRealtimePost(post)
+                await FeedPresentationPrewarmer.shared.warm([post])
             }
         case .taskCompleted(let name):
             guard task(name, updates: source) else { return }
@@ -1279,8 +1283,6 @@ final class NewsFeedViewModel: ObservableObject {
             flashCategory: flashCategory,
             serverURL: serverURL
         ), self.source == source, selectedFlashCategory == flashCategory else { return }
-        await FeedPresentationPrewarmer.shared.warm(snapshot.posts)
-        guard self.source == source, selectedFlashCategory == flashCategory else { return }
         posts = snapshot.posts
         if source == .xueqiu, selectedXueqiuFeedID == nil {
             xueqiuDirectoryPosts = snapshot.posts
@@ -1289,6 +1291,7 @@ final class NewsFeedViewModel: ObservableObject {
         canLoadMore = snapshot.canLoadMore
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         isSwitchingSource = false
+        schedulePresentationPrewarm(for: posts)
         scheduleRSSCardTranslations(for: posts)
     }
 
