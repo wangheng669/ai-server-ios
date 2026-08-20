@@ -31,7 +31,8 @@ struct APIClient {
         source: FeedSource,
         flashCategory: String? = nil,
         youtubePerson: String? = nil,
-        xUserID: String? = nil
+        xUserID: String? = nil,
+        bypassCache: Bool = false
     ) async throws -> [Post] {
         switch source {
         case .weibo, .douyin, .baidu:
@@ -55,7 +56,13 @@ struct APIClient {
         case .youtube:
             return try await fetchYouTubePosts(page: page, limit: limit, person: youtubePerson)
         default:
-            return try await fetchRegularPosts(page: page, limit: limit, source: source, xUserID: xUserID)
+            return try await fetchRegularPosts(
+                page: page,
+                limit: limit,
+                source: source,
+                xUserID: xUserID,
+                bypassCache: bypassCache
+            )
         }
     }
 
@@ -278,7 +285,8 @@ struct APIClient {
         page: Int,
         limit: Int,
         source: FeedSource,
-        xUserID: String? = nil
+        xUserID: String? = nil,
+        bypassCache: Bool = false
     ) async throws -> [Post] {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
         let isSpecialRSS = source == .laozhong || source == .youtube
@@ -294,7 +302,10 @@ struct APIClient {
         }
         components?.queryItems = queryItems
         guard let url = components?.url else { throw APIError.invalidURL }
-        let response: PostListResponse = try await get(url)
+        let response: PostListResponse = try await get(
+            url,
+            cachePolicy: bypassCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
+        )
         return response.data
     }
 
