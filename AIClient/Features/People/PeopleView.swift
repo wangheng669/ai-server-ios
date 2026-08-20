@@ -2107,7 +2107,6 @@ private struct PeopleRelationshipExplorer: View {
             .padding(.bottom, 112)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await onRefresh() }
         .onAppear {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--people-relations-list-preview") {

@@ -220,7 +220,6 @@ struct CountryGDPRankingView: View {
                             }
                             .background(InvestmentDesign.surface)
                             .scrollIndicators(.hidden)
-                            .refreshable { await load() }
                         } else if isLoading {
                             loadingState
                         } else {

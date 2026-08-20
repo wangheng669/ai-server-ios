@@ -123,7 +123,6 @@ struct FamousHoldingsView: View {
             .padding(.bottom, 18)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await store.load(force: true) }
         .task(id: "\(rootTabIsActive):\(manager.key)") {
             guard rootTabIsActive else { return }
             await store.loadDetail(managerKey: manager.key)

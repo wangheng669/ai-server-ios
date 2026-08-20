@@ -814,7 +814,6 @@ private struct TodayWorldView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .refreshable { await store.load(force: true) }
             .background(Color(uiColor: .systemBackground))
         } else {
             reportStatusView(report)

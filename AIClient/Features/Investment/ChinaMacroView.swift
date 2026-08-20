@@ -385,7 +385,6 @@ struct ChinaMacroView: View {
             .padding(.vertical, 14)
         }
         .background(InvestmentDesign.canvas)
-        .refreshable { await store.load() }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             if store.years.isEmpty { await store.load() }

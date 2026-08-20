@@ -1122,7 +1122,6 @@ struct NewsFeedView: View {
                         Color.clear.frame(height: 55)
                     }
                 }
-                .refreshable { await weiboFollowingModel.refresh() }
             } else if weiboFollowingModel.isLoading {
                 ProgressView("正在加载关注内容").font(.footnote)
             } else if let error = weiboFollowingModel.errorMessage {
@@ -1286,16 +1285,6 @@ struct NewsFeedView: View {
                 isHidden: $isFeedChromeHidden,
                 isAtTop: $isFeedAtTop
             ))
-            .refreshable {
-                guard source == model.source else { return }
-                if isSelectedRSSPage, let feedID = model.selectedRSSFeedID {
-                    await model.selectRSSFeed(feedID)
-                } else if isSelectedWeChatPage, let feedID = model.selectedWeChatFeedID {
-                    await model.selectWeChatFeed(feedID)
-                } else {
-                    await model.refresh()
-                }
-            }
             .allowsHitTesting(openingWebPostID == nil)
             .overlay(alignment: .top) {
                 if source == .x, model.source == .x, !model.pendingRealtimePosts.isEmpty {
