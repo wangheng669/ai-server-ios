@@ -9,6 +9,7 @@ private enum MarketStyle {
     static let gain = InvestmentDesign.gain
     static let loss = InvestmentDesign.loss
     static let accent = InvestmentDesign.accent
+    static let live = Color(red: 0.08, green: 0.72, blue: 0.40)
     static let purple = accent
     static let pageSpacing: CGFloat = 10
 }
@@ -350,7 +351,9 @@ private struct MarketTerminalHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            heroStatusHeader
+            MarketLiveStatus(store: store)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.secondary)
                 .padding(.trailing, 76)
 
             Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
@@ -469,17 +472,6 @@ private struct MarketTerminalHero: View {
         return quote?.tradingSession.displayLabel ?? "行情更新"
     }
 
-    private var sessionHeadline: String {
-        if region == .unitedStates, overnightQuote != nil { return "美股休市 · 期指夜盘" }
-        return "\(region.rawValue) · \(sessionLabel)"
-    }
-
-    private var sessionTint: Color {
-        region == .crypto || quote?.marketSession == "regular" || overnightQuote != nil
-            ? Color(red: 0.08, green: 0.83, blue: 0.47)
-            : Color.secondary
-    }
-
     private func cryptoMetric(symbol: String) -> some View {
         let value = store.quote(symbol: symbol)
         return MarketTerminalMetric(
@@ -520,40 +512,6 @@ private struct MarketTerminalHero: View {
             tint: quoteTint(store.quote(symbol: "^TNX")),
             trend: store.trendValues(for: store.quote(symbol: "^TNX"))
         )
-    }
-
-    @ViewBuilder private var heroStatusHeader: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: 7) {
-                sessionStatus
-                HStack(spacing: 8) {
-                    MarketLiveStatus(store: store)
-                }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.secondary)
-                .dynamicTypeSize(.large)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                sessionStatus
-                Group {
-                    MarketLiveStatus(store: store)
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Color.secondary)
-            }
-        }
-    }
-
-    private var sessionStatus: some View {
-        HStack(spacing: 6) {
-            Circle().fill(sessionTint).frame(width: 7, height: 7)
-            Text(sessionHeadline)
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(sessionTint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-        }
     }
 
     @ViewBuilder private var heroInstrumentTitle: some View {
@@ -990,6 +948,7 @@ private struct MarketRegionPicker: View {
         let weight: Font.Weight = isSelected ? .semibold : .medium
         let foreground = isSelected ? MarketStyle.accent : Color.secondary
         let quote = store.quote(symbol: region.primarySymbol)
+        let status = tabStatus(for: region, quote: quote)
 
         return Button {
             selection = region
@@ -998,10 +957,14 @@ private struct MarketRegionPicker: View {
                 Text(region.rawValue)
                     .font(.system(size: 12, weight: weight))
                     .foregroundStyle(foreground)
-                Text(quote?.formattedPercent ?? "—")
-                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(quoteTint(quote))
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(status.tint)
+                        .frame(width: 4, height: 4)
+                    Text(status.label)
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(status.tint)
+                }
             }
                 .lineLimit(1)
                 .frame(width: 62, height: 33)
@@ -1016,8 +979,33 @@ private struct MarketRegionPicker: View {
         }
         .id(region)
         .buttonStyle(.plain)
-        .accessibilityLabel("\(region.rawValue)，\(quote?.formattedPercent ?? "涨跌幅等待更新")")
+        .accessibilityLabel("\(region.rawValue)，\(status.accessibilityLabel)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func tabStatus(for region: MarketRegion, quote: MarketQuote?) -> (label: String, accessibilityLabel: String, tint: Color) {
+        if region == .unitedStates,
+           quote?.tradingSession != .regular,
+           marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol]) != nil {
+            return ("夜盘", "期指夜盘交易中", MarketStyle.live)
+        }
+
+        switch quote?.tradingSession {
+        case .regular:
+            return ("交易中", "交易中", MarketStyle.live)
+        case .premarket:
+            return ("盘前", "盘前交易", MarketStyle.live)
+        case .postmarket:
+            return ("盘后", "盘后交易", MarketStyle.live)
+        case .overnight:
+            return ("夜盘", "夜盘交易", MarketStyle.live)
+        case .alwaysOpen:
+            return ("24H", "24小时交易", MarketStyle.live)
+        case .closed:
+            return ("休市", "已休市", Color.secondary)
+        case .unknown, .none:
+            return ("更新中", "交易状态更新中", Color.secondary)
+        }
     }
 }
 
