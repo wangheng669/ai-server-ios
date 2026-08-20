@@ -276,9 +276,6 @@ struct PostDetailView: View {
     @ViewBuilder
     private var newYorkTimesDetail: some View {
         VStack(spacing: 0) {
-            newYorkTimesHeader
-            Divider()
-
             if isLoadingNewYorkTimesBody {
                 VStack(spacing: 12) {
                     ProgressView()
@@ -369,41 +366,6 @@ struct PostDetailView: View {
                 }
             }
         }
-    }
-
-    private var newYorkTimesHeader: some View {
-        HStack(spacing: 12) {
-            Button { dismiss() } label: {
-                Image(systemName: dismissIconName)
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel(dismissAccessibilityLabel)
-            .opacity(presentedAsSheet ? 0 : 1)
-            .disabled(presentedAsSheet)
-            .accessibilityHidden(presentedAsSheet)
-
-            Spacer(minLength: 0)
-
-            Text("纽约时报")
-                .font(.system(size: 17, weight: .semibold, design: .serif))
-
-            Spacer(minLength: 0)
-
-            Button {
-                isRSSBookmarked.toggle()
-                RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
-            } label: {
-                Image(systemName: isRSSBookmarked ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel(isRSSBookmarked ? "取消收藏" : "收藏")
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 8)
-        .frame(height: 52)
-        .background(.background)
     }
 
     private var standardDetail: some View {
