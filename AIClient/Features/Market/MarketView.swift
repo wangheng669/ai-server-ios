@@ -9,7 +9,6 @@ private enum MarketStyle {
     static let gain = InvestmentDesign.gain
     static let loss = InvestmentDesign.loss
     static let accent = InvestmentDesign.accent
-    static let regionTransition = Animation.smooth(duration: 0.26, extraBounce: 0)
     static let purple = accent
     static let pageSpacing: CGFloat = 10
 }
@@ -125,10 +124,6 @@ private struct MarketHomeView: View {
         return .unitedStates
         #endif
     }()
-    @State private var suppressIndexSelection = false
-    @State private var selectionResetTask: Task<Void, Never>?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         GeometryReader { viewport in
             ScrollViewReader { proxy in
@@ -141,18 +136,14 @@ private struct MarketHomeView: View {
                             )
                         }
                         .frame(height: 1)
-                        .id("market-top")
 
                         ZStack(alignment: .topTrailing) {
                             MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: onSelectIndex)
-                                .id(selectedMarket)
-                                .transition(.opacity)
                             MarketRegionPicker(store: store, selection: $selectedMarket)
                                 .padding(.top, 14)
                                 .padding(.trailing, 8)
                         }
                         .background(MarketStyle.surface)
-                        .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
 
                         VStack(spacing: MarketStyle.pageSpacing) {
                             if let error = regionalHealthMessage {
@@ -164,12 +155,8 @@ private struct MarketHomeView: View {
                             MarketIndexTable(
                                 region: selectedMarket,
                                 store: store,
-                                onSelectIndex: selectIndex
+                                onSelectIndex: onSelectIndex
                             )
-                            .id(selectedMarket)
-                            .transition(.opacity)
-                            .animation(reduceMotion ? nil : MarketStyle.regionTransition, value: selectedMarket)
-                            .simultaneousGesture(regionSwipeGesture)
                             if selectedMarket == .china {
                                 ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
                                     .id("market-structure")
@@ -187,11 +174,7 @@ private struct MarketHomeView: View {
                 .coordinateSpace(name: "market-scroll")
                 .scrollIndicators(.hidden)
                 .refreshable { await store.refresh() }
-                .onChange(of: selectedMarket) { _, _ in
-                    withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
-                        proxy.scrollTo("market-top", anchor: .top)
-                    }
-                }
+                .simultaneousGesture(regionSwipeGesture)
                 .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
                     onCompactHeaderChange(offset < -28)
                 }
@@ -221,48 +204,16 @@ private struct MarketHomeView: View {
     }
 
     private var regionSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 14)
-            .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                selectionResetTask?.cancel()
-                suppressIndexSelection = true
-            }
+        DragGesture(minimumDistance: 24)
             .onEnded { value in
-                let horizontalDistance = value.translation.width
-                let verticalDistance = value.translation.height
-                let projectedHorizontalDistance = value.predictedEndTranslation.width
-                let isHorizontal = abs(horizontalDistance) > abs(verticalDistance)
-                let crossedDistance = abs(horizontalDistance) >= 36
-                let hasHorizontalMomentum = abs(projectedHorizontalDistance) >= 64
-                if isHorizontal, crossedDistance || hasHorizontalMomentum {
-                    selectAdjacentRegion(offset: horizontalDistance < 0 ? 1 : -1)
-                }
-                allowIndexSelectionAfterGesture()
+                guard let offset = marketRegionSwipeOffset(
+                    horizontalDistance: value.translation.width,
+                    verticalDistance: value.translation.height,
+                    projectedHorizontalDistance: value.predictedEndTranslation.width
+                ), let destination = marketAdjacentRegion(from: selectedMarket, offset: offset) else { return }
+                selectedMarket = destination
+                UIAccessibility.post(notification: .announcement, argument: destination.rawValue)
             }
-    }
-
-    private func selectIndex(_ symbol: String) {
-        guard !suppressIndexSelection else { return }
-        onSelectIndex(symbol)
-    }
-
-    private func allowIndexSelectionAfterGesture() {
-        selectionResetTask?.cancel()
-        selectionResetTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled else { return }
-            suppressIndexSelection = false
-        }
-    }
-
-    private func selectAdjacentRegion(offset: Int) {
-        let regions = MarketRegion.allCases
-        guard let currentIndex = regions.firstIndex(of: selectedMarket) else { return }
-        let nextIndex = currentIndex + offset
-        guard regions.indices.contains(nextIndex) else { return }
-        withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
-            selectedMarket = regions[nextIndex]
-        }
     }
 }
 
@@ -279,7 +230,7 @@ private enum MarketTerminalPalette {
     static let headerDivider = InvestmentDesign.divider
 }
 
-private enum MarketRegion: String, CaseIterable, Identifiable {
+enum MarketRegion: String, CaseIterable, Identifiable {
     case unitedStates = "美国"
     case china = "中国"
     case japan = "日本"
@@ -335,6 +286,27 @@ private enum MarketRegion: String, CaseIterable, Identifiable {
         case .crypto: Set(symbols)
         }
     }
+}
+
+func marketRegionSwipeOffset(
+    horizontalDistance: CGFloat,
+    verticalDistance: CGFloat,
+    projectedHorizontalDistance: CGFloat
+) -> Int? {
+    guard abs(horizontalDistance) > abs(verticalDistance) * 1.2 else { return nil }
+    guard abs(horizontalDistance) >= 44 || abs(projectedHorizontalDistance) >= 80 else { return nil }
+    let directionDistance = abs(horizontalDistance) >= 44
+        ? horizontalDistance
+        : projectedHorizontalDistance
+    return directionDistance < 0 ? 1 : -1
+}
+
+func marketAdjacentRegion(from current: MarketRegion, offset: Int) -> MarketRegion? {
+    let regions = MarketRegion.allCases
+    guard let currentIndex = regions.firstIndex(of: current) else { return nil }
+    let destinationIndex = currentIndex + offset
+    guard regions.indices.contains(destinationIndex) else { return nil }
+    return regions[destinationIndex]
 }
 
 private struct MarketTerminalHero: View {
@@ -972,7 +944,6 @@ private struct MarketTerminalSentiment: View {
 private struct MarketRegionPicker: View {
     let store: MarketStore
     @Binding var selection: MarketRegion
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 1) {
@@ -992,9 +963,7 @@ private struct MarketRegionPicker: View {
         let quote = store.quote(symbol: region.primarySymbol)
 
         return Button {
-            withAnimation(reduceMotion ? nil : MarketStyle.regionTransition) {
-                selection = region
-            }
+            selection = region
         } label: {
             VStack(spacing: 1) {
                 Text(region.rawValue)
