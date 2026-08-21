@@ -1330,39 +1330,13 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertNotEqual(post.newYorkTimesFeedExcerpt, body)
     }
 
-    func testTodayWorldYesterdayReportDecoding() throws {
-        let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"advanced":{"status":"succeeded","stage":"done","sections":[{"section_key":"artificial-intelligence","section_name":"人工智能","groups":[{"group_key":"ai-ecosystems","group_name":"人工智能体系","systems":[{"system_key":"altman","system_name":"奥特曼系","summary":"OpenAI 更新模型，Sam Altman 转发说明。","source_keys":["openai","sam-altman"],"source_names":["OpenAI","Sam Altman"],"post_ids":[43,42]}]}]},{"section_key":"investment","section_name":"投资","groups":[{"group_key":"investment-leaders","group_name":"投资大佬","systems":[{"system_key":"dan-bin","system_name":"但斌","summary":"复盘市场。","source_keys":["dan-bin"],"source_names":["但斌"],"post_ids":[44]}]}]}],"section_count":2,"group_count":2,"system_count":2,"source_char_count":320,"char_count":28,"compression_ratio":0.0875,"model":"qwen3.5-flash","total_tokens":456,"cost_cny":0.0042,"completed_at":"2026-08-08T06:18:00+08:00"}},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123,"completed_at":"2026-08-08T06:16:00+08:00"}}"#.utf8)
-        let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
 
-        XCTAssertEqual(response.data.date, "2026-08-07")
-        XCTAssertEqual(response.data.sourceCount, 3)
-        XCTAssertEqual(response.data.report.advanced?.status, "succeeded")
-        XCTAssertEqual(response.data.report.advanced?.sections.map(\.sectionName), ["人工智能", "投资"])
-        XCTAssertEqual(response.data.report.advanced?.groupCount, 2)
-        XCTAssertEqual(response.data.report.advanced?.sections[1].groups[0].groupName, "投资大佬")
-        XCTAssertEqual(response.data.report.advanced?.sectionCount, 2)
-        XCTAssertEqual(response.data.report.advanced?.systems.first?.systemName, "奥特曼系")
-        XCTAssertEqual(response.data.report.advanced?.systems.first?.sourceNames, ["OpenAI", "Sam Altman"])
-        XCTAssertEqual(response.data.report.advanced?.systems.first?.postIDs, [43, 42])
-        XCTAssertEqual(response.data.report.advanced?.compressionRatio, 0.0875)
-    }
-
-    func testTodayWorldYesterdayReportDecodesAdvancedProgressWithoutSections() throws {
-        let data = Data(#"{"success":true,"data":{"date":"2026-08-07","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":3,"post_count":8,"report":{"advanced":{"status":"running","stage":"compressing","started_at":"2026-08-08T06:18:00+08:00"}},"model":"qwen3.5-flash","total_tokens":1234,"cost_cny":0.0123}}"#.utf8)
-        let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
-
-        XCTAssertEqual(response.data.report.advanced?.status, "running")
-        XCTAssertEqual(response.data.report.advanced?.stage, "compressing")
-        XCTAssertEqual(response.data.report.advanced?.sections, [])
-        XCTAssertEqual(response.data.report.advanced?.systems, [])
-    }
 
     func testTodayWorldYesterdayReportDecodesFinalEditorialStructure() throws {
-        let data = Data(#"{"success":true,"data":{"date":"2026-08-20","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":2,"post_count":4,"report":{"advanced":{"edition":"final","status":"succeeded","stage":"done","overview":{"headline":"模型安全与产品发布构成昨日主线。","highlights":[{"title":"训练安全","text":"OpenAI 暂停一项训练并加强监控。","system_keys":["altman"],"post_ids":[42]}],"watch_items":[{"text":"继续观察训练恢复时间。","system_keys":["altman"],"post_ids":[42]}]},"sections":[{"section_key":"artificial-intelligence","section_name":"人工智能","groups":[{"group_key":"ai-ecosystems","group_name":"人工智能体系","systems":[{"system_key":"altman","system_name":"OpenAI 系","headline":"OpenAI 调整训练并加强安全监控。","summary":"兼容摘要。","signal_level":"high","facts":[{"category":"action","text":"OpenAI 暂停一项训练并加强监控。","source_keys":["openai"],"post_ids":[42]}],"watch_item":"继续观察训练恢复时间。","source_keys":["openai"],"source_names":["OpenAI"],"post_ids":[42]}]}]}]}},"model":"qwen3.5-plus","total_tokens":1234,"cost_cny":0.0123}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"date":"2026-08-20","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":2,"post_count":4,"report":{"final":{"status":"succeeded","stage":"done","overview":{"headline":"模型安全与产品发布构成昨日主线。","highlights":[{"title":"训练安全","text":"OpenAI 暂停一项训练并加强监控。","system_keys":["altman"],"post_ids":[42]}],"watch_items":[{"text":"继续观察训练恢复时间。","system_keys":["altman"],"post_ids":[42]}]},"sections":[{"section_key":"artificial-intelligence","section_name":"人工智能","groups":[{"group_key":"ai-ecosystems","group_name":"人工智能体系","systems":[{"system_key":"altman","system_name":"OpenAI 系","headline":"OpenAI 调整训练并加强安全监控。","signal_level":"high","facts":[{"category":"action","text":"OpenAI 暂停一项训练并加强监控。","source_keys":["openai"],"post_ids":[42]}],"watch_item":"继续观察训练恢复时间。","source_keys":["openai"],"source_names":["OpenAI"],"post_ids":[42]}]}]}]}},"model":"qwen3.5-plus","total_tokens":1234,"cost_cny":0.0123}}"#.utf8)
         let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
-        let final = try XCTUnwrap(response.data.report.advanced)
+        let final = try XCTUnwrap(response.data.report.final)
 
-        XCTAssertEqual(final.edition, "final")
         XCTAssertEqual(final.overview.headline, "模型安全与产品发布构成昨日主线。")
         XCTAssertEqual(final.overview.highlights.first?.postIDs, [42])
         XCTAssertEqual(final.overview.watchItems.first?.text, "继续观察训练恢复时间。")
@@ -1371,6 +1345,12 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(final.systems.first?.facts.first?.category, "action")
         XCTAssertEqual(final.systems.first?.facts.first?.sourceKeys, ["openai"])
         XCTAssertEqual(final.systems.first?.watchItem, "继续观察训练恢复时间。")
+    }
+
+    func testTodayWorldYesterdayReportRejectsOldAdvancedContract() throws {
+        let data = Data(#"{"success":true,"data":{"date":"2026-08-20","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":2,"post_count":4,"report":{"advanced":{"status":"succeeded"}},"model":"qwen3.5-plus","total_tokens":1234,"cost_cny":0.0123}}"#.utf8)
+        let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
+        XCTAssertNil(response.data.report.final)
     }
 
 }

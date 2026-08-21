@@ -1035,24 +1035,23 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
 }
 
 struct TodayWorldYesterdayReportContent: Decodable, Equatable {
-    let advanced: TodayWorldAdvancedReport?
+    let final: TodayWorldFinalReport?
 
     enum CodingKeys: String, CodingKey {
-        case advanced
+        case final
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        advanced = try container.decodeIfPresent(TodayWorldAdvancedReport.self, forKey: .advanced)
+        final = try container.decodeIfPresent(TodayWorldFinalReport.self, forKey: .final)
     }
 }
 
-struct TodayWorldAdvancedReport: Decodable, Equatable {
-    let edition: String?
+struct TodayWorldFinalReport: Decodable, Equatable {
     let status: String
     let stage: String?
     let error: String?
-    let sections: [TodayWorldAdvancedReportSection]
+    let sections: [TodayWorldFinalReportSection]
     let sectionCount: Int
     let groupCount: Int
     let systemCount: Int
@@ -1066,7 +1065,7 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
     let overview: TodayWorldFinalReportOverview
 
     enum CodingKeys: String, CodingKey {
-        case edition, status, stage, error, sections, model, overview
+        case status, stage, error, sections, model, overview
         case sectionCount = "section_count"
         case groupCount = "group_count"
         case systemCount = "system_count"
@@ -1080,11 +1079,10 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        edition = try container.decodeIfPresent(String.self, forKey: .edition)
-        status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+        status = try container.decode(String.self, forKey: .status)
         stage = try container.decodeIfPresent(String.self, forKey: .stage)
         error = try container.decodeIfPresent(String.self, forKey: .error)
-        let decodedSections = try container.decodeIfPresent([TodayWorldAdvancedReportSection].self, forKey: .sections) ?? []
+        let decodedSections = try container.decodeIfPresent([TodayWorldFinalReportSection].self, forKey: .sections) ?? []
         sections = decodedSections
         sectionCount = try container.decodeIfPresent(Int.self, forKey: .sectionCount) ?? decodedSections.count
         groupCount = try container.decodeIfPresent(Int.self, forKey: .groupCount) ?? decodedSections.reduce(0) { $0 + $1.groups.count }
@@ -1096,21 +1094,28 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
         totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
         costCNY = try container.decodeIfPresent(Double.self, forKey: .costCNY)
         completedAt = try container.decodeIfPresent(String.self, forKey: .completedAt)
-        overview = try container.decodeIfPresent(TodayWorldFinalReportOverview.self, forKey: .overview) ?? .empty
+        if status == "succeeded" {
+            guard !decodedSections.isEmpty else {
+                throw DecodingError.dataCorruptedError(forKey: .sections, in: container, debugDescription: "最终版日报缺少 sections")
+            }
+            overview = try container.decode(TodayWorldFinalReportOverview.self, forKey: .overview)
+        } else {
+            overview = try container.decodeIfPresent(TodayWorldFinalReportOverview.self, forKey: .overview) ?? .empty
+        }
     }
 
-    var systems: [TodayWorldAdvancedReportSystem] {
+    var systems: [TodayWorldFinalReportSystem] {
         sections.flatMap(\.systems)
     }
 }
 
-struct TodayWorldAdvancedReportSection: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportSection: Decodable, Equatable, Identifiable {
     let sectionKey: String
     let sectionName: String
-    let groups: [TodayWorldAdvancedReportGroup]
+    let groups: [TodayWorldFinalReportGroup]
     var id: String { sectionKey }
 
-    var systems: [TodayWorldAdvancedReportSystem] {
+    var systems: [TodayWorldFinalReportSystem] {
         groups.flatMap(\.systems)
     }
 
@@ -1121,10 +1126,10 @@ struct TodayWorldAdvancedReportSection: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldAdvancedReportGroup: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportGroup: Decodable, Equatable, Identifiable {
     let groupKey: String
     let groupName: String
-    let systems: [TodayWorldAdvancedReportSystem]
+    let systems: [TodayWorldFinalReportSystem]
     var id: String { groupKey }
 
     enum CodingKeys: String, CodingKey {
@@ -1134,11 +1139,10 @@ struct TodayWorldAdvancedReportGroup: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldAdvancedReportSystem: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportSystem: Decodable, Equatable, Identifiable {
     let systemKey: String
     let systemName: String
     let headline: String
-    let summary: String
     let signalLevel: String
     let facts: [TodayWorldFinalReportFact]
     let watchItem: String?
@@ -1148,7 +1152,7 @@ struct TodayWorldAdvancedReportSystem: Decodable, Equatable, Identifiable {
     var id: String { systemKey }
 
     enum CodingKeys: String, CodingKey {
-        case headline, summary, facts
+        case headline, facts
         case signalLevel = "signal_level"
         case watchItem = "watch_item"
         case systemKey = "system_key"
@@ -1160,16 +1164,15 @@ struct TodayWorldAdvancedReportSystem: Decodable, Equatable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        systemKey = try container.decodeIfPresent(String.self, forKey: .systemKey) ?? ""
-        systemName = try container.decodeIfPresent(String.self, forKey: .systemName) ?? ""
-        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
-        headline = try container.decodeIfPresent(String.self, forKey: .headline) ?? summary
-        signalLevel = try container.decodeIfPresent(String.self, forKey: .signalLevel) ?? "medium"
-        facts = try container.decodeIfPresent([TodayWorldFinalReportFact].self, forKey: .facts) ?? []
+        systemKey = try container.decode(String.self, forKey: .systemKey)
+        systemName = try container.decode(String.self, forKey: .systemName)
+        headline = try container.decode(String.self, forKey: .headline)
+        signalLevel = try container.decode(String.self, forKey: .signalLevel)
+        facts = try container.decode([TodayWorldFinalReportFact].self, forKey: .facts)
         watchItem = try container.decodeIfPresent(String.self, forKey: .watchItem)
-        sourceKeys = try container.decodeIfPresent([String].self, forKey: .sourceKeys) ?? []
-        sourceNames = try container.decodeIfPresent([String].self, forKey: .sourceNames) ?? []
-        postIDs = try container.decodeIfPresent([Int].self, forKey: .postIDs) ?? []
+        sourceKeys = try container.decode([String].self, forKey: .sourceKeys)
+        sourceNames = try container.decode([String].self, forKey: .sourceNames)
+        postIDs = try container.decode([Int].self, forKey: .postIDs)
     }
 }
 
