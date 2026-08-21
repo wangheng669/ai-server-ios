@@ -328,43 +328,14 @@ struct CityNewsView: View {
     }
 
     private var topBar: some View {
-        ZStack {
-            Text("城市观察")
-                .font(.headline.weight(.bold))
-
-            HStack {
-                Button {
-                    guard journey.goBack() else { return }
-                    selectedID = Self.defaultSelection(for: journey)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 19, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(CityPressStyle())
-                .accessibilityLabel("返回上一级地区")
-
-                Spacer()
-
-                ShareLink(
-                    item: "\(journey.current.name)城市观察",
-                    subject: Text(journey.current.name),
-                    message: Text(journey.current.introduction)
-                ) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(CityPressStyle())
-                .accessibilityLabel("分享城市观察")
+        Text("城市观察")
+            .font(.headline.weight(.bold))
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(CityDesign.canvas)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(CityDesign.divider).frame(height: 0.5)
             }
-            .padding(.horizontal, 8)
-        }
-        .frame(height: 48)
-        .background(CityDesign.canvas)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(CityDesign.divider).frame(height: 0.5)
-        }
     }
 
     private static func defaultSelection(for journey: CityRegionJourney) -> String? {
