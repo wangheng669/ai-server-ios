@@ -388,7 +388,7 @@ private struct EditorialRootView: View {
                     )
                 }
             }
-            .padding(.bottom, -13)
+            .padding(.bottom, selectedTab == .city ? -30 : -13)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -496,16 +496,19 @@ private struct RootNavigationBar: View {
             item(.learning, title: "知识", icon: "books.vertical")
             item(.city, title: "城市", icon: "map")
         }
-        .frame(maxWidth: 368)
-        .frame(height: 54)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: selection == .city ? .infinity : 368)
+        .frame(height: selection == .city ? 58 : 54)
+        .background(
+            Color(uiColor: .systemBackground),
+            in: RoundedRectangle(cornerRadius: selection == .city ? 29 : 14, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.primary.opacity(0.16), lineWidth: 0.7)
+            RoundedRectangle(cornerRadius: selection == .city ? 29 : 14, style: .continuous)
+                .stroke(Color.primary.opacity(selection == .city ? 0.09 : 0.16), lineWidth: 0.7)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 11)
-        .padding(.bottom, 2)
+        .padding(.horizontal, selection == .city ? 0 : 11)
+        .padding(.bottom, selection == .city ? 0 : 2)
     }
 
     private var intelligenceItem: some View {
@@ -615,8 +618,8 @@ private struct RootNavigationBar: View {
             if isSelected {
                 Capsule()
                     .fill(InvestmentDesign.accent.opacity(0.1))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, selection == .city && title == "城市" ? 0 : 7)
+                    .padding(.vertical, selection == .city && title == "城市" ? 0 : 2)
             }
         }
     }
