@@ -368,13 +368,14 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDecodesInvestorMoodPublicVideoSamples() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","videoUrl":"https://video.example.com/123.mp4","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_investor_mood_v1","generatedAt":"2026-07-23T04:00:00Z","methodology":"public-video-sample","disclaimer":"观点样本来自公开视频，不代表整体市场情绪，不构成投资建议。","items":[{"nickname":"王小雨","awemeId":"123","description":"今天继续观察","url":"https://www.douyin.com/video/123","coverUrl":"https://example.com/cover.jpg","videoUrl":"https://video.example.com/123.mp4","createdAt":"2026-07-23T03:00:00Z","label":"观望","reasons":["等待方向"],"transcript":"今天继续观察，等待市场方向。","transcriptStatus":"字幕成功","analysis":"情绪保持中性。","evidence":["继续观察"],"analysisSource":"qwen","model":"qwen-vl","stale":false,"ageHours":1.0}]}}"#.utf8)
         let response = try JSONDecoder().decode(InvestorMoodResponse.self, from: data)
         XCTAssertEqual(response.data.dataContract, "market_investor_mood_v1")
         XCTAssertEqual(response.data.methodology, "public-video-sample")
         XCTAssertEqual(response.data.items.first?.nickname, "王小雨")
         XCTAssertEqual(response.data.items.first?.label, "观望")
         XCTAssertEqual(response.data.items.first?.analysis, "情绪保持中性。")
+        XCTAssertEqual(response.data.items.first?.transcript, "今天继续观察，等待市场方向。")
         XCTAssertEqual(response.data.items.first?.videoUrl, "https://video.example.com/123.mp4")
         XCTAssertEqual(response.data.items.first?.directPlaybackURL?.absoluteString, "https://video.example.com/123.mp4")
         XCTAssertTrue(response.data.items.first?.playbackURL?.absoluteString.contains("/api/ios/v1/media-proxy?") == true)
