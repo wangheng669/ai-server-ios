@@ -1048,6 +1048,7 @@ struct TodayWorldYesterdayReportContent: Decodable, Equatable {
 }
 
 struct TodayWorldAdvancedReport: Decodable, Equatable {
+    let edition: String?
     let status: String
     let stage: String?
     let error: String?
@@ -1062,9 +1063,10 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
     let totalTokens: Int?
     let costCNY: Double?
     let completedAt: String?
+    let overview: TodayWorldFinalReportOverview
 
     enum CodingKeys: String, CodingKey {
-        case status, stage, error, sections, model
+        case edition, status, stage, error, sections, model, overview
         case sectionCount = "section_count"
         case groupCount = "group_count"
         case systemCount = "system_count"
@@ -1078,6 +1080,7 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        edition = try container.decodeIfPresent(String.self, forKey: .edition)
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
         stage = try container.decodeIfPresent(String.self, forKey: .stage)
         error = try container.decodeIfPresent(String.self, forKey: .error)
@@ -1093,6 +1096,7 @@ struct TodayWorldAdvancedReport: Decodable, Equatable {
         totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
         costCNY = try container.decodeIfPresent(Double.self, forKey: .costCNY)
         completedAt = try container.decodeIfPresent(String.self, forKey: .completedAt)
+        overview = try container.decodeIfPresent(TodayWorldFinalReportOverview.self, forKey: .overview) ?? .empty
     }
 
     var systems: [TodayWorldAdvancedReportSystem] {
@@ -1133,18 +1137,79 @@ struct TodayWorldAdvancedReportGroup: Decodable, Equatable, Identifiable {
 struct TodayWorldAdvancedReportSystem: Decodable, Equatable, Identifiable {
     let systemKey: String
     let systemName: String
+    let headline: String
     let summary: String
+    let signalLevel: String
+    let facts: [TodayWorldFinalReportFact]
+    let watchItem: String?
     let sourceKeys: [String]
     let sourceNames: [String]
     let postIDs: [Int]
     var id: String { systemKey }
 
     enum CodingKeys: String, CodingKey {
-        case summary
+        case headline, summary, facts
+        case signalLevel = "signal_level"
+        case watchItem = "watch_item"
         case systemKey = "system_key"
         case systemName = "system_name"
         case sourceKeys = "source_keys"
         case sourceNames = "source_names"
+        case postIDs = "post_ids"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        systemKey = try container.decodeIfPresent(String.self, forKey: .systemKey) ?? ""
+        systemName = try container.decodeIfPresent(String.self, forKey: .systemName) ?? ""
+        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        headline = try container.decodeIfPresent(String.self, forKey: .headline) ?? summary
+        signalLevel = try container.decodeIfPresent(String.self, forKey: .signalLevel) ?? "medium"
+        facts = try container.decodeIfPresent([TodayWorldFinalReportFact].self, forKey: .facts) ?? []
+        watchItem = try container.decodeIfPresent(String.self, forKey: .watchItem)
+        sourceKeys = try container.decodeIfPresent([String].self, forKey: .sourceKeys) ?? []
+        sourceNames = try container.decodeIfPresent([String].self, forKey: .sourceNames) ?? []
+        postIDs = try container.decodeIfPresent([Int].self, forKey: .postIDs) ?? []
+    }
+}
+
+struct TodayWorldFinalReportOverview: Decodable, Equatable {
+    let headline: String
+    let highlights: [TodayWorldFinalReportOverviewItem]
+    let watchItems: [TodayWorldFinalReportOverviewItem]
+
+    static let empty = TodayWorldFinalReportOverview(headline: "", highlights: [], watchItems: [])
+
+    enum CodingKeys: String, CodingKey {
+        case headline, highlights
+        case watchItems = "watch_items"
+    }
+}
+
+struct TodayWorldFinalReportOverviewItem: Decodable, Equatable, Identifiable {
+    let title: String?
+    let text: String
+    let systemKeys: [String]
+    let postIDs: [Int]
+    var id: String { ([title, text].compactMap { $0 } + postIDs.map(String.init)).joined(separator: "|") }
+
+    enum CodingKeys: String, CodingKey {
+        case title, text
+        case systemKeys = "system_keys"
+        case postIDs = "post_ids"
+    }
+}
+
+struct TodayWorldFinalReportFact: Decodable, Equatable, Identifiable {
+    let category: String
+    let text: String
+    let sourceKeys: [String]
+    let postIDs: [Int]
+    var id: String { "\(category)|\(text)|\(postIDs.map(String.init).joined(separator: ","))" }
+
+    enum CodingKeys: String, CodingKey {
+        case category, text
+        case sourceKeys = "source_keys"
         case postIDs = "post_ids"
     }
 }

@@ -1357,6 +1357,22 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(response.data.report.advanced?.systems, [])
     }
 
+    func testTodayWorldYesterdayReportDecodesFinalEditorialStructure() throws {
+        let data = Data(#"{"success":true,"data":{"date":"2026-08-20","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":2,"post_count":4,"report":{"advanced":{"edition":"final","status":"succeeded","stage":"done","overview":{"headline":"模型安全与产品发布构成昨日主线。","highlights":[{"title":"训练安全","text":"OpenAI 暂停一项训练并加强监控。","system_keys":["altman"],"post_ids":[42]}],"watch_items":[{"text":"继续观察训练恢复时间。","system_keys":["altman"],"post_ids":[42]}]},"sections":[{"section_key":"artificial-intelligence","section_name":"人工智能","groups":[{"group_key":"ai-ecosystems","group_name":"人工智能体系","systems":[{"system_key":"altman","system_name":"OpenAI 系","headline":"OpenAI 调整训练并加强安全监控。","summary":"兼容摘要。","signal_level":"high","facts":[{"category":"action","text":"OpenAI 暂停一项训练并加强监控。","source_keys":["openai"],"post_ids":[42]}],"watch_item":"继续观察训练恢复时间。","source_keys":["openai"],"source_names":["OpenAI"],"post_ids":[42]}]}]}]}},"model":"qwen3.5-plus","total_tokens":1234,"cost_cny":0.0123}}"#.utf8)
+        let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)
+        let final = try XCTUnwrap(response.data.report.advanced)
+
+        XCTAssertEqual(final.edition, "final")
+        XCTAssertEqual(final.overview.headline, "模型安全与产品发布构成昨日主线。")
+        XCTAssertEqual(final.overview.highlights.first?.postIDs, [42])
+        XCTAssertEqual(final.overview.watchItems.first?.text, "继续观察训练恢复时间。")
+        XCTAssertEqual(final.systems.first?.headline, "OpenAI 调整训练并加强安全监控。")
+        XCTAssertEqual(final.systems.first?.signalLevel, "high")
+        XCTAssertEqual(final.systems.first?.facts.first?.category, "action")
+        XCTAssertEqual(final.systems.first?.facts.first?.sourceKeys, ["openai"])
+        XCTAssertEqual(final.systems.first?.watchItem, "继续观察训练恢复时间。")
+    }
+
 }
 
 final class RSSCardTranslationTests: XCTestCase {

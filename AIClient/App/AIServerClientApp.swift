@@ -642,7 +642,7 @@ private final class TodayWorldStore: ObservableObject {
             return
         } catch {
             if report == nil {
-                errorMessage = (error as? LocalizedError)?.errorDescription ?? "暂时无法读取进阶日报"
+                errorMessage = (error as? LocalizedError)?.errorDescription ?? "暂时无法读取最终版日报"
             }
         }
     }
@@ -803,11 +803,24 @@ private struct TodayWorldView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     metadata(report)
+                    if !advanced.overview.headline.isEmpty {
+                        finalOverview(advanced.overview)
+                    }
                     sectionSelector(advanced.sections, selectedID: section.id)
 
-                    ForEach(Array(section.systems.enumerated()), id: \.element.id) { index, system in
-                        if index > 0 { Divider().padding(.leading, 18) }
-                        systemRow(system)
+                    ForEach(section.groups) { group in
+                        if section.groups.count > 1 || section.sectionKey == "investment" {
+                            Text(group.groupName)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 18)
+                                .padding(.top, 14)
+                                .padding(.bottom, 4)
+                        }
+                        ForEach(Array(group.systems.enumerated()), id: \.element.id) { index, system in
+                            if index > 0 { Divider().padding(.leading, 18) }
+                            systemRow(system)
+                        }
                     }
 
                     Color.clear.frame(height: 88)
@@ -818,6 +831,53 @@ private struct TodayWorldView: View {
         } else {
             reportStatusView(report)
         }
+    }
+
+    private func finalOverview(_ overview: TodayWorldFinalReportOverview) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("昨日主线")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.teal)
+
+            Text(overview.headline)
+                .font(.system(size: 20, weight: .bold))
+                .lineSpacing(3)
+
+            ForEach(Array(overview.highlights.prefix(5).enumerated()), id: \.element.id) { index, item in
+                HStack(alignment: .top, spacing: 10) {
+                    Text(String(format: "%02d", index + 1))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.teal)
+                    VStack(alignment: .leading, spacing: 3) {
+                        if let title = item.title, !title.isEmpty {
+                            Text(title).font(.system(size: 14, weight: .semibold))
+                        }
+                        Text(item.text)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(2)
+                    }
+                }
+            }
+
+            if !overview.watchItems.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("继续观察")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(overview.watchItems) { item in
+                        Text("· \(item.text)")
+                            .font(.system(size: 13.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(18)
+        .background(Color.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 18)
+        .padding(.bottom, 18)
     }
 
     private func metadata(_ report: TodayWorldYesterdayReportPayload) -> some View {
@@ -863,20 +923,37 @@ private struct TodayWorldView: View {
             selectedSystem = system
         } label: {
             VStack(alignment: .leading, spacing: 11) {
-                Text(system.systemName)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 8) {
+                    Text(system.systemName)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Text(signalLabel(system.signalLevel))
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(signalColor(system.signalLevel))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(signalColor(system.signalLevel).opacity(0.1), in: Capsule())
+                }
 
                 Text("\(system.sourceKeys.count) 个账号 · \(system.postIDs.count) 条依据")
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
 
-                Text(system.summary)
-                    .font(.system(size: 14.5))
+                Text(system.headline)
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineSpacing(3)
-                    .lineLimit(3)
+                    .lineLimit(2)
                     .multilineTextAlignment(.leading)
+
+                if let fact = system.facts.first {
+                    Text(fact.text)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(2)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
 
                 HStack(spacing: -7) {
                     ForEach(Array(system.sourceKeys.prefix(3).enumerated()), id: \.offset) { index, key in
@@ -902,6 +979,18 @@ private struct TodayWorldView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("查看引用动态和原文")
+    }
+
+    private func signalLabel(_ level: String) -> String {
+        ["high": "高信号", "medium": "中信号", "low": "低信号"][level] ?? "已筛选"
+    }
+
+    private func signalColor(_ level: String) -> Color {
+        switch level {
+        case "high": return .red
+        case "low": return Color(uiColor: .secondaryLabel)
+        default: return .orange
+        }
     }
 
     private var loadingView: some View {
@@ -933,11 +1022,11 @@ private struct TodayWorldView: View {
             || report.report.advanced?.status == "running" || report.report.advanced?.status == "queued"
         return ContentUnavailableView {
             Label(
-                isRunning ? "正在生成日报" : "暂无进阶日报",
+                isRunning ? "正在生成最终版日报" : "暂无最终版日报",
                 systemImage: isRunning ? "hourglass" : "doc.text.magnifyingglass"
             )
         } description: {
-            Text(isRunning ? "完成后会自动展示总结内容" : "服务端尚未生成可展示的总结")
+            Text(isRunning ? "完成后会自动展示主线、要点与直接依据" : (report.report.advanced?.error ?? "普通日报仍可在治理后台查看"))
         } actions: {
             Button("重新加载") { Task { await store.load(force: true) } }
                 .buttonStyle(.borderedProminent)
@@ -1055,16 +1144,59 @@ private struct TodayWorldReportSourcesSheet: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("今日摘要")
+                    Text("最终结论")
                         .font(.system(size: 15, weight: .semibold))
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(summaryParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                            Text(paragraph)
-                                .font(.system(size: 16))
-                                .lineSpacing(5)
-                                .fixedSize(horizontal: false, vertical: true)
+                    Text(system.headline)
+                        .font(.system(size: 19, weight: .bold))
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if system.facts.isEmpty {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(Array(summaryParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                                Text(paragraph)
+                                    .font(.system(size: 16))
+                                    .lineSpacing(5)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(system.facts) { fact in
+                                VStack(alignment: .leading, spacing: 7) {
+                                    HStack {
+                                        Text(factCategoryLabel(fact.category))
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(Color.teal)
+                                        Spacer()
+                                        Text("\(fact.postIDs.count) 条直接依据")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    Text(fact.text)
+                                        .font(.system(size: 16))
+                                        .lineSpacing(5)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(14)
+                                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                        }
+                    }
+
+                    if let watchItem = system.watchItem, !watchItem.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("继续观察")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.orange)
+                            Text(watchItem)
+                                .font(.system(size: 14.5))
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(3)
+                        }
+                        .padding(14)
+                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1076,6 +1208,10 @@ private struct TodayWorldReportSourcesSheet: View {
 
             summaryFooter
         }
+    }
+
+    private func factCategoryLabel(_ category: String) -> String {
+        ["release": "发布", "action": "行动", "viewpoint": "观点", "market": "市场", "risk": "风险", "context": "背景"][category] ?? "要点"
     }
 
     private var summaryParagraphs: [String] {
@@ -1153,7 +1289,7 @@ private struct TodayWorldReportSourcesSheet: View {
                 isShowingPosts = true
             } label: {
                 HStack(spacing: 6) {
-                    Text("查看 \(system.postIDs.count) 条动态")
+                    Text("查看 \(system.postIDs.count) 条直接依据")
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .semibold))
                 }
