@@ -347,7 +347,7 @@ struct CityNewsView: View {
                     onSelectTrail: returnTo
                 )
                 .padding(.horizontal, 20)
-                .padding(.top, 12)
+                .padding(.top, 8)
 
                 CityRegionMapStage(
                     scope: mapScope,
@@ -357,8 +357,8 @@ struct CityNewsView: View {
                     reduceMotion: reduceMotion,
                     onSelect: selectRegion
                 )
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
 
                 if !journey.mapRegions.isEmpty {
                     CityRegionPicker(
@@ -367,7 +367,7 @@ struct CityNewsView: View {
                         selectedRegionID: journey.selectedMapRegionID,
                         onSelect: selectRegion
                     )
-                    .padding(.top, 14)
+                    .padding(.top, 12)
                 }
 
                 CityRegionDetails(region: displayedRegion)
@@ -375,7 +375,7 @@ struct CityNewsView: View {
                 .allowsHitTesting(detailsInteractionEnabled)
                 .accessibilityHidden(!detailsInteractionEnabled)
                 .padding(.horizontal, 20)
-                .padding(.top, 24)
+                .padding(.top, 28)
                 .padding(.bottom, 72)
             }
         }
@@ -383,18 +383,6 @@ struct CityNewsView: View {
         .clipped()
         .background(CityNewsDesign.canvas)
         .tint(CityNewsDesign.accent)
-        .overlay(alignment: .top) {
-            GeometryReader { geometry in
-                VStack(spacing: 0) {
-                    CityNewsDesign.canvas
-                        .frame(height: geometry.safeAreaInsets.top)
-                        .contentShape(Rectangle())
-                    Spacer(minLength: 0)
-                        .allowsHitTesting(false)
-                }
-            }
-            .accessibilityHidden(true)
-        }
         .sensoryFeedback(.selection, trigger: region.id)
         .accessibilityIdentifier("city-region-screen")
         .onAppear { settleContentImmediately() }
@@ -496,17 +484,20 @@ struct CityNewsView: View {
 private enum CityNewsDesign {
     static let accent = InvestmentDesign.accent
     static let accentSoft = accent.opacity(0.09)
-    static let canvas = Color(uiColor: .systemBackground)
+    static let canvas = Color(uiColor: .systemGroupedBackground)
+    static let surface = Color(uiColor: .systemBackground)
     static let secondarySurface = Color(uiColor: .secondarySystemBackground)
     static let divider = Color(uiColor: .separator).opacity(0.24)
     static let mapGradient = LinearGradient(
         colors: [
-            Color(uiColor: .secondarySystemBackground),
-            accent.opacity(0.075)
+            Color(red: 0.035, green: 0.105, blue: 0.19),
+            Color(red: 0.045, green: 0.22, blue: 0.29),
+            Color(red: 0.07, green: 0.29, blue: 0.34)
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
+    static let heroGlow = Color(red: 0.34, green: 0.86, blue: 0.78)
 }
 
 private struct CityPressStyle: ButtonStyle {
@@ -545,9 +536,9 @@ private struct CityRegionHeader: View {
     let onSelectTrail: (CityRegion) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                Label("城市观察", systemImage: "location.fill")
+                Label("城市观察", systemImage: "scope")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(CityNewsDesign.accent)
                     .textCase(.uppercase)
@@ -574,21 +565,24 @@ private struct CityRegionHeader: View {
             }
             .frame(height: 44)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(region.name)
-                    .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
                     .contentTransition(.opacity)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityFocused($isCurrentTitleFocused)
                     .accessibilityIdentifier("city-current-title")
-                Text(([region.level.rawValue] + region.facts).joined(separator: " · "))
+                Text(region.introduction)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
             }
-            .frame(minHeight: 66, alignment: .topLeading)
+            .padding(.top, 14)
+            .frame(minHeight: 118, alignment: .topLeading)
             .task(id: region.id) {
                 guard voiceOverEnabled, focusTitle else { return }
                 await Task.yield()
@@ -599,14 +593,35 @@ private struct CityRegionHeader: View {
                 if trail.count > 1 {
                     CityRegionBreadcrumb(trail: trail, onSelect: onSelectTrail)
                 } else {
-                    Text("轻点地图或地区名称逐级浏览")
+                    Text("全国城市与区域动态")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 7)
                 }
             }
             .frame(minHeight: 32, alignment: .leading)
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    factPill(region.level.rawValue, highlighted: true)
+                    ForEach(region.facts, id: \.self) { fact in
+                        factPill(fact, highlighted: false)
+                    }
+                }
+                .padding(.vertical, 7)
+            }
+            .scrollIndicators(.hidden)
+            .padding(.top, 4)
         }
+    }
+
+    private func factPill(_ text: String, highlighted: Bool) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(highlighted ? CityNewsDesign.accent : .secondary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(highlighted ? CityNewsDesign.accentSoft : CityNewsDesign.surface, in: Capsule())
     }
 }
 
@@ -659,14 +674,21 @@ private struct CityRegionMapStage: View {
     let onSelect: (CityRegion) -> Void
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .fill(CityNewsDesign.mapGradient)
 
             Circle()
-                .fill(CityNewsDesign.accent.opacity(0.055))
-                .frame(width: 170, height: 170)
-                .offset(x: 62, y: 74)
+                .fill(CityNewsDesign.heroGlow.opacity(0.12))
+                .frame(width: 220, height: 220)
+                .blur(radius: 2)
+                .offset(x: 116, y: -112)
+                .allowsHitTesting(false)
+
+            Circle()
+                .stroke(.white.opacity(0.075), lineWidth: 1)
+                .frame(width: 250, height: 250)
+                .offset(x: -145, y: 118)
                 .allowsHitTesting(false)
 
             CityMapCamera(
@@ -677,22 +699,44 @@ private struct CityRegionMapStage: View {
                 reduceMotion: reduceMotion,
                 onSelect: onSelect
             )
-            .padding(4)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 12)
 
-            Image(systemName: selectedRegionID == nil ? "hand.tap.fill" : "mappin.circle.fill")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 32, height: 32)
-                .background(.ultraThinMaterial, in: Circle())
-                .padding(12)
-                .accessibilityHidden(true)
+            VStack {
+                HStack {
+                    Label(scope.level.childTitle ?? "当前区域", systemImage: "map.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.16), in: Capsule())
+                    Spacer()
+                }
+                Spacer()
+                HStack {
+                    Spacer()
+                    Label(
+                        selectedRegionID == nil ? "轻点地图探索" : "已定位",
+                        systemImage: selectedRegionID == nil ? "hand.tap.fill" : "mappin.circle.fill"
+                    )
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.2), in: Capsule())
+                }
+            }
+            .padding(14)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
-        .frame(height: 312)
+        .frame(height: 326)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.primary.opacity(0.05), lineWidth: 0.7)
+                .stroke(.white.opacity(0.1), lineWidth: 0.8)
         }
+        .shadow(color: Color(red: 0.02, green: 0.12, blue: 0.18).opacity(0.18), radius: 18, y: 10)
     }
 }
 
@@ -1018,9 +1062,9 @@ private struct CityAdministrativeMap: View {
     }
 
     private func fillColor(for feature: CityMapFeature) -> Color {
-        if feature.id == selectedAdcode { return CityNewsDesign.accent.opacity(0.78) }
-        if availableAdcodes.contains(feature.id) { return CityNewsDesign.accent.opacity(0.42) }
-        return Color.secondary.opacity(0.11)
+        if feature.id == selectedAdcode { return CityNewsDesign.heroGlow.opacity(0.92) }
+        if availableAdcodes.contains(feature.id) { return Color.white.opacity(0.27) }
+        return Color.white.opacity(0.1)
     }
 
     private func selectFeature(at point: CGPoint, projection: CityMapProjection) {
@@ -1048,15 +1092,15 @@ private struct CityAdministrativeMap: View {
     private func mapLabel(_ text: String, selected: Bool) -> some View {
         Text(text.replacingOccurrences(of: "省", with: "").replacingOccurrences(of: "市", with: ""))
             .font(.system(size: min(max(scaledMapLabelSize, 9), 14), weight: .semibold))
-            .foregroundStyle(selected ? .white : CityNewsDesign.accent)
+            .foregroundStyle(selected ? Color(red: 0.02, green: 0.17, blue: 0.2) : .white)
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
             .background(
-                selected ? CityNewsDesign.accent : CityNewsDesign.secondarySurface.opacity(0.96),
+                selected ? CityNewsDesign.heroGlow : Color.black.opacity(0.28),
                 in: Capsule()
             )
-            .overlay { Capsule().stroke(CityNewsDesign.accent.opacity(0.24), lineWidth: 0.6) }
-            .shadow(color: .black.opacity(selected ? 0 : 0.06), radius: 4, y: 2)
+            .overlay { Capsule().stroke(.white.opacity(0.18), lineWidth: 0.6) }
+            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
             .allowsHitTesting(false)
     }
 }
@@ -1118,162 +1162,124 @@ private struct CityMapProjection {
 }
 
 private struct CityRegionDetails: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var expandedSection: CityRegionDetailSection?
-
     let region: CityRegion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            disclosureCard(
-                section: .overview,
-                title: "城市速写",
-                subtitle: "概况与 \(region.facts.count) 项关键数据",
-                symbol: "text.alignleft"
-            ) {
-                VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 30) {
+            VStack(alignment: .leading, spacing: 14) {
+                sectionHeading("城市名片", subtitle: "快速认识 \(region.name)", symbol: "building.2.crop.circle")
+
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "quote.opening")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(CityNewsDesign.accent)
+                        .frame(width: 42, height: 42)
+                        .background(CityNewsDesign.accentSoft, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
                     Text(region.introduction)
                         .font(.body)
                         .foregroundStyle(.primary)
-                        .lineSpacing(3)
+                        .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
-
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) {
-                            ForEach(region.facts, id: \.self) { fact in
-                                factLabel(fact)
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(region.facts, id: \.self) { fact in
-                                factLabel(fact)
-                            }
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
+                .padding(17)
+                .background(CityNewsDesign.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.primary.opacity(0.045), lineWidth: 0.7)
+                }
                 .accessibilityIdentifier("city-details-overview-content")
             }
 
-            disclosureCard(
-                section: .news,
-                title: "今日动态",
-                subtitle: "\(region.name) · \(region.news.count) 条",
-                symbol: "newspaper"
-            ) {
-                VStack(spacing: 0) {
-                    ForEach(Array(region.news.enumerated()), id: \.element.id) { index, item in
-                        CityRegionNewsRow(item: item)
-                        if index < region.news.count - 1 {
-                            Rectangle()
-                                .fill(CityNewsDesign.divider)
-                                .frame(height: 0.5)
-                                .padding(.leading, 50)
+            VStack(alignment: .leading, spacing: 14) {
+                sectionHeading("今日动态", subtitle: "\(region.news.count) 条城市现场", symbol: "newspaper.fill")
+
+                if let featured = region.news.first {
+                    featuredNews(featured)
+                }
+
+                if region.news.count > 1 {
+                    VStack(spacing: 0) {
+                        ForEach(Array(region.news.dropFirst().enumerated()), id: \.element.id) { index, item in
+                            CityRegionNewsRow(item: item)
+                            if index < region.news.count - 2 {
+                                Rectangle()
+                                    .fill(CityNewsDesign.divider)
+                                    .frame(height: 0.5)
+                                    .padding(.leading, 50)
+                            }
                         }
                     }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-                .accessibilityIdentifier("city-details-news-content")
-            }
-        }
-    }
-
-    private func factLabel(_ fact: String) -> some View {
-        Text(fact)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(minHeight: 28)
-            .background(Color.primary.opacity(0.055), in: Capsule())
-    }
-
-    private func disclosureCard<Content: View>(
-        section: CityRegionDetailSection,
-        title: String,
-        subtitle: String,
-        symbol: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        let isExpanded = expandedSection == section
-
-        return VStack(spacing: 0) {
-            Button {
-                toggle(section)
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: symbol)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(CityNewsDesign.accent)
-                        .frame(width: 36, height: 36)
-                        .background(CityNewsDesign.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                        .frame(width: 44, height: 44)
-                }
-                .padding(.leading, 14)
-                .padding(.trailing, 8)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(CityPressStyle())
-            .accessibilityLabel("\(title)，\(subtitle)")
-            .accessibilityValue(isExpanded ? "已展开" : "已收起")
-            .accessibilityHint(isExpanded ? "收起\(title)" : "展开\(title)")
-            .accessibilityIdentifier("city-details-\(section.rawValue)-toggle")
-
-            if isExpanded {
-                Rectangle()
-                    .fill(CityNewsDesign.divider)
-                    .frame(height: 0.5)
                     .padding(.horizontal, 16)
-
-                content()
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+                    .padding(.vertical, 4)
+                    .background(CityNewsDesign.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.primary.opacity(0.045), lineWidth: 0.7)
+                    }
+                }
             }
-        }
-        .background(CityNewsDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.primary.opacity(0.045), lineWidth: 0.7)
+            .accessibilityIdentifier("city-details-news-content")
         }
     }
 
-    private func toggle(_ section: CityRegionDetailSection) {
-        let changes = {
-            expandedSection = expandedSection == section ? nil : section
-        }
-        if reduceMotion {
-            changes()
-        } else {
-            withAnimation(.smooth(duration: 0.28, extraBounce: 0)) {
-                changes()
+    private func sectionHeading(_ title: String, subtitle: String, symbol: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(CityNewsDesign.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+            Spacer()
         }
     }
 
-}
+    private func featuredNews(_ item: CityRegionNews) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label("今日焦点", systemImage: item.symbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Spacer()
+                Text(item.relativeTime)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.66))
+            }
 
-private enum CityRegionDetailSection: String, Hashable {
-    case overview
-    case news
+            Text(item.title)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(item.summary)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.78))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(item.source)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(CityNewsDesign.heroGlow)
+        }
+        .padding(20)
+        .background(CityNewsDesign.mapGradient, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(alignment: .topTrailing) {
+            Circle()
+                .fill(CityNewsDesign.heroGlow.opacity(0.12))
+                .frame(width: 130, height: 130)
+                .offset(x: 38, y: -54)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: Color(red: 0.02, green: 0.12, blue: 0.18).opacity(0.12), radius: 14, y: 7)
+        .accessibilityElement(children: .combine)
+    }
+
 }
 
 private struct CityRegionPicker: View {
