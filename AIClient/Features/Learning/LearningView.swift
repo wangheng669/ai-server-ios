@@ -2223,7 +2223,7 @@ private final class ReadingReminderManager {
         content.body = "打开书架，继续今天的阅读。"
         content.sound = .default
         var date = DateComponents()
-        date.hour = 9
+        date.hour = 21
         date.minute = 0
         let request = UNNotificationRequest(
             identifier: Self.notificationID,
@@ -2269,7 +2269,7 @@ private struct BooksReadingSummaryCard: View {
                     Image(systemName: reminder.isEnabled ? "bell.fill" : "bell")
                         .foregroundStyle(KnowledgePagePalette.accent)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("每天 09:00 读书提醒")
+                        Text("每天 21:00 读书提醒")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.primary)
                         Text(reminder.errorMessage ?? (reminder.isEnabled ? "已开启" : "点击开启"))
