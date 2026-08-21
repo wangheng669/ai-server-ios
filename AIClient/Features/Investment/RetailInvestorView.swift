@@ -1,3 +1,4 @@
+import AVKit
 import Observation
 import SwiftUI
 
@@ -7,6 +8,7 @@ struct RetailInvestorView: View {
     private let marketStore: MarketStore
     @State private var selectedMarket: SentimentMarket = .china
     @State private var interpretationItem: InvestorMoodItem?
+    @State private var playbackItem: InvestorMoodItem?
     @State private var showsAllInvestorMood = false
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
@@ -93,6 +95,9 @@ struct RetailInvestorView: View {
         .onDisappear { showsDetail = false }
         .sheet(item: $interpretationItem) { item in
             InvestorVideoInterpretationSheet(item: item, service: store.service)
+        }
+        .sheet(item: $playbackItem) { item in
+            InvestorMoodVideoPlayerSheet(item: item)
         }
     }
 
@@ -194,7 +199,7 @@ struct RetailInvestorView: View {
         let snapshot = store.snapshot(for: selectedMarket)
         let score = snapshot?.score
         let breadth = selectedBreadth
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("市场情绪")
                     .font(.system(size: 12, weight: .semibold))
@@ -216,7 +221,7 @@ struct RetailInvestorView: View {
 
             HStack(alignment: .lastTextBaseline, spacing: 10) {
                 Text(score.map { String(Int($0.rounded())) } ?? "—")
-                    .font(.system(size: 50, weight: .medium, design: .rounded))
+                    .font(.system(size: 42, weight: .medium, design: .rounded))
                     .foregroundStyle(InvestmentDesign.accent)
                     .tracking(-2)
                     .contentTransition(.numericText())
@@ -225,12 +230,12 @@ struct RetailInvestorView: View {
                     .foregroundStyle(.tertiary)
                 Spacer()
                 Text(sentimentVerdict(score))
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .multilineTextAlignment(.trailing)
             }
 
             Text(decisionNarrative(score: score, breadth: breadth))
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineSpacing(3)
 
@@ -264,8 +269,8 @@ struct RetailInvestorView: View {
             }
             .padding(.top, 2)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
         .background(InvestmentDesign.surface)
     }
 
@@ -582,7 +587,7 @@ struct RetailInvestorView: View {
     private var sectorHighlights: some View {
         let leaders = Array(store.sectors.prefix(3))
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text("板块涨幅排行")
                     .font(.system(size: 15, weight: .semibold))
@@ -608,7 +613,7 @@ struct RetailInvestorView: View {
                             .foregroundStyle(.primary)
                             .frame(width: 56, alignment: .trailing)
                     }
-                    .frame(height: 38)
+                    .frame(height: 32)
                     if index < leaders.count - 1 {
                         Divider().overlay(InvestmentDesign.divider).padding(.leading, 24)
                     }
@@ -616,16 +621,16 @@ struct RetailInvestorView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 16)
+        .padding(.vertical, 12)
     }
 
     private var chinaSupplementCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectorHighlights
+            investorMoodCard
             Divider()
                 .overlay(InvestmentDesign.divider)
                 .padding(.horizontal, 16)
-            investorMoodCard
+            sectorHighlights
         }
         .background(InvestmentDesign.surface)
     }
@@ -779,7 +784,7 @@ struct RetailInvestorView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("散户正在说")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 18, weight: .bold))
                 Spacer()
                 Text("视频由后台自动解读")
                     .font(.system(size: 10.5, weight: .medium))
@@ -793,7 +798,8 @@ struct RetailInvestorView: View {
                 investorMoodList(items)
             }
         }
-        .padding(.vertical, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 10)
     }
 
     private func investorMoodSummary(_ items: [InvestorMoodItem]) -> some View {
@@ -826,20 +832,21 @@ struct RetailInvestorView: View {
     }
 
     private func investorMoodList(_ items: [InvestorMoodItem]) -> some View {
-        let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(2))
+        let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(3))
         return LazyVStack(spacing: 0) {
             ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
                 InvestorMoodVideoCard(
                     item: item,
+                    onPlay: { playbackItem = item },
                     onInterpret: { interpretationItem = item }
                 )
                 if index < visibleItems.count - 1 {
                     Divider()
                         .overlay(InvestmentDesign.divider)
-                        .padding(.leading, 112)
+                        .padding(.leading, 136)
                 }
             }
-            if items.count > 2 {
+            if items.count > 3 {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) {
                         showsAllInvestorMood.toggle()
@@ -1239,21 +1246,22 @@ private struct InvestorVideoInterpretationSheet: View {
 
 private struct InvestorMoodVideoCard: View {
     let item: InvestorMoodItem
+    let onPlay: () -> Void
     let onInterpret: () -> Void
 
     var body: some View {
-        HStack(spacing: 13) {
-            Button(action: onInterpret) {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onPlay) {
                 thumbnail
-                    .frame(width: 88, height: 66)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .frame(width: 120, height: 154)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Text(item.nickname)
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
                     moodBadge
                     Spacer(minLength: 2)
@@ -1261,25 +1269,41 @@ private struct InvestorMoodVideoCard: View {
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
-                Text(summary)
+                Text(item.description.nonEmpty ?? summary)
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Button(action: onInterpret) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles.tv")
-                        Text("查看视频解读")
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                    }
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
+                    .lineLimit(2)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("原始字幕", systemImage: "captions.bubble.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(transcript)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+                        .lineSpacing(2)
                 }
-                .buttonStyle(.plain)
+
+                HStack(spacing: 8) {
+                    Button(action: onPlay) {
+                        Label("播放视频", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                    Button(action: onInterpret) {
+                        Label("AI 解读", systemImage: "sparkles")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .font(.system(size: 10.5, weight: .semibold))
             }
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .contain)
     }
 
@@ -1287,22 +1311,20 @@ private struct InvestorMoodVideoCard: View {
     private var thumbnail: some View {
         ZStack {
             Color.black
-            AsyncImage(url: item.coverPlaybackURL ?? MediaURL.image(item.coverUrl) ?? URL(string: item.coverUrl)) { phase in
+            AsyncImage(url: item.directCoverURL) { phase in
                 if let image = phase.image {
                     image.resizable().scaledToFill()
+                } else if phase.error != nil {
+                    proxyCoverImage
                 } else {
-                    LinearGradient(
-                        colors: [.black, InvestmentDesign.accent.opacity(0.48)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+                    coverPlaceholder
                 }
             }
             Circle()
                 .fill(.black.opacity(0.58))
-                .frame(width: 30, height: 30)
+                .frame(width: 38, height: 38)
             Image(systemName: "play.fill")
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.white)
                 .offset(x: 1)
         }
@@ -1313,6 +1335,29 @@ private struct InvestorMoodVideoCard: View {
         item.analysis.nonEmpty ?? item.reasons.first?.nonEmpty ?? item.description.nonEmpty ?? "暂无观点摘要"
     }
 
+    private var transcript: String {
+        item.transcript.nonEmpty ?? (item.transcriptStatus.nonEmpty ?? "暂无原始字幕")
+    }
+
+    @ViewBuilder
+    private var proxyCoverImage: some View {
+        AsyncImage(url: item.coverPlaybackURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            } else {
+                coverPlaceholder
+            }
+        }
+    }
+
+    private var coverPlaceholder: some View {
+        LinearGradient(
+            colors: [.black, InvestmentDesign.accent.opacity(0.48)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
     private var moodBadge: some View {
         return Text(item.stale ? "\(item.label) · 旧样本" : item.label)
             .font(.system(size: 10.5, weight: .semibold))
@@ -1320,6 +1365,62 @@ private struct InvestorMoodVideoCard: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(InvestmentDesign.accentSoft, in: Capsule())
+    }
+}
+
+private struct InvestorMoodVideoPlayerSheet: View {
+    let item: InvestorMoodItem
+    @Environment(\.dismiss) private var dismiss
+    @State private var player = AVPlayer()
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VideoPlayer(player: player)
+                        .aspectRatio(9 / 16, contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .background(.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(item.nickname)
+                                .font(.headline)
+                            Spacer()
+                            Text(RetailSentimentFormat.relativeTime(item.createdAt))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text(item.description.nonEmpty ?? "散户观点视频")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("原始字幕", systemImage: "captions.bubble.fill")
+                            .font(.headline)
+                        Text(item.transcript.nonEmpty ?? "当前视频暂无可用字幕")
+                            .font(.body)
+                            .lineSpacing(5)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("原视频")
+            .navigationBarTitleDisplayMode(.inline)
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭原视频")
+                    .padding(16)
+            }
+        }
+        .task(id: item.id) {
+            guard let url = item.playbackURL ?? item.directPlaybackURL else { return }
+            player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            player.play()
+        }
+        .onDisappear { player.pause() }
     }
 }
 

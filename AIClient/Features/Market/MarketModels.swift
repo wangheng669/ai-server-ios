@@ -748,6 +748,7 @@ struct InvestorMoodItem: Decodable, Identifiable {
     let createdAt: String?
     let label: String
     let reasons: [String]
+    let transcript: String
     let transcriptStatus: String
     let analysis: String
     let evidence: [String]
@@ -758,7 +759,7 @@ struct InvestorMoodItem: Decodable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case nickname, awemeId, description, url, coverUrl, createdAt, label, reasons
-        case transcriptStatus, analysis, evidence, analysisSource, model, stale, ageHours
+        case transcript, transcriptStatus, analysis, evidence, analysisSource, model, stale, ageHours
         case videoUrl, videoURL, playUrl, playURL
         case videoUrlSnake = "video_url"
         case playUrlSnake = "play_url"
@@ -784,6 +785,7 @@ struct InvestorMoodItem: Decodable, Identifiable {
         createdAt = try values.decodeIfPresent(String.self, forKey: .createdAt)
         label = try values.decodeIfPresent(String.self, forKey: .label) ?? "中性"
         reasons = try values.decodeIfPresent([String].self, forKey: .reasons) ?? []
+        transcript = try values.decodeIfPresent(String.self, forKey: .transcript) ?? ""
         transcriptStatus = try values.decodeIfPresent(String.self, forKey: .transcriptStatus) ?? ""
         analysis = try values.decodeIfPresent(String.self, forKey: .analysis) ?? ""
         evidence = try values.decodeIfPresent([String].self, forKey: .evidence) ?? []
