@@ -754,7 +754,7 @@ private struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayWorldStore()
     @State private var selectedSectionKey: String?
-    @State private var selectedSystem: TodayWorldAdvancedReportSystem?
+    @State private var selectedSystem: TodayWorldFinalReportSystem?
 
     var body: some View {
         NavigationStack {
@@ -796,17 +796,17 @@ private struct TodayWorldView: View {
 
     @ViewBuilder
     private func reportView(_ report: TodayWorldYesterdayReportPayload) -> some View {
-        if let advanced = report.report.advanced,
-           advanced.status == "succeeded",
-           !advanced.sections.isEmpty {
-            let section = advanced.sections.first { $0.id == selectedSectionKey } ?? advanced.sections[0]
+        if let final = report.report.final,
+           final.status == "succeeded",
+           !final.sections.isEmpty {
+            let section = final.sections.first { $0.id == selectedSectionKey } ?? final.sections[0]
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     metadata(report)
-                    if !advanced.overview.headline.isEmpty {
-                        finalOverview(advanced.overview)
+                    if !final.overview.headline.isEmpty {
+                        finalOverview(final.overview)
                     }
-                    sectionSelector(advanced.sections, selectedID: section.id)
+                    sectionSelector(final.sections, selectedID: section.id)
 
                     ForEach(section.groups) { group in
                         if section.groups.count > 1 || section.sectionKey == "investment" {
@@ -890,7 +890,7 @@ private struct TodayWorldView: View {
     }
 
     private func sectionSelector(
-        _ sections: [TodayWorldAdvancedReportSection],
+        _ sections: [TodayWorldFinalReportSection],
         selectedID: String
     ) -> some View {
         HStack(spacing: 0) {
@@ -918,7 +918,7 @@ private struct TodayWorldView: View {
         .padding(.bottom, 14)
     }
 
-    private func systemRow(_ system: TodayWorldAdvancedReportSystem) -> some View {
+    private func systemRow(_ system: TodayWorldFinalReportSystem) -> some View {
         Button {
             selectedSystem = system
         } label: {
@@ -1019,14 +1019,14 @@ private struct TodayWorldView: View {
 
     private func reportStatusView(_ report: TodayWorldYesterdayReportPayload) -> some View {
         let isRunning = report.status == "running" || report.status == "queued"
-            || report.report.advanced?.status == "running" || report.report.advanced?.status == "queued"
+            || report.report.final?.status == "running" || report.report.final?.status == "queued"
         return ContentUnavailableView {
             Label(
                 isRunning ? "正在生成最终版日报" : "暂无最终版日报",
                 systemImage: isRunning ? "hourglass" : "doc.text.magnifyingglass"
             )
         } description: {
-            Text(isRunning ? "完成后会自动展示主线、要点与直接依据" : (report.report.advanced?.error ?? "普通日报仍可在治理后台查看"))
+            Text(isRunning ? "完成后会自动展示主线、要点与直接依据" : (report.report.final?.error ?? "最终版日报尚未生成"))
         } actions: {
             Button("重新加载") { Task { await store.load(force: true) } }
                 .buttonStyle(.borderedProminent)
@@ -1057,7 +1057,7 @@ private struct TodayWorldView: View {
         return formatter.string(from: date)
     }
 
-    private func sourceName(_ system: TodayWorldAdvancedReportSystem, at index: Int) -> String {
+    private func sourceName(_ system: TodayWorldFinalReportSystem, at index: Int) -> String {
         guard system.sourceNames.indices.contains(index) else { return system.systemName }
         return system.sourceNames[index]
     }
@@ -1070,7 +1070,7 @@ private func todayWorldSourceAvatarURL(_ key: String) -> URL? {
 
 private struct TodayWorldReportSourcesSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let system: TodayWorldAdvancedReportSystem
+    let system: TodayWorldFinalReportSystem
     let reportDate: String
 
     @State private var posts: [Post] = []
@@ -1152,36 +1152,25 @@ private struct TodayWorldReportSourcesSheet: View {
                         .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if system.facts.isEmpty {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(Array(summaryParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                                Text(paragraph)
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(system.facts) { fact in
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack {
+                                    Text(factCategoryLabel(fact.category))
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Color.teal)
+                                    Spacer()
+                                    Text("\(fact.postIDs.count) 条直接依据")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Text(fact.text)
                                     .font(.system(size: 16))
                                     .lineSpacing(5)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(system.facts) { fact in
-                                VStack(alignment: .leading, spacing: 7) {
-                                    HStack {
-                                        Text(factCategoryLabel(fact.category))
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(Color.teal)
-                                        Spacer()
-                                        Text("\(fact.postIDs.count) 条直接依据")
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                    Text(fact.text)
-                                        .font(.system(size: 16))
-                                        .lineSpacing(5)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                .padding(14)
-                                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            }
+                            .padding(14)
+                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                     }
 
@@ -1212,38 +1201,6 @@ private struct TodayWorldReportSourcesSheet: View {
 
     private func factCategoryLabel(_ category: String) -> String {
         ["release": "发布", "action": "行动", "viewpoint": "观点", "market": "市场", "risk": "风险", "context": "背景"][category] ?? "要点"
-    }
-
-    private var summaryParagraphs: [String] {
-        let text = system.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return [] }
-
-        let explicitParagraphs = text
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if explicitParagraphs.count > 1 {
-            return explicitParagraphs
-        }
-
-        var sentences: [String] = []
-        var sentence = ""
-        for character in text {
-            sentence.append(character)
-            if "。！？!?".contains(character) {
-                let value = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !value.isEmpty { sentences.append(value) }
-                sentence = ""
-            }
-        }
-        let remainder = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !remainder.isEmpty { sentences.append(remainder) }
-        guard sentences.count > 1 else { return [text] }
-
-        let groupSize = max(1, Int(ceil(Double(sentences.count) / 4)))
-        return stride(from: 0, to: sentences.count, by: groupSize).map { start in
-            sentences[start..<min(start + groupSize, sentences.count)].joined()
-        }
     }
 
     private var primaryPersonAvatarAssetName: String? {
