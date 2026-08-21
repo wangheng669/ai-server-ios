@@ -239,6 +239,12 @@ private enum CityDashboardTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum CityMapNavigationDirection {
+    case forward
+    case backward
+    case lateral
+}
+
 private struct CityMetric: Identifiable {
     let id: String
     let title: String
@@ -250,11 +256,13 @@ private struct CityMetric: Identifiable {
 
 struct CityNewsView: View {
     @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var journey: CityRegionJourney
     @State private var selectedID: String?
     @State private var selectedTab: CityDashboardTab = .overview
     @State private var showsList = false
     @State private var showsMap = false
+    @State private var mapNavigationDirection: CityMapNavigationDirection = .forward
 
     init() {
         let journey: CityRegionJourney
@@ -309,13 +317,18 @@ struct CityNewsView: View {
         }
         .background(CityDesign.canvas.ignoresSafeArea())
         .tint(CityDesign.accent)
+        .sensoryFeedback(.selection, trigger: selectedID)
+        .sensoryFeedback(.impact(weight: .light), trigger: journey.current.id)
         .accessibilityIdentifier("city-region-screen")
         .sheet(isPresented: $showsList) {
             CityRegionList(
                 title: journey.mapScope.level.childTitle ?? "区域列表",
                 regions: journey.mapRegions,
                 selection: selectedID,
-                onSelect: { region in selectedID = region.id; showsList = false }
+                onSelect: { region in
+                    select(region)
+                    showsList = false
+                }
             )
         }
         .fullScreenCover(isPresented: $showsMap) {
@@ -351,17 +364,65 @@ struct CityNewsView: View {
         return regions.first
     }
 
+    private var mapAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.16) : .spring(duration: 0.48, bounce: 0.12)
+    }
+
+    private var mapTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        switch mapNavigationDirection {
+        case .forward:
+            return .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.76)),
+                removal: .opacity.combined(with: .scale(scale: 1.16))
+            )
+        case .backward:
+            return .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 1.12)),
+                removal: .opacity.combined(with: .scale(scale: 0.80))
+            )
+        case .lateral:
+            return .opacity
+        }
+    }
+
+    private func select(_ region: CityRegion) {
+        if selectedID == region.id,
+           journey.current.children.contains(where: { $0.id == region.id }) {
+            navigate(to: region)
+            return
+        }
+        withAnimation(.easeOut(duration: reduceMotion ? 0.12 : 0.22)) {
+            selectedID = region.id
+        }
+    }
+
+    private func navigate(to region: CityRegion) {
+        let isChild = journey.current.children.contains(where: { $0.id == region.id })
+        mapNavigationDirection = isChild ? .forward : .lateral
+        withAnimation(mapAnimation) {
+            let didNavigate = isChild ? journey.enter(region) : journey.selectPeer(region)
+            guard didNavigate else { return }
+            selectedID = Self.defaultSelection(for: journey)
+        }
+    }
+
+    private func navigateBack() {
+        let leaving = journey.current
+        mapNavigationDirection = .backward
+        withAnimation(mapAnimation) {
+            guard journey.goBack() else { return }
+            selectedID = journey.mapRegions.first(where: { $0.id == leaving.id })?.id
+                ?? Self.defaultSelection(for: journey)
+        }
+    }
+
     @ViewBuilder
     private func header(_ region: CityRegion) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if journey.regionIDs.count > 1 {
-                Button {
-                    let leaving = journey.current
-                    guard journey.goBack() else { return }
-                    selectedID = journey.mapRegions.first(where: { $0.id == leaving.id })?.id
-                        ?? Self.defaultSelection(for: journey)
-                } label: {
-                    Label(journey.parent?.name ?? "广东省", systemImage: "chevron.left")
+            if journey.canGoBack {
+                Button { navigateBack() } label: {
+                    Label(journey.parent?.name ?? CityNewsMockData.root.name, systemImage: "chevron.left")
                         .font(.subheadline.weight(.semibold))
                         .frame(minHeight: 44)
                 }
@@ -489,14 +550,19 @@ struct CityNewsView: View {
                 ZStack(alignment: .bottomTrailing) {
                     CityDesign.mapGradient
                     Circle().fill(.white.opacity(0.45)).frame(width: 240, height: 240).blur(radius: 10).offset(x: 100, y: -120)
-                    CityAdministrativeMap(
-                        scope: scope,
-                        selectedRegionID: selected?.id,
-                        selectableRegions: regions,
-                        onSelect: { selectedID = $0.id }
-                    )
+                    ZStack {
+                        CityAdministrativeMap(
+                            scope: scope,
+                            selectedRegionID: selected?.id,
+                            selectableRegions: regions,
+                            onSelect: select
+                        )
+                        .id(scope.id)
+                        .transition(mapTransition)
+                    }
                     .padding(.horizontal, 7)
                     .padding(.vertical, 8)
+                    .clipped()
                     Button { showsMap = true } label: {
                         Label("全屏地图", systemImage: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 10, weight: .semibold))
@@ -512,6 +578,8 @@ struct CityNewsView: View {
 
                 if let selected {
                     selectedCard(selected)
+                        .id(selected.id)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -566,16 +634,9 @@ struct CityNewsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if region.id != journey.current.id {
-                Button {
-                    if journey.current.children.contains(where: { $0.id == region.id }) {
-                        guard journey.enter(region) else { return }
-                    } else {
-                        guard journey.selectPeer(region) else { return }
-                    }
-                    selectedID = Self.defaultSelection(for: journey)
-                } label: {
+                Button { navigate(to: region) } label: {
                     HStack(spacing: 4) {
-                        Text("进入城市")
+                        Text(navigationLabel(for: region))
                         Image(systemName: "chevron.right")
                     }
                     .font(.system(size: 10, weight: .bold))
@@ -583,7 +644,7 @@ struct CityNewsView: View {
                     .frame(minWidth: 50, minHeight: 36)
                 }
                 .buttonStyle(CityPressStyle())
-                .accessibilityLabel("进入\(region.name)")
+                .accessibilityLabel("\(navigationLabel(for: region))\(region.name)")
             }
         }
         .padding(8)
@@ -593,7 +654,21 @@ struct CityNewsView: View {
 
     private func cardSubtitle(_ region: CityRegion) -> String {
         if region.id == "shenzhen" { return "广东省副省级市 · 经济特区" }
-        return region.level == .district ? "区县级行政单位" : "广东省地级市"
+        switch region.level {
+        case .country: return "全国城市观察"
+        case .province: return "中国省级行政区"
+        case .city: return "\(journey.parent?.name ?? "中国")地级市"
+        case .district: return "区县级行政单位"
+        }
+    }
+
+    private func navigationLabel(for region: CityRegion) -> String {
+        switch region.level {
+        case .country: return "进入全国"
+        case .province: return "进入省份"
+        case .city: return "进入城市"
+        case .district: return "查看区县"
+        }
     }
 
     private func cardIntroduction(_ region: CityRegion) -> String {
@@ -863,7 +938,7 @@ private struct CityAdministrativeMap: View {
                                 .frame(minWidth: region.id == selectedRegionID ? 68 : 36, minHeight: 30)
                                 .position(projection.point(for: coordinate))
                                 .accessibilityLabel(region.id == selectedRegionID ? "\(region.name)，当前选择" : region.name)
-                                .accessibilityHint("选择\(region.name)")
+                                .accessibilityHint(region.id == selectedRegionID ? "再次轻点进入\(region.name)" : "选择\(region.name)")
                                 .accessibilityAddTraits(.isButton)
                                 .accessibilityAction { onSelect(region) }
                         }
