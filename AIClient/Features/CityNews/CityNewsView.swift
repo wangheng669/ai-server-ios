@@ -279,30 +279,34 @@ struct CityNewsView: View {
         let regions = journey.mapRegions
         let selected = selectedRegion(in: regions)
 
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                header(region)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
+        VStack(spacing: 0) {
+            topBar
 
-                tabBar
-                    .padding(.top, 16)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    header(region)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
 
-                mapSection(scope: journey.mapScope, regions: regions, selected: selected)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
+                    tabBar
+                        .padding(.top, 12)
 
-                metricSection(region)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 28)
+                    mapSection(scope: journey.mapScope, regions: regions, selected: selected)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 15)
 
-                exploreSection
-                    .padding(.horizontal, 20)
-                    .padding(.top, 28)
-                    .padding(.bottom, max(bottomChromeHeight, 78) + 24)
+                    metricSection(region)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
+
+                    exploreSection
+                        .padding(.horizontal, 20)
+                        .padding(.top, 18)
+                        .padding(.bottom, max(bottomChromeHeight, 78) + 20)
+                }
             }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
         .background(CityDesign.canvas.ignoresSafeArea())
         .tint(CityDesign.accent)
         .accessibilityIdentifier("city-region-screen")
@@ -320,6 +324,46 @@ struct CityNewsView: View {
                 regions: journey.mapRegions,
                 selection: $selectedID
             )
+        }
+    }
+
+    private var topBar: some View {
+        ZStack {
+            Text("城市观察")
+                .font(.headline.weight(.bold))
+
+            HStack {
+                Button {
+                    guard journey.goBack() else { return }
+                    selectedID = Self.defaultSelection(for: journey)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 19, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(CityPressStyle())
+                .accessibilityLabel("返回上一级地区")
+
+                Spacer()
+
+                ShareLink(
+                    item: "\(journey.current.name)城市观察",
+                    subject: Text(journey.current.name),
+                    message: Text(journey.current.introduction)
+                ) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(CityPressStyle())
+                .accessibilityLabel("分享城市观察")
+            }
+            .padding(.horizontal, 8)
+        }
+        .frame(height: 48)
+        .background(CityDesign.canvas)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(CityDesign.divider).frame(height: 0.5)
         }
     }
 
@@ -355,23 +399,23 @@ struct CityNewsView: View {
             }
 
             Text(eyebrow(region))
-                .font(.subheadline.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(CityDesign.accent)
 
             Text(region.name)
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-                .padding(.top, 9)
+                .font(.system(size: 25, weight: .bold, design: .rounded))
+                .padding(.top, 7)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("city-current-title")
 
             Text(compactIntro(region))
-                .font(.subheadline)
+                .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
-                .padding(.top, 5)
+                .padding(.top, 4)
 
             factCard(region)
-                .padding(.top, 18)
+                .padding(.top, 13)
         }
     }
 
@@ -405,50 +449,47 @@ struct CityNewsView: View {
             ForEach(Array(facts.enumerated()), id: \.offset) { index, item in
                 HStack(spacing: 9) {
                     Image(systemName: item.2)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(CityDesign.accent)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 30, height: 30)
                         .background(CityDesign.accentSoft, in: Circle())
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.0).font(.caption).foregroundStyle(.secondary)
-                        Text(item.1).font(.headline.weight(.bold)).lineLimit(1).minimumScaleFactor(0.72)
+                        Text(item.0).font(.caption2).foregroundStyle(.secondary)
+                        Text(item.1).font(.subheadline.weight(.bold)).lineLimit(1).minimumScaleFactor(0.72)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity)
                 if index < facts.count - 1 {
-                    Rectangle().fill(CityDesign.divider).frame(width: 1, height: 34).padding(.horizontal, 8)
+                    Rectangle().fill(CityDesign.divider).frame(width: 1, height: 28).padding(.horizontal, 6)
                 }
             }
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 14)
-        .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.045), lineWidth: 0.8) }
-        .shadow(color: .black.opacity(0.05), radius: 12, y: 6)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.045), lineWidth: 0.8) }
+        .shadow(color: .black.opacity(0.045), radius: 10, y: 5)
     }
 
     private var tabBar: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 24) {
-                ForEach(CityDashboardTab.allCases) { tab in
-                    Button {
-                        selectedTab = tab
-                    } label: {
-                        VStack(spacing: 9) {
-                            Text(tab.rawValue)
-                                .font(.subheadline.weight(selectedTab == tab ? .bold : .medium))
-                                .foregroundStyle(selectedTab == tab ? CityDesign.accent : .secondary)
-                            Capsule().fill(selectedTab == tab ? CityDesign.accent : .clear).frame(height: 2.5)
-                        }
-                        .frame(minWidth: 42)
+        HStack(spacing: 0) {
+            ForEach(CityDashboardTab.allCases) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    VStack(spacing: 7) {
+                        Text(tab.rawValue)
+                            .font(.system(size: 14, weight: selectedTab == tab ? .bold : .medium))
+                            .foregroundStyle(selectedTab == tab ? CityDesign.accent : .secondary)
+                        Capsule().fill(selectedTab == tab ? CityDesign.accent : .clear).frame(width: 34, height: 2.5)
                     }
-                    .buttonStyle(CityPressStyle())
+                    .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(CityPressStyle())
             }
-            .padding(.horizontal, 20)
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, 18)
         .overlay(alignment: .bottom) { Rectangle().fill(CityDesign.divider).frame(height: 0.5) }
     }
 
@@ -457,9 +498,9 @@ struct CityNewsView: View {
         regions: [CityRegion],
         selected: CityRegion?
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(scope.level.childTitle ?? "区域地图").font(.title3.weight(.bold))
+                Text(scope.level.childTitle ?? "区域地图").font(.headline.weight(.bold))
                 Spacer()
                 if !regions.isEmpty {
                     Button { showsList = true } label: {
@@ -467,7 +508,7 @@ struct CityNewsView: View {
                             Text("查看全部 \(regions.count)个")
                             Image(systemName: "chevron.right").font(.caption.weight(.bold))
                         }
-                        .font(.subheadline.weight(.medium))
+                        .font(.caption.weight(.medium))
                     }
                     .buttonStyle(CityPressStyle())
                 }
@@ -483,59 +524,68 @@ struct CityNewsView: View {
                         selectableRegions: regions,
                         onSelect: { selectedID = $0.id }
                     )
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 16)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 10)
                     Button { showsMap = true } label: {
                         Label("全屏地图", systemImage: "arrow.up.left.and.arrow.down.right")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
                             .background(.ultraThinMaterial, in: Capsule())
                     }
                     .buttonStyle(CityPressStyle())
-                    .padding(14)
+                    .padding(10)
                 }
-                .frame(height: 376)
+                .frame(height: 244)
 
                 if let selected {
                     selectedCard(selected)
                 }
             }
-            .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 22).stroke(Color.primary.opacity(0.045), lineWidth: 0.8) }
-            .shadow(color: CityDesign.accent.opacity(0.10), radius: 18, y: 9)
+            .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.045), lineWidth: 0.8) }
+            .shadow(color: CityDesign.accent.opacity(0.09), radius: 14, y: 7)
         }
     }
 
     private func selectedCard(_ region: CityRegion) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                LinearGradient(colors: [CityDesign.accent.opacity(0.85), .cyan.opacity(0.50)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: region.level == .district ? "building.columns.fill" : "building.2.fill")
-                    .font(.system(size: 32, weight: .medium))
-                    .foregroundStyle(.white)
-                    .symbolRenderingMode(.hierarchical)
+        HStack(spacing: 11) {
+            Group {
+                if region.id == "shenzhen" {
+                    Image("ShenzhenSkyline")
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    ZStack {
+                        LinearGradient(colors: [CityDesign.accent.opacity(0.85), .cyan.opacity(0.50)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        Image(systemName: region.level == .district ? "building.columns.fill" : "building.2.fill")
+                            .font(.system(size: 27, weight: .medium))
+                            .foregroundStyle(.white)
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                }
             }
-            .frame(width: 88, height: 88)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(width: 76, height: 82)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 7) {
-                    Text(region.name).font(.title3.weight(.bold)).lineLimit(1)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(region.name).font(.headline.weight(.bold)).lineLimit(1)
                     Text(region.id == journey.current.id ? "当前城市" : "当前选择")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(CityDesign.accent)
                         .padding(.horizontal, 7).padding(.vertical, 4)
                         .background(CityDesign.accentSoft, in: Capsule())
                 }
-                Text(region.introduction).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                Text(cardSubtitle(region)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(cardIntroduction(region)).font(.caption2.weight(.medium)).lineLimit(1)
                 ScrollView(.horizontal) {
                     HStack(spacing: 5) {
                         ForEach(region.facts.prefix(3), id: \.self) { fact in
-                            Text(fact).font(.caption2).foregroundStyle(.secondary)
-                                .padding(.horizontal, 7).padding(.vertical, 4)
+                            Text(fact).font(.system(size: 9.5)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
                                 .background(CityDesign.secondarySurface, in: Capsule())
                         }
                     }
@@ -553,17 +603,31 @@ struct CityNewsView: View {
                     }
                     selectedID = Self.defaultSelection(for: journey)
                 } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 42, height: 42)
+                    HStack(spacing: 4) {
+                        Text("进入城市")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.caption.weight(.bold))
+                    .fixedSize()
+                    .frame(minWidth: 54, minHeight: 42)
                 }
                 .buttonStyle(CityPressStyle())
                 .accessibilityLabel("进入\(region.name)")
             }
         }
-        .padding(16)
+        .padding(10)
         .background(CityDesign.surface)
         .overlay(alignment: .top) { Rectangle().fill(CityDesign.divider).frame(height: 0.5) }
+    }
+
+    private func cardSubtitle(_ region: CityRegion) -> String {
+        if region.id == "shenzhen" { return "广东省副省级市 · 经济特区" }
+        return region.level == .district ? "区县级行政单位" : "广东省地级市"
+    }
+
+    private func cardIntroduction(_ region: CityRegion) -> String {
+        if region.id == "shenzhen" { return "科技创新与先进制造业中心" }
+        return region.introduction
     }
 
     private func metrics(_ region: CityRegion) -> [CityMetric] {
@@ -584,39 +648,37 @@ struct CityNewsView: View {
     }
 
     private func metricSection(_ region: CityRegion) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 9) {
-                Text("城市名片").font(.title3.weight(.bold))
+                Text("城市名片").font(.headline.weight(.bold))
                 Text("快速了解\(region.name)").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("更多数据  ›").font(.subheadline.weight(.medium)).foregroundStyle(CityDesign.accent)
+                Text("更多数据  ›").font(.caption.weight(.medium)).foregroundStyle(CityDesign.accent)
             }
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    ForEach(metrics(region)) { metric in
-                        VStack(alignment: .leading, spacing: 9) {
-                            HStack(spacing: 6) {
-                                Image(systemName: metric.symbol)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(CityDesign.accent)
-                                    .frame(width: 28, height: 28)
-                                    .background(CityDesign.accentSoft, in: Circle())
-                                Text(metric.title).font(.caption2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                                Text(metric.value).font(.system(size: 23, weight: .bold, design: .rounded))
-                                Text(metric.unit).font(.caption.weight(.semibold))
-                            }
-                            Text(metric.note).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ForEach(metrics(region)) { metric in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 4) {
+                            Image(systemName: metric.symbol)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(CityDesign.accent)
+                                .frame(width: 23, height: 23)
+                                .background(CityDesign.accentSoft, in: Circle())
+                            Text(metric.title).font(.system(size: 9.5, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
                         }
-                        .frame(width: 128, height: 110, alignment: .topLeading)
-                        .padding(12)
-                        .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay { RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.045), lineWidth: 0.8) }
+                        HStack(alignment: .firstTextBaseline, spacing: 1) {
+                            Text(metric.value).font(.system(size: 18, weight: .bold, design: .rounded)).minimumScaleFactor(0.72)
+                            Text(metric.unit).font(.system(size: 9.5, weight: .semibold))
+                        }
+                        .lineLimit(1)
+                        Text(metric.note).font(.system(size: 9)).foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
+                    .padding(8)
+                    .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.045), lineWidth: 0.8) }
                 }
             }
-            .scrollIndicators(.hidden)
         }
     }
 
@@ -627,25 +689,28 @@ struct CityNewsView: View {
             ("区域排行榜", "城市发展排名", "trophy.fill"),
             ("产业分布", "产业格局分析", "chart.pie.fill")
         ]
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("探索广东").font(.title3.weight(.bold))
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(item.0).font(.subheadline.weight(.bold))
-                            Text(item.1).font(.caption2).foregroundStyle(.secondary)
+        let colors: [Color] = [.teal, CityDesign.accent, .orange, .indigo]
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("探索广东").font(.headline.weight(.bold))
+            HStack(spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.0).font(.system(size: 11, weight: .bold)).lineLimit(1)
+                        Text(item.1).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                        HStack {
                             Spacer()
-                            HStack { Spacer(); Image(systemName: item.2).font(.system(size: 30, weight: .semibold)).foregroundStyle(CityDesign.accent.opacity(0.72)) }
+                            Image(systemName: item.2)
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(colors[index].opacity(0.72))
                         }
-                        .frame(width: 132, height: 98)
-                        .padding(13)
-                        .background(CityDesign.accent.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay { RoundedRectangle(cornerRadius: 16).stroke(CityDesign.accent.opacity(0.10), lineWidth: 0.8) }
                     }
+                    .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
+                    .padding(8)
+                    .background(colors[index].opacity(0.065), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 13).stroke(colors[index].opacity(0.12), lineWidth: 0.8) }
                 }
             }
-            .scrollIndicators(.hidden)
         }
     }
 }
