@@ -1285,22 +1285,17 @@ private struct InvestorMoodVideoCard: View {
                         .lineSpacing(2)
                 }
 
-                HStack(spacing: 8) {
-                    Button(action: onPlay) {
-                        Label("播放视频", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
+                Button(action: onInterpret) {
+                    HStack(spacing: 5) {
+                        Label("查看 AI 解读", systemImage: "sparkles")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-
-                    Button(action: onInterpret) {
-                        Label("AI 解读", systemImage: "sparkles")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(InvestmentDesign.accent)
                 }
-                .font(.system(size: 10.5, weight: .semibold))
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 12)
