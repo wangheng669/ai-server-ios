@@ -39,7 +39,17 @@ struct RetailInvestorView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    marketPicker
+                    if selectedMarket == .korea {
+                        marketPicker
+                            .dashboardSurface()
+                    } else {
+                        VStack(spacing: 0) {
+                            marketPicker
+                            Divider().overlay(InvestmentDesign.divider)
+                            sentimentDecisionHero
+                        }
+                        .dashboardSurface()
+                    }
                     if let message = selectedMarket == .china
                         ? store.errorMessage
                         : store.detailErrorMessage(for: selectedMarket) {
@@ -52,19 +62,21 @@ struct RetailInvestorView: View {
                                 }
                             }
                         }
-                            .padding(.horizontal, 16)
                     }
                     if selectedMarket == .korea {
                         koreaLeverageContent
+                            .background(InvestmentDesign.surface)
+                            .dashboardSurface()
                     } else {
-                        sentimentDecisionHero
                         if selectedMarket == .china {
-                            chinaSupplementCard
+                            chinaSupplementCard.dashboardSurface()
                         }
                         methodologyNote
                     }
                 }
-                .padding(.bottom, 36)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 92)
             }
             .background(InvestmentDesign.canvas)
             .task(id: rootTabIsActive) {
@@ -570,7 +582,7 @@ struct RetailInvestorView: View {
     private var sectorHighlights: some View {
         let leaders = Array(store.sectors.prefix(3))
 
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("板块涨幅排行")
                     .font(.system(size: 15, weight: .semibold))
@@ -603,14 +615,16 @@ struct RetailInvestorView: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
     }
 
     private var chinaSupplementCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectorHighlights
-            Divider().overlay(InvestmentDesign.divider)
+            Divider()
+                .overlay(InvestmentDesign.divider)
+                .padding(.horizontal, 16)
             investorMoodCard
         }
         .background(InvestmentDesign.surface)
@@ -853,7 +867,7 @@ struct RetailInvestorView: View {
             .font(.system(size: 11))
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 6)
             .padding(.top, 2)
     }
 
@@ -1809,6 +1823,15 @@ private enum RetailSentimentFormat {
 }
 
 private extension View {
+    func dashboardSurface() -> some View {
+        clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(InvestmentDesign.divider.opacity(0.7), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.025), radius: 5, y: 2)
+    }
+
     func sentimentCard() -> some View {
         padding(15)
             .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 15))
