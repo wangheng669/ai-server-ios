@@ -24,6 +24,17 @@ final class CityNewsTests: XCTestCase {
         XCTAssertTrue(city.children.allSatisfy { $0.level == .district })
     }
 
+    func testGuangdongExposesAllPrefectureLevelCities() throws {
+        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
+
+        XCTAssertEqual(guangdong.children.count, 21)
+        XCTAssertEqual(Set(guangdong.children.map(\.adcode)).count, 21)
+        XCTAssertNotNil(guangdong.children.first { $0.id == "guangzhou" })
+        XCTAssertNotNil(guangdong.children.first { $0.id == "shenzhen" })
+        XCTAssertNotNil(guangdong.children.first { $0.id == "dongguan" })
+        XCTAssertNotNil(guangdong.children.first { $0.id == "zhuhai" })
+    }
+
     func testEveryRegionHasRealAdministrativeGeometry() {
         assertGeometry(in: CityNewsMockData.root)
     }
@@ -74,6 +85,19 @@ final class CityNewsTests: XCTestCase {
         XCTAssertEqual(journey.mapScope.name, "深圳市")
         XCTAssertEqual(journey.selectedMapRegionID, "shenzhen-440304")
         XCTAssertFalse(journey.selectPeer(futian))
+    }
+
+    func testTerminalCityKeepsProvinceMapAvailable() throws {
+        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
+        let foshan = try XCTUnwrap(CityNewsMockData.region(withID: "foshan"))
+        var journey = CityRegionJourney(path: [guangdong])
+
+        XCTAssertTrue(foshan.children.isEmpty)
+        XCTAssertTrue(journey.enter(foshan))
+        XCTAssertEqual(journey.current.id, "foshan")
+        XCTAssertEqual(journey.mapScope.id, "guangdong")
+        XCTAssertEqual(journey.selectedMapRegionID, "foshan")
+        XCTAssertEqual(journey.mapRegions.count, 21)
     }
 
     func testMapScopeOnlyChangesWhenTheGeographicViewportChanges() throws {
