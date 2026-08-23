@@ -1051,14 +1051,18 @@ struct PostDetailView: View {
                     }
 
                     if post.xueqiuQuoteBody != nil {
-                        HStack(spacing: 9) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                            Text("查看对话")
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
+                        Button(action: openXueqiuOriginal) {
+                            HStack(spacing: 9) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                Text("查看对话")
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .font(.system(size: 15.5))
+                            .foregroundStyle(.secondary)
                         }
-                        .font(.system(size: 15.5))
-                        .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看雪球对话")
                     }
 
                     if let quoteBody = post.xueqiuQuoteBody {
@@ -1094,6 +1098,10 @@ struct PostDetailView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
+                        .contentShape(RoundedRectangle(cornerRadius: 9))
+                        .onTapGesture(perform: openXueqiuOriginal)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { openXueqiuOriginal() }
                     }
 
                     if !post.videoURLs.isEmpty || !post.xueqiuUnplacedImageURLs.isEmpty {
