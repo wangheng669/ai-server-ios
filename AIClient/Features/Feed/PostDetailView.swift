@@ -175,7 +175,7 @@ struct PostDetailView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if presentedAsSheet {
+            if presentedAsSheet && presentedXueqiuLink == nil {
                 DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
                     .padding(.trailing, 16)
                     .padding(.bottom, sheetCloseBottomPadding)
