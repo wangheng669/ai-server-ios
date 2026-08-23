@@ -196,98 +196,7 @@ struct RetailInvestorView: View {
     }
 
     private var sentimentDecisionHero: some View {
-        let snapshot = store.snapshot(for: selectedMarket)
-        let score = snapshot?.score
-        let breadth = selectedBreadth
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("市场情绪")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if store.isLoadingDetails(for: selectedMarket), snapshot == nil {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.mini)
-                        Text(store.detailLoadingMessage(for: selectedMarket))
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                } else {
-                    Label(snapshot?.label.nonEmpty ?? "等待数据", systemImage: sentimentSymbol(score))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(InvestmentDesign.accent)
-                }
-            }
-
-            HStack(alignment: .lastTextBaseline, spacing: 10) {
-                Text(score.map { String(Int($0.rounded())) } ?? "—")
-                    .font(.system(size: 42, weight: .medium, design: .rounded))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .tracking(-2)
-                    .contentTransition(.numericText())
-                Text("/ 100")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                Text(sentimentVerdict(score))
-                    .font(.system(size: 17, weight: .semibold))
-                    .multilineTextAlignment(.trailing)
-            }
-
-            Text(decisionNarrative(score: score, breadth: breadth))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .lineSpacing(3)
-
-            VStack(spacing: 7) {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.13))
-                        Capsule()
-                            .fill(InvestmentDesign.accent)
-                            .frame(width: proxy.size.width * min(max((score ?? 0) / 100, 0), 1))
-                    }
-                }
-                .frame(height: 4)
-                HStack {
-                    Text("冷静")
-                    Spacer()
-                    Text("均衡")
-                    Spacer()
-                    Text("活跃")
-                }
-                .font(.system(size: 9.5, weight: .medium))
-                .foregroundStyle(.tertiary)
-            }
-
-            HStack(spacing: 0) {
-                heroMetric("上涨占比", value: breadth.total > 0 ? "\(Int((breadth.upRatio * 100).rounded()))%" : "—", tint: .primary)
-                heroDivider
-                heroMetric("赚钱效应", value: breadthEffectLabel(breadth), tint: .primary)
-                heroDivider
-                heroMetric("估值位置", value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—", tint: .primary)
-            }
-            .padding(.top, 2)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(InvestmentDesign.surface)
-    }
-
-    private func heroMetric(_ title: String, value: String, tint: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(tint)
-            Text(title)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var heroDivider: some View {
-        Rectangle().fill(InvestmentDesign.divider).frame(width: 0.5, height: 28)
+        MarketSentimentSummaryCard(store: store, market: selectedMarket)
     }
 
     private var sentimentDecisionGrid: some View {
@@ -380,39 +289,6 @@ struct RetailInvestorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func sentimentVerdict(_ score: Double?) -> String {
-        guard let score else { return "正在汇总市场" }
-        switch score {
-        case ..<30: return "市场偏谨慎"
-        case ..<70: return "市场相对均衡"
-        case ..<90: return "市场情绪升温"
-        default: return "市场情绪过热"
-        }
-    }
-
-    private func sentimentSymbol(_ score: Double?) -> String {
-        guard let score else { return "waveform.path.ecg" }
-        switch score {
-        case ..<30: return "shield.lefthalf.filled"
-        case ..<70: return "equal.circle.fill"
-        default: return "flame.fill"
-        }
-    }
-
-    private func decisionNarrative(score: Double?, breadth: SentimentBreadth) -> String {
-        guard score != nil else { return "正在读取估值、市场广度与散户样本，稍后给出今日结论。" }
-        if breadth.total == 0 { return temperatureNarrative(score) }
-        if breadth.down > breadth.up { return "下跌家数占优，赚钱效应偏弱；先观察承接力度，再决定是否提高仓位。" }
-        return "上涨家数占优，市场承接尚可；关注量能持续性，避免在情绪高点盲目追涨。"
-    }
-
-    private func breadthEffectLabel(_ breadth: SentimentBreadth) -> String {
-        guard breadth.total > 0 else { return "待更新" }
-        if breadth.upRatio >= 0.6 { return "较强" }
-        if breadth.upRatio >= 0.42 { return "一般" }
-        return "偏弱"
     }
 
     private func actionSuggestions(_ score: Double?) -> [(title: String, tint: Color)] {
@@ -1028,6 +904,160 @@ struct RetailInvestorView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct MarketSentimentSummaryCard: View {
+    let store: RetailSentimentStore
+    let market: SentimentMarket
+
+    private var snapshot: SentimentSnapshot? { store.snapshot(for: market) }
+    private var score: Double? { snapshot?.score }
+    private var breadth: SentimentBreadth {
+        if market == .china, let value = store.breadth {
+            return SentimentBreadth(up: value.up, down: value.down, flat: value.flat)
+        }
+        return store.constituentBreadth(for: market)
+    }
+    private var isLoading: Bool {
+        market == .china ? store.isLoading : store.isLoadingDetails(for: market)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("市场情绪")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isLoading, snapshot == nil {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text(store.detailLoadingMessage(for: market))
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                } else {
+                    Label(snapshot?.label.nonEmpty ?? "等待数据", systemImage: sentimentSymbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(InvestmentDesign.accent)
+                }
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                Text(score.map { String(Int($0.rounded())) } ?? "—")
+                    .font(.system(size: 42, weight: .medium, design: .rounded))
+                    .foregroundStyle(InvestmentDesign.accent)
+                    .tracking(-2)
+                    .contentTransition(.numericText())
+                Text("/ 100")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text(sentimentVerdict)
+                    .font(.system(size: 17, weight: .semibold))
+                    .multilineTextAlignment(.trailing)
+            }
+
+            Text(decisionNarrative)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+
+            VStack(spacing: 7) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.13))
+                        Capsule()
+                            .fill(InvestmentDesign.accent)
+                            .frame(width: proxy.size.width * min(max((score ?? 0) / 100, 0), 1))
+                    }
+                }
+                .frame(height: 4)
+                HStack {
+                    Text("冷静")
+                    Spacer()
+                    Text("均衡")
+                    Spacer()
+                    Text("活跃")
+                }
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(.tertiary)
+            }
+
+            HStack(spacing: 0) {
+                metric("上涨占比", value: breadth.total > 0 ? "\(Int((breadth.upRatio * 100).rounded()))%" : "—")
+                divider
+                metric("赚钱效应", value: breadthEffectLabel)
+                divider
+                metric("估值位置", value: snapshot?.primaryValue.map { String(Int($0.rounded())) } ?? "—")
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(InvestmentDesign.surface)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("市场情绪 \(score.map { String(Int($0.rounded())) } ?? "暂无数据")")
+    }
+
+    private func metric(_ title: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+            Text(title)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var divider: some View {
+        Rectangle().fill(InvestmentDesign.divider).frame(width: 0.5, height: 28)
+    }
+
+    private var sentimentVerdict: String {
+        guard let score else { return "正在汇总市场" }
+        switch score {
+        case ..<30: return "市场偏谨慎"
+        case ..<70: return "市场相对均衡"
+        case ..<90: return "市场情绪升温"
+        default: return "市场情绪过热"
+        }
+    }
+
+    private var sentimentSymbol: String {
+        guard let score else { return "waveform.path.ecg" }
+        switch score {
+        case ..<30: return "shield.lefthalf.filled"
+        case ..<70: return "equal.circle.fill"
+        default: return "flame.fill"
+        }
+    }
+
+    private var decisionNarrative: String {
+        guard score != nil else { return "正在读取估值、市场广度与散户样本，稍后给出今日结论。" }
+        if breadth.total == 0 { return temperatureNarrative }
+        if breadth.down > breadth.up { return "下跌家数占优，赚钱效应偏弱；先观察承接力度，再决定是否提高仓位。" }
+        return "上涨家数占优，市场承接尚可；关注量能持续性，避免在情绪高点盲目追涨。"
+    }
+
+    private var breadthEffectLabel: String {
+        guard breadth.total > 0 else { return "待更新" }
+        if breadth.upRatio >= 0.6 { return "较强" }
+        if breadth.upRatio >= 0.42 { return "一般" }
+        return "偏弱"
+    }
+
+    private var temperatureNarrative: String {
+        guard let score else { return "正在汇总最新市场信号" }
+        switch score {
+        case ..<10: return "风险偏好极低，市场处于深度冷静区"
+        case ..<30: return "资金偏谨慎，机会与风险开始重新定价"
+        case ..<70: return "多空力量相对均衡，市场情绪保持中性"
+        case ..<90: return "风险偏好升温，需留意交易拥挤"
+        default: return "情绪明显过热，波动风险正在累积"
+        }
     }
 }
 
