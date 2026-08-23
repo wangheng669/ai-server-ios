@@ -22,8 +22,8 @@ private struct MarketDetailRoute: Identifiable, Equatable {
 struct MarketView: View {
     @Binding private var showsDetail: Bool
     private let store: MarketStore
+    private let sentimentStore: RetailSentimentStore
     private let onCompactHeaderChange: (Bool) -> Void
-    private let onOpenSentiment: () -> Void
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -45,36 +45,35 @@ struct MarketView: View {
     @MainActor
     init(
         store: MarketStore,
+        sentimentStore: RetailSentimentStore,
         showsDetail: Binding<Bool> = .constant(false),
-        onCompactHeaderChange: @escaping (Bool) -> Void = { _ in },
-        onOpenSentiment: @escaping () -> Void = {}
+        onCompactHeaderChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.store = store
+        self.sentimentStore = sentimentStore
         self.onCompactHeaderChange = onCompactHeaderChange
-        self.onOpenSentiment = onOpenSentiment
         _showsDetail = showsDetail
     }
 
     @MainActor
     init(
         showsDetail: Binding<Bool> = .constant(false),
-        onCompactHeaderChange: @escaping (Bool) -> Void = { _ in },
-        onOpenSentiment: @escaping () -> Void = {}
+        onCompactHeaderChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.init(
             store: MarketStore(),
+            sentimentStore: RetailSentimentStore(),
             showsDetail: showsDetail,
-            onCompactHeaderChange: onCompactHeaderChange,
-            onOpenSentiment: onOpenSentiment
+            onCompactHeaderChange: onCompactHeaderChange
         )
     }
 
     var body: some View {
         MarketHomeView(
             store: store,
+            sentimentStore: sentimentStore,
             onCompactHeaderChange: onCompactHeaderChange,
-            onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) },
-            onOpenSentiment: onOpenSentiment
+            onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) }
         )
         .sheet(item: $selectedDetail, onDismiss: {
             showsDetail = false
@@ -97,6 +96,10 @@ struct MarketView: View {
             guard rootTabIsActive else { return }
             await store.runUpdates()
         }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await sentimentStore.load(marketStore: store)
+        }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
             Task { await store.resumeUpdates() }
@@ -113,9 +116,9 @@ struct MarketView: View {
 
 private struct MarketHomeView: View {
     let store: MarketStore
+    let sentimentStore: RetailSentimentStore
     let onCompactHeaderChange: (Bool) -> Void
     let onSelectIndex: (String) -> Void
-    let onOpenSentiment: () -> Void
     @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
         #if DEBUG
@@ -157,11 +160,15 @@ private struct MarketHomeView: View {
                         .background(MarketStyle.surface)
 
                         VStack(spacing: MarketStyle.pageSpacing) {
-                            MarketSentimentEntry(
-                                sentiment: store.dashboard?.sentiment,
-                                action: onOpenSentiment
-                            )
-                            .padding(.top, MarketStyle.pageSpacing)
+                            MarketSentimentSummaryCard(store: sentimentStore, market: .china)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .stroke(InvestmentDesign.divider.opacity(0.7), lineWidth: 0.5)
+                                }
+                                .shadow(color: .black.opacity(0.025), radius: 5, y: 2)
+                                .padding(.horizontal, 10)
+                                .padding(.top, MarketStyle.pageSpacing)
 
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
@@ -251,57 +258,6 @@ private struct MarketHomeView: View {
     private func selectIndex(_ symbol: String) {
         guard !blocksSelectionDuringRegionSwipe else { return }
         onSelectIndex(symbol)
-    }
-}
-
-private struct MarketSentimentEntry: View {
-    let sentiment: MarketSentiment?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: "gauge.with.dots.needle.50percent")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(MarketStyle.accent)
-                    .frame(width: 38, height: 38)
-                    .background(MarketStyle.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("市场情绪")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("查看各市场情绪与散户动态")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 8)
-
-                if let sentiment {
-                    Text(String(Int(sentiment.score.rounded())))
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                    Text("/100")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 14)
-            .frame(minHeight: 62)
-            .background(MarketStyle.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(MarketStyle.divider.opacity(0.7), lineWidth: 0.8)
-            }
-        }
-        .buttonStyle(MarketPressStyle())
-        .padding(.horizontal, 10)
-        .accessibilityHint("弹出完整市场情绪页面")
     }
 }
 

@@ -240,8 +240,6 @@ private struct MarketHubView: View {
     @Binding private var showsDetail: Bool
     private let store: MarketStore
     private let sentimentStore: RetailSentimentStore
-    @State private var showsSentiment: Bool
-    @State private var sentimentShowsDetail = false
 
     @MainActor
     init(
@@ -252,74 +250,14 @@ private struct MarketHubView: View {
         self.store = store
         self.sentimentStore = sentimentStore
         _showsDetail = showsDetail
-        #if DEBUG
-        let opensSentiment = ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview")
-        _showsSentiment = State(initialValue: opensSentiment)
-        #else
-        _showsSentiment = State(initialValue: false)
-        #endif
     }
 
     var body: some View {
         MarketView(
             store: store,
-            showsDetail: $showsDetail,
-            onOpenSentiment: {
-                showsSentiment = true
-            }
+            sentimentStore: sentimentStore,
+            showsDetail: $showsDetail
         )
-        .sheet(isPresented: $showsSentiment) {
-            MarketSentimentSheet(
-                store: sentimentStore,
-                marketStore: store,
-                showsDetail: $sentimentShowsDetail
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationBackground(InvestmentDesign.canvas)
-            .presentationContentInteraction(.resizes)
-        }
-        .onChange(of: showsSentiment) { _, value in showsDetail = value }
-    }
-}
-
-private struct MarketSentimentSheet: View {
-    let store: RetailSentimentStore
-    let marketStore: MarketStore
-    @Binding var showsDetail: Bool
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("市场情绪")
-                    .font(.headline)
-                Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .bold))
-                        .frame(width: 34, height: 34)
-                        .background(Color.secondary.opacity(0.12), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭市场情绪")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(InvestmentDesign.surface)
-
-            Divider().overlay(InvestmentDesign.divider)
-
-            RetailInvestorView(
-                store: store,
-                marketStore: marketStore,
-                showsDetail: $showsDetail
-            )
-        }
-        .background(InvestmentDesign.canvas)
-        .accessibilityAction(.escape) { dismiss() }
     }
 }
 
