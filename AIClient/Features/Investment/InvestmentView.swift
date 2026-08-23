@@ -236,18 +236,12 @@ struct InvestmentView: View {
     }
 }
 
-private enum MarketHubPage: String, CaseIterable, Identifiable {
-    case quotes = "行情"
-    case sentiment = "情绪"
-
-    var id: Self { self }
-}
-
 private struct MarketHubView: View {
     @Binding private var showsDetail: Bool
     private let store: MarketStore
     private let sentimentStore: RetailSentimentStore
-    @State private var page: MarketHubPage
+    @State private var showsSentiment: Bool
+    @State private var sentimentShowsDetail = false
 
     @MainActor
     init(
@@ -261,42 +255,71 @@ private struct MarketHubView: View {
         #if DEBUG
         let opensSentiment = ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
             ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview")
-        _page = State(initialValue: opensSentiment ? .sentiment : .quotes)
+        _showsSentiment = State(initialValue: opensSentiment)
         #else
-        _page = State(initialValue: .quotes)
+        _showsSentiment = State(initialValue: false)
         #endif
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("市场内容", selection: $page) {
-                ForEach(MarketHubPage.allCases) { item in
-                    Text(item.rawValue).tag(item)
-                }
+        MarketView(
+            store: store,
+            showsDetail: $showsDetail,
+            onOpenSentiment: {
+                showsSentiment = true
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(InvestmentDesign.canvas)
-            .accessibilityHint("在市场行情和市场情绪之间切换")
+        )
+        .sheet(isPresented: $showsSentiment) {
+            MarketSentimentSheet(
+                store: sentimentStore,
+                marketStore: store,
+                showsDetail: $sentimentShowsDetail
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.canvas)
+            .presentationContentInteraction(.resizes)
+        }
+        .onChange(of: showsSentiment) { _, value in showsDetail = value }
+    }
+}
 
-            Group {
-                switch page {
-                case .quotes:
-                    MarketView(store: store, showsDetail: $showsDetail)
-                case .sentiment:
-                    RetailInvestorView(
-                        store: sentimentStore,
-                        marketStore: store,
-                        showsDetail: $showsDetail
-                    )
+private struct MarketSentimentSheet: View {
+    let store: RetailSentimentStore
+    let marketStore: MarketStore
+    @Binding var showsDetail: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("市场情绪")
+                    .font(.headline)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 34, height: 34)
+                        .background(Color.secondary.opacity(0.12), in: Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关闭市场情绪")
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(InvestmentDesign.surface)
+
+            Divider().overlay(InvestmentDesign.divider)
+
+            RetailInvestorView(
+                store: store,
+                marketStore: marketStore,
+                showsDetail: $showsDetail
+            )
         }
         .background(InvestmentDesign.canvas)
-        .sensoryFeedback(.selection, trigger: page)
-        .onChange(of: page) { _, _ in showsDetail = false }
+        .accessibilityAction(.escape) { dismiss() }
     }
 }
 
