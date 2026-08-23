@@ -780,6 +780,7 @@ private struct TodayWorldView: View {
     @StateObject private var store = TodayWorldStore()
     @State private var selectedSectionKey: String?
     @State private var selectedSystem: TodayWorldFinalReportSystem?
+    @State private var showsReportDetails = false
 
     var body: some View {
         NavigationStack {
@@ -797,12 +798,17 @@ private struct TodayWorldView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedSystem, onDismiss: {
+        .sheet(isPresented: $showsReportDetails, onDismiss: {
+            selectedSystem = nil
             showsDetail = false
-        }) { system in
-            TodayWorldReportSourcesSheet(system: system, reportDate: store.report?.date ?? "")
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
+        }) {
+            if let report = store.report,
+               let final = report.report.final,
+               final.status == "succeeded" {
+                reportDetailsSheet(final, reportDate: report.date)
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
+            }
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -812,10 +818,8 @@ private struct TodayWorldView: View {
             guard rootTabIsActive, phase == .active else { return }
             Task { await store.load(force: true) }
         }
-        .onChange(of: selectedSystem) { _, system in
-            if system != nil {
-                showsDetail = true
-            }
+        .onChange(of: showsReportDetails) { _, isPresented in
+            showsDetail = isPresented
         }
     }
 
@@ -824,13 +828,84 @@ private struct TodayWorldView: View {
         if let final = report.report.final,
            final.status == "succeeded",
            !final.sections.isEmpty {
-            let section = final.sections.first { $0.id == selectedSectionKey } ?? final.sections[0]
+            VStack(alignment: .leading, spacing: 0) {
+                metadata(report)
+                if !final.overview.headline.isEmpty {
+                    finalOverview(final.overview)
+                }
+                Spacer(minLength: 12)
+                Button {
+                    showsReportDetails = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("查看昨日明细")
+                        Text("\(final.sections.reduce(0) { $0 + $1.systems.count }) 个体系")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.up")
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .padding(.horizontal, 18)
+                    .frame(height: 52)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("弹出人工智能、投资及引用依据")
+                .padding(.horizontal, 18)
+                .padding(.bottom, 84)
+            }
+            .background(Color(uiColor: .systemBackground))
+        } else {
+            reportStatusView(report)
+        }
+    }
+
+    private func finalOverview(_ overview: TodayWorldFinalReportOverview) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("昨日主线")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.teal)
+
+            Text(overview.headline)
+                .font(.system(size: 20, weight: .bold))
+                .lineSpacing(3)
+
+            ForEach(Array(overview.highlights.prefix(3).enumerated()), id: \.element.id) { index, item in
+                HStack(alignment: .top, spacing: 10) {
+                    Text(String(format: "%02d", index + 1))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.teal)
+                    VStack(alignment: .leading, spacing: 3) {
+                        if let title = item.title, !title.isEmpty {
+                            Text(title).font(.system(size: 14, weight: .semibold))
+                        }
+                        Text(item.text)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(2)
+                            .lineLimit(2)
+                    }
+                }
+            }
+
+            Text("完整分组、观察项和引用依据可在昨日明细中查看")
+                .font(.system(size: 12.5))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(18)
+        .background(Color.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 18)
+        .padding(.bottom, 18)
+    }
+
+    private func reportDetailsSheet(
+        _ final: TodayWorldFinalReport,
+        reportDate: String
+    ) -> some View {
+        let section = final.sections.first { $0.id == selectedSectionKey } ?? final.sections[0]
+        return NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    metadata(report)
-                    if !final.overview.headline.isEmpty {
-                        finalOverview(final.overview)
-                    }
                     sectionSelector(final.sections, selectedID: section.id)
 
                     ForEach(section.groups) { group in
@@ -848,61 +923,24 @@ private struct TodayWorldView: View {
                         }
                     }
 
-                    Color.clear.frame(height: 88)
+                    Color.clear.frame(height: 24)
                 }
+                .padding(.top, 12)
             }
             .scrollIndicators(.hidden)
-            .background(Color(uiColor: .systemBackground))
-        } else {
-            reportStatusView(report)
-        }
-    }
-
-    private func finalOverview(_ overview: TodayWorldFinalReportOverview) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("昨日主线")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.teal)
-
-            Text(overview.headline)
-                .font(.system(size: 20, weight: .bold))
-                .lineSpacing(3)
-
-            ForEach(Array(overview.highlights.prefix(5).enumerated()), id: \.element.id) { index, item in
-                HStack(alignment: .top, spacing: 10) {
-                    Text(String(format: "%02d", index + 1))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color.teal)
-                    VStack(alignment: .leading, spacing: 3) {
-                        if let title = item.title, !title.isEmpty {
-                            Text(title).font(.system(size: 14, weight: .semibold))
-                        }
-                        Text(item.text)
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(2)
-                    }
+            .navigationTitle("昨日明细")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showsReportDetails = false }
                 }
             }
-
-            if !overview.watchItems.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("继续观察")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(overview.watchItems) { item in
-                        Text("· \(item.text)")
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.top, 2)
-            }
         }
-        .padding(18)
-        .background(Color.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .padding(.horizontal, 18)
-        .padding(.bottom, 18)
+        .sheet(item: $selectedSystem) { system in
+            TodayWorldReportSourcesSheet(system: system, reportDate: reportDate)
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(28)
+        }
     }
 
     private func metadata(_ report: TodayWorldYesterdayReportPayload) -> some View {
