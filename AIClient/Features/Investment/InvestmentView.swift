@@ -22,7 +22,6 @@ private enum InvestmentMotion {
 
 private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
-    case sentiment = "情绪"
     case chinaMacro = "国内宏观"
     case institutionResearch = "机构研究"
     case holdings = "知名投资人"
@@ -33,7 +32,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
 
     var category: InvestmentCategory {
         switch self {
-        case .market, .sentiment:
+        case .market:
             .market
         case .chinaMacro, .gdp:
             .macro
@@ -45,7 +44,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     var subsectionTitle: String {
         switch self {
         case .market: "行情"
-        case .sentiment: "情绪"
         case .chinaMacro: "国内"
         case .institutionResearch: "机构"
         case .holdings: "投资人"
@@ -57,7 +55,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .market: "chart.line.uptrend.xyaxis"
-        case .sentiment: "gauge.with.dots.needle.50percent"
         case .chinaMacro: "building.columns"
         case .institutionResearch: "doc.text.magnifyingglass"
         case .holdings: "person.crop.circle.badge.checkmark"
@@ -77,7 +74,7 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
     var sections: [InvestmentSection] {
         switch self {
         case .market:
-            [.market, .sentiment]
+            [.market]
         case .macro:
             [.chinaMacro, .gdp]
         case .research:
@@ -108,7 +105,6 @@ struct InvestmentView: View {
     @State private var contentScale: CGFloat = 1
     @State private var contentOffset: CGFloat = 0
     @State private var transitionTask: Task<Void, Never>?
-    @State private var marketShowsDetail = false
     @State private var holdingsShowsDetail = false
     @State private var marketStore = MarketStore()
     @State private var sentimentStore = RetailSentimentStore()
@@ -128,7 +124,7 @@ struct InvestmentView: View {
             initialSection = .institutionResearch
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
                     ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
-            initialSection = .sentiment
+            initialSection = .market
         } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
                     ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) {
             initialSection = .gdp
@@ -156,20 +152,20 @@ struct InvestmentView: View {
         .overlay(alignment: .bottomTrailing) {
             if !showsDetail {
                 HStack(alignment: .bottom, spacing: 8) {
-                    InvestmentSectionSelector(selection: $section)
+                    if section.category.sections.count > 1 {
+                        InvestmentSectionSelector(selection: $section)
+                    }
                     InvestmentCategorySelector(selection: $section)
                 }
                 .padding(.trailing, 14)
                 .padding(.bottom, 10)
             }
         }
-        .onChange(of: marketShowsDetail) { _, value in showsDetail = value }
         .onChange(of: holdingsShowsDetail) { _, value in
             showsDetail = value
         }
         .onChange(of: section) { _, value in
             transitionPage(to: value)
-            marketShowsDetail = false
             holdingsShowsDetail = false
             showsDetail = false
         }
@@ -183,14 +179,9 @@ struct InvestmentView: View {
     private var selectedSectionContent: some View {
         switch displayedSection {
         case .market:
-            MarketView(
+            MarketHubView(
                 store: marketStore,
-                showsDetail: $marketShowsDetail
-            )
-        case .sentiment:
-            RetailInvestorView(
-                store: sentimentStore,
-                marketStore: marketStore,
+                sentimentStore: sentimentStore,
                 showsDetail: $showsDetail
             )
         case .chinaMacro:
@@ -242,6 +233,70 @@ struct InvestmentView: View {
                 contentOffset = 0
             }
         }
+    }
+}
+
+private enum MarketHubPage: String, CaseIterable, Identifiable {
+    case quotes = "行情"
+    case sentiment = "情绪"
+
+    var id: Self { self }
+}
+
+private struct MarketHubView: View {
+    @Binding private var showsDetail: Bool
+    private let store: MarketStore
+    private let sentimentStore: RetailSentimentStore
+    @State private var page: MarketHubPage
+
+    @MainActor
+    init(
+        store: MarketStore,
+        sentimentStore: RetailSentimentStore,
+        showsDetail: Binding<Bool>
+    ) {
+        self.store = store
+        self.sentimentStore = sentimentStore
+        _showsDetail = showsDetail
+        #if DEBUG
+        let opensSentiment = ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview")
+        _page = State(initialValue: opensSentiment ? .sentiment : .quotes)
+        #else
+        _page = State(initialValue: .quotes)
+        #endif
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("市场内容", selection: $page) {
+                ForEach(MarketHubPage.allCases) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(InvestmentDesign.canvas)
+            .accessibilityHint("在市场行情和市场情绪之间切换")
+
+            Group {
+                switch page {
+                case .quotes:
+                    MarketView(store: store, showsDetail: $showsDetail)
+                case .sentiment:
+                    RetailInvestorView(
+                        store: sentimentStore,
+                        marketStore: store,
+                        showsDetail: $showsDetail
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(InvestmentDesign.canvas)
+        .sensoryFeedback(.selection, trigger: page)
+        .onChange(of: page) { _, _ in showsDetail = false }
     }
 }
 
