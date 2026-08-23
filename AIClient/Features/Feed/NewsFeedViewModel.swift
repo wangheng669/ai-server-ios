@@ -137,7 +137,7 @@ actor FeedDiskCache {
 actor FeedPresentationPrewarmer {
     static let shared = FeedPresentationPrewarmer()
 
-    func warm(_ posts: [Post]) {
+    func warm(_ posts: [Post]) async {
         for post in posts {
             if post.isXueqiu {
                 _ = post.xueqiuPresentation
@@ -145,6 +145,7 @@ actor FeedPresentationPrewarmer {
                 _ = post.htmlInlineAssetURLs
             }
         }
+        await ImageLoader.prefetchFeedImages(for: posts)
     }
 }
 
@@ -1184,7 +1185,7 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func schedulePresentationPrewarm(for posts: [Post]) {
-        Task { await FeedPresentationPrewarmer.shared.warm(posts) }
+        Task(priority: .utility) { await FeedPresentationPrewarmer.shared.warm(posts) }
     }
 
     private func scheduleNewYorkTimesPrefetch(for posts: [Post], cancelsPrevious: Bool) {

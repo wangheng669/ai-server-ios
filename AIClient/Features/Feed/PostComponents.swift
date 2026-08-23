@@ -671,6 +671,13 @@ actor ImageLoader {
         let task: Task<Data?, Never>
     }
 
+    private struct PrefetchRequest: Hashable {
+        let url: URL
+        let width: CGFloat
+        let height: CGFloat
+        let prefersCompactXAvatar: Bool
+    }
+
     private let cache = NSCache<NSString, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
     private var downloads: [URL: Download] = [:]
@@ -704,18 +711,72 @@ actor ImageLoader {
         return nil
     }
 
+    static func prefetchFeedImages(for posts: [Post]) async {
+        let visiblePosts = Array(posts.prefix(6))
+        guard !visiblePosts.isEmpty else { return }
+
+        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
+        var requests: [PrefetchRequest] = []
+
+        for post in visiblePosts {
+            if let avatarURL = post.avatarURL {
+                requests.append(.init(
+                    url: avatarURL,
+                    width: 44,
+                    height: 44,
+                    prefersCompactXAvatar: true
+                ))
+            }
+            if let quoteAvatarURL = post.xQuotedPost?.author?.profileImageURL.flatMap(URL.init(string:)) {
+                requests.append(.init(
+                    url: quoteAvatarURL,
+                    width: 28,
+                    height: 28,
+                    prefersCompactXAvatar: true
+                ))
+            }
+        }
+
+        for post in visiblePosts.prefix(4) {
+            let mediaURL = post.sourceName == "X"
+                ? post.feedImageURLs.first ?? post.previewURL
+                : post.previewURL
+            if let mediaURL {
+                requests.append(.init(
+                    url: mediaURL,
+                    width: screenWidth,
+                    height: 260,
+                    prefersCompactXAvatar: false
+                ))
+            }
+            if let quoteImageURL = post.xQuotedPost?.media?
+                .first(where: { !$0.isVideo })?
+                .feedDisplayURL {
+                requests.append(.init(
+                    url: quoteImageURL,
+                    width: max(screenWidth - 102, 220),
+                    height: 220,
+                    prefersCompactXAvatar: false
+                ))
+            }
+        }
+
+        var seen = Set<URL>()
+        let uniqueRequests = requests.filter { seen.insert($0.url).inserted }
+        await prefetch(uniqueRequests, maximumConcurrentLoads: 4)
+    }
+
     static func avatarCandidateURLs(_ url: URL) -> [URL] {
-        let highResolutionURL = highResolutionAvatarURL(url)
-        guard highResolutionURL != url else { return [url] }
-        return [highResolutionURL, url]
+        [highResolutionAvatarURL(sourceImageURL(from: url))]
     }
 
     static func compactAvatarCandidateURLs(_ url: URL) -> [URL] {
-        let upgradedURL = highResolutionAvatarURL(url)
+        let sourceURL = sourceImageURL(from: url)
+        let upgradedURL = highResolutionAvatarURL(sourceURL)
         guard let host = upgradedURL.host?.lowercased(),
               (host == "pbs.twimg.com" || host.hasSuffix(".twimg.com")),
               upgradedURL.path.contains("/profile_images/") else {
-            return avatarCandidateURLs(url)
+            return [upgradedURL]
         }
 
         var components = URLComponents(url: upgradedURL, resolvingAgainstBaseURL: false)
@@ -724,8 +785,17 @@ actor ImageLoader {
             .replacingOccurrences(of: "_mini.", with: "_200x200.")
             .replacingOccurrences(of: "_400x400.", with: "_200x200.")
         let compactURL = components?.url ?? upgradedURL
-        guard compactURL != url else { return [url] }
-        return [compactURL, url]
+        return [compactURL]
+    }
+
+    static func sourceImageURL(from url: URL) -> URL {
+        guard url.path.hasSuffix("/image-proxy"),
+              let originalValue = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "url" })?
+                .value,
+              let originalURL = URL(string: originalValue) else { return url }
+        return originalURL
     }
 
     static func highResolutionAvatarURL(_ url: URL) -> URL {
@@ -796,25 +866,42 @@ actor ImageLoader {
         return decodedImage
     }
 
-    private static func download(_ url: URL) async -> Data? {
-        var candidates = [url]
-        if url.path.hasSuffix("image-proxy"),
-           let target = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "url" })?.value,
-           let direct = URL(string: target) {
-            candidates.append(direct)
+    private static func prefetch(
+        _ requests: [PrefetchRequest],
+        maximumConcurrentLoads: Int
+    ) async {
+        guard !requests.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = requests.makeIterator()
+            let limit = min(max(1, maximumConcurrentLoads), requests.count)
+            for _ in 0..<limit {
+                guard let request = iterator.next() else { break }
+                group.addTask { await load(request) }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled, let request = iterator.next() else { continue }
+                group.addTask { await load(request) }
+            }
         }
+    }
 
-        for candidate in candidates {
-            var request = URLRequest(url: candidate, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
-            request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
-            guard let (data, response) = try? await URLSession.shared.data(for: request),
-                  let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode),
-                  http.mimeType?.lowercased() != "image/svg+xml",
-                  !data.isEmpty else { continue }
-            return data
-        }
-        return nil
+    private static func load(_ request: PrefetchRequest) async {
+        _ = await load(
+            request.url,
+            targetSize: CGSize(width: request.width, height: request.height),
+            prefersCompactXAvatar: request.prefersCompactXAvatar
+        )
+    }
+
+    private static func download(_ url: URL) async -> Data? {
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+        request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              http.mimeType?.lowercased() != "image/svg+xml",
+              !data.isEmpty else { return nil }
+        return data
     }
 
     private static func decode(_ data: Data, pixelLimit: CGFloat?, scale: CGFloat) -> UIImage? {
