@@ -649,6 +649,28 @@ private final class TodayWorldStore: ObservableObject {
             }
         }
     }
+
+    func generate() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        do {
+            report = try await client.generateTodayWorldYesterdayReport()
+            for _ in 0..<240 {
+                guard let report, report.shouldPollForFinalReport else { return }
+                try await Task.sleep(for: .seconds(2))
+                self.report = try await client.fetchTodayWorldYesterdayReport()
+            }
+            errorMessage = "日报仍在后台生成，请稍后重新加载"
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? "暂时无法生成最终版日报"
+        }
+    }
 }
 
 private actor TodayWorldPostMemoryCache {
@@ -1021,18 +1043,26 @@ private struct TodayWorldView: View {
     }
 
     private func reportStatusView(_ report: TodayWorldYesterdayReportPayload) -> some View {
-        let isRunning = report.status == "running" || report.status == "queued"
-            || report.report.final?.status == "running" || report.report.final?.status == "queued"
+        let isRunning = report.isGenerating
         return ContentUnavailableView {
             Label(
                 isRunning ? "正在生成最终版日报" : "暂无最终版日报",
                 systemImage: isRunning ? "hourglass" : "doc.text.magnifyingglass"
             )
         } description: {
-            Text(isRunning ? "完成后会自动展示主线、要点与直接依据" : (report.report.final?.error ?? "最终版日报尚未生成"))
+            Text(isRunning ? "完成后会自动展示主线、要点与直接依据" : (store.errorMessage ?? report.report.final?.error ?? "最终版日报尚未生成"))
         } actions: {
-            Button("重新加载") { Task { await store.load(force: true) } }
+            Button(isRunning ? "刷新进度" : "重新加载") {
+                Task {
+                    if isRunning {
+                        await store.load(force: true)
+                    } else {
+                        await store.generate()
+                    }
+                }
+            }
                 .buttonStyle(.borderedProminent)
+                .disabled(store.isLoading)
         }
     }
 
@@ -1043,9 +1073,10 @@ private struct TodayWorldView: View {
             Text(message)
         } actions: {
             Button("重新加载") {
-                Task { await store.load(force: true) }
+                Task { await store.generate() }
             }
             .buttonStyle(.borderedProminent)
+            .disabled(store.isLoading)
         }
     }
 

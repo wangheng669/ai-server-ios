@@ -25,6 +25,27 @@ struct APIClient {
         return response.data
     }
 
+    func generateTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
+        var request = URLRequest(
+            url: baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+        do {
+            let payload = try JSONDecoder().decode(TodayWorldYesterdayReportGenerationResponse.self, from: data)
+            guard payload.success else { throw APIError.invalidResponse }
+            return payload.data.report
+        } catch let error as APIError {
+            throw error
+        } catch {
+            throw APIError.decoding(error)
+        }
+    }
+
     func fetchPosts(
         page: Int,
         limit: Int = 20,
@@ -1010,6 +1031,16 @@ struct TodayWorldYesterdayReportResponse: Decodable {
     let data: TodayWorldYesterdayReportPayload
 }
 
+struct TodayWorldYesterdayReportGenerationResponse: Decodable {
+    let success: Bool
+    let data: TodayWorldYesterdayReportGenerationPayload
+}
+
+struct TodayWorldYesterdayReportGenerationPayload: Decodable {
+    let queued: Bool
+    let report: TodayWorldYesterdayReportPayload
+}
+
 struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     let date: String
     let timezone: String
@@ -1031,6 +1062,17 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
         case totalTokens = "total_tokens"
         case costCNY = "cost_cny"
         case completedAt = "completed_at"
+    }
+
+    var isGenerating: Bool {
+        status == "running" || status == "queued"
+            || report.final?.status == "running" || report.final?.status == "queued"
+    }
+
+    var shouldPollForFinalReport: Bool {
+        guard status != "failed" else { return false }
+        guard let finalStatus = report.final?.status else { return true }
+        return finalStatus != "succeeded" && finalStatus != "failed"
     }
 }
 
