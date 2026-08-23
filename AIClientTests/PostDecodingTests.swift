@@ -1353,6 +1353,21 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertNil(response.data.report.final)
     }
 
+    func testTodayWorldYesterdayReportGenerationResponseKeepsPollingUntilFinalCompletes() throws {
+        let queuedData = Data(#"{"success":true,"data":{"queued":true,"report":{"date":"2026-08-22","timezone":"Asia/Shanghai","status":"queued","stage":"queued","progress":0,"source_count":0,"post_count":0,"report":{},"total_tokens":0,"cost_cny":0}}}"#.utf8)
+        let queued = try JSONDecoder().decode(TodayWorldYesterdayReportGenerationResponse.self, from: queuedData)
+
+        XCTAssertTrue(queued.data.queued)
+        XCTAssertTrue(queued.data.report.isGenerating)
+        XCTAssertTrue(queued.data.report.shouldPollForFinalReport)
+
+        let completedData = Data(#"{"success":true,"data":{"date":"2026-08-22","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":1,"post_count":2,"report":{"final":{"status":"failed","stage":"failed","error":"生成失败"}},"total_tokens":20,"cost_cny":0.01}}"#.utf8)
+        let completed = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: completedData)
+
+        XCTAssertFalse(completed.data.isGenerating)
+        XCTAssertFalse(completed.data.shouldPollForFinalReport)
+    }
+
 }
 
 final class RSSCardTranslationTests: XCTestCase {
