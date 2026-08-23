@@ -1593,12 +1593,23 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(targetComponents.queryItems?.first(where: { $0.name == "name" })?.value, "medium")
     }
 
-    func testCompactXAvatarUses200PixelVariantAndKeepsOriginalFallback() throws {
+    func testCompactXAvatarUsesSingle200PixelVariant() throws {
         let original = try XCTUnwrap(URL(string: "https://pbs.twimg.com/profile_images/123/avatar_400x400.jpg"))
 
         XCTAssertEqual(
             ImageLoader.compactAvatarCandidateURLs(original).map(\.absoluteString),
-            ["https://pbs.twimg.com/profile_images/123/avatar_200x200.jpg", original.absoluteString]
+            ["https://pbs.twimg.com/profile_images/123/avatar_200x200.jpg"]
+        )
+    }
+
+    func testCompactXAvatarUnwrapsServerProxyBeforeSelectingVariant() throws {
+        let proxied = try XCTUnwrap(
+            MediaURL.image("https://pbs.twimg.com/profile_images/123/avatar_400x400.jpg")
+        )
+
+        XCTAssertEqual(
+            ImageLoader.compactAvatarCandidateURLs(proxied).map(\.absoluteString),
+            ["https://pbs.twimg.com/profile_images/123/avatar_200x200.jpg"]
         )
     }
 
@@ -1621,17 +1632,14 @@ final class FeedAdapterTests: XCTestCase {
         )
     }
 
-    func testXAvatarLoaderPrefersHighResolutionVariantAndFallsBackToOriginal() throws {
+    func testXAvatarLoaderUsesSingleHighResolutionVariant() throws {
         let original = try XCTUnwrap(
             URL(string: "https://pbs.twimg.com/profile_images/1631421210205749248/uohbT_40_normal.jpg")
         )
 
         XCTAssertEqual(
             ImageLoader.avatarCandidateURLs(original).map(\.absoluteString),
-            [
-                "https://pbs.twimg.com/profile_images/1631421210205749248/uohbT_200x200.jpg",
-                original.absoluteString,
-            ]
+            ["https://pbs.twimg.com/profile_images/1631421210205749248/uohbT_200x200.jpg"]
         )
     }
 
