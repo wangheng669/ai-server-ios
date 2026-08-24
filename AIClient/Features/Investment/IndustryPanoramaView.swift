@@ -171,7 +171,7 @@ struct IndustryPanoramaView: View {
                     errorState
                 }
             }
-            .padding(.bottom, 112)
+            .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
         .background(InvestmentDesign.canvas)

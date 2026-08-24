@@ -55,6 +55,20 @@ struct MarketView: View {
     @State private var globalRankingStore: GlobalRankingStore
     @State private var holdingsStore: FamousHoldingsStore
     @State private var investorShowsDetail = false
+    @State private var showsInstitutionResearch = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--institution-research-preview")
+        #else
+        false
+        #endif
+    }()
+    @State private var showsIndustries = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--industries-preview")
+        #else
+        false
+        #endif
+    }()
     @State private var showsInvestors = {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
@@ -74,7 +88,8 @@ struct MarketView: View {
     }()
     @State private var showsMacro = {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--market-macro-sheet-preview")
+        ProcessInfo.processInfo.arguments.contains("--market-macro-sheet-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--china-macro-preview")
         #else
         false
         #endif
@@ -159,6 +174,14 @@ struct MarketView: View {
                 showsInvestors = true
                 showsDetail = true
             },
+            onOpenInstitutionResearch: {
+                showsInstitutionResearch = true
+                showsDetail = true
+            },
+            onOpenIndustries: {
+                showsIndustries = true
+                showsDetail = true
+            },
             onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) }
         )
         .sheet(isPresented: $showsInvestors, onDismiss: {
@@ -172,6 +195,46 @@ struct MarketView: View {
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("完成") { showsInvestors = false }
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+            .presentationDetents([.fraction(0.82), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.canvas)
+            .presentationContentInteraction(.resizes)
+        }
+        .sheet(isPresented: $showsInstitutionResearch, onDismiss: {
+            showsDetail = false
+        }) {
+            NavigationStack {
+                InstitutionResearchView()
+                    .navigationTitle("机构研究")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showsInstitutionResearch = false }
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+            .presentationDetents([.fraction(0.82), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.canvas)
+            .presentationContentInteraction(.resizes)
+        }
+        .sheet(isPresented: $showsIndustries, onDismiss: {
+            showsDetail = false
+        }) {
+            NavigationStack {
+                IndustryPanoramaView()
+                    .navigationTitle("产业全景")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showsIndustries = false }
                                 .fontWeight(.semibold)
                         }
                     }
@@ -279,7 +342,7 @@ struct MarketView: View {
         }
         .onAppear {
             showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil ||
-                showsGlobalRanking || showsInvestors
+                showsGlobalRanking || showsInvestors || showsInstitutionResearch || showsIndustries
         }
         .onDisappear { showsDetail = false }
     }
@@ -349,6 +412,8 @@ private struct MarketHomeView: View {
     let onOpenGlobalRanking: () -> Void
     let holdingsStore: FamousHoldingsStore
     let onOpenInvestors: () -> Void
+    let onOpenInstitutionResearch: () -> Void
+    let onOpenIndustries: () -> Void
     let onSelectIndex: (String) -> Void
     @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
@@ -408,6 +473,12 @@ private struct MarketHomeView: View {
                                 onOpen: onOpenInvestors
                             )
 
+                            MarketResearchEntryGrid(
+                                onOpenInstitutionResearch: onOpenInstitutionResearch,
+                                onOpenIndustries: onOpenIndustries
+                            )
+                            .id("market-research-entry-grid")
+
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
                                     message: error,
@@ -424,8 +495,7 @@ private struct MarketHomeView: View {
                                     .id("market-structure")
                             }
                         }
-                        // The root navigation already reserves its own safe-area inset. Keep only
-                        // enough room for the investment selectors that float above the final row.
+                        // The root navigation already reserves its own safe-area inset.
                         .padding(.bottom, 24)
                         .background(MarketStyle.canvas)
                     }
@@ -449,6 +519,9 @@ private struct MarketHomeView: View {
                     if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
                         try? await Task.sleep(for: .seconds(2))
                         proxy.scrollTo("market-structure", anchor: .top)
+                    } else if ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") {
+                        try? await Task.sleep(for: .seconds(2))
+                        proxy.scrollTo("market-research-entry-grid", anchor: .center)
                     }
                     #endif
                 }
@@ -504,6 +577,78 @@ private struct MarketHomeView: View {
     private func selectIndex(_ symbol: String) {
         guard !blocksSelectionDuringRegionSwipe else { return }
         onSelectIndex(symbol)
+    }
+}
+
+private struct MarketResearchEntryGrid: View {
+    let onOpenInstitutionResearch: () -> Void
+    let onOpenIndustries: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            MarketResearchEntryCard(
+                title: "机构研究",
+                subtitle: "公开观点与原文",
+                systemImage: "doc.text.magnifyingglass",
+                action: onOpenInstitutionResearch
+            )
+            MarketResearchEntryCard(
+                title: "产业全景",
+                subtitle: "产业链与景气跟踪",
+                systemImage: "square.3.layers.3d",
+                action: onOpenIndustries
+            )
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
+private struct MarketResearchEntryCard: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(MarketStyle.accent)
+                        .frame(width: 34, height: 34)
+                        .background(MarketStyle.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 14.5, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .padding(13)
+            .frame(maxWidth: .infinity, minHeight: 102, alignment: .leading)
+            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(MarketStyle.accent.opacity(0.14), lineWidth: 0.8)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(subtitle)
+        .accessibilityHint("打开详情")
     }
 }
 
