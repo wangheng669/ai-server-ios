@@ -32,11 +32,24 @@ EOF
 cat >"$mock_bin/xcrun" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$IOS_TEST_CALLS"
+if [[ "$*" == *"device info details"* ]]; then
+  while (($#)); do
+    if [[ "$1" == --json-output ]]; then
+      printf '{"result":{"deviceProperties":{"name":"Test iPhone"},"hardwareProperties":{"udid":"DEVICE"}}}' > "$2"
+      break
+    fi
+    shift
+  done
+fi
 exit 0
 EOF
 cat >"$mock_bin/xcodebuild" <<'EOF'
 #!/usr/bin/env bash
-echo "xcodebuild must not run for a valid prepared signature" >&2
+if [[ "$*" == *"-showdestinations"* ]]; then
+  echo 'platform:iOS, id:DEVICE, name:Test iPhone'
+  exit 0
+fi
+echo "A device build must not run for a valid prepared signature" >&2
 exit 99
 EOF
 chmod +x "$mock_bin"/*

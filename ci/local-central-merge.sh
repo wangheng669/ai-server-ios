@@ -100,7 +100,9 @@ report_local_delivery() {
       -f source_sha="$source_sha" \
       -f source_branch="$source_branch" \
       -f originating_run_id="$run_id" \
-      -f stage="$stage"; then
+      -f stage="$stage" \
+      -f device_id="${IOS_DEVICE_ID:-$DEVICE_UDID}" \
+      -f device_name="${IOS_DEVICE_NAME:-}"; then
       echo "Queued authenticated deployment-status reconciliation for $source_sha."
       return
     fi
@@ -221,8 +223,13 @@ if [[ "$app_changed" == true ]]; then
   export DEVICE_UDID=${DEVICE_UDID:-$(repository_variable IOS_DEVICE_UDID)}
   export TEAM_ID=${TEAM_ID:-$(repository_variable IOS_TEAM_ID 9M7P4VLHY3)}
   export BUNDLE_ID=${BUNDLE_ID:-$(repository_variable IOS_BUNDLE_ID com.wangheng.aiserverclient)}
+  export IOS_DELIVERY_MODE=local-fallback
+  export IOS_DEVICE_READY_JSON="$RUNNER_TEMP/ios-device-ready.json"
 
   ./ci/verify-ios-device-stability.sh
+  export IOS_DEVICE_ID IOS_DEVICE_NAME
+  IOS_DEVICE_ID=$(jq -r '.deviceId' "$IOS_DEVICE_READY_JSON")
+  IOS_DEVICE_NAME=$(jq -r '.deviceName' "$IOS_DEVICE_READY_JSON")
   mkdir -p "$IOS_BUILD_CACHE_ROOT" "$RUNNER_TEMP"
   if [[ "$test_scope" == build ]]; then
     echo "Low-risk App change; skipping shared simulator tests."
@@ -277,6 +284,7 @@ if [[ "$app_changed" == true ]]; then
   ./ci/sign-and-install-ios.sh
   report_local_delivery installed-local-fallback
 else
+  export IOS_DELIVERY_MODE=local-fallback
   report_local_delivery published-local-fallback
 fi
 

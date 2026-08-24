@@ -406,6 +406,9 @@ jobs:
           IOS_DIRECT_INSTALL_SECONDS: ${{ steps.local_install.outputs.direct_install_seconds }}
           IOS_XCODE_RECOVERY_SECONDS: ${{ steps.local_install.outputs.xcode_recovery_seconds }}
           IOS_FINAL_INSTALL_SECONDS: ${{ steps.local_install.outputs.final_install_seconds }}
+          IOS_DEVICE_ID: ${{ steps.local_install.outputs.device_id }}
+          IOS_DEVICE_NAME: ${{ steps.local_install.outputs.device_name }}
+          IOS_DELIVERY_MODE: central-direct
         run: ./ci/report-ios-deployment.sh succeeded 1 installed-locally
 
       - name: Report configuration-only delivery completed

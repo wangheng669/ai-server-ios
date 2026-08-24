@@ -49,6 +49,30 @@ commit_message=${IOS_COMMIT_MESSAGE:-}
 deployment_commit=${IOS_DEPLOYMENT_COMMIT:-${GITHUB_SHA:-}}
 deployment_source_branch=${IOS_DEPLOYMENT_SOURCE_BRANCH:-${GITHUB_REF_NAME:-}}
 deployment_run_id=${IOS_DEPLOYMENT_RUN_ID:-${GITHUB_RUN_ID:-}}
+deployment_mode=${IOS_DELIVERY_MODE:-central}
+deployment_device_id=${IOS_DEVICE_ID:-${DEVICE_UDID:-}}
+deployment_device_name=${IOS_DEVICE_NAME:-}
+acceptance=pending
+installed_at=""
+accepted_at=""
+if [[ "$phase" == succeeded ]]; then
+  case "$stage" in
+    installed-*|installed)
+      acceptance=accepted
+      installed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      accepted_at=$installed_at
+      ;;
+    published-no-app-change|published-local-fallback)
+      acceptance=accepted
+      accepted_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      ;;
+    published-pending-install)
+      acceptance=pending-install
+      ;;
+  esac
+elif [[ "$phase" == failed ]]; then
+  acceptance=rejected
+fi
 if [[ -z "$commit_message" && -n "$deployment_commit" ]] && git cat-file -e "${deployment_commit}^{commit}" 2>/dev/null; then
   commit_message=$(git log -1 --format=%s "$deployment_commit")
 fi
@@ -61,6 +85,12 @@ payload=$(jq -cn \
   --arg commitMessage "$commit_message" \
   --arg sourceBranch "$deployment_source_branch" \
   --arg runId "$deployment_run_id" \
+  --arg deliveryMode "$deployment_mode" \
+  --arg deviceId "$deployment_device_id" \
+  --arg deviceName "$deployment_device_name" \
+  --arg acceptance "$acceptance" \
+  --arg installedAt "$installed_at" \
+  --arg acceptedAt "$accepted_at" \
   --argjson preflight "$preflight_seconds" \
   --argjson prepare "$prepare_seconds" \
   --argjson deviceWarm "$device_warm_seconds" \
@@ -76,7 +106,9 @@ payload=$(jq -cn \
   --argjson install "$device_delivery_seconds" \
   --argjson total "$total_seconds" \
   '{phase:$phase, progress:$progress, stage:$stage, commit:$commit, commitMessage:$commitMessage,
-    sourceBranch:$sourceBranch, runId:$runId,
+    sourceBranch:$sourceBranch, runId:$runId, deliveryMode:$deliveryMode,
+    deviceId:$deviceId, deviceName:$deviceName, acceptance:$acceptance,
+    installedAt:$installedAt, acceptedAt:$acceptedAt,
     timings:{preflight:$preflight, prepare:$prepare, deviceWarm:$deviceWarm,
       dependency:$dependency, deviceBuildWarm:$deviceBuildWarm, simulatorWarm:$simulatorWarm, merge:$merge, build:$build,
       deviceWait:$deviceWait, directInstall:$directInstall, xcodeRecovery:$xcodeRecovery,

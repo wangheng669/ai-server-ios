@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D30000000000000000000001 /* KnowledgeCityFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */; };
 		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
 		C17A00000000000000000004 /* CityNewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000005 /* CityNewsTests.swift */; };
 		C17A00000000000000000006 /* CityMapRegions.geojson in Resources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000007 /* CityMapRegions.geojson */; };
@@ -71,6 +72,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		D3000000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 37F0B2007597DC862475646C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1BA618CF45A696DF721357E4;
+			remoteInfo = AIServerClient;
+		};
 		1C50566A059B87DBD436D9E3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 37F0B2007597DC862475646C /* Project object */;
@@ -110,6 +118,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeCityFlowUITests.swift; sourceTree = "<group>"; };
+		D30000000000000000000003 /* AIClientUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AIClientUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
 		C17A00000000000000000007 /* CityMapRegions.geojson */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = CityMaps/CityMapRegions.geojson; sourceTree = "<group>"; };
 		C17A00000000000000000005 /* CityNewsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsTests.swift; sourceTree = "<group>"; };
@@ -178,6 +188,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		D30000000000000000000005 /* AIClientUITests */ = {
+			isa = PBXGroup;
+			children = (
+				D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */,
+			);
+			path = AIClientUITests;
+			sourceTree = "<group>";
+		};
 		AA1000000000000000000003 /* GoogleSignal */ = {
 			isa = PBXGroup;
 			children = (
@@ -209,6 +227,7 @@
 			children = (
 				AB627736F386E322364D4CF2 /* AIClient */,
 				287F9373E17FFE1FC50C15E6 /* AIClientTests */,
+				D30000000000000000000005 /* AIClientUITests */,
 				A10000000000000000000007 /* NotificationServiceExtension */,
 				C20000000000000000000007 /* NotificationContentExtension */,
 				772B58C95655CED4643BB6A2 /* Products */,
@@ -255,6 +274,7 @@
 			isa = PBXGroup;
 			children = (
 				C41BF51CBE9570E400E536EE /* AIClientTests.xctest */,
+				D30000000000000000000003 /* AIClientUITests.xctest */,
 				7EEF5CEFD643AD59FF1351B3 /* AIServerClient.app */,
 				A10000000000000000000006 /* NotificationServiceExtension.appex */,
 				C20000000000000000000006 /* NotificationContentExtension.appex */,
@@ -396,6 +416,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		D30000000000000000000006 /* AIClientUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D3000000000000000000000F /* Build configuration list for PBXNativeTarget "AIClientUITests" */;
+			buildPhases = (
+				D30000000000000000000007 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D3000000000000000000000C /* PBXTargetDependency */,
+			);
+			name = AIClientUITests;
+			packageProductDependencies = (
+			);
+			productName = AIClientUITests;
+			productReference = D30000000000000000000003 /* AIClientUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		1BA618CF45A696DF721357E4 /* AIServerClient */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2C0BBEB2AD1834C6892FFF59 /* Build configuration list for PBXNativeTarget "AIServerClient" */;
@@ -484,6 +522,11 @@
 					9B03021EF69495E5B996EA2D = {
 						DevelopmentTeam = 9M7P4VLHY3;
 					};
+					D30000000000000000000006 = {
+						CreatedOnToolsVersion = 27.0;
+						DevelopmentTeam = 9M7P4VLHY3;
+						TestTargetID = 1BA618CF45A696DF721357E4;
+					};
 					A10000000000000000000008 = {
 						CreatedOnToolsVersion = 15.0;
 						DevelopmentTeam = 9M7P4VLHY3;
@@ -509,6 +552,7 @@
 			projectRoot = "";
 			targets = (
 				9B03021EF69495E5B996EA2D /* AIClientTests */,
+				D30000000000000000000006 /* AIClientUITests */,
 				1BA618CF45A696DF721357E4 /* AIServerClient */,
 				A10000000000000000000008 /* NotificationServiceExtension */,
 				C20000000000000000000008 /* NotificationContentExtension */,
@@ -529,6 +573,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		D30000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D30000000000000000000001 /* KnowledgeCityFlowUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000009 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -617,6 +669,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		D3000000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1BA618CF45A696DF721357E4 /* AIServerClient */;
+			targetProxy = D3000000000000000000000B /* PBXContainerItemProxy */;
+		};
 		11EE4C3BAE513956CEAE3026 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 1BA618CF45A696DF721357E4 /* AIServerClient */;
@@ -635,6 +692,36 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		D3000000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 9M7P4VLHY3;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = AIServerClient;
+			};
+			name = Debug;
+		};
+		D3000000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 9M7P4VLHY3;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = AIServerClient;
+			};
+			name = Release;
+		};
 		184AFCBFAB0DD3C35B59C46D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -919,6 +1006,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		D3000000000000000000000F /* Build configuration list for PBXNativeTarget "AIClientUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D3000000000000000000000D /* Debug */,
+				D3000000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		1CB8E601656193E6689EF54E /* Build configuration list for PBXProject "AIServerClient" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -22,6 +22,14 @@ on:
         options:
           - installed-local-fallback
           - published-local-fallback
+      device_id:
+        description: Installed iPhone identifier
+        required: false
+        type: string
+      device_name:
+        description: Installed iPhone name
+        required: false
+        type: string
 
 run-name: Reconcile local delivery for ${{ inputs.source_branch }}
 
@@ -43,4 +51,7 @@ jobs:
           IOS_DEPLOYMENT_COMMIT: ${{ inputs.source_sha }}
           IOS_DEPLOYMENT_SOURCE_BRANCH: ${{ inputs.source_branch }}
           IOS_DEPLOYMENT_RUN_ID: ${{ inputs.originating_run_id }}
+          IOS_DELIVERY_MODE: local-fallback
+          IOS_DEVICE_ID: ${{ inputs.device_id }}
+          IOS_DEVICE_NAME: ${{ inputs.device_name }}
         run: ./ci/report-ios-deployment.sh succeeded 1 '${{ inputs.stage }}'

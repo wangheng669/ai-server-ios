@@ -24,6 +24,7 @@ grep -Fq 'skips sources already merged into main' <<<"$merge_source"
 grep -Fq 'repository_variable IOS_DEVICE_UDID' <<<"$merge_source"
 grep -Fq 'report_local_delivery installed-local-fallback' <<<"$merge_source"
 grep -Fq 'gh workflow run local-central-delivery-report.yml' <<<"$merge_source"
+grep -Fq 'device_id="${IOS_DEVICE_ID:-$DEVICE_UDID}"' <<<"$merge_source"
 
 workflow_source=$(<.github/workflows/local-central-delivery-report.yml)
 grep -Fq 'workflow_dispatch:' <<<"$workflow_source"
