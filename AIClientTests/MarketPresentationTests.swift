@@ -93,7 +93,7 @@ final class MarketPresentationTests: XCTestCase {
 
         XCTAssertEqual(quote.detailPresentationName, "纳斯达克100 ETF")
         XCTAssertEqual(quote.detailInstrumentLabel, "QQQ · 指数代理 ETF")
-        XCTAssertEqual(quote.compactMarketName, "纳指100实时代理（QQQ）")
+        XCTAssertEqual(quote.compactMarketName, "纳指100")
     }
 
     func testCompactMarketNameRemovesFuturesNoise() throws {
@@ -101,6 +101,13 @@ final class MarketPresentationTests: XCTestCase {
         let quote = try JSONDecoder().decode(MarketQuote.self, from: data)
 
         XCTAssertEqual(quote.compactMarketName, "纳指 100 期货")
+    }
+
+    func testMarketAuxiliaryRequestsAreSplitIntoSmallBatches() {
+        let batches = marketRequestBatches(Array(0..<10), maximumConcurrentRequests: 3)
+
+        XCTAssertEqual(batches, [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]])
+        XCTAssertEqual(marketRequestBatches([1, 2], maximumConcurrentRequests: 0), [[1], [2]])
     }
 
     func testSentimentSnapshotCachePolicyUsesAvailableCacheOnWeakNetworks() {
