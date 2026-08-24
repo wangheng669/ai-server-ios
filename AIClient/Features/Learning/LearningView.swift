@@ -190,10 +190,7 @@ struct LearningView: View {
             KnowledgePagePalette.canvas.ignoresSafeArea()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    knowledgeResumeBar
-                    knowledgeEditorialFeed
-                }
+                knowledgeEditorialFeed
                 .padding(.bottom, 118)
             }
             .scrollIndicators(.hidden)
@@ -223,66 +220,6 @@ struct LearningView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: presentedSection)
     }
 
-    @ViewBuilder
-    private var knowledgeResumeBar: some View {
-        if let catalog = store.catalog {
-            let milestones = learningMilestones(from: stockTopics(in: catalog))
-            let completed = progressStore.completedCount(in: milestones.map(\.topic))
-            let currentIndex = milestones.firstIndex {
-                !progressStore.isCompleted($0.topic.id)
-            } ?? max(0, milestones.count - 1)
-
-            if milestones.indices.contains(currentIndex) {
-                let milestone = milestones[currentIndex]
-                Button {
-                    selectedRoute = route(for: milestone, at: currentIndex, total: milestones.count)
-                } label: {
-                    VStack(alignment: .leading, spacing: 9) {
-                        HStack(alignment: .bottom, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("继续学习")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(Color.primary.opacity(0.56))
-                                Text("股票入门 · \(milestone.title)")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer(minLength: 0)
-
-                            Text("第 \(currentIndex + 1) / \(milestones.count) 步")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(Color.primary.opacity(0.58))
-                                .monospacedDigit()
-                        }
-
-                        ProgressView(
-                            value: Double(completed),
-                            total: Double(max(1, milestones.count))
-                        )
-                        .tint(KnowledgePagePalette.accent)
-                    }
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(LearningPressStyle())
-                .padding(.horizontal, 20)
-                .padding(.top, 14)
-            }
-        } else {
-            HStack(spacing: 12) {
-                ProgressView()
-                Text("正在准备学习内容")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 28)
-        }
-    }
-
     private var knowledgeEditorialFeed: some View {
         VStack(spacing: 14) {
             knowledgeInvestmentFeature
@@ -291,6 +228,7 @@ struct LearningView: View {
             knowledgeIdeologyRow
         }
         .padding(.horizontal, 16)
+        .padding(.top, 14)
     }
 
     private func knowledgeSectionCount(_ section: KnowledgeSection) -> String {
@@ -308,12 +246,13 @@ struct LearningView: View {
 
     private var knowledgeInvestmentFeature: some View {
         let lesson = store.videoLibrary?.lessons.first
-        return Button {
-            presentedSection = .investment
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                knowledgeEditorialHeader(.investment)
+        return VStack(alignment: .leading, spacing: 12) {
+            knowledgeEditorialHeader(.investment)
+            knowledgeInvestmentResume
 
+            Button {
+                presentedSection = .investment
+            } label: {
                 HStack(spacing: 13) {
                     AsyncImage(url: lesson?.coverURL) { phase in
                         if case let .success(image) = phase {
@@ -350,13 +289,78 @@ struct LearningView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(LearningPressStyle())
+            .accessibilityHint("以弹窗展示投资学习")
 
-                knowledgeSectionDivider
+            knowledgeSectionDivider
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var knowledgeInvestmentResume: some View {
+        if let catalog = store.catalog {
+            let milestones = learningMilestones(from: stockTopics(in: catalog))
+            let completed = progressStore.completedCount(in: milestones.map(\.topic))
+            let currentIndex = milestones.firstIndex {
+                !progressStore.isCompleted($0.topic.id)
+            } ?? max(0, milestones.count - 1)
+
+            if milestones.indices.contains(currentIndex) {
+                let milestone = milestones[currentIndex]
+                Button {
+                    selectedRoute = route(for: milestone, at: currentIndex, total: milestones.count)
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .bottom, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("继续学习 · 股票入门")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(KnowledgePagePalette.accent)
+                                Text(milestone.title)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: 0)
+
+                            Text("第 \(currentIndex + 1) / \(milestones.count) 步")
+                                .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                                .foregroundStyle(Color.primary.opacity(0.58))
+                                .monospacedDigit()
+                        }
+
+                        ProgressView(
+                            value: Double(completed),
+                            total: Double(max(1, milestones.count))
+                        )
+                        .tint(KnowledgePagePalette.accent)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(KnowledgePagePalette.accent.opacity(0.065))
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(LearningPressStyle())
+                .accessibilityHint("继续当前投资课程")
+            }
+        } else {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("正在准备学习内容")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.primary.opacity(0.56))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 16)
+            .background(Color.primary.opacity(0.035))
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         }
-        .buttonStyle(LearningPressStyle())
-        .accessibilityHint("以弹窗展示投资学习")
     }
 
     private var knowledgeBooksRow: some View {
