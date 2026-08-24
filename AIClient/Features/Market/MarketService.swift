@@ -1,4 +1,10 @@
 import Foundation
+import OSLog
+
+private let marketServiceLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "AIServerClient",
+    category: "MarketService"
+)
 
 struct MarketService {
     let baseURL: URL
@@ -213,8 +219,7 @@ struct MarketService {
         }
         guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
-        do { return try JSONDecoder().decode(type, from: data) }
-        catch { throw MarketServiceError.decoding(error) }
+        return try decode(data, response: http, url: url, as: type)
     }
 
     private func request<Response: Decodable>(
@@ -234,8 +239,92 @@ struct MarketService {
         }
         guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
-        do { return try JSONDecoder().decode(type, from: data) }
-        catch { throw MarketServiceError.decoding(error) }
+        return try decode(data, response: http, url: request.url, as: type)
+    }
+
+    private func decode<Response: Decodable>(
+        _ data: Data,
+        response: HTTPURLResponse,
+        url: URL?,
+        as type: Response.Type
+    ) throws -> Response {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            let diagnostic = marketDecodingDiagnostic(error)
+            let requestID = response.value(forHTTPHeaderField: "x-request-id") ?? "missing"
+            let contentType = response.value(forHTTPHeaderField: "content-type") ?? "missing"
+            marketServiceLogger.error(
+                "Decoding failed endpoint=\(url?.path ?? "unknown", privacy: .public) request_id=\(requestID, privacy: .public) response_type=\(String(reflecting: type), privacy: .public) bytes=\(data.count) content_type=\(contentType, privacy: .public) category=\(diagnostic.category, privacy: .public) path=\(diagnostic.path, privacy: .public) expected=\(diagnostic.expectedType ?? "unknown", privacy: .public) detail=\(diagnostic.detail, privacy: .public)"
+            )
+            throw MarketServiceError.decoding(error)
+        }
+    }
+}
+
+struct MarketDecodingDiagnostic: Equatable {
+    let category: String
+    let path: String
+    let expectedType: String?
+    let detail: String
+}
+
+func marketDecodingDiagnostic(_ error: Error) -> MarketDecodingDiagnostic {
+    guard let error = error as? DecodingError else {
+        return MarketDecodingDiagnostic(
+            category: String(describing: type(of: error)),
+            path: "$",
+            expectedType: nil,
+            detail: error.localizedDescription
+        )
+    }
+
+    switch error {
+    case let .typeMismatch(type, context):
+        return MarketDecodingDiagnostic(
+            category: "typeMismatch",
+            path: marketDecodingPath(context.codingPath),
+            expectedType: String(reflecting: type),
+            detail: context.debugDescription
+        )
+    case let .valueNotFound(type, context):
+        return MarketDecodingDiagnostic(
+            category: "valueNotFound",
+            path: marketDecodingPath(context.codingPath),
+            expectedType: String(reflecting: type),
+            detail: context.debugDescription
+        )
+    case let .keyNotFound(key, context):
+        return MarketDecodingDiagnostic(
+            category: "keyNotFound",
+            path: marketDecodingPath(context.codingPath + [key]),
+            expectedType: nil,
+            detail: context.debugDescription
+        )
+    case let .dataCorrupted(context):
+        return MarketDecodingDiagnostic(
+            category: "dataCorrupted",
+            path: marketDecodingPath(context.codingPath),
+            expectedType: nil,
+            detail: context.debugDescription
+        )
+    @unknown default:
+        return MarketDecodingDiagnostic(
+            category: "unknown",
+            path: "$",
+            expectedType: nil,
+            detail: error.localizedDescription
+        )
+    }
+}
+
+private func marketDecodingPath(_ codingPath: [CodingKey]) -> String {
+    codingPath.reduce(into: "$") { path, key in
+        if let index = key.intValue {
+            path += "[\(index)]"
+        } else {
+            path += ".\(key.stringValue)"
+        }
     }
 }
 
