@@ -1526,7 +1526,7 @@ final class RetailSentimentStore {
             guard let remote = marketSnapshots[market] else { return nil }
             return SentimentSnapshot(
                 score: remote.score,
-                label: remote.label,
+                label: SentimentSnapshot.displayLabel(for: remote.label),
                 primaryTitle: "估值温度",
                 primaryValue: remote.valuationPercentile,
                 secondaryTitle: "情绪温度",
@@ -1539,7 +1539,7 @@ final class RetailSentimentStore {
             guard let remote = marketSnapshots[market] else { return nil }
             return SentimentSnapshot(
                 score: remote.score,
-                label: remote.label,
+                label: SentimentSnapshot.displayLabel(for: remote.label),
                 primaryTitle: "估值温度",
                 primaryValue: remote.valuationPercentile,
                 secondaryTitle: "情绪温度",
@@ -1549,7 +1549,18 @@ final class RetailSentimentStore {
                 detail: "与 A 股采用相同公式：标普 500 当前市盈率的历史百分位，与核心成分上涨家数占比的近一年历史百分位等权合成。"
             )
         case .korea:
-            return nil
+            guard let remote = marketSnapshots[market] else { return nil }
+            return SentimentSnapshot(
+                score: remote.score,
+                label: SentimentSnapshot.displayLabel(for: remote.label),
+                primaryTitle: "杠杆温度",
+                primaryValue: remote.koreaLeverage?.leverageThermometer.value,
+                secondaryTitle: "强平压力",
+                secondaryValue: remote.koreaLeverage?.forcedLiquidation.percentile10Y,
+                formula: "韩国散户杠杆风险",
+                fetchedAt: remote.fetchedAt,
+                detail: "结合融资余额、杠杆 ETF、投资者存管金与强平压力衡量韩国散户情绪。"
+            )
         }
     }
 
@@ -1666,6 +1677,7 @@ enum SentimentMarket: String, CaseIterable, Identifiable {
     case korea
 
     var id: Self { self }
+    static let marketOverviewOrder: [Self] = [.china, .hongKong, .korea, .unitedStates]
     var title: String {
         switch self {
         case .china: "A 股"
@@ -1878,6 +1890,14 @@ struct SentimentSnapshot {
         case ..<70: "正常"
         case ..<90: "偏热"
         default: "极热"
+        }
+    }
+
+    static func displayLabel(for rawValue: String) -> String {
+        switch rawValue.lowercased() {
+        case "critical": "高风险"
+        case "warning": "预警"
+        default: rawValue
         }
     }
 }
