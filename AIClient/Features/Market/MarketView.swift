@@ -219,7 +219,7 @@ private struct MarketSentimentSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("市场情绪")
+                Text("散户正在说")
                     .font(.headline)
                 Spacer()
                 Button { dismiss() } label: {
@@ -229,7 +229,7 @@ private struct MarketSentimentSheet: View {
                         .background(Color.secondary.opacity(0.12), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("关闭市场情绪")
+                .accessibilityLabel("关闭散户正在说")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -421,7 +421,7 @@ private struct MarketSentimentOverviewStrip: View {
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("打开完整市场情绪")
+                .accessibilityLabel("打开散户正在说")
                 Spacer()
                 Button(action: onOpenMacro) {
                     HStack(spacing: 3) {
@@ -479,7 +479,7 @@ private struct MarketSentimentOverviewStrip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(market.title)市场情绪")
         .accessibilityValue(snapshot.map { "\(Int($0.score.rounded()))分，\($0.label)" } ?? (isLoading ? "加载中" : "暂无数据"))
-        .accessibilityHint("打开完整市场情绪")
+        .accessibilityHint("查看散户观点")
     }
 
     private func sentimentLabel(snapshot: SentimentSnapshot?, isLoading: Bool) -> String {
