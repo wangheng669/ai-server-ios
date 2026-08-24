@@ -1916,7 +1916,7 @@ enum RetailSentimentFormat {
     static func moodColor(_ label: String) -> Color {
         if label.contains("悲观") || label.contains("恐慌") || label.contains("看空") { return .green }
         if label.contains("乐观") || label.contains("兴奋") || label.contains("看多") { return .red }
-        return .secondary
+        return InvestmentDesign.accent
     }
 
     private static func isoDate(_ value: String) -> Date? {
