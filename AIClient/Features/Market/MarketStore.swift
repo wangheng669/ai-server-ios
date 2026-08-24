@@ -78,6 +78,12 @@ final class MarketStore {
     }
 
     func refresh(force: Bool = true) async {
+        if !force,
+           let lastSnapshotRefreshAt,
+           Date().timeIntervalSince(lastSnapshotRefreshAt) < 5,
+           dashboard != nil {
+            return
+        }
         guard !isRefreshing else { return }
         isRefreshing = true
         if dashboard == nil { isLoading = true }
@@ -106,6 +112,20 @@ final class MarketStore {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func applyBootstrap(_ value: MarketDashboard, receivedAt: Date = Date()) {
+        var value = value
+        for update in latestRealtimeUpdates.values {
+            value.merge(update)
+        }
+        dashboardQuotesBySymbol = Self.quoteIndex(for: value)
+        dashboard = value
+        lastSnapshotRefreshAt = receivedAt
+        isShowingCachedSnapshot = false
+        cacheSavedAt = nil
+        errorMessage = marketHealthMessage(for: value)
+        scheduleMissingTrendBackfill()
     }
 
     func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
@@ -337,6 +357,7 @@ final class MarketStore {
     private func loadCacheIfNeeded() {
         guard !loadedCache else { return }
         loadedCache = true
+        guard dashboard == nil else { return }
         guard let snapshot = MarketSnapshotCache.load() else { return }
         dashboardQuotesBySymbol = Self.quoteIndex(for: snapshot.dashboard)
         dashboard = snapshot.dashboard

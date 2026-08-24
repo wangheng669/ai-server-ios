@@ -152,10 +152,12 @@ struct MarketView: View {
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
+            await sentimentStore.preload(marketStore: store)
             await store.runUpdates()
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
+            await sentimentStore.preload(marketStore: store)
             await sentimentStore.load(marketStore: store)
             async let hongKong: Void = sentimentStore.loadDetails(for: .hongKong)
             async let korea: Void = sentimentStore.loadDetails(for: .korea)

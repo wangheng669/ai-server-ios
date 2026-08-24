@@ -24,6 +24,13 @@ struct MarketService {
         return try await request(url, as: MarketDashboardResponse.self, bypassCache: refresh).data
     }
 
+    func bootstrap() async throws -> MarketBootstrap {
+        let url = baseURL.appending(path: "api/ios/v1/market/bootstrap")
+        var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        urlRequest.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        return try await request(urlRequest, as: MarketBootstrapResponse.self).data
+    }
+
     func chart(symbol: String, range: MarketRange, refresh: Bool = false) async throws -> MarketChart {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/chart"), resolvingAgainstBaseURL: false)
         var queryItems: [URLQueryItem] = [

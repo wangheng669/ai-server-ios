@@ -165,6 +165,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertFalse(snapshot.stale)
     }
 
+    func testDecodesMarketBootstrapFirstScreenContract() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_bootstrap_v1","generatedAt":"2026-08-24T01:00:00Z","dashboard":{"dataContract":"market_dashboard_v4","definitionVersion":"test","generatedAt":"2026-08-24T01:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"componentsByRegion":{},"crypto":[],"commodities":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]},"temperature":{"dataContract":"market_ashare_temperature_v3","days":90,"latest":{"ai_server":{"composite_temperature":{"value":48,"label":"正常","tradeDate":"2026-08-22","fetchedAt":"2026-08-22T07:00:00Z"}}}},"sentimentSnapshots":{"hong-kong":{"dataContract":"market_sentiment_snapshot_v1","market":"hong-kong","score":52,"label":"正常","fetchedAt":"2026-08-24T01:00:00Z","cached":true,"stale":false}},"errors":{"korea":"delayed"}}}"#.utf8)
+
+        let bootstrap = try JSONDecoder().decode(MarketBootstrapResponse.self, from: data).data
+
+        XCTAssertEqual(bootstrap.dataContract, "market_bootstrap_v1")
+        XCTAssertEqual(bootstrap.dashboard.dataContract, "market_dashboard_v4")
+        XCTAssertEqual(bootstrap.temperature?.latest.aiServer?.compositeTemperature?.value, 48)
+        XCTAssertEqual(bootstrap.sentimentSnapshots["hong-kong"]?.score, 52)
+        XCTAssertEqual(bootstrap.errors?["korea"], "delayed")
+    }
+
     func testDecodesServerBackedInstitutionResearch() throws {
         let data = Data(#"{"data":{"institutionsCount":3,"items":[{"id":"morgan-stanley-more-stocks-join-bull-market","institution":"Morgan Stanley","institutionShortName":"MS","title":"更多股票加入牛市","originalTitle":"More Stocks Join the Bull Market","summary":"市场领导力正在扩散。","publishedOn":"2026-07-22","sourceType":"官方播客文字稿","categories":["美股","市场广度"],"metrics":[],"source":{"title":"More Stocks Join the Bull Market","url":"https://www.morganstanley.com/insights/example"},"isSystemSummary":true,"presentation":"lead"},{"id":"goldman-sp500-forecast-2026","institution":"Goldman Sachs","institutionShortName":"GS","title":"盈利增长推动美股上行","originalTitle":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","summary":"盈利预测上调。","publishedOn":"2026-05-28","sourceType":"官方研究文章","categories":["美股"],"metrics":[{"label":"2026 EPS","value":"$340"}],"targetRevision":{"label":"标普500年末目标","previousValue":"7,600","currentValue":"8,000"},"source":{"title":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","url":"https://www.goldmansachs.com/insights/example"},"isSystemSummary":true,"presentation":"revision"}],"updatedAt":"2026-08-10T00:00:00Z"}}"#.utf8)
         let decoder = JSONDecoder()
