@@ -14,7 +14,7 @@ if ! git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
       --deepen="$deepen_by" \
       origin \
       "$source_sha" \
-      main:refs/remotes/origin/main
+      +main:refs/remotes/origin/main
     if git merge-base "$source_sha" origin/main >/dev/null 2>&1; then
       break
     fi

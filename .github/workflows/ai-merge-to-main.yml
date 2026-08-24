@@ -80,7 +80,7 @@ jobs:
             --no-tags \
             --depth=64 \
             origin \
-            main:refs/remotes/origin/main
+            +main:refs/remotes/origin/main
           ./ci/report-ios-deployment.sh running 0.01 central-preparing || true
           ./ci/prepare-central-runner-parallel.sh
 
@@ -106,7 +106,7 @@ jobs:
             --no-tags \
             --depth=64 \
             origin \
-            main:refs/remotes/origin/main
+            +main:refs/remotes/origin/main
           for deepen_by in 128 256 512; do
             if git merge-base "$SOURCE_SHA" origin/main >/dev/null 2>&1; then
               break
