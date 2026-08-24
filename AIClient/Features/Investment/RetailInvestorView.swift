@@ -42,54 +42,17 @@ struct RetailInvestorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if selectedMarket == .korea {
-                        marketPicker
-                            .dashboardSurface()
-                    } else {
-                        VStack(spacing: 0) {
-                            marketPicker
-                            Divider().overlay(InvestmentDesign.divider)
-                            sentimentDecisionHero
-                        }
-                        .dashboardSurface()
-                    }
-                    if let message = selectedMarket == .china
-                        ? store.errorMessage
-                        : store.detailErrorMessage(for: selectedMarket) {
-                        errorBanner(message) {
-                            Task {
-                                if selectedMarket == .china {
-                                    await store.load(marketStore: marketStore, force: true)
-                                } else {
-                                    await store.loadDetails(for: selectedMarket, force: true)
-                                }
-                            }
-                        }
-                    }
-                    if selectedMarket == .korea {
-                        koreaLeverageContent
-                            .background(InvestmentDesign.surface)
-                            .dashboardSurface()
-                    } else {
-                        if selectedMarket == .china {
-                            chinaSupplementCard.dashboardSurface()
-                        }
-                        methodologyNote
-                    }
-                }
+                investorMoodContent(showsHeader: false)
+                    .background(InvestmentDesign.surface)
+                    .dashboardSurface()
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
-                .padding(.bottom, 92)
+                .padding(.bottom, 24)
             }
             .background(InvestmentDesign.canvas)
             .task(id: rootTabIsActive) {
                 guard rootTabIsActive else { return }
                 await store.load(marketStore: marketStore)
-            }
-            .task(id: "\(rootTabIsActive):\(selectedMarket.rawValue)") {
-                guard rootTabIsActive else { return }
-                await store.loadDetails(for: selectedMarket)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
@@ -659,16 +622,22 @@ struct RetailInvestorView: View {
     }
 
     private var investorMoodCard: some View {
+        investorMoodContent(showsHeader: true)
+    }
+
+    private func investorMoodContent(showsHeader: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("散户正在说")
-                    .font(.system(size: 18, weight: .bold))
-                Spacer()
-                Text("视频由后台自动解读")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.tertiary)
+            if showsHeader {
+                HStack {
+                    Text("散户正在说")
+                        .font(.system(size: 18, weight: .bold))
+                    Spacer()
+                    Text("视频由后台自动解读")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
             if store.investorMood?.items.isEmpty != false {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
@@ -676,7 +645,7 @@ struct RetailInvestorView: View {
                 investorMoodList(items)
             }
         }
-        .padding(.top, 16)
+        .padding(.top, showsHeader ? 16 : 12)
         .padding(.bottom, 10)
     }
 
