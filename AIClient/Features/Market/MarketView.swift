@@ -52,6 +52,16 @@ struct MarketView: View {
     private let store: MarketStore
     private let sentimentStore: RetailSentimentStore
     private let onCompactHeaderChange: (Bool) -> Void
+    @State private var globalRankingStore: GlobalRankingStore
+    @State private var showsGlobalRanking = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--global-assets-preview") ||
+            ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") })
+        #else
+        false
+        #endif
+    }()
     @State private var showsMacro = {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("--market-macro-sheet-preview")
@@ -99,6 +109,7 @@ struct MarketView: View {
         self.sentimentStore = sentimentStore
         self.onCompactHeaderChange = onCompactHeaderChange
         _showsDetail = showsDetail
+        _globalRankingStore = State(initialValue: GlobalRankingStore())
     }
 
     @MainActor
@@ -127,8 +138,33 @@ struct MarketView: View {
                 selectedSentimentMarket = market
                 showsDetail = true
             },
+            rankingStore: globalRankingStore,
+            onOpenGlobalRanking: {
+                showsGlobalRanking = true
+                showsDetail = true
+            },
             onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) }
         )
+        .sheet(isPresented: $showsGlobalRanking, onDismiss: {
+            showsDetail = false
+        }) {
+            NavigationStack {
+                CountryGDPRankingView(store: globalRankingStore)
+                    .navigationTitle("全球排行")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showsGlobalRanking = false }
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+            .presentationDetents([.fraction(0.82), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.surface)
+            .presentationContentInteraction(.resizes)
+        }
         .sheet(isPresented: $showsMacro, onDismiss: {
             showsDetail = false
         }) {
@@ -204,7 +240,9 @@ struct MarketView: View {
                 showsDetail = true
             }
         }
-        .onAppear { showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil }
+        .onAppear {
+            showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil || showsGlobalRanking
+        }
         .onDisappear { showsDetail = false }
     }
 }
@@ -269,6 +307,8 @@ private struct MarketHomeView: View {
     let onCompactHeaderChange: (Bool) -> Void
     let onOpenMacro: () -> Void
     let onOpenSentiment: (SentimentMarket) -> Void
+    let rankingStore: GlobalRankingStore
+    let onOpenGlobalRanking: () -> Void
     let onSelectIndex: (String) -> Void
     @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
@@ -317,12 +357,17 @@ private struct MarketHomeView: View {
                         .background(MarketStyle.surface)
 
                         VStack(spacing: MarketStyle.pageSpacing) {
+                            GlobalRankingSummaryCard(
+                                store: rankingStore,
+                                onOpen: onOpenGlobalRanking
+                            )
+                            .padding(.top, MarketStyle.pageSpacing)
+
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
                                     message: error,
                                     isRetrying: store.isRetrying
                                 ) { await store.refresh() }
-                                .padding(.top, MarketStyle.pageSpacing)
                             }
                             MarketIndexTable(
                                 region: selectedMarket,
@@ -414,6 +459,120 @@ private struct MarketHomeView: View {
     private func selectIndex(_ symbol: String) {
         guard !blocksSelectionDuringRegionSwipe else { return }
         onSelectIndex(symbol)
+    }
+}
+
+private struct GlobalRankingSummaryCard: View {
+    let store: GlobalRankingStore
+    let onOpen: () -> Void
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+
+    private var countryLeader: CountryGDP? { store.countryGDP?.countries.first }
+    private var assetLeader: GlobalAsset? { store.globalAssets?.assets.first }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack {
+                    Label("全球排行", systemImage: "chart.bar.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    HStack(spacing: 3) {
+                        Text("查看全部")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(MarketStyle.accent)
+                }
+
+                HStack(spacing: 0) {
+                    summaryColumn(
+                        title: "最大经济体",
+                        name: countryLeader?.localizedName,
+                        value: countryLeader.map { "$" + CountryGDPFormat.ranking($0.gdpCurrentUSD) },
+                        badge: countryLeader.map { "GDP #\($0.rank)" },
+                        failed: store.countryGDPLoadFailed
+                    )
+
+                    Rectangle()
+                        .fill(MarketStyle.divider)
+                        .frame(width: 0.5, height: 52)
+                        .padding(.horizontal, 12)
+
+                    summaryColumn(
+                        title: "最大资产",
+                        name: assetLeader?.name,
+                        value: assetLeader.map { GlobalAssetsFormat.marketCap($0.marketCapUSD) },
+                        badge: assetLeader.map { "资产 #\($0.rank)" },
+                        failed: store.globalAssetsLoadFailed
+                    )
+                }
+
+                Text("国家 GDP · 全球资产市值排行")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(MarketStyle.accent.opacity(0.18), lineWidth: 0.8)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("全球排行")
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint("打开国家 GDP 与全球资产排行")
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.loadSummary()
+        }
+    }
+
+    private func summaryColumn(
+        title: String,
+        name: String?,
+        value: String?,
+        badge: String?,
+        failed: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(name ?? (failed ? "暂不可用" : "加载中"))
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            HStack(spacing: 7) {
+                Text(value ?? "—")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundStyle(MarketStyle.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(MarketStyle.accent.opacity(0.10), in: Capsule())
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var accessibilityValue: String {
+        let country = countryLeader.map { "最大经济体\($0.localizedName)" } ?? "最大经济体数据加载中"
+        let asset = assetLeader.map { "最大资产\($0.name)" } ?? "最大资产数据加载中"
+        return "\(country)，\(asset)"
     }
 }
 

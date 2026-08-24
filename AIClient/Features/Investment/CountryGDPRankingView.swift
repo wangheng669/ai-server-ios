@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 enum GDPDesign {
     static let porcelain = InvestmentDesign.surface
@@ -179,17 +180,67 @@ struct GlobalAssetsService {
     }
 }
 
+@MainActor
+@Observable
+final class GlobalRankingStore {
+    private(set) var countryGDP: CountryGDPRanking?
+    private(set) var globalAssets: GlobalAssetsRanking?
+    private(set) var isLoadingCountryGDP = false
+    private(set) var isLoadingGlobalAssets = false
+    private(set) var countryGDPLoadFailed = false
+    private(set) var globalAssetsLoadFailed = false
+
+    private let countryGDPService: CountryGDPService
+    private let globalAssetsService: GlobalAssetsService
+
+    init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession = .shared) {
+        countryGDPService = CountryGDPService(baseURL: baseURL, session: session)
+        globalAssetsService = GlobalAssetsService(baseURL: baseURL, session: session)
+    }
+
+    func loadSummary() async {
+        async let countryGDP: Void = loadCountryGDP()
+        async let globalAssets: Void = loadGlobalAssets()
+        _ = await (countryGDP, globalAssets)
+    }
+
+    func loadCountryGDP() async {
+        guard !isLoadingCountryGDP else { return }
+        isLoadingCountryGDP = true
+        countryGDPLoadFailed = false
+        defer { isLoadingCountryGDP = false }
+        do {
+            countryGDP = try await countryGDPService.ranking()
+        } catch is CancellationError {
+            return
+        } catch {
+            if countryGDP == nil { countryGDPLoadFailed = true }
+        }
+    }
+
+    func loadGlobalAssets() async {
+        guard !isLoadingGlobalAssets else { return }
+        isLoadingGlobalAssets = true
+        globalAssetsLoadFailed = false
+        defer { isLoadingGlobalAssets = false }
+        do {
+            globalAssets = try await globalAssetsService.ranking()
+        } catch is CancellationError {
+            return
+        } catch {
+            if globalAssets == nil { globalAssetsLoadFailed = true }
+        }
+    }
+}
+
 struct CountryGDPRankingView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
-    @Binding var showsDetail: Bool
+    let store: GlobalRankingStore
     @State private var category: GlobalRankingCategory
-    @State private var ranking: CountryGDPRanking?
-    @State private var isLoading = true
-    @State private var loadFailed = false
     @State private var selectedCountry: CountryGDPRoute?
 
-    init(showsDetail: Binding<Bool>) {
-        _showsDetail = showsDetail
+    init(store: GlobalRankingStore) {
+        self.store = store
         #if DEBUG
         _category = State(
             initialValue: ProcessInfo.processInfo.arguments.contains("--global-assets-preview")
@@ -207,30 +258,27 @@ struct CountryGDPRankingView: View {
 
             switch category {
             case .countryGDP:
-                NavigationStack {
-                    Group {
-                        if let ranking {
-                            ScrollView {
-                                LazyVStack(spacing: 0) {
-                                    overview(ranking)
-                                    rankingSection(ranking)
-                                    sourceFooter(ranking)
-                                }
-                                .padding(.bottom, 28)
+                Group {
+                    if let ranking = store.countryGDP {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                overview(ranking)
+                                rankingSection(ranking)
+                                sourceFooter(ranking)
                             }
-                            .background(InvestmentDesign.surface)
-                            .scrollIndicators(.hidden)
-                        } else if isLoading {
-                            loadingState
-                        } else {
-                            errorState
+                            .padding(.bottom, 28)
                         }
+                        .background(InvestmentDesign.surface)
+                        .scrollIndicators(.hidden)
+                    } else if store.isLoadingCountryGDP || !store.countryGDPLoadFailed {
+                        loadingState
+                    } else {
+                        errorState
                     }
-                    .background(InvestmentDesign.surface)
-                    .toolbar(.hidden, for: .navigationBar)
                 }
+                .background(InvestmentDesign.surface)
             case .globalAssets:
-                GlobalAssetsRankingView()
+                GlobalAssetsRankingView(store: store)
             }
         }
         .background(InvestmentDesign.surface)
@@ -242,12 +290,20 @@ struct CountryGDPRankingView: View {
                 .presentationBackground(InvestmentDesign.surface)
         }
         .task(id: "\(rootTabIsActive):\(category.rawValue)") {
-            if rootTabIsActive, category == .countryGDP, ranking == nil {
-                await load()
+            if rootTabIsActive, category == .countryGDP, store.countryGDP == nil {
+                await store.loadCountryGDP()
             }
+            #if DEBUG
+            if rootTabIsActive,
+               selectedCountry == nil,
+               let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--gdp-detail-preview=") }),
+               let country = store.countryGDP?.countries.first(where: {
+                   $0.countryCode == String(argument.dropFirst("--gdp-detail-preview=".count)).uppercased()
+               }) {
+                selectedCountry = CountryGDPRoute(country: country)
+            }
+            #endif
         }
-        .onAppear { showsDetail = false }
-        .onDisappear { showsDetail = false }
     }
 
     private var categoryPicker: some View {
@@ -490,35 +546,13 @@ struct CountryGDPRankingView: View {
             Text("服务器未返回可用的排名数据")
         } actions: {
             Button("重新加载") {
-                Task { await load() }
+                Task { await store.loadCountryGDP() }
             }
             .buttonStyle(.borderedProminent)
         }
         .frame(minHeight: 320)
     }
 
-    @MainActor
-    private func load() async {
-        if ranking == nil { isLoading = true }
-        loadFailed = false
-        defer { isLoading = false }
-        do {
-            ranking = try await CountryGDPService().ranking()
-            #if DEBUG
-            if selectedCountry == nil,
-               let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--gdp-detail-preview=") }),
-               let country = ranking?.countries.first(where: {
-                   $0.countryCode == String(argument.dropFirst("--gdp-detail-preview=".count)).uppercased()
-               }) {
-                selectedCountry = CountryGDPRoute(country: country)
-            }
-            #endif
-        } catch is CancellationError {
-            return
-        } catch {
-            if ranking == nil { loadFailed = true }
-        }
-    }
 }
 
 struct FlatCountryFlag: View {
