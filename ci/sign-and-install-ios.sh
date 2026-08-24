@@ -24,8 +24,9 @@ sync_metrics_env() {
 write_metrics() {
   sync_metrics_env
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-    printf 'device_wait_seconds=%s\ndirect_install_seconds=%s\nxcode_recovery_seconds=%s\nfinal_install_seconds=%s\n' \
-      "$device_wait_duration_seconds" "$direct_install_seconds" "$xcode_recovery_seconds" "$final_install_seconds" >> "$GITHUB_OUTPUT"
+    printf 'device_wait_seconds=%s\ndirect_install_seconds=%s\nxcode_recovery_seconds=%s\nfinal_install_seconds=%s\ndevice_id=%s\ndevice_name=%s\n' \
+      "$device_wait_duration_seconds" "$direct_install_seconds" "$xcode_recovery_seconds" "$final_install_seconds" \
+      "${IOS_DEVICE_ID:-$DEVICE_UDID}" "${IOS_DEVICE_NAME:-}" >> "$GITHUB_OUTPUT"
   fi
 }
 
@@ -51,35 +52,28 @@ security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" \
 
 device_attempts=${IOS_DEVICE_WAIT_ATTEMPTS:-12}
 device_wait_seconds=${IOS_DEVICE_WAIT_SECONDS:-5}
-device_available=false
 device_wait_started_epoch=$(date +%s)
+device_ready_json=$(mktemp "$RUNNER_TEMP/ios-install-device.XXXXXX")
 
 if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
   ./ci/report-ios-deployment.sh running 0.82 checking-device || true
 fi
 
-for ((attempt = 1; attempt <= device_attempts; attempt++)); do
-  if xcrun devicectl device info details --device "$DEVICE_UDID" >/dev/null 2>&1; then
-    device_available=true
-    echo "iPhone is available (attempt $attempt/$device_attempts)."
-    break
-  fi
-
-  if [[ "$attempt" -lt "$device_attempts" ]]; then
-    echo "Waiting for iPhone $DEVICE_UDID (attempt $attempt/$device_attempts)..."
-    if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
-      ./ci/report-ios-deployment.sh running 0.86 waiting-for-device || true
-    fi
-    sleep "$device_wait_seconds"
-  fi
-done
-device_wait_duration_seconds=$(($(date +%s) - device_wait_started_epoch))
-sync_metrics_env
-
-if [[ "$device_available" != true ]]; then
-  echo "The configured iPhone did not become available after $device_attempts attempts: $DEVICE_UDID" >&2
-  exit 1
+if [[ -n "${DEPLOYMENT_STATUS_API_KEY:-}" ]]; then
+  ./ci/report-ios-deployment.sh running 0.86 waiting-for-device || true
 fi
+IOS_DEVICE_STABILITY_ATTEMPTS=1 \
+IOS_DEVICE_STABILITY_MAX_ATTEMPTS="$device_attempts" \
+IOS_DEVICE_STABILITY_INTERVAL_SECONDS="$device_wait_seconds" \
+IOS_DEVICE_READY_JSON="$device_ready_json" \
+  ./ci/verify-ios-device-stability.sh
+device_wait_duration_seconds=$(($(date +%s) - device_wait_started_epoch))
+export IOS_DEVICE_ID
+export IOS_DEVICE_NAME
+IOS_DEVICE_ID=$(jq -r '.deviceId' "$device_ready_json")
+IOS_DEVICE_NAME=$(jq -r '.deviceName' "$device_ready_json")
+rm -f "$device_ready_json"
+sync_metrics_env
 
 install_root=$(dirname "$APP_PATH")
 mkdir -p "$install_root"

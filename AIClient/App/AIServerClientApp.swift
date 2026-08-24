@@ -588,6 +588,7 @@ private struct RootNavigationBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+        .accessibilityIdentifier("root-tab-\(title)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

@@ -581,6 +581,7 @@ struct LearningView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .buttonStyle(LearningPressStyle())
+        .accessibilityIdentifier("knowledge-city-entry")
         .accessibilityHint("以弹窗展示城市观察")
     }
 
