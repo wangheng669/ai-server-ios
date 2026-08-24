@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 private enum MarketStyle {
-    static let canvas = InvestmentDesign.canvas
+    static let canvas = InvestmentDesign.surface
     static let surface = InvestmentDesign.surface
     static let divider = InvestmentDesign.divider
     static let gain = InvestmentDesign.gain
@@ -294,27 +294,17 @@ private struct MarketSentimentOverviewStrip: View {
             Text(snapshot.map { String(Int($0.score.rounded())) } ?? "—")
                 .font(.system(size: 20, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(sentimentTint(snapshot?.score))
+                .foregroundStyle(.primary)
                 .contentTransition(.numericText())
             Text(sentimentLabel(snapshot: snapshot, isLoading: isLoading))
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(snapshot == nil ? Color.secondary : sentimentTint(snapshot?.score))
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(market.title)市场情绪")
         .accessibilityValue(snapshot.map { "\(Int($0.score.rounded()))分，\($0.label)" } ?? (isLoading ? "加载中" : "暂无数据"))
-    }
-
-    private func sentimentTint(_ score: Double?) -> Color {
-        guard let score else { return .secondary }
-        switch score {
-        case ..<30: return .blue
-        case ..<70: return InvestmentDesign.accent
-        case ..<90: return .orange
-        default: return InvestmentDesign.gain
-        }
     }
 
     private func sentimentLabel(snapshot: SentimentSnapshot?, isLoading: Bool) -> String {
