@@ -24,7 +24,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case market = "市场"
     case chinaMacro = "国内宏观"
     case institutionResearch = "机构研究"
-    case holdings = "知名投资人"
     case industries = "产业全景"
 
     var id: Self { self }
@@ -33,7 +32,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         switch self {
         case .market, .chinaMacro:
             .market
-        case .institutionResearch, .holdings, .industries:
+        case .institutionResearch, .industries:
             .research
         }
     }
@@ -43,7 +42,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         case .market: "行情"
         case .chinaMacro: "国内"
         case .institutionResearch: "机构"
-        case .holdings: "投资人"
         case .industries: "产业"
         }
     }
@@ -53,7 +51,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         case .market: "chart.line.uptrend.xyaxis"
         case .chinaMacro: "building.columns"
         case .institutionResearch: "doc.text.magnifyingglass"
-        case .holdings: "person.crop.circle.badge.checkmark"
         case .industries: "square.3.layers.3d"
         }
     }
@@ -70,7 +67,7 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
         case .market:
             [.market]
         case .research:
-            [.institutionResearch, .holdings, .industries]
+            [.institutionResearch, .industries]
         }
     }
 
@@ -96,10 +93,8 @@ struct InvestmentView: View {
     @State private var contentScale: CGFloat = 1
     @State private var contentOffset: CGFloat = 0
     @State private var transitionTask: Task<Void, Never>?
-    @State private var holdingsShowsDetail = false
     @State private var marketStore: MarketStore
     @State private var sentimentStore: RetailSentimentStore
-    @State private var holdingsStore = FamousHoldingsStore()
 
     @MainActor
     init(
@@ -112,9 +107,7 @@ struct InvestmentView: View {
         _sentimentStore = State(initialValue: sentimentStore ?? RetailSentimentStore())
         let initialSection: InvestmentSection
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") {
-            initialSection = .holdings
-        } else if ProcessInfo.processInfo.arguments.contains("--industries-preview") {
+        if ProcessInfo.processInfo.arguments.contains("--industries-preview") {
             initialSection = .industries
         } else if ProcessInfo.processInfo.arguments.contains("--china-macro-preview") {
             initialSection = .chinaMacro
@@ -156,12 +149,8 @@ struct InvestmentView: View {
                 .padding(.bottom, 10)
             }
         }
-        .onChange(of: holdingsShowsDetail) { _, value in
-            showsDetail = value
-        }
         .onChange(of: section) { _, value in
             transitionPage(to: value)
-            holdingsShowsDetail = false
             showsDetail = false
         }
         .onDisappear {
@@ -183,8 +172,6 @@ struct InvestmentView: View {
             ChinaMacroView()
         case .institutionResearch:
             InstitutionResearchView()
-        case .holdings:
-            FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
         case .industries:
             IndustryPanoramaView()
         }

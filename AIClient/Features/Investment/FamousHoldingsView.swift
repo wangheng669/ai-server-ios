@@ -40,48 +40,45 @@ struct FamousHoldingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottomTrailing) {
-                Group {
-                    if managers.indices.contains(selectedIndex) {
-                        let manager = managers[selectedIndex]
-                        overview(store.managerDetails[manager.key] ?? manager)
-                    } else if store.isLoading {
-                        ProgressView("正在读取公开持仓披露").foregroundStyle(.secondary)
-                    } else {
-                        unavailableView
-                    }
-                }
-
-                if managers.count > 1 {
-                    if isManagerSelectorExpanded {
-                        Color.black.opacity(0.08)
-                            .ignoresSafeArea()
-                            .contentShape(Rectangle())
-                            .onTapGesture { closeManagerSelector() }
-                            .transition(.opacity)
-                    }
-
-                    managerSelector
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 16)
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if managers.indices.contains(selectedIndex) {
+                    let manager = managers[selectedIndex]
+                    overview(store.managerDetails[manager.key] ?? manager)
+                } else if store.isLoading {
+                    ProgressView("正在读取公开持仓披露").foregroundStyle(.secondary)
+                } else {
+                    unavailableView
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(HoldingsPalette.canvas.ignoresSafeArea())
-            .task(id: rootTabIsActive) {
-                guard rootTabIsActive else { return }
-                await store.load()
-                #if DEBUG
-                if selectedDetail == nil,
-                   let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--holdings-detail-preview=") }) {
-                    selectedDetail = HoldingDetailRoute(
-                        managerKey: String(argument.dropFirst("--holdings-detail-preview=".count))
-                    )
+
+            if managers.count > 1 {
+                if isManagerSelectorExpanded {
+                    Color.black.opacity(0.08)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeManagerSelector() }
+                        .transition(.opacity)
                 }
-                #endif
+
+                managerSelector
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 16)
             }
-            .toolbar(.hidden, for: .navigationBar)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(HoldingsPalette.canvas.ignoresSafeArea())
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.load()
+            #if DEBUG
+            if selectedDetail == nil,
+               let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--holdings-detail-preview=") }) {
+                selectedDetail = HoldingDetailRoute(
+                    managerKey: String(argument.dropFirst("--holdings-detail-preview=".count))
+                )
+            }
+            #endif
         }
         .sheet(item: $selectedDetail, onDismiss: {
             showsDetail = false
@@ -751,7 +748,7 @@ struct FamousHoldingsView: View {
     }
 }
 
-private struct InvestorPortraitImage: View {
+struct InvestorPortraitImage: View {
     let manager: FamousHoldingsManager
     var contentMode: ContentMode = .fit
     @State private var image: UIImage?
@@ -896,7 +893,7 @@ func actionColor(_ action: FamousHoldingAction) -> Color {
     }
 }
 
-private func managerPriority(_ key: String) -> Int {
+func managerPriority(_ key: String) -> Int {
     ["ark", "berkshire", "duanyongping", "lilu", "danbin", "bridgewater", "soros", "sunmasayoshi"].firstIndex(of: key) ?? 99
 }
 
