@@ -116,9 +116,11 @@ final class MarketStore {
         defer { loadingCharts.remove(key) }
         do {
             let value = try await service.chart(symbol: symbol, range: range, refresh: force)
+            let artifacts = await marketChartArtifacts(for: value)
+            guard !Task.isCancelled else { return }
             charts[key] = value
-            chartPresentations[key] = MarketChartPresentation(chart: value)
-            listTrendPresentations[key] = marketSampledChartTrend(value.candles)
+            chartPresentations[key] = artifacts.presentation
+            listTrendPresentations[key] = artifacts.listTrend
             if marketChartNeedsRetry(value) {
                 scheduleChartRetry(symbol: symbol, range: range, key: key)
             } else {

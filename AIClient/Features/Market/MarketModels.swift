@@ -1142,7 +1142,7 @@ struct MarketChartResponse: Decodable {
     let data: MarketChart
 }
 
-struct MarketChart: Decodable {
+struct MarketChart: Decodable, Sendable {
     let symbol: String
     let market: String
     let tradingDate: String
@@ -1154,11 +1154,11 @@ struct MarketChart: Decodable {
     let candles: [MarketChartPoint]
 }
 
-enum MarketChartQualityStatus: String, Decodable {
+enum MarketChartQualityStatus: String, Decodable, Sendable {
     case complete, repairing, partial, unavailable
 }
 
-struct MarketChartQuality: Decodable {
+struct MarketChartQuality: Decodable, Sendable {
     let status: MarketChartQualityStatus
     let expected: Int
     let actual: Int
@@ -1167,12 +1167,12 @@ struct MarketChartQuality: Decodable {
     let isFinal: Bool
 }
 
-struct MarketChartGap: Decodable, Equatable {
+struct MarketChartGap: Decodable, Equatable, Sendable {
     let startTimestamp: Int64
     let endTimestamp: Int64
 }
 
-struct MarketChartQuote: Decodable {
+struct MarketChartQuote: Decodable, Sendable {
     let price: Double?
     let previousClose: Double?
     let change: Double?
@@ -1182,7 +1182,7 @@ struct MarketChartQuote: Decodable {
     let source: String
 }
 
-struct MarketChartPoint: Decodable, Identifiable, Equatable {
+struct MarketChartPoint: Decodable, Identifiable, Equatable, Sendable {
     var id: Int64 { timestamp }
     let timestamp: Int64
     let open: Double
@@ -1212,7 +1212,7 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
     }
 }
 
-struct MarketChartPresentation {
+struct MarketChartPresentation: Sendable {
     let points: [MarketChartPoint]
     let values: [Double]
     let xFractions: [CGFloat]
@@ -1253,6 +1253,20 @@ struct MarketChartPresentation {
             timezone: chart.timezone
         )
     }
+}
+
+struct MarketChartArtifacts: Sendable {
+    let presentation: MarketChartPresentation
+    let listTrend: [Double]
+}
+
+func marketChartArtifacts(for chart: MarketChart) async -> MarketChartArtifacts {
+    await Task.detached(priority: .userInitiated) {
+        MarketChartArtifacts(
+            presentation: MarketChartPresentation(chart: chart),
+            listTrend: marketSampledChartTrend(chart.candles)
+        )
+    }.value
 }
 
 func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 60) -> [Double] {
@@ -1308,7 +1322,7 @@ func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketCh
     return changedSession || hasIntradayGap
 }
 
-struct MarketChartSessionBreak: Equatable {
+struct MarketChartSessionBreak: Equatable, Sendable {
     let previousTimestamp: Int64
     let currentTimestamp: Int64
     let label: String
@@ -1513,12 +1527,20 @@ extension MarketQuote {
     }
 
     var compactMarketName: String {
-        presentationName
+        var name = presentationName
             .replacingOccurrences(of: "纳斯达克 100", with: "纳指 100")
             .replacingOccurrences(of: "纳斯达克100", with: "纳指100")
             .replacingOccurrences(of: "道琼斯工业指数", with: "道指")
             .replacingOccurrences(of: " E-mini", with: "")
             .replacingOccurrences(of: "E-mini ", with: "")
+        if instrumentType == "realtime-proxy-etf" {
+            name = name
+                .replacingOccurrences(of: "实时代理", with: "")
+                .replacingOccurrences(of: "（\(symbol)）", with: "")
+                .replacingOccurrences(of: "(\(symbol))", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return name
     }
 
     var freshnessLabel: String {

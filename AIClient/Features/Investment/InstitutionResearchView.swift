@@ -122,6 +122,7 @@ struct InstitutionResearchView: View {
             } else if store.isLoading {
                 ProgressView("正在载入机构研究")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(InvestmentDesign.surface)
             } else if let message = store.errorMessage {
                 ContentUnavailableView {
                     Label(message, systemImage: "wifi.exclamationmark")
@@ -134,7 +135,7 @@ struct InstitutionResearchView: View {
                 ContentUnavailableView("暂无公开研究", systemImage: "doc.text.magnifyingglass")
             }
         }
-        .background(InvestmentDesign.canvas)
+        .background(store.isLoading ? InvestmentDesign.surface : InvestmentDesign.canvas)
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await store.load()

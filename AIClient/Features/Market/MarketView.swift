@@ -14,6 +14,16 @@ private enum MarketStyle {
     static let pageSpacing: CGFloat = 10
 }
 
+func marketRequestBatches<Element>(
+    _ elements: [Element],
+    maximumConcurrentRequests: Int = 3
+) -> [[Element]] {
+    let batchSize = max(maximumConcurrentRequests, 1)
+    return stride(from: 0, to: elements.count, by: batchSize).map { start in
+        Array(elements[start..<min(start + batchSize, elements.count)])
+    }
+}
+
 private struct MarketDetailRoute: Identifiable, Equatable {
     let symbol: String
     var id: String { symbol }
@@ -230,6 +240,9 @@ private struct MarketHomeView: View {
                 .background(MarketStyle.surface)
                 .coordinateSpace(name: "market-scroll")
                 .scrollIndicators(.hidden)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Color.clear.frame(height: 58)
+                }
                 .simultaneousGesture(regionSwipeGesture)
                 .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
                     onCompactHeaderChange(offset < -28)
@@ -249,6 +262,12 @@ private struct MarketHomeView: View {
                     proxy.scrollTo("market-structure", anchor: .top)
                 }
                 #endif
+            }
+            .overlay(alignment: .top) {
+                MarketStyle.surface
+                    .frame(height: viewport.safeAreaInsets.top)
+                    .ignoresSafeArea(edges: .top)
+                    .allowsHitTesting(false)
             }
         }
     }
@@ -1195,16 +1214,19 @@ private struct MarketIndexTable: View {
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             guard region != .commodity else { return }
-            let requestedQuotes = (quotes + coreStocks).reduce(into: [String: MarketQuote]()) {
+            let requestedQuotes = Array((quotes + coreStocks).reduce(into: [String: MarketQuote]()) {
                 $0[$1.symbol] = $1
-            }.values
-            await withTaskGroup(of: Void.self) { group in
-                for quote in requestedQuotes {
-                    group.addTask { @MainActor in
-                        await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
-                        guard let path = store.companyLogoPaths[quote.symbol],
-                              let url = marketCompanyLogoURL(path) else { return }
-                        _ = await MarketLogoImageCache.shared.image(for: url)
+            }.values)
+            for batch in marketRequestBatches(requestedQuotes) {
+                guard !Task.isCancelled else { return }
+                await withTaskGroup(of: Void.self) { group in
+                    for quote in batch {
+                        group.addTask { @MainActor in
+                            await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                            guard let path = store.companyLogoPaths[quote.symbol],
+                                  let url = marketCompanyLogoURL(path) else { return }
+                            _ = await MarketLogoImageCache.shared.image(for: url)
+                        }
                     }
                 }
             }
@@ -1212,10 +1234,13 @@ private struct MarketIndexTable: View {
             displayedLogoPaths = store.companyLogoPaths
         }
         .task(id: componentChartRequestID) {
-            await withTaskGroup(of: Void.self) { group in
-                for quote in quotes + coreStocks {
-                    group.addTask { @MainActor in
-                        await store.loadChart(symbol: quote.symbol, range: .day)
+            for batch in marketRequestBatches(quotes + coreStocks) {
+                guard !Task.isCancelled else { return }
+                await withTaskGroup(of: Void.self) { group in
+                    for quote in batch {
+                        group.addTask { @MainActor in
+                            await store.loadChart(symbol: quote.symbol, range: .day)
+                        }
                     }
                 }
             }
