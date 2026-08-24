@@ -237,23 +237,23 @@ struct LearningView: View {
                 Button {
                     selectedRoute = route(for: milestone, at: currentIndex, total: milestones.count)
                 } label: {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 9) {
                         HStack(alignment: .bottom, spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                            Text("继续学习")
+                                Text("继续学习")
                                     .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text("股票入门 · \(milestone.title)")
+                                    .foregroundStyle(Color.primary.opacity(0.56))
+                                Text("股票入门 · \(milestone.title)")
                                     .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
                             }
 
                             Spacer(minLength: 0)
 
-                            Text("\(completed) / \(milestones.count)")
+                            Text("第 \(currentIndex + 1) / \(milestones.count) 步")
                                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.primary.opacity(0.58))
                                 .monospacedDigit()
                         }
 
@@ -284,7 +284,7 @@ struct LearningView: View {
     }
 
     private var knowledgeEditorialFeed: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             knowledgeInvestmentFeature
             knowledgeBooksRow
             knowledgeConceptRow
@@ -314,33 +314,37 @@ struct LearningView: View {
             VStack(alignment: .leading, spacing: 12) {
                 knowledgeEditorialHeader(.investment)
 
-                HStack(spacing: 14) {
-                AsyncImage(url: lesson?.coverURL) { phase in
-                    if case let .success(image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Color(red: 0.035, green: 0.055, blue: 0.09)
+                HStack(spacing: 13) {
+                    AsyncImage(url: lesson?.coverURL) { phase in
+                        if case let .success(image) = phase {
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .saturation(0.72)
+                                .contrast(0.94)
+                        } else {
+                            Color(red: 0.035, green: 0.055, blue: 0.09)
                                 .overlay {
-                                Image(systemName: "chart.line.uptrend.xyaxis")
+                                    Image(systemName: "chart.line.uptrend.xyaxis")
                                         .font(.system(size: 25, weight: .light))
                                         .foregroundStyle(.white.opacity(0.72))
-                            }
+                                }
+                        }
                     }
-                }
-                    .frame(width: 132, height: 86)
-                .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(width: 112, height: 74)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 7) {
                         Text(lesson?.title ?? "从基础开始建立投资框架")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 15.5, weight: .semibold))
                             .foregroundStyle(.primary)
-                            .lineLimit(3)
+                            .lineLimit(2)
 
                         if let lesson {
                             Text("\(lesson.creator) · \(lesson.durationText)")
                                 .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.primary.opacity(0.56))
                                 .lineLimit(1)
                         }
                     }
@@ -356,7 +360,7 @@ struct LearningView: View {
     }
 
     private var knowledgeBooksRow: some View {
-        let books = Array((store.bookshelf?.books ?? []).prefix(4))
+        let books = Array((store.bookshelf?.books ?? []).prefix(3))
         return Button {
             presentedSection = .books
         } label: {
@@ -366,27 +370,28 @@ struct LearningView: View {
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(books) { book in
                         VStack(alignment: .leading, spacing: 6) {
-                        AsyncImage(url: book.coverURL) { phase in
-                            if case let .success(image) = phase {
-                                image.resizable().scaledToFill()
-                            } else {
-                                Color(white: 0.93)
-                                    .overlay {
-                                        Text(String(book.title.prefix(2)))
-                                            .font(.system(size: 11, weight: .bold, design: .serif))
-                                            .foregroundStyle(.secondary)
-                                    }
+                            AsyncImage(url: book.coverURL) { phase in
+                                if case let .success(image) = phase {
+                                    image.resizable().scaledToFit()
+                                } else {
+                                    Color(white: 0.93)
+                                        .overlay {
+                                            Text(String(book.title.prefix(2)))
+                                                .font(.system(size: 11, weight: .bold, design: .serif))
+                                                .foregroundStyle(Color.primary.opacity(0.55))
+                                        }
+                                }
                             }
-                        }
                             .frame(maxWidth: .infinity)
-                            .frame(height: 108)
-                        .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .frame(height: 128)
+                            .background(Color.primary.opacity(0.025))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                             Text(book.title)
                                 .font(.system(size: 10.5, weight: .medium))
                                 .foregroundStyle(.primary)
                                 .lineLimit(2)
+                                .frame(height: 29, alignment: .topLeading)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -414,11 +419,11 @@ struct LearningView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if let concept {
                         Text(concept.title)
-                            .font(.system(size: 19, weight: .bold, design: .serif))
+                            .font(.system(size: 18, weight: .semibold, design: .serif))
                             .foregroundStyle(.primary)
                         Text(concept.summary)
                             .font(.system(size: 12.5))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.primary.opacity(0.62))
                             .lineLimit(3)
                             .lineSpacing(3)
                     }
@@ -426,12 +431,21 @@ struct LearningView: View {
 
                 Spacer(minLength: 0)
 
-                Text("W")
-                    .font(.system(size: 34, weight: .medium, design: .serif))
-                    .foregroundStyle(.primary)
-                    .frame(width: 62, height: 74)
-                    .background(Color.primary.opacity(0.045))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    AsyncImage(url: concept?.coverURL) { phase in
+                        if case let .success(image) = phase {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color.primary.opacity(0.045)
+                                .overlay {
+                                    Image(systemName: "rectangle.stack.fill")
+                                        .font(.system(size: 22, weight: .medium))
+                                        .foregroundStyle(Color.primary.opacity(0.42))
+                                }
+                        }
+                    }
+                    .frame(width: 76, height: 76)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
 
                 knowledgeSectionDivider
@@ -443,7 +457,8 @@ struct LearningView: View {
     }
 
     private var knowledgeIdeologyRow: some View {
-        let people = Array(ideologyPeople.prefix(6))
+        let people = Array(ideologyPeople.prefix(5))
+        let remainingCount = max(0, ideologyPeople.count - people.count)
         return Button {
             presentedSection = .ideology
         } label: {
@@ -466,6 +481,21 @@ struct LearningView: View {
                         }
                         .frame(maxWidth: .infinity)
                     }
+
+                    if remainingCount > 0 {
+                        VStack(spacing: 5) {
+                            Text("+\(remainingCount)")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Color.primary.opacity(0.68))
+                                .monospacedDigit()
+                                .frame(width: 42, height: 42)
+                                .background(Color.primary.opacity(0.055), in: Circle())
+                            Text("更多")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(Color.primary.opacity(0.56))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -475,13 +505,16 @@ struct LearningView: View {
     }
 
     private func knowledgeEditorialHeader(_ section: KnowledgeSection) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 8) {
             Text(section.title)
-                .font(.system(size: 19, weight: .bold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
             Text(knowledgeSectionCount(section))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(Color.primary.opacity(0.55))
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .background(Color.primary.opacity(0.045), in: Capsule())
             Spacer(minLength: 0)
         }
     }
