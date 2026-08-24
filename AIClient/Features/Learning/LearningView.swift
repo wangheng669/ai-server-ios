@@ -191,8 +191,8 @@ struct LearningView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    knowledgeHero
-                    knowledgeEntryGrid
+                    knowledgeResumeStrip
+                    knowledgeBentoGrid
                 }
                 .padding(.bottom, 118)
             }
@@ -223,85 +223,265 @@ struct LearningView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: presentedSection)
     }
 
-    private var knowledgeHero: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            Text("知识")
-                .font(.system(size: 34, weight: .bold, design: .serif))
-                .tracking(-0.5)
+    @ViewBuilder
+    private var knowledgeResumeStrip: some View {
+        if let catalog = store.catalog {
+            let milestones = learningMilestones(from: stockTopics(in: catalog))
+            let completed = progressStore.completedCount(in: milestones.map(\.topic))
+            let currentIndex = milestones.firstIndex {
+                !progressStore.isCompleted($0.topic.id)
+            } ?? max(0, milestones.count - 1)
 
-            Text("把课程、阅读、概念和思想放在一条学习脉络里。")
-                .font(.system(size: 15.5))
-                .foregroundStyle(KnowledgePagePalette.supportingText)
-                .lineSpacing(4)
+            if milestones.indices.contains(currentIndex) {
+                let milestone = milestones[currentIndex]
+                Button {
+                    selectedRoute = route(for: milestone, at: currentIndex, total: milestones.count)
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Color(red: 0.045, green: 0.12, blue: 0.22)
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.system(size: 23, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
 
-            Text("选择一个主题，以弹窗展开全部内容")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(KnowledgePagePalette.accent)
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("继续学习")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text("股票入门 · \(milestone.title)")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            HStack(spacing: 9) {
+                                ProgressView(
+                                    value: Double(completed),
+                                    total: Double(max(1, milestones.count))
+                                )
+                                .tint(KnowledgePagePalette.accent)
+
+                                Text("\(completed) / \(milestones.count)")
+                                    .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+
+                        Text("继续")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 15)
+                            .frame(height: 36)
+                            .background(KnowledgePagePalette.accent, in: Capsule())
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(LearningPressStyle())
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 18)
+            }
+        } else {
+            HStack(spacing: 12) {
+                ProgressView()
+                Text("正在准备学习内容")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 28)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
-        .padding(.bottom, 24)
     }
 
-    private var knowledgeEntryGrid: some View {
+    private var knowledgeBentoGrid: some View {
         LazyVGrid(
             columns: [
-                GridItem(.flexible(), spacing: 12),
-                GridItem(.flexible(), spacing: 12)
+                GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 8),
+                GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 8)
             ],
-            spacing: 12
+            spacing: 8
         ) {
             ForEach(KnowledgeSection.allCases) { section in
                 Button {
                     presentedSection = section
                 } label: {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack {
-                            Image(systemName: section.icon)
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(KnowledgePagePalette.accent)
-                                .frame(width: 44, height: 44)
-                                .background(KnowledgePagePalette.accent.opacity(0.09), in: Circle())
-
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(section.title)
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundStyle(.primary)
+                                Text(knowledgeSectionCount(section))
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
                             Spacer()
-
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.primary.opacity(0.68))
                         }
 
-                        Spacer(minLength: 22)
-
-                        Text(section.title)
-                            .font(.system(size: 20, weight: .bold, design: .serif))
-                            .foregroundStyle(.primary)
-
-                        Text(section.subtitle)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(KnowledgePagePalette.supportingText)
-                            .lineLimit(2)
-                            .lineSpacing(2)
-                            .padding(.top, 5)
-
-                        Text("打开")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(KnowledgePagePalette.accent)
-                            .padding(.top, 14)
+                        knowledgeBentoPreview(section)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
-                    .padding(16)
-                    .background(KnowledgePagePalette.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
-                    }
+                    .frame(maxWidth: .infinity, minHeight: 216, alignment: .topLeading)
+                    .padding(14)
+                    .background(section.homeTint)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(LearningPressStyle())
                 .accessibilityHint("以弹窗展示\(section.title)")
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 12)
+    }
+
+    private func knowledgeSectionCount(_ section: KnowledgeSection) -> String {
+        switch section {
+        case .investment:
+            "\(store.videoLibrary?.lessons.count ?? 0) 节"
+        case .books:
+            "\(store.bookshelf?.books.count ?? 0) 本"
+        case .concepts:
+            "\(store.conceptLibrary?.concepts.count ?? 0) 张"
+        case .ideology:
+            "\(ideologyPeople.count) 人"
+        }
+    }
+
+    @ViewBuilder
+    private func knowledgeBentoPreview(_ section: KnowledgeSection) -> some View {
+        switch section {
+        case .investment:
+            if let lesson = store.videoLibrary?.lessons.first {
+                VStack(alignment: .leading, spacing: 8) {
+                    AsyncImage(url: lesson.coverURL) { phase in
+                        if case let .success(image) = phase {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color(red: 0.045, green: 0.12, blue: 0.22)
+                                .overlay {
+                                    Image(systemName: "play.fill")
+                                        .foregroundStyle(.white.opacity(0.85))
+                                }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 112)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    Text(lesson.title)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                }
+            } else {
+                knowledgeBentoPlaceholder(symbol: "chart.line.uptrend.xyaxis")
+            }
+
+        case .books:
+            let books = Array((store.bookshelf?.books ?? []).prefix(3))
+            if books.isEmpty {
+                knowledgeBentoPlaceholder(symbol: "books.vertical.fill")
+            } else {
+                HStack(alignment: .bottom, spacing: 6) {
+                    ForEach(books) { book in
+                        AsyncImage(url: book.coverURL) { phase in
+                            if case let .success(image) = phase {
+                                image.resizable().scaledToFill()
+                            } else {
+                                KnowledgePagePalette.surface
+                                    .overlay {
+                                        Text(String(book.title.prefix(2)))
+                                            .font(.system(size: 11, weight: .bold, design: .serif))
+                                            .foregroundStyle(.secondary)
+                                    }
+                            }
+                        }
+                        .frame(width: 43, height: 128)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .shadow(color: .black.opacity(0.1), radius: 3, y: 2)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+
+        case .concepts:
+            if let concept = (shuffledConcepts.isEmpty
+                ? store.conceptLibrary?.concepts.first
+                : shuffledConcepts.first) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 5) {
+                        Text(concept.kind.title)
+                        ForEach(concept.keyPeople.prefix(2), id: \.self) { person in
+                            Text(person)
+                        }
+                    }
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                    HStack(alignment: .top, spacing: 9) {
+                        Text("W")
+                            .font(.system(size: 24, weight: .medium, design: .serif))
+                            .frame(width: 42, height: 42)
+                            .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 9))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(concept.title)
+                                .font(.system(size: 14, weight: .bold, design: .serif))
+                                .foregroundStyle(.primary)
+                            Text(concept.summary)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(4)
+                                .lineSpacing(2)
+                        }
+                    }
+                    .padding(10)
+                    .background(.white.opacity(0.64), in: RoundedRectangle(cornerRadius: 11))
+                }
+            } else {
+                knowledgeBentoPlaceholder(symbol: "rectangle.stack.fill")
+            }
+
+        case .ideology:
+            let people = Array(ideologyPeople.prefix(8))
+            if people.isEmpty {
+                knowledgeBentoPlaceholder(symbol: "person.3.fill")
+            } else {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
+                    spacing: 8
+                ) {
+                    ForEach(people) { person in
+                        VStack(spacing: 3) {
+                            AvatarView(
+                                url: person.avatarURL(baseURL: peopleStore.baseURL),
+                                name: person.name,
+                                size: 34,
+                                assetName: person.avatarAssetName
+                            )
+                            Text(person.name)
+                                .font(.system(size: 8.5, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func knowledgeBentoPlaceholder(symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 30, weight: .light))
+            .foregroundStyle(KnowledgePagePalette.accent.opacity(0.68))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func knowledgePopup(_ section: KnowledgeSection) -> some View {
@@ -956,6 +1136,15 @@ private enum KnowledgeSection: String, CaseIterable, Identifiable {
         case .books: "books.vertical.fill"
         case .concepts: "rectangle.stack.fill"
         case .ideology: "person.3.fill"
+        }
+    }
+
+    var homeTint: Color {
+        switch self {
+        case .investment: Color(red: 0.90, green: 0.94, blue: 0.99)
+        case .books: Color(red: 0.86, green: 0.93, blue: 0.88)
+        case .concepts: Color(red: 0.96, green: 0.91, blue: 0.82)
+        case .ideology: Color(red: 0.92, green: 0.89, blue: 0.96)
         }
     }
 }
