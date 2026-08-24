@@ -23,6 +23,26 @@ struct LearningView: View {
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
     @State private var shuffledConcepts: [KnowledgeConceptCard] = []
+    @State private var presentedSection: KnowledgeSection? = {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-book-preview") {
+            return .books
+        }
+        if ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview") {
+            return .concepts
+        }
+        if ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") {
+            return .ideology
+        }
+        if ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--learning-video-preview") {
+            return .investment
+        }
+        #endif
+        return nil
+    }()
     @State private var readingReminder = ReadingReminderManager()
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
@@ -36,7 +56,7 @@ struct LearningView: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .sheet(item: $selectedRoute, onDismiss: {
-            showsDetail = selectedIdeologyPerson != nil
+            showsDetail = presentedSection != nil || selectedIdeologyPerson != nil
         }) { route in
             NavigationStack {
                 switch route {
@@ -59,7 +79,7 @@ struct LearningView: View {
             .presentationContentInteraction(.scrolls)
         }
         .sheet(isPresented: ideologyPersonIsPresented, onDismiss: {
-            showsDetail = selectedRoute != nil
+            showsDetail = presentedSection != nil || selectedRoute != nil
         }) {
             PersonDetailSheet(
                 selectedPerson: $selectedIdeologyPerson,
@@ -118,14 +138,13 @@ struct LearningView: View {
             }
         }
         .onChange(of: selectedRoute, initial: true) { _, route in
-            if route != nil || selectedIdeologyPerson != nil {
-                showsDetail = true
-            }
+            showsDetail = route != nil || selectedIdeologyPerson != nil || presentedSection != nil
         }
         .onChange(of: selectedIdeologyPerson) { _, person in
-            if selectedRoute != nil || person != nil {
-                showsDetail = true
-            }
+            showsDetail = selectedRoute != nil || person != nil || presentedSection != nil
+        }
+        .onChange(of: presentedSection) { _, section in
+            showsDetail = section != nil || selectedRoute != nil || selectedIdeologyPerson != nil
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
@@ -171,27 +190,9 @@ struct LearningView: View {
             KnowledgePagePalette.canvas.ignoresSafeArea()
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     knowledgeHero
-
-                    knowledgeSection(.investment) {
-                        investmentContent
-                    }
-
-                    knowledgeSection(.books) {
-                        booksContent
-                    }
-
-                    knowledgeSection(.concepts) {
-                        conceptsContent
-                    }
-
-                    knowledgeSection(.ideology) {
-                        ideologyCampPicker
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 14)
-                        ideologyContent
-                    }
+                    knowledgeEntryGrid
                 }
                 .padding(.bottom, 118)
             }
@@ -204,7 +205,22 @@ struct LearningView: View {
                 async let people: Void = peopleStore.load(force: true)
                 _ = await (catalog, bookshelf, concepts, videos, people)
             }
+            .allowsHitTesting(presentedSection == nil)
+            .accessibilityHidden(presentedSection != nil)
+
+            if let presentedSection {
+                Color.black.opacity(0.24)
+                    .ignoresSafeArea()
+                    .onTapGesture { dismissSection() }
+                    .transition(.opacity)
+
+                knowledgePopup(presentedSection)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(1)
+            }
         }
+        .animation(.smooth(duration: 0.28), value: presentedSection)
+        .sensoryFeedback(.impact(weight: .light), trigger: presentedSection)
     }
 
     private var knowledgeHero: some View {
@@ -218,59 +234,154 @@ struct LearningView: View {
                 .foregroundStyle(KnowledgePagePalette.supportingText)
                 .lineSpacing(4)
 
-            HStack(spacing: 8) {
-                ForEach(KnowledgeSection.allCases, id: \.self) { section in
-                    Label(section.shortTitle, systemImage: section.icon)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(KnowledgePagePalette.accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 34)
-                        .background(KnowledgePagePalette.accent.opacity(0.075), in: Capsule())
-                }
-            }
+            Text("选择一个主题，以弹窗展开全部内容")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(KnowledgePagePalette.accent)
         }
         .padding(.horizontal, 20)
         .padding(.top, 18)
         .padding(.bottom, 24)
     }
 
-    private func knowledgeSection<Content: View>(
-        _ section: KnowledgeSection,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Rectangle()
-                .fill(KnowledgePagePalette.stroke)
-                .frame(height: 0.5)
-                .padding(.horizontal, 20)
+    private var knowledgeEntryGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ],
+            spacing: 12
+        ) {
+            ForEach(KnowledgeSection.allCases) { section in
+                Button {
+                    presentedSection = section
+                } label: {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Image(systemName: section.icon)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(KnowledgePagePalette.accent)
+                                .frame(width: 44, height: 44)
+                                .background(KnowledgePagePalette.accent.opacity(0.09), in: Circle())
 
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: section.icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(KnowledgePagePalette.accent)
-                    .frame(width: 38, height: 38)
-                    .background(KnowledgePagePalette.accent.opacity(0.09), in: Circle())
+                            Spacer()
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(section.title)
-                        .font(.system(size: 25, weight: .bold, design: .serif))
-                    Text(section.subtitle)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(KnowledgePagePalette.supportingText)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        Spacer(minLength: 22)
+
+                        Text(section.title)
+                            .font(.system(size: 20, weight: .bold, design: .serif))
+                            .foregroundStyle(.primary)
+
+                        Text(section.subtitle)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(KnowledgePagePalette.supportingText)
+                            .lineLimit(2)
+                            .lineSpacing(2)
+                            .padding(.top, 5)
+
+                        Text("打开")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(KnowledgePagePalette.accent)
+                            .padding(.top, 14)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
+                    .padding(16)
+                    .background(KnowledgePagePalette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
+                    }
                 }
-
-                Spacer(minLength: 0)
+                .buttonStyle(LearningPressStyle())
+                .accessibilityHint("以弹窗展示\(section.title)")
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 26)
-            .padding(.bottom, 18)
-
-            content()
         }
-        .padding(.bottom, 32)
-        .accessibilityElement(children: .contain)
+        .padding(.horizontal, 20)
+    }
+
+    private func knowledgePopup(_ section: KnowledgeSection) -> some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: section.icon)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(KnowledgePagePalette.accent)
+                        .frame(width: 38, height: 38)
+                        .background(KnowledgePagePalette.accent.opacity(0.09), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(section.title)
+                            .font(.system(size: 22, weight: .bold, design: .serif))
+                        Text(section.subtitle)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(KnowledgePagePalette.supportingText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Button(action: dismissSection) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 36, height: 36)
+                            .background(Color.primary.opacity(0.06), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("关闭\(section.title)")
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+
+                Divider()
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        switch section {
+                        case .investment:
+                            investmentContent
+                        case .books:
+                            booksContent
+                        case .concepts:
+                            conceptsContent
+                        case .ideology:
+                            ideologyCampPicker
+                                .padding(.horizontal, 20)
+                                .padding(.top, 14)
+                                .padding(.bottom, 10)
+                            ideologyContent
+                        }
+                    }
+                    .padding(.top, section == .concepts ? 0 : 16)
+                    .padding(.bottom, 34)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .frame(
+                width: max(0, proxy.size.width - 24),
+                height: max(0, proxy.size.height - 30)
+            )
+            .background(KnowledgePagePalette.canvas)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.white.opacity(0.42), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(0.2), radius: 26, y: 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func dismissSection() {
+        withAnimation(.smooth(duration: 0.24)) {
+            presentedSection = nil
+        }
     }
 
     @ViewBuilder
@@ -813,11 +924,13 @@ struct LearningView: View {
     }
 }
 
-private enum KnowledgeSection: String, CaseIterable {
+private enum KnowledgeSection: String, CaseIterable, Identifiable {
     case investment
     case books
     case concepts
     case ideology
+
+    var id: Self { self }
 
     var title: String {
         switch self {
@@ -825,15 +938,6 @@ private enum KnowledgeSection: String, CaseIterable {
         case .books: "书籍"
         case .concepts: "概念卡片"
         case .ideology: "思想图谱"
-        }
-    }
-
-    var shortTitle: String {
-        switch self {
-        case .investment: "课程"
-        case .books: "阅读"
-        case .concepts: "概念"
-        case .ideology: "思想"
         }
     }
 
