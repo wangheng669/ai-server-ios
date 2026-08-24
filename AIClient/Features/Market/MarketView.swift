@@ -99,6 +99,10 @@ struct MarketView: View {
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await sentimentStore.load(marketStore: store)
+            async let hongKong: Void = sentimentStore.loadDetails(for: .hongKong)
+            async let korea: Void = sentimentStore.loadDetails(for: .korea)
+            async let unitedStates: Void = sentimentStore.loadDetails(for: .unitedStates)
+            _ = await (hongKong, korea, unitedStates)
         }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
@@ -151,6 +155,8 @@ private struct MarketHomeView: View {
                         }
                         .frame(height: 1)
 
+                        MarketSentimentOverviewStrip(store: sentimentStore)
+
                         ZStack(alignment: .topTrailing) {
                             MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: selectIndex)
                             MarketRegionPicker(store: store, selection: $selectedMarket)
@@ -160,16 +166,6 @@ private struct MarketHomeView: View {
                         .background(MarketStyle.surface)
 
                         VStack(spacing: MarketStyle.pageSpacing) {
-                            MarketSentimentSummaryCard(store: sentimentStore, market: .china)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .stroke(InvestmentDesign.divider.opacity(0.7), lineWidth: 0.5)
-                                }
-                                .shadow(color: .black.opacity(0.025), radius: 5, y: 2)
-                                .padding(.horizontal, 10)
-                                .padding(.top, MarketStyle.pageSpacing)
-
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
                                     message: error,
@@ -258,6 +254,72 @@ private struct MarketHomeView: View {
     private func selectIndex(_ symbol: String) {
         guard !blocksSelectionDuringRegionSwipe else { return }
         onSelectIndex(symbol)
+    }
+}
+
+private struct MarketSentimentOverviewStrip: View {
+    let store: RetailSentimentStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("市场情绪")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 0) {
+                ForEach(SentimentMarket.marketOverviewOrder) { market in
+                    sentimentItem(for: market)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.55)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func sentimentItem(for market: SentimentMarket) -> some View {
+        let snapshot = store.snapshot(for: market)
+        let isLoading = market == .china
+            ? store.isLoading
+            : store.isLoadingDetails(for: market)
+
+        return VStack(spacing: 2) {
+            Text(market.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(snapshot.map { String(Int($0.score.rounded())) } ?? "—")
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(sentimentTint(snapshot?.score))
+                .contentTransition(.numericText())
+            Text(sentimentLabel(snapshot: snapshot, isLoading: isLoading))
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(snapshot == nil ? Color.secondary : sentimentTint(snapshot?.score))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(market.title)市场情绪")
+        .accessibilityValue(snapshot.map { "\(Int($0.score.rounded()))分，\($0.label)" } ?? (isLoading ? "加载中" : "暂无数据"))
+    }
+
+    private func sentimentTint(_ score: Double?) -> Color {
+        guard let score else { return .secondary }
+        switch score {
+        case ..<30: return .blue
+        case ..<70: return InvestmentDesign.accent
+        case ..<90: return .orange
+        default: return InvestmentDesign.gain
+        }
+    }
+
+    private func sentimentLabel(snapshot: SentimentSnapshot?, isLoading: Bool) -> String {
+        if let label = snapshot?.label, !label.isEmpty { return label }
+        return isLoading ? "加载中" : "暂无数据"
     }
 }
 

@@ -2,6 +2,22 @@ import XCTest
 @testable import AIServerClient
 
 final class MarketPresentationTests: XCTestCase {
+    func testMarketSentimentOverviewUsesRequestedMarketOrder() {
+        XCTAssertEqual(
+            SentimentMarket.marketOverviewOrder,
+            [.china, .hongKong, .korea, .unitedStates]
+        )
+        XCTAssertEqual(SentimentMarket.marketOverviewOrder.map(\.title), ["A 股", "港股", "韩股", "美股"])
+    }
+
+    func testSentimentLabelsCoverOverviewTemperatureScale() {
+        XCTAssertEqual(SentimentSnapshot.label(for: 25), "偏冷")
+        XCTAssertEqual(SentimentSnapshot.label(for: 50), "正常")
+        XCTAssertEqual(SentimentSnapshot.label(for: 79), "偏热")
+        XCTAssertEqual(SentimentSnapshot.displayLabel(for: "critical"), "高风险")
+        XCTAssertEqual(SentimentSnapshot.displayLabel(for: "warning"), "预警")
+    }
+
     func testMarketRegionSwipeAcceptsOnlyDeliberateHorizontalGestures() {
         XCTAssertEqual(
             marketRegionSwipeOffset(
