@@ -1623,6 +1623,34 @@ func marketActiveIndexSession(_ quote: MarketQuote?) -> MarketQuote? {
     return quote.tradingSession.isActivelyTrading && quote.tradingSession != .alwaysOpen ? quote : nil
 }
 
+func marketXueqiuURL(for symbol: String) -> URL? {
+    let normalized = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    let xueqiuCode: String
+
+    if normalized.hasSuffix(".SS") || normalized.hasSuffix(".SZ") {
+        let code = String(normalized.dropLast(3))
+        guard code.count == 6, code.allSatisfy(\.isNumber) else { return nil }
+        xueqiuCode = (normalized.hasSuffix(".SS") ? "SH" : "SZ") + code
+    } else if normalized.hasSuffix(".HK") {
+        let code = String(normalized.dropLast(3))
+        guard (1...5).contains(code.count), code.allSatisfy(\.isNumber) else { return nil }
+        xueqiuCode = String(repeating: "0", count: 5 - code.count) + code
+    } else {
+        let supportedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
+        let unsupportedMarketSuffixes = [".T", ".KS", ".KQ"]
+        guard !normalized.isEmpty,
+              !normalized.hasPrefix("^"),
+              !normalized.contains(":"),
+              !normalized.contains("!"),
+              !unsupportedMarketSuffixes.contains(where: normalized.hasSuffix),
+              normalized.unicodeScalars.allSatisfy(supportedCharacters.contains),
+              normalized.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
+        xueqiuCode = normalized
+    }
+
+    return URL(string: "https://xueqiu.com/S/\(xueqiuCode)")
+}
+
 func marketShortTimestamp(_ timestamp: Int64) -> String {
     MarketDateFormatters.shortTimestamp.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000))
 }

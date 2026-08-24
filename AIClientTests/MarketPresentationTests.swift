@@ -22,6 +22,20 @@ private actor MarketConcurrencyProbe {
 }
 
 final class MarketPresentationTests: XCTestCase {
+    func testXueqiuStockURLUsesMarketSpecificCodes() {
+        XCTAssertEqual(marketXueqiuURL(for: "NVDA")?.absoluteString, "https://xueqiu.com/S/NVDA")
+        XCTAssertEqual(marketXueqiuURL(for: "601398.SS")?.absoluteString, "https://xueqiu.com/S/SH601398")
+        XCTAssertEqual(marketXueqiuURL(for: "000001.SZ")?.absoluteString, "https://xueqiu.com/S/SZ000001")
+        XCTAssertEqual(marketXueqiuURL(for: "1211.HK")?.absoluteString, "https://xueqiu.com/S/01211")
+        XCTAssertEqual(marketXueqiuURL(for: "00700.HK")?.absoluteString, "https://xueqiu.com/S/00700")
+    }
+
+    func testXueqiuStockURLRejectsUnsupportedInstrumentFormats() {
+        for symbol in ["^GSPC", "BINANCE:BTCUSDT", "GC1!", "7203.T", "005930.KS", ""] {
+            XCTAssertNil(marketXueqiuURL(for: symbol), symbol)
+        }
+    }
+
     func testMarketSentimentOverviewUsesRequestedMarketOrder() {
         XCTAssertEqual(
             SentimentMarket.marketOverviewOrder,

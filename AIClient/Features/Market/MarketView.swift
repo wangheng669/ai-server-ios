@@ -2828,6 +2828,10 @@ private struct MarketIndexDetailView: View {
     private var isAShareIndex: Bool {
         symbol.hasSuffix(".SS") || symbol.hasSuffix(".SZ") || symbol.hasPrefix("THS:")
     }
+    private var xueqiuURL: URL? {
+        guard !isIndex, !isCrypto, !isCommodity else { return nil }
+        return marketXueqiuURL(for: quote?.symbol ?? symbol)
+    }
     private var detailBreadth: MarketBreadth? {
         if isAShareIndex {
             return store.dashboard?.currentAShareBreadth
@@ -2928,15 +2932,34 @@ private struct MarketIndexDetailView: View {
                 .layoutPriority(1)
                 Spacer(minLength: 4)
                 HStack(spacing: 5) {
-                    Circle().fill(sessionColor).frame(width: 6, height: 6)
-                    Text(sessionText)
-                }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(sessionColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .overlay {
-                    Capsule().stroke(sessionColor.opacity(0.35), lineWidth: 0.75)
+                    HStack(spacing: 5) {
+                        Circle().fill(sessionColor).frame(width: 6, height: 6)
+                        Text(sessionText)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(sessionColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .overlay {
+                        Capsule().stroke(sessionColor.opacity(0.35), lineWidth: 0.75)
+                    }
+
+                    if let xueqiuURL {
+                        Button {
+                            UIApplication.shared.open(xueqiuURL)
+                        } label: {
+                            Image("XueqiuMark")
+                                .resizable()
+                                .renderingMode(.original)
+                                .scaledToFit()
+                                .frame(width: 30, height: 30)
+                                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("在雪球打开\(quote?.presentationName ?? symbol)")
+                        .accessibilityHint("跳转到雪球股票详情页")
+                        .accessibilityIdentifier("market-xueqiu-link")
+                    }
                 }
             }
             VStack(alignment: .leading, spacing: 6) {
