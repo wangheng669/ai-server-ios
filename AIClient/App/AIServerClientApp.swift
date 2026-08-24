@@ -188,6 +188,8 @@ private struct EditorialRootView: View {
     @StateObject private var deploymentStore = DeploymentStatusStore()
     @StateObject private var personPushNavigation = PersonPushNavigationStore.shared
     @State private var peopleStore = PeopleStore()
+    @State private var marketStore = MarketStore()
+    @State private var marketSentimentStore = RetailSentimentStore()
     @State private var selectedTab: EditorialTab = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--today-world-preview") { return .world }
@@ -321,7 +323,11 @@ private struct EditorialRootView: View {
                     )
                 }
                 tabContent(.investment) {
-                    InvestmentView(showsDetail: $marketShowsDetail)
+                    InvestmentView(
+                        showsDetail: $marketShowsDetail,
+                        marketStore: marketStore,
+                        sentimentStore: marketSentimentStore
+                    )
                 }
                 tabContent(.company) {
                     CompanyResearchView()
@@ -433,6 +439,9 @@ private struct EditorialRootView: View {
             } else {
                 deploymentStore.stop()
             }
+        }
+        .task {
+            await marketSentimentStore.preload(marketStore: marketStore)
         }
         .onChange(of: personPushNavigation.request, initial: true) { _, request in
             guard let request else { return }

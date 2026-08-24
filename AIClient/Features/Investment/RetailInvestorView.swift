@@ -1466,6 +1466,7 @@ final class RetailSentimentStore {
     private var loadedMarkets: Set<SentimentMarket> = []
     private var loadingMarkets: Set<SentimentMarket> = []
     private var detailErrors: [SentimentMarket: String] = [:]
+    private var bootstrapTask: Task<MarketBootstrap, Error>?
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
@@ -1576,6 +1577,11 @@ final class RetailSentimentStore {
             dashboard = marketStore.dashboard ?? dashboard
             return
         }
+        if !force, dashboard != nil, temperature != nil {
+            await loadInvestorMoodIfNeeded()
+            loaded = true
+            return
+        }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -1606,6 +1612,63 @@ final class RetailSentimentStore {
             if dashboard == nil { errorMessage = error.localizedDescription }
         }
         loaded = dashboard != nil || investorMood != nil || temperature != nil
+    }
+
+    func preload(marketStore: MarketStore) async {
+        if dashboard != nil, temperature != nil, loadedMarkets.count == 3 { return }
+        let task: Task<MarketBootstrap, Error>
+        if let bootstrapTask {
+            task = bootstrapTask
+        } else {
+            task = Task { try await service.bootstrap() }
+            bootstrapTask = task
+        }
+        defer { bootstrapTask = nil }
+        do {
+            let value = try await task.value
+            guard !Task.isCancelled, value.dataContract == "market_bootstrap_v1" else { return }
+            marketStore.applyBootstrap(value.dashboard)
+            applyBootstrap(value)
+        } catch is CancellationError {
+            return
+        } catch {
+            // The regular per-resource loading path remains the fallback when bootstrap is unavailable.
+        }
+    }
+
+    private func applyBootstrap(_ value: MarketBootstrap) {
+        dashboard = value.dashboard
+        temperature = value.temperature
+        errorMessage = nil
+        let markets: [(String, SentimentMarket)] = [
+            ("hong-kong", .hongKong),
+            ("korea", .korea),
+            ("united-states", .unitedStates),
+        ]
+        for (key, market) in markets {
+            guard let snapshot = value.sentimentSnapshots[key],
+                  snapshot.dataContract == "market_sentiment_snapshot_v1" else { continue }
+            marketSnapshots[market] = snapshot
+            loadedMarkets.insert(market)
+            detailErrors[market] = nil
+            if market == .korea {
+                koreaLeverage = snapshot.koreaLeverage
+                koreaLeverageErrorMessage = snapshot.koreaLeverage == nil ? "韩国杠杆快照暂不可用" : nil
+            }
+        }
+    }
+
+    private func loadInvestorMoodIfNeeded() async {
+        guard investorMood == nil else { return }
+        do {
+            let mood = try await service.investorMood()
+            investorMood = mood
+            Task { await service.prewarmInvestorMoodVideos(mood.items) }
+        } catch is CancellationError {
+            return
+        } catch {
+            if dashboard == nil { errorMessage = error.localizedDescription }
+        }
     }
 
     func loadDetails(for market: SentimentMarket, force: Bool = false) async {

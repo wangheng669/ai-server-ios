@@ -5,6 +5,20 @@ struct MarketDashboardResponse: Decodable {
     let data: MarketDashboard
 }
 
+struct MarketBootstrapResponse: Decodable {
+    let success: Bool
+    let data: MarketBootstrap
+}
+
+struct MarketBootstrap: Decodable {
+    let dataContract: String
+    let generatedAt: String
+    let dashboard: MarketDashboard
+    let temperature: MarketAShareTemperature?
+    let sentimentSnapshots: [String: MarketSentimentSnapshot]
+    let errors: [String: String]?
+}
+
 enum CommodityLogoKind: String, CaseIterable {
     case gold
     case crudeOil

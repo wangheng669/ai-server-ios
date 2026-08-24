@@ -100,12 +100,19 @@ struct InvestmentView: View {
     @State private var contentOffset: CGFloat = 0
     @State private var transitionTask: Task<Void, Never>?
     @State private var holdingsShowsDetail = false
-    @State private var marketStore = MarketStore()
-    @State private var sentimentStore = RetailSentimentStore()
+    @State private var marketStore: MarketStore
+    @State private var sentimentStore: RetailSentimentStore
     @State private var holdingsStore = FamousHoldingsStore()
 
-    init(showsDetail: Binding<Bool> = .constant(false)) {
+    @MainActor
+    init(
+        showsDetail: Binding<Bool> = .constant(false),
+        marketStore: MarketStore? = nil,
+        sentimentStore: RetailSentimentStore? = nil
+    ) {
         _showsDetail = showsDetail
+        _marketStore = State(initialValue: marketStore ?? MarketStore())
+        _sentimentStore = State(initialValue: sentimentStore ?? RetailSentimentStore())
         let initialSection: InvestmentSection
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--holdings-preview") {
