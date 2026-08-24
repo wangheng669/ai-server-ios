@@ -23,24 +23,6 @@ struct LearningView: View {
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
     @State private var shuffledConcepts: [KnowledgeConceptCard] = []
-    @State private var selectedSection: KnowledgeSection = {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") {
-            return .ideology
-        }
-        if ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview") {
-            return .concepts
-        }
-        if ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-book-preview") {
-            return .books
-        }
-        return .investment
-        #else
-        .investment
-        #endif
-    }()
     @State private var readingReminder = ReadingReminderManager()
 
     init(showsDetail: Binding<Bool> = .constant(false)) {
@@ -147,7 +129,6 @@ struct LearningView: View {
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
-                  selectedSection == .investment,
                   let catalog = store.catalog,
                   let section = catalog.sections.first(where: { $0.name == "股票" }) ??
                     catalog.sections.first else {
@@ -155,18 +136,17 @@ struct LearningView: View {
             }
             await repository.prefetch(section.topics.prefix(10))
         }
-        .task(id: "\(rootTabIsActive)-\(selectedSection)") {
-            guard rootTabIsActive, selectedSection == .ideology else { return }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
             await peopleStore.load()
         }
-        .task(id: "books-\(rootTabIsActive)-\(selectedSection)") {
-            guard rootTabIsActive, selectedSection == .books else { return }
+        .task(id: "books-\(rootTabIsActive)") {
+            guard rootTabIsActive else { return }
             await store.loadBookshelf()
             await readingReminder.restore()
         }
         .task(id: conceptImagePrefetchKey) {
             guard rootTabIsActive,
-                  selectedSection == .concepts,
                   let concepts = store.conceptLibrary?.concepts else {
                 return
             }
@@ -176,121 +156,121 @@ struct LearningView: View {
     }
 
     private var prefetchKey: String {
-        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)-\(selectedSection)"
+        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)"
     }
 
     private var conceptImagePrefetchKey: String {
         let imageURLs = store.conceptLibrary?.concepts.compactMap {
             $0.coverURL?.absoluteString
         } ?? []
-        return "\(rootTabIsActive)-\(selectedSection)-\(imageURLs.joined(separator: "|"))"
+        return "\(rootTabIsActive)-\(imageURLs.joined(separator: "|"))"
     }
 
     private var knowledgeHome: some View {
         ZStack {
             KnowledgePagePalette.canvas.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                sectionPicker
-                TabView(selection: $selectedSection) {
-                    knowledgeSectionPage(.investment)
-                        .tag(KnowledgeSection.investment)
-                    knowledgeSectionPage(.books)
-                        .tag(KnowledgeSection.books)
-                    knowledgeSectionPage(.concepts)
-                        .tag(KnowledgeSection.concepts)
-                    knowledgeSectionPage(.ideology)
-                        .tag(KnowledgeSection.ideology)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-            }
-        }
-        .sensoryFeedback(.selection, trigger: selectedSection)
-    }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    knowledgeHero
 
-    private func knowledgeSectionPage(_ section: KnowledgeSection) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                switch section {
-                case .investment:
-                    investmentContent
-                case .books:
-                    booksContent
-                case .concepts:
-                    conceptsContent
-                case .ideology:
-                    ideologyContent
-                }
-            }
-            .padding(.top, section == .concepts ? 0 : 12)
-            .padding(.bottom, section == .concepts ? 0 : 32)
-        }
-        .scrollIndicators(.hidden)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if section == .ideology {
-                ideologyCampPicker
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(KnowledgePagePalette.canvas)
-            }
-        }
-        .safeAreaPadding(.bottom, section == .concepts ? 0 : 90)
-    }
+                    knowledgeSection(.investment) {
+                        investmentContent
+                    }
 
-    private var sectionPicker: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 24) {
-                    sectionButton(.investment)
-                    sectionButton(.books)
-                    sectionButton(.concepts)
-                    sectionButton(.ideology)
+                    knowledgeSection(.books) {
+                        booksContent
+                    }
+
+                    knowledgeSection(.concepts) {
+                        conceptsContent
+                    }
+
+                    knowledgeSection(.ideology) {
+                        ideologyCampPicker
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 14)
+                        ideologyContent
+                    }
                 }
-                .padding(.horizontal, 18)
+                .padding(.bottom, 118)
             }
             .scrollIndicators(.hidden)
-            .onChange(of: selectedSection) { _, section in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(section, anchor: .center)
+            .refreshable {
+                async let catalog: Void = store.load(force: true)
+                async let bookshelf: Void = store.loadBookshelf(force: true)
+                async let concepts: Void = store.loadConceptLibrary(force: true)
+                async let videos: Void = store.loadVideoLibrary(force: true)
+                async let people: Void = peopleStore.load(force: true)
+                _ = await (catalog, bookshelf, concepts, videos, people)
+            }
+        }
+    }
+
+    private var knowledgeHero: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text("知识")
+                .font(.system(size: 34, weight: .bold, design: .serif))
+                .tracking(-0.5)
+
+            Text("把课程、阅读、概念和思想放在一条学习脉络里。")
+                .font(.system(size: 15.5))
+                .foregroundStyle(KnowledgePagePalette.supportingText)
+                .lineSpacing(4)
+
+            HStack(spacing: 8) {
+                ForEach(KnowledgeSection.allCases, id: \.self) { section in
+                    Label(section.shortTitle, systemImage: section.icon)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(KnowledgePagePalette.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .background(KnowledgePagePalette.accent.opacity(0.075), in: Capsule())
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 6)
-        .background(KnowledgePagePalette.surface)
-        .overlay(alignment: .bottom) {
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 24)
+    }
+
+    private func knowledgeSection<Content: View>(
+        _ section: KnowledgeSection,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             Rectangle()
                 .fill(KnowledgePagePalette.stroke)
                 .frame(height: 0.5)
-        }
-    }
+                .padding(.horizontal, 20)
 
-    private func sectionButton(_ section: KnowledgeSection) -> some View {
-        Button {
-            guard selectedSection != section else { return }
-            withAnimation(.snappy(duration: 0.22)) {
-                selectedSection = section
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: section.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(KnowledgePagePalette.accent)
+                    .frame(width: 38, height: 38)
+                    .background(KnowledgePagePalette.accent.opacity(0.09), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(section.title)
+                        .font(.system(size: 25, weight: .bold, design: .serif))
+                    Text(section.subtitle)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(KnowledgePagePalette.supportingText)
+                }
+
+                Spacer(minLength: 0)
             }
-        } label: {
-            VStack(spacing: 0) {
-                Text(section.title)
-                    .font(.system(size: 14, weight: selectedSection == section ? .semibold : .regular))
-                    .foregroundStyle(
-                        selectedSection == section
-                            ? Color.primary
-                            : KnowledgePagePalette.supportingText
-                    )
-                    .frame(height: 42)
-                Capsule()
-                    .fill(selectedSection == section ? KnowledgePagePalette.accent : .clear)
-                    .frame(width: 18, height: 2.5)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(Rectangle())
+            .padding(.horizontal, 20)
+            .padding(.top, 26)
+            .padding(.bottom, 18)
+
+            content()
         }
-        .id(section)
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
+        .padding(.bottom, 32)
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
@@ -551,16 +531,16 @@ struct LearningView: View {
                 } else {
                     GeometryReader { proxy in
                         ScrollView(.horizontal) {
-                            LazyHStack(spacing: 0) {
+                            LazyHStack(spacing: 12) {
                                 ForEach(Array(concepts.enumerated()), id: \.element.id) { index, concept in
                                     KnowledgeConceptCarouselCard(
                                         concept: concept,
                                         index: index,
                                         count: concepts.count,
-                                        width: proxy.size.width,
+                                        width: max(280, proxy.size.width - 40),
                                         height: proxy.size.height
                                     )
-                                    .frame(width: proxy.size.width)
+                                    .frame(width: max(280, proxy.size.width - 40))
                                     .id(concept.id)
                                     .onTapGesture {
                                         selectedConcept = concept
@@ -568,14 +548,13 @@ struct LearningView: View {
                                 }
                             }
                             .scrollTargetLayout()
+                            .padding(.horizontal, 20)
                         }
                         .scrollIndicators(.hidden)
-                        .scrollTargetBehavior(.paging)
+                        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
                         .scrollPosition(id: $selectedConceptID)
                     }
-                    .containerRelativeFrame(.vertical) { availableHeight, _ in
-                        max(520, availableHeight)
-                    }
+                    .frame(height: 540)
                 }
             }
             .onChange(of: library.concepts, initial: true) { _, loadedConcepts in
@@ -834,7 +813,7 @@ struct LearningView: View {
     }
 }
 
-private enum KnowledgeSection: String {
+private enum KnowledgeSection: String, CaseIterable {
     case investment
     case books
     case concepts
@@ -842,10 +821,37 @@ private enum KnowledgeSection: String {
 
     var title: String {
         switch self {
-        case .investment: "投资"
+        case .investment: "投资学习"
         case .books: "书籍"
+        case .concepts: "概念卡片"
+        case .ideology: "思想图谱"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .investment: "课程"
+        case .books: "阅读"
         case .concepts: "概念"
-        case .ideology: "意识形态"
+        case .ideology: "思想"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .investment: "视频课程、入门路径与收藏内容"
+        case .books: "接着读，也看见自己的阅读进度"
+        case .concepts: "用人物与事件连接知识背景"
+        case .ideology: "从不同立场认识重要人物"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .investment: "chart.line.uptrend.xyaxis"
+        case .books: "books.vertical.fill"
+        case .concepts: "rectangle.stack.fill"
+        case .ideology: "person.3.fill"
         }
     }
 }
