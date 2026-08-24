@@ -14,13 +14,31 @@ private enum MarketStyle {
     static let pageSpacing: CGFloat = 10
 }
 
-func marketRequestBatches<Element>(
+func marketRunWithLimitedConcurrency<Element>(
     _ elements: [Element],
-    maximumConcurrentRequests: Int = 3
-) -> [[Element]] {
-    let batchSize = max(maximumConcurrentRequests, 1)
-    return stride(from: 0, to: elements.count, by: batchSize).map { start in
-        Array(elements[start..<min(start + batchSize, elements.count)])
+    maximumConcurrentRequests: Int = 3,
+    operation: @escaping @Sendable (Element) async -> Void
+) async {
+    guard !elements.isEmpty else { return }
+    let limit = min(max(maximumConcurrentRequests, 1), elements.count)
+    await withTaskGroup(of: Void.self) { group in
+        var nextIndex = 0
+        for _ in 0..<limit {
+            let element = elements[nextIndex]
+            nextIndex += 1
+            group.addTask { await operation(element) }
+        }
+
+        while await group.next() != nil {
+            guard !Task.isCancelled else {
+                group.cancelAll()
+                return
+            }
+            guard nextIndex < elements.count else { continue }
+            let element = elements[nextIndex]
+            nextIndex += 1
+            group.addTask { await operation(element) }
+        }
     }
 }
 
@@ -1217,32 +1235,18 @@ private struct MarketIndexTable: View {
             let requestedQuotes = Array((quotes + coreStocks).reduce(into: [String: MarketQuote]()) {
                 $0[$1.symbol] = $1
             }.values)
-            for batch in marketRequestBatches(requestedQuotes) {
-                guard !Task.isCancelled else { return }
-                await withTaskGroup(of: Void.self) { group in
-                    for quote in batch {
-                        group.addTask { @MainActor in
-                            await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
-                            guard let path = store.companyLogoPaths[quote.symbol],
-                                  let url = marketCompanyLogoURL(path) else { return }
-                            _ = await MarketLogoImageCache.shared.image(for: url)
-                        }
-                    }
-                }
+            await marketRunWithLimitedConcurrency(requestedQuotes) { quote in
+                await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                guard let path = await store.companyLogoPaths[quote.symbol],
+                      let url = marketCompanyLogoURL(path) else { return }
+                _ = await MarketLogoImageCache.shared.image(for: url)
             }
             guard !Task.isCancelled else { return }
             displayedLogoPaths = store.companyLogoPaths
         }
         .task(id: componentChartRequestID) {
-            for batch in marketRequestBatches(quotes + coreStocks) {
-                guard !Task.isCancelled else { return }
-                await withTaskGroup(of: Void.self) { group in
-                    for quote in batch {
-                        group.addTask { @MainActor in
-                            await store.loadChart(symbol: quote.symbol, range: .day)
-                        }
-                    }
-                }
+            await marketRunWithLimitedConcurrency(quotes + coreStocks) { quote in
+                await store.loadChart(symbol: quote.symbol, range: .day)
             }
         }
     }
