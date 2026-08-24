@@ -1229,6 +1229,39 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertTrue(values.contains { $0 > 40 && $0 < 80 })
     }
 
+    func testMarketListTrendKeepsRichSnapshotWhenChartOnlyHasEndpoints() {
+        let snapshot = [10.0, 11.0, 10.5, 12.0]
+
+        let values = marketPreferredListTrend(
+            chartValues: [10.0, 12.0],
+            snapshotValues: snapshot
+        )
+
+        XCTAssertEqual(values, snapshot)
+    }
+
+    func testMarketListTrendUsesChartOnceItHasShape() {
+        let chart = [10.0, 11.0, 10.5]
+
+        let values = marketPreferredListTrend(
+            chartValues: chart,
+            snapshotValues: [9.0, 9.5, 10.0, 10.5]
+        )
+
+        XCTAssertEqual(values, chart)
+    }
+
+    func testMarketListTrendStillUsesTwoPointChartWithoutRichFallback() {
+        let chart = [10.0, 12.0]
+
+        let values = marketPreferredListTrend(
+            chartValues: chart,
+            snapshotValues: [10.0]
+        )
+
+        XCTAssertEqual(values, chart)
+    }
+
     func testVolumeScaleUsesRobustPercentileCeiling() throws {
         let rows = (1...20).map { index in
             #"{"timestamp":\#(index),"open":10,"high":11,"low":9,"close":10,"volume":\#(index * 100),"state":"confirmed","source":"test","session":"regular"}"#
