@@ -22,6 +22,35 @@ private actor MarketConcurrencyProbe {
 }
 
 final class MarketPresentationTests: XCTestCase {
+    func testMarketDecodingDiagnosticIncludesMissingFieldPath() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-24T10:00:00Z","refreshIntervalMs":30000}}"#.utf8)
+
+        do {
+            _ = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+            XCTFail("Expected dashboard decoding to fail")
+        } catch {
+            let diagnostic = marketDecodingDiagnostic(error)
+            XCTAssertEqual(diagnostic.category, "keyNotFound")
+            XCTAssertEqual(diagnostic.path, "$.data.componentsByRegion")
+            XCTAssertNil(diagnostic.expectedType)
+            XCTAssertFalse(diagnostic.detail.isEmpty)
+        }
+    }
+
+    func testMarketDecodingDiagnosticIncludesTypeMismatchPath() throws {
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-24T10:00:00Z","refreshIntervalMs":"30000","componentsByRegion":{}}}"#.utf8)
+
+        do {
+            _ = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
+            XCTFail("Expected dashboard decoding to fail")
+        } catch {
+            let diagnostic = marketDecodingDiagnostic(error)
+            XCTAssertEqual(diagnostic.category, "typeMismatch")
+            XCTAssertEqual(diagnostic.path, "$.data.refreshIntervalMs")
+            XCTAssertEqual(diagnostic.expectedType, "Swift.Int")
+        }
+    }
+
     func testXueqiuStockURLUsesMarketSpecificCodes() {
         XCTAssertEqual(marketXueqiuURL(for: "NVDA")?.absoluteString, "https://xueqiu.com/S/NVDA")
         XCTAssertEqual(marketXueqiuURL(for: "601398.SS")?.absoluteString, "https://xueqiu.com/S/SH601398")
