@@ -112,7 +112,7 @@ struct MarketDashboard: Codable {
         referenceIndices = try values.decodeLossyQuotes(forKey: .referenceIndices)
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
         metrics = try values.decodeLossyQuotes(forKey: .metrics)
-        componentsByRegion = try values.decode([String: [MarketQuote]].self, forKey: .componentsByRegion)
+        componentsByRegion = try values.decodeLossyQuoteArrays(forKey: .componentsByRegion)
         crypto = try values.decodeLossyQuotes(forKey: .crypto)
         commodities = try values.decodeLossyQuotes(forKey: .commodities)
         indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
@@ -188,6 +188,11 @@ private extension KeyedDecodingContainer where Key == MarketDashboard.CodingKeys
     func decodeLossyQuoteDictionary(forKey key: Key) throws -> [String: MarketQuote]? {
         try decodeIfPresent([String: LossyMarketQuote].self, forKey: key)?
             .compactMapValues(\.value)
+    }
+
+    func decodeLossyQuoteArrays(forKey key: Key) throws -> [String: [MarketQuote]] {
+        try decode([String: [LossyMarketQuote]].self, forKey: key)
+            .mapValues { $0.compactMap(\.value) }
     }
 }
 
