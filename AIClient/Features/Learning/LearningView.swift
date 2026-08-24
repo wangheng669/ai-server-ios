@@ -281,10 +281,15 @@ struct LearningView: View {
                             .lineLimit(2)
 
                         if let lesson {
-                            Text("\(lesson.creator) · \(lesson.durationText)")
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(Color.primary.opacity(0.56))
-                                .lineLimit(1)
+                            HStack(spacing: 6) {
+                                Text("推荐")
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .foregroundStyle(KnowledgePagePalette.accent)
+                                Text("\(lesson.creator) · \(lesson.durationText)")
+                                    .font(.system(size: 11.5, weight: .medium))
+                                    .foregroundStyle(Color.primary.opacity(0.56))
+                                    .lineLimit(1)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -327,7 +332,7 @@ struct LearningView: View {
 
                             Spacer(minLength: 0)
 
-                            Text("第 \(currentIndex + 1) / \(milestones.count) 步")
+                            Text("已完成 \(completed) / \(milestones.count)")
                                 .font(.system(size: 11.5, weight: .medium, design: .rounded))
                                 .foregroundStyle(Color.primary.opacity(0.58))
                                 .monospacedDigit()
@@ -392,10 +397,11 @@ struct LearningView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                             Text(book.title)
-                                .font(.system(size: 10.5, weight: .medium))
+                                .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(.primary)
-                                .lineLimit(2)
-                                .frame(height: 29, alignment: .topLeading)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(height: 17, alignment: .topLeading)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -419,21 +425,21 @@ struct LearningView: View {
             VStack(alignment: .leading, spacing: 12) {
                 knowledgeEditorialHeader(.concepts)
 
-                HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let concept {
-                        Text(concept.title)
-                            .font(.system(size: 18, weight: .semibold, design: .serif))
-                            .foregroundStyle(.primary)
-                        Text(concept.summary)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Color.primary.opacity(0.62))
-                            .lineLimit(3)
-                            .lineSpacing(3)
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        if let concept {
+                            Text(concept.title)
+                                .font(.system(size: 18, weight: .semibold, design: .serif))
+                                .foregroundStyle(.primary)
+                            Text(concept.summary)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color.primary.opacity(0.7))
+                                .lineLimit(2)
+                                .lineSpacing(2)
+                        }
                     }
-                }
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
                     AsyncImage(url: concept?.coverURL) { phase in
                         if case let .success(image) = phase {
@@ -447,9 +453,9 @@ struct LearningView: View {
                                 }
                         }
                     }
-                    .frame(width: 76, height: 76)
+                    .frame(width: 68, height: 68)
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
 
                 knowledgeSectionDivider
@@ -461,7 +467,7 @@ struct LearningView: View {
     }
 
     private var knowledgeIdeologyRow: some View {
-        let people = Array(ideologyPeople.prefix(5))
+        let people = Array(ideologyPeople.prefix(4))
         let remainingCount = max(0, ideologyPeople.count - people.count)
         return Button {
             presentedSection = .ideology
@@ -475,11 +481,11 @@ struct LearningView: View {
                             AvatarView(
                                 url: person.avatarURL(baseURL: peopleStore.baseURL),
                                 name: person.name,
-                                size: 42,
+                                size: 44,
                                 assetName: person.avatarAssetName
                             )
                             Text(person.name)
-                                .font(.system(size: 9.5, weight: .medium))
+                                .font(.system(size: 10.5, weight: .medium))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                         }
@@ -492,10 +498,10 @@ struct LearningView: View {
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Color.primary.opacity(0.68))
                                 .monospacedDigit()
-                                .frame(width: 42, height: 42)
+                                .frame(width: 44, height: 44)
                                 .background(Color.primary.opacity(0.055), in: Circle())
                             Text("更多")
-                                .font(.system(size: 9.5, weight: .medium))
+                                .font(.system(size: 10.5, weight: .medium))
                                 .foregroundStyle(Color.primary.opacity(0.56))
                         }
                         .frame(maxWidth: .infinity)
@@ -509,16 +515,13 @@ struct LearningView: View {
     }
 
     private func knowledgeEditorialHeader(_ section: KnowledgeSection) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Text(section.title)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
             Text(knowledgeSectionCount(section))
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(Color.primary.opacity(0.55))
-                .padding(.horizontal, 7)
-                .frame(height: 22)
-                .background(Color.primary.opacity(0.045), in: Capsule())
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.primary.opacity(0.43))
             Spacer(minLength: 0)
         }
     }
