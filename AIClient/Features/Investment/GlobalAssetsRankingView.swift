@@ -2,12 +2,11 @@ import SwiftUI
 
 struct GlobalAssetsRankingView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
-    @State private var ranking: GlobalAssetsRanking?
-    @State private var isLoading = true
+    let store: GlobalRankingStore
 
     var body: some View {
         Group {
-            if let ranking {
+            if let ranking = store.globalAssets {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         overview(ranking)
@@ -17,7 +16,7 @@ struct GlobalAssetsRankingView: View {
                     .padding(.bottom, 28)
                 }
                 .scrollIndicators(.hidden)
-            } else if isLoading {
+            } else if store.isLoadingGlobalAssets || !store.globalAssetsLoadFailed {
                 VStack(spacing: 12) {
                     ProgressView()
                     Text("正在读取全球资产排名")
@@ -32,7 +31,7 @@ struct GlobalAssetsRankingView: View {
                 } description: {
                     Text("服务器数据库尚未返回可用数据")
                 } actions: {
-                    Button("重新加载") { Task { await load() } }
+                    Button("重新加载") { Task { await store.loadGlobalAssets() } }
                         .buttonStyle(.borderedProminent)
                 }
                 .frame(minHeight: 320)
@@ -40,7 +39,7 @@ struct GlobalAssetsRankingView: View {
         }
         .background(InvestmentDesign.surface)
         .task(id: rootTabIsActive) {
-            if rootTabIsActive, ranking == nil { await load() }
+            if rootTabIsActive, store.globalAssets == nil { await store.loadGlobalAssets() }
         }
     }
 
@@ -202,16 +201,6 @@ struct GlobalAssetsRankingView: View {
             .foregroundStyle(value >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss)
     }
 
-    @MainActor
-    private func load() async {
-        if ranking == nil { isLoading = true }
-        defer { isLoading = false }
-        do {
-            ranking = try await GlobalAssetsService().ranking()
-        } catch {
-            // Preserve the last valid database snapshot during transient failures.
-        }
-    }
 }
 
 enum GlobalAssetsFormat {

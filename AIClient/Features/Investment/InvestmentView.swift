@@ -26,7 +26,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
     case institutionResearch = "机构研究"
     case holdings = "知名投资人"
     case industries = "产业全景"
-    case gdp = "全球排行"
 
     var id: Self { self }
 
@@ -34,7 +33,7 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         switch self {
         case .market, .chinaMacro:
             .market
-        case .institutionResearch, .holdings, .industries, .gdp:
+        case .institutionResearch, .holdings, .industries:
             .research
         }
     }
@@ -46,7 +45,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         case .institutionResearch: "机构"
         case .holdings: "投资人"
         case .industries: "产业"
-        case .gdp: "全球排行"
         }
     }
 
@@ -57,7 +55,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
         case .institutionResearch: "doc.text.magnifyingglass"
         case .holdings: "person.crop.circle.badge.checkmark"
         case .industries: "square.3.layers.3d"
-        case .gdp: "list.number"
         }
     }
 }
@@ -73,7 +70,7 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
         case .market:
             [.market]
         case .research:
-            [.institutionResearch, .holdings, .industries, .gdp]
+            [.institutionResearch, .holdings, .industries]
         }
     }
 
@@ -126,9 +123,6 @@ struct InvestmentView: View {
         } else if ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
                     ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
             initialSection = .market
-        } else if ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
-                    ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) {
-            initialSection = .gdp
         } else {
             initialSection = .market
         }
@@ -193,8 +187,6 @@ struct InvestmentView: View {
             FamousHoldingsView(store: holdingsStore, showsDetail: $holdingsShowsDetail)
         case .industries:
             IndustryPanoramaView()
-        case .gdp:
-            CountryGDPRankingView(showsDetail: $showsDetail)
         }
     }
 
