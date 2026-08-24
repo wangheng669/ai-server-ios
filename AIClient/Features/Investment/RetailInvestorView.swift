@@ -16,10 +16,12 @@ struct RetailInvestorView: View {
     init(
         store: RetailSentimentStore,
         marketStore: MarketStore,
+        initialMarket: SentimentMarket = .china,
         showsDetail: Binding<Bool> = .constant(false)
     ) {
         self.store = store
         self.marketStore = marketStore
+        _selectedMarket = State(initialValue: initialMarket)
         _showsDetail = showsDetail
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {

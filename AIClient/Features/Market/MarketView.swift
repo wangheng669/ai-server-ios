@@ -59,6 +59,17 @@ struct MarketView: View {
         false
         #endif
     }()
+    @State private var selectedSentimentMarket: SentimentMarket? = {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
+            return .korea
+        }
+        return ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ? .china : nil
+        #else
+        nil
+        #endif
+    }()
+    @State private var sentimentShowsDetail = false
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -112,6 +123,10 @@ struct MarketView: View {
                 showsMacro = true
                 showsDetail = true
             },
+            onOpenSentiment: { market in
+                selectedSentimentMarket = market
+                showsDetail = true
+            },
             onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) }
         )
         .sheet(isPresented: $showsMacro, onDismiss: {
@@ -132,6 +147,22 @@ struct MarketView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.canvas)
+        }
+        .sheet(item: $selectedSentimentMarket, onDismiss: {
+            sentimentShowsDetail = false
+            showsDetail = false
+        }) { market in
+            MarketSentimentSheet(
+                store: sentimentStore,
+                marketStore: store,
+                initialMarket: market,
+                showsDetail: $sentimentShowsDetail
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.canvas)
+            .presentationContentInteraction(.resizes)
         }
         .sheet(item: $selectedDetail, onDismiss: {
             showsDetail = false
@@ -173,8 +204,48 @@ struct MarketView: View {
                 showsDetail = true
             }
         }
-        .onAppear { showsDetail = selectedDetail != nil || showsMacro }
+        .onAppear { showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil }
         .onDisappear { showsDetail = false }
+    }
+}
+
+private struct MarketSentimentSheet: View {
+    let store: RetailSentimentStore
+    let marketStore: MarketStore
+    let initialMarket: SentimentMarket
+    @Binding var showsDetail: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("市场情绪")
+                    .font(.headline)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 34, height: 34)
+                        .background(Color.secondary.opacity(0.12), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关闭市场情绪")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(InvestmentDesign.surface)
+
+            Divider().overlay(InvestmentDesign.divider)
+
+            RetailInvestorView(
+                store: store,
+                marketStore: marketStore,
+                initialMarket: initialMarket,
+                showsDetail: $showsDetail
+            )
+        }
+        .background(InvestmentDesign.canvas)
+        .accessibilityAction(.escape) { dismiss() }
     }
 }
 
@@ -183,6 +254,7 @@ private struct MarketHomeView: View {
     let sentimentStore: RetailSentimentStore
     let onCompactHeaderChange: (Bool) -> Void
     let onOpenMacro: () -> Void
+    let onOpenSentiment: (SentimentMarket) -> Void
     let onSelectIndex: (String) -> Void
     @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
@@ -218,7 +290,8 @@ private struct MarketHomeView: View {
 
                         MarketSentimentOverviewStrip(
                             store: sentimentStore,
-                            onOpenMacro: onOpenMacro
+                            onOpenMacro: onOpenMacro,
+                            onOpenSentiment: onOpenSentiment
                         )
 
                         ZStack(alignment: .topTrailing) {
@@ -333,13 +406,22 @@ private struct MarketHomeView: View {
 private struct MarketSentimentOverviewStrip: View {
     let store: RetailSentimentStore
     let onOpenMacro: () -> Void
+    let onOpenSentiment: (SentimentMarket) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("市场情绪")
+                Button { onOpenSentiment(.china) } label: {
+                    HStack(spacing: 3) {
+                        Text("市场情绪")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("打开完整市场情绪")
                 Spacer()
                 Button(action: onOpenMacro) {
                     HStack(spacing: 3) {
@@ -376,24 +458,28 @@ private struct MarketSentimentOverviewStrip: View {
             ? store.isLoading
             : store.isLoadingDetails(for: market)
 
-        return VStack(spacing: 2) {
-            Text(market.title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(snapshot.map { String(Int($0.score.rounded())) } ?? "—")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-                .contentTransition(.numericText())
-            Text(sentimentLabel(snapshot: snapshot, isLoading: isLoading))
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        return Button { onOpenSentiment(market) } label: {
+            VStack(spacing: 2) {
+                Text(market.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(snapshot.map { String(Int($0.score.rounded())) } ?? "—")
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .contentTransition(.numericText())
+                Text(sentimentLabel(snapshot: snapshot, isLoading: isLoading))
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(market.title)市场情绪")
         .accessibilityValue(snapshot.map { "\(Int($0.score.rounded()))分，\($0.label)" } ?? (isLoading ? "加载中" : "暂无数据"))
+        .accessibilityHint("打开完整市场情绪")
     }
 
     private func sentimentLabel(snapshot: SentimentSnapshot?, isLoading: Bool) -> String {
