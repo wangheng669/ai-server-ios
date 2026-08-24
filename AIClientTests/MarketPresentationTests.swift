@@ -684,12 +684,13 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDashboardSkipsQuotesWithNullPriceWithoutDroppingValidData() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-02T08:09:10Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理","price":632.08}],"referenceIndices":[],"metrics":[{"symbol":"USDJPY","name":"美元兑日元","price":null,"lastKnownPrice":157.4,"stale":true},{"symbol":"^VIX","name":"波动率指数","price":16.72}],"componentsByRegion":{},"crypto":[],"indexSessions":{"SPY":{"symbol":"SPY","name":"标普500盘后","price":null,"stale":true}},"missingSymbols":[],"expectedSymbols":["SPY","USDJPY","^VIX"],"symbolHealth":[{"symbol":"USDJPY","status":"stale","reason":"quote_stale"}],"regions":[]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-02T08:09:10Z","refreshIntervalMs":30000,"coreIndices":[{"symbol":"SPY","name":"标普500实时代理","price":632.08}],"referenceIndices":[],"metrics":[{"symbol":"USDJPY","name":"美元兑日元","price":null,"lastKnownPrice":157.4,"stale":true},{"symbol":"^VIX","name":"波动率指数","price":16.72}],"componentsByRegion":{"us":[{"symbol":"NVDA","name":"英伟达","price":null,"stale":true},{"symbol":"GOOGL","name":"谷歌","price":201}]},"crypto":[],"indexSessions":{"SPY":{"symbol":"SPY","name":"标普500盘后","price":null,"stale":true}},"missingSymbols":[],"expectedSymbols":["SPY","USDJPY","^VIX"],"symbolHealth":[{"symbol":"USDJPY","status":"stale","reason":"quote_stale"}],"regions":[]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketDashboardResponse.self, from: data)
 
         XCTAssertEqual(response.data.coreIndices.map(\.symbol), ["SPY"])
         XCTAssertEqual(response.data.metrics.map(\.symbol), ["^VIX"])
+        XCTAssertEqual(response.data.componentsByRegion["us"]?.map(\.symbol), ["GOOGL"])
         XCTAssertEqual(response.data.indexSessions, [:])
         XCTAssertEqual(response.data.symbolHealth.first?.symbol, "USDJPY")
         XCTAssertEqual(response.data.symbolHealth.first?.status, .stale)
