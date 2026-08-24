@@ -232,11 +232,10 @@ final class MarketStore {
 
     func listTrendValues(for quote: MarketQuote?) -> [Double] {
         guard let quote else { return [] }
-        if let values = listTrendPresentations[ChartKey(symbol: quote.symbol, range: .day)],
-           values.count > 1 {
-            return values
-        }
-        return trendValues(for: quote)
+        return marketPreferredListTrend(
+            chartValues: listTrendPresentations[ChartKey(symbol: quote.symbol, range: .day)],
+            snapshotValues: trendValues(for: quote)
+        )
     }
 
     private func backfillMissingTrends() async {
@@ -408,6 +407,14 @@ final class MarketStore {
         await refresh(force: false)
     }
 
+}
+
+func marketPreferredListTrend(chartValues: [Double]?, snapshotValues: [Double]) -> [Double] {
+    guard let chartValues, !chartValues.isEmpty else { return snapshotValues }
+    // A two-point intraday response only describes its endpoints and renders as a
+    // misleading diagonal. Keep the richer dashboard trend until the chart has shape.
+    if chartValues.count < 3, snapshotValues.count >= 3 { return snapshotValues }
+    return chartValues
 }
 
 enum MarketCompanyLogoPathCache {
