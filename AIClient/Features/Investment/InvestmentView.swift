@@ -32,11 +32,9 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
 
     var category: InvestmentCategory {
         switch self {
-        case .market:
+        case .market, .chinaMacro:
             .market
-        case .chinaMacro, .gdp:
-            .macro
-        case .institutionResearch, .holdings, .industries:
+        case .institutionResearch, .holdings, .industries, .gdp:
             .research
         }
     }
@@ -66,7 +64,6 @@ private enum InvestmentSection: String, CaseIterable, Identifiable {
 
 private enum InvestmentCategory: String, CaseIterable, Identifiable {
     case market = "市场"
-    case macro = "宏观"
     case research = "研究"
 
     var id: Self { self }
@@ -75,10 +72,8 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
         switch self {
         case .market:
             [.market]
-        case .macro:
-            [.chinaMacro, .gdp]
         case .research:
-            [.institutionResearch, .holdings, .industries]
+            [.institutionResearch, .holdings, .industries, .gdp]
         }
     }
 
@@ -89,7 +84,6 @@ private enum InvestmentCategory: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .market: "chart.xyaxis.line"
-        case .macro: "globe.asia.australia"
         case .research: "doc.text.magnifyingglass"
         }
     }
