@@ -155,16 +155,15 @@ struct AIServerClientApp: App {
 }
 
 private enum EditorialTab: Hashable {
-    case world, signal, observation, investment, company, learning, people
+    case world, signal, observation, investment, company, learning
 
-    static let researchTabs: [EditorialTab] = [.investment, .company, .people]
+    static let researchTabs: [EditorialTab] = [.investment, .company]
 
     var sectionTitle: String {
         switch self {
         case .signal: "信号"
         case .observation: "动态"
         case .company: "公司"
-        case .people: "人物"
         case .world: "今日"
         case .investment: "数据"
         case .learning: "知识"
@@ -175,7 +174,6 @@ private enum EditorialTab: Hashable {
         switch self {
         case .investment: "chart.xyaxis.line"
         case .company: "building.2"
-        case .people: "person.2"
         default: "magnifyingglass"
         }
     }
@@ -198,7 +196,7 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--video-detail-preview") {
-            return .people
+            return .learning
         }
         if ProcessInfo.processInfo.arguments.contains("--market-preview") ||
             ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
@@ -230,7 +228,6 @@ private struct EditorialRootView: View {
     @State private var marketShowsDetail = false
     @State private var worldShowsDetail = false
     @State private var feedShowsDetail = false
-    @State private var peopleShowsDetail = false
     @State private var learningShowsDetail = false
     @State private var feedHidesTabBar = false
     @State private var notificationPostID: Int?
@@ -297,7 +294,6 @@ private struct EditorialRootView: View {
         case .investment: marketShowsDetail
         case .company: false
         case .learning: learningShowsDetail
-        case .people: peopleShowsDetail
         }
     }
 
@@ -331,12 +327,9 @@ private struct EditorialRootView: View {
                     CompanyResearchView()
                 }
                 tabContent(.learning) {
-                    LearningView(showsDetail: $learningShowsDetail)
-                }
-                tabContent(.people) {
-                    PeopleView(
-                        store: peopleStore,
-                        showsDetail: $peopleShowsDetail,
+                    LearningView(
+                        peopleStore: peopleStore,
+                        showsDetail: $learningShowsDetail,
                         notificationPersonID: $notificationPersonID,
                         notificationVideoID: $notificationVideoID
                     )
@@ -445,7 +438,7 @@ private struct EditorialRootView: View {
                 selectedTab = .observation
                 notificationPostID = Int(request.contentID)
             case "video":
-                selectedTab = .people
+                selectedTab = .learning
                 notificationPersonID = request.personID
                 notificationVideoID = Int64(request.contentID)
             default:
@@ -460,7 +453,7 @@ private struct EditorialRootView: View {
             switch tab {
             case .signal, .observation:
                 lastDynamicTab = tab
-            case .investment, .company, .people:
+            case .investment, .company:
                 lastResearchTab = tab
             case .world, .learning:
                 break

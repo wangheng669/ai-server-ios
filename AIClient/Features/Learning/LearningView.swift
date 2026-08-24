@@ -11,14 +11,17 @@ private let learningImageLogger = Logger(
 
 struct LearningView: View {
     @Binding private var showsDetail: Bool
+    @Binding private var notificationPersonID: String?
+    @Binding private var notificationVideoID: Int64?
     @Environment(\.openURL) private var openURL
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    private let peopleStore: PeopleStore
     @State private var store = LearningStore()
     @State private var repository = LearningContentRepository()
     @State private var progressStore = LearningProgressStore()
-    @State private var peopleStore = PeopleStore()
     @State private var selectedRoute: LearningRoute?
     @State private var selectedIdeologyPerson: SpecialPerson?
+    @State private var peopleShowsDetail = false
     @State private var ideologyCampFilter: IdeologyCampFilter = .all
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
@@ -30,6 +33,17 @@ struct LearningView: View {
             arguments.contains("--city-province-preview") ||
             arguments.contains("--city-city-preview") ||
             arguments.contains("--city-district-preview")
+        #else
+        return false
+        #endif
+    }()
+    @State private var showsPeople = {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("--people-preview") ||
+            arguments.contains("--person-detail-preview") ||
+            arguments.contains("--article-detail-preview") ||
+            arguments.contains("--video-detail-preview")
         #else
         return false
         #endif
@@ -56,8 +70,16 @@ struct LearningView: View {
     }()
     @State private var readingReminder = ReadingReminderManager()
 
-    init(showsDetail: Binding<Bool> = .constant(false)) {
+    init(
+        peopleStore: PeopleStore,
+        showsDetail: Binding<Bool> = .constant(false),
+        notificationPersonID: Binding<String?> = .constant(nil),
+        notificationVideoID: Binding<Int64?> = .constant(nil)
+    ) {
+        self.peopleStore = peopleStore
         _showsDetail = showsDetail
+        _notificationPersonID = notificationPersonID
+        _notificationVideoID = notificationVideoID
     }
 
     var body: some View {
@@ -109,6 +131,20 @@ struct LearningView: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
                 .presentationContentInteraction(.scrolls)
+        }
+        .sheet(isPresented: $showsPeople, onDismiss: updateShowsDetail) {
+            PeopleView(
+                store: peopleStore,
+                showsDetail: $peopleShowsDetail,
+                notificationPersonID: $notificationPersonID,
+                notificationVideoID: $notificationVideoID
+            )
+            .environment(\.rootBottomChromeHeight, 0)
+            .environment(\.rootTabIsActive, true)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationContentInteraction(.scrolls)
         }
         .task {
             async let catalog: Void = store.load()
@@ -166,6 +202,17 @@ struct LearningView: View {
             updateShowsDetail()
         }
         .onChange(of: showsCity) { _, _ in
+            updateShowsDetail()
+        }
+        .onChange(of: showsPeople, initial: true) { _, _ in
+            updateShowsDetail()
+        }
+        .onChange(of: peopleShowsDetail) { _, _ in
+            updateShowsDetail()
+        }
+        .onChange(of: notificationPersonID, initial: true) { _, personID in
+            guard let personID, !personID.isEmpty else { return }
+            showsPeople = true
             updateShowsDetail()
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
@@ -247,6 +294,7 @@ struct LearningView: View {
             knowledgeInvestmentFeature
             knowledgeBooksRow
             knowledgeConceptRow
+            knowledgePeopleRow
             knowledgeCityRow
             knowledgeIdeologyRow
         }
@@ -537,6 +585,70 @@ struct LearningView: View {
         .accessibilityHint("以弹窗展示思想图谱")
     }
 
+    private var knowledgePeopleRow: some View {
+        let people = Array(peopleStore.people.prefix(4))
+        return Button {
+            showsPeople = true
+        } label: {
+            VStack(alignment: .leading, spacing: 13) {
+                HStack(spacing: 7) {
+                    Text("人物")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    if !peopleStore.people.isEmpty {
+                        Text("\(peopleStore.people.count) 位")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.primary.opacity(0.43))
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 12) {
+                    HStack(spacing: -9) {
+                        if people.isEmpty {
+                            Image(systemName: "person.2.fill")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(Color.primary.opacity(0.46))
+                                .frame(width: 48, height: 48)
+                                .background(Color.primary.opacity(0.055), in: Circle())
+                        } else {
+                            ForEach(people) { person in
+                                AvatarView(
+                                    url: person.avatarURL(baseURL: peopleStore.baseURL),
+                                    name: person.name,
+                                    size: 48,
+                                    assetName: person.avatarAssetName
+                                )
+                                .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("进入人物关系网络")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("查看人物档案、动态与关系")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.primary.opacity(0.62))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.primary.opacity(0.34))
+                }
+
+                knowledgeSectionDivider
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .buttonStyle(LearningPressStyle())
+        .accessibilityIdentifier("knowledge-people-entry")
+        .accessibilityHint("以弹窗展示人物页面")
+    }
+
     private var knowledgeCityRow: some View {
         Button {
             showsCity = true
@@ -688,7 +800,9 @@ struct LearningView: View {
         showsDetail = selectedRoute != nil ||
             selectedIdeologyPerson != nil ||
             presentedSection != nil ||
-            showsCity
+            showsCity ||
+            showsPeople ||
+            peopleShowsDetail
     }
 
     @ViewBuilder
