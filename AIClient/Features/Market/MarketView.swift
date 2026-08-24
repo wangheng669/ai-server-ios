@@ -161,7 +161,7 @@ struct MarketView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
-            .presentationBackground(InvestmentDesign.canvas)
+            .presentationBackground(InvestmentDesign.surface)
             .presentationContentInteraction(.resizes)
         }
         .sheet(item: $selectedDetail, onDismiss: {
@@ -219,20 +219,29 @@ private struct MarketSentimentSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("散户正在说")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("散户正在说")
+                        .font(.system(size: 22, weight: .bold))
+                    Text(headerSubtitle)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))
                         .frame(width: 34, height: 34)
-                        .background(Color.secondary.opacity(0.12), in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(InvestmentDesign.divider, lineWidth: 1)
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("关闭散户正在说")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
             .background(InvestmentDesign.surface)
 
             Divider().overlay(InvestmentDesign.divider)
@@ -244,8 +253,13 @@ private struct MarketSentimentSheet: View {
                 showsDetail: $showsDetail
             )
         }
-        .background(InvestmentDesign.canvas)
+        .background(InvestmentDesign.surface)
         .accessibilityAction(.escape) { dismiss() }
+    }
+
+    private var headerSubtitle: String {
+        guard let board = store.investorMood else { return "正在加载最新观点" }
+        return "\(board.items.count) 个样本 · \(RetailSentimentFormat.compactRelativeTime(board.generatedAt))更新"
     }
 }
 

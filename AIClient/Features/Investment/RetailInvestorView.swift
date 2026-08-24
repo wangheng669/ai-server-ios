@@ -7,9 +7,7 @@ struct RetailInvestorView: View {
     private let store: RetailSentimentStore
     private let marketStore: MarketStore
     @State private var selectedMarket: SentimentMarket = .china
-    @State private var interpretationItem: InvestorMoodItem?
     @State private var playbackItem: InvestorMoodItem?
-    @State private var showsAllInvestorMood = false
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     @MainActor
@@ -44,12 +42,9 @@ struct RetailInvestorView: View {
             ScrollView {
                 investorMoodContent(showsHeader: false)
                     .background(InvestmentDesign.surface)
-                    .dashboardSurface()
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
                 .padding(.bottom, 24)
             }
-            .background(InvestmentDesign.canvas)
+            .background(InvestmentDesign.surface)
             .task(id: rootTabIsActive) {
                 guard rootTabIsActive else { return }
                 await store.load(marketStore: marketStore)
@@ -58,9 +53,6 @@ struct RetailInvestorView: View {
         }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
-        .sheet(item: $interpretationItem) { item in
-            InvestorVideoInterpretationSheet(item: item, service: store.service)
-        }
         .sheet(item: $playbackItem) { item in
             InvestorMoodVideoPlayerSheet(item: item)
         }
@@ -641,7 +633,6 @@ struct RetailInvestorView: View {
             if store.investorMood?.items.isEmpty != false {
                 placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
             } else if let items = store.investorMood?.items {
-                investorMoodSummary(items)
                 investorMoodList(items)
             }
         }
@@ -649,71 +640,20 @@ struct RetailInvestorView: View {
         .padding(.bottom, 10)
     }
 
-    private func investorMoodSummary(_ items: [InvestorMoodItem]) -> some View {
-        let groupedItems: [String: [InvestorMoodItem]] = Dictionary(grouping: items) { item in
-            item.label
-        }
-        let groups: [InvestorMoodCount] = groupedItems.map { label, values in
-            InvestorMoodCount(label: label, count: values.count)
-        }.sorted { lhs, rhs in
-            lhs.count == rhs.count ? lhs.label < rhs.label : lhs.count > rhs.count
-        }
-
-        return HStack(spacing: 12) {
-            ForEach(groups) { group in
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(InvestmentDesign.accent)
-                        .frame(width: 6, height: 6)
-                    Text("\(group.label) \(group.count)")
-                }
-            }
-            Spacer(minLength: 0)
-            Text("样本 \(items.count)")
-                .foregroundStyle(.tertiary)
-        }
-        .font(.system(size: 10.5, weight: .medium))
-        .foregroundStyle(.secondary)
-        .padding(.vertical, 2)
-        .padding(.horizontal, 16)
-    }
-
     private func investorMoodList(_ items: [InvestorMoodItem]) -> some View {
-        let visibleItems = showsAllInvestorMood ? items : Array(items.prefix(3))
-        return LazyVStack(spacing: 0) {
-            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
+        LazyVStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 InvestorMoodVideoCard(
                     item: item,
-                    onPlay: { playbackItem = item },
-                    onInterpret: { interpretationItem = item }
+                    onPlay: { playbackItem = item }
                 )
-                if index < visibleItems.count - 1 {
+                if index < items.count - 1 {
                     Divider()
                         .overlay(InvestmentDesign.divider)
-                        .padding(.leading, 136)
                 }
-            }
-            if items.count > 3 {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        showsAllInvestorMood.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(showsAllInvestorMood ? "收起列表" : "查看全部 \(items.count) 条")
-                        Image(systemName: showsAllInvestorMood ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                }
-                .buttonStyle(.plain)
-                .overlay(alignment: .top) { Divider().overlay(InvestmentDesign.divider) }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
     }
 
     private var methodologyNote: some View {
@@ -1105,12 +1045,6 @@ private struct MarketTemperatureGauge: View {
     }
 }
 
-private struct InvestorMoodCount: Identifiable {
-    var id: String { label }
-    let label: String
-    let count: Int
-}
-
 private struct InvestorVideoInterpretationSheet: View {
     let item: InvestorMoodItem
     let service: MarketService
@@ -1248,59 +1182,46 @@ private struct InvestorVideoInterpretationSheet: View {
 private struct InvestorMoodVideoCard: View {
     let item: InvestorMoodItem
     let onPlay: () -> Void
-    let onInterpret: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Button(action: onPlay) {
+        Button(action: onPlay) {
+            HStack(alignment: .top, spacing: 14) {
                 thumbnail
-                    .frame(width: 120, height: 154)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    Text(item.nickname)
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(1)
-                    moodBadge
-                    Spacer(minLength: 2)
-                    Text(RetailSentimentFormat.relativeTime(item.createdAt))
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                }
-                Text(item.description.nonEmpty ?? summary)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Label("原始字幕", systemImage: "captions.bubble.fill")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(transcript)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.primary)
-                        .lineLimit(3)
-                        .lineSpacing(2)
-                }
-
-                Button(action: onInterpret) {
-                    HStack(spacing: 5) {
-                        Label("查看 AI 解读", systemImage: "sparkles")
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
+                    .frame(width: 96, height: 128)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(alignment: .bottomTrailing) {
+                        if item.createdAt != nil {
+                            Text(RetailSentimentFormat.compactRelativeTime(item.createdAt))
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(.black.opacity(0.68), in: Capsule())
+                                .padding(6)
+                        }
                     }
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 7) {
+                        Text(item.nickname)
+                            .font(.system(size: 15, weight: .semibold))
+                            .lineLimit(1)
+                        moodBadge
+                        Spacer(minLength: 0)
+                    }
+                    Text(transcript)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(.primary)
+                        .lineLimit(5)
+                        .lineSpacing(3)
                 }
-                .buttonStyle(.plain)
             }
+            .contentShape(Rectangle())
+            .padding(.vertical, 14)
         }
-        .padding(.vertical, 12)
-        .accessibilityElement(children: .contain)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(item.nickname)，\(item.label)，\(RetailSentimentFormat.compactRelativeTime(item.createdAt))，\(transcript)")
+        .accessibilityHint("播放散户观点视频")
     }
 
     @ViewBuilder
@@ -1327,12 +1248,8 @@ private struct InvestorMoodVideoCard: View {
         .clipped()
     }
 
-    private var summary: String {
-        item.analysis.nonEmpty ?? item.reasons.first?.nonEmpty ?? item.description.nonEmpty ?? "暂无观点摘要"
-    }
-
     private var transcript: String {
-        item.transcript.nonEmpty ?? (item.transcriptStatus.nonEmpty ?? "暂无原始字幕")
+        item.transcript.nonEmpty ?? item.analysis.nonEmpty ?? item.description.nonEmpty ?? "当前视频暂无可用内容"
     }
 
     @ViewBuilder
@@ -1347,20 +1264,22 @@ private struct InvestorMoodVideoCard: View {
     }
 
     private var coverPlaceholder: some View {
-        LinearGradient(
-            colors: [.black, InvestmentDesign.accent.opacity(0.48)],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        Color.black
+            .overlay {
+                Image(systemName: "video.fill")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
     }
 
     private var moodBadge: some View {
+        let tint = RetailSentimentFormat.moodColor(item.label)
         return Text(item.stale ? "\(item.label) · 旧样本" : item.label)
             .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(InvestmentDesign.accent)
+            .foregroundStyle(tint)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(InvestmentDesign.accentSoft, in: Capsule())
+            .background(tint.opacity(0.1), in: Capsule())
     }
 }
 
@@ -1393,14 +1312,10 @@ private struct InvestorMoodVideoPlayerSheet: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("原始字幕", systemImage: "captions.bubble.fill")
-                            .font(.headline)
-                        Text(item.transcript.nonEmpty ?? "当前视频暂无可用字幕")
-                            .font(.body)
-                            .lineSpacing(5)
-                            .textSelection(.enabled)
-                    }
+                    Text(item.transcript.nonEmpty ?? "当前视频暂无可用字幕")
+                        .font(.body)
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
                 }
                 .padding(16)
             }
@@ -1951,7 +1866,7 @@ private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
 
-private enum RetailSentimentFormat {
+enum RetailSentimentFormat {
     static func money(_ value: Double?) -> String {
         guard let value else { return "—" }
         let absolute = abs(value)
@@ -1983,10 +1898,25 @@ private enum RetailSentimentFormat {
         return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
     }
 
+    static func compactRelativeTime(_ value: String?) -> String {
+        guard let value, let date = isoDate(value) else { return "刚刚" }
+        let seconds = max(Int(Date().timeIntervalSince(date)), 0)
+        switch seconds {
+        case ..<60:
+            return "刚刚"
+        case ..<3_600:
+            return "\(seconds / 60) 分钟前"
+        case ..<86_400:
+            return "\(seconds / 3_600) 小时前"
+        default:
+            return "\(seconds / 86_400) 天前"
+        }
+    }
+
     static func moodColor(_ label: String) -> Color {
-        if label.contains("悲观") || label.contains("恐慌") { return .green }
-        if label.contains("乐观") || label.contains("兴奋") { return .red }
-        return HoldingsPalette.purple
+        if label.contains("悲观") || label.contains("恐慌") || label.contains("看空") { return .green }
+        if label.contains("乐观") || label.contains("兴奋") || label.contains("看多") { return .red }
+        return .secondary
     }
 
     private static func isoDate(_ value: String) -> Date? {
