@@ -1,6 +1,26 @@
 import XCTest
 @testable import AIServerClient
 
+private actor MarketConcurrencyProbe {
+    private var active = 0
+    private var maximumActive = 0
+    private var completed: [Int] = []
+
+    func start() {
+        active += 1
+        maximumActive = max(maximumActive, active)
+    }
+
+    func finish(_ value: Int) {
+        active -= 1
+        completed.append(value)
+    }
+
+    func result() -> (maximumActive: Int, completed: [Int]) {
+        (maximumActive, completed)
+    }
+}
+
 final class MarketPresentationTests: XCTestCase {
     func testMarketSentimentOverviewUsesRequestedMarketOrder() {
         XCTAssertEqual(
@@ -103,11 +123,18 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(quote.compactMarketName, "纳指 100 期货")
     }
 
-    func testMarketAuxiliaryRequestsAreSplitIntoSmallBatches() {
-        let batches = marketRequestBatches(Array(0..<10), maximumConcurrentRequests: 3)
+    func testMarketAuxiliaryRequestsKeepConcurrencySlotsFullWithoutExceedingLimit() async {
+        let probe = MarketConcurrencyProbe()
 
-        XCTAssertEqual(batches, [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]])
-        XCTAssertEqual(marketRequestBatches([1, 2], maximumConcurrentRequests: 0), [[1], [2]])
+        await marketRunWithLimitedConcurrency(Array(0..<10), maximumConcurrentRequests: 3) { value in
+            await probe.start()
+            try? await Task.sleep(for: .milliseconds(value.isMultiple(of: 3) ? 12 : 3))
+            await probe.finish(value)
+        }
+
+        let result = await probe.result()
+        XCTAssertEqual(result.completed.sorted(), Array(0..<10))
+        XCTAssertEqual(result.maximumActive, 3)
     }
 
     func testSentimentSnapshotCachePolicyUsesAvailableCacheOnWeakNetworks() {

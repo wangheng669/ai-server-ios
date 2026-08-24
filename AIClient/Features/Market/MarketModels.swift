@@ -1260,18 +1260,25 @@ struct MarketChartArtifacts: Sendable {
     let listTrend: [Double]
 }
 
-func marketChartArtifacts(for chart: MarketChart) async -> MarketChartArtifacts {
-    await Task.detached(priority: .userInitiated) {
-        MarketChartArtifacts(
-            presentation: MarketChartPresentation(chart: chart),
-            listTrend: marketSampledChartTrend(chart.candles)
-        )
-    }.value
+func marketChartArtifacts(for chart: MarketChart) async throws -> MarketChartArtifacts {
+    try Task.checkCancellation()
+    let presentation = MarketChartPresentation(chart: chart)
+    try Task.checkCancellation()
+    return MarketChartArtifacts(
+        presentation: presentation,
+        listTrend: marketSampledChartTrend(displayPoints: presentation.points)
+    )
 }
 
 func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 60) -> [Double] {
-    let values = marketChartDisplayPoints(points)
-        .sorted { $0.timestamp < $1.timestamp }
+    marketSampledChartTrend(
+        displayPoints: marketChartDisplayPoints(points).sorted { $0.timestamp < $1.timestamp },
+        limit: limit
+    )
+}
+
+private func marketSampledChartTrend(displayPoints: [MarketChartPoint], limit: Int = 60) -> [Double] {
+    let values = displayPoints
         .compactMap(\.displayValue)
         .filter { $0.isFinite && $0 > 0 }
     guard limit > 1, values.count > limit else { return values }

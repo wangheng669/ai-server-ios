@@ -38,6 +38,7 @@ final class MarketStore {
     private var chartRetryAttempts: [ChartKey: Int] = [:]
     private var loadingConstituentSymbols: Set<String> = []
     private var loadingCompanyLogoSymbols: Set<String> = []
+    private var companyLogoCacheSaveTask: Task<Void, Never>?
     private var trendBackfillTask: Task<Void, Never>?
     @ObservationIgnored private var dashboardQuotesBySymbol: [String: MarketQuote] = [:]
     @ObservationIgnored private var constituentsBySymbol: [String: MarketIndexConstituent] = [:]
@@ -116,7 +117,7 @@ final class MarketStore {
         defer { loadingCharts.remove(key) }
         do {
             let value = try await service.chart(symbol: symbol, range: range, refresh: force)
-            let artifacts = await marketChartArtifacts(for: value)
+            let artifacts = try await marketChartArtifacts(for: value)
             guard !Task.isCancelled else { return }
             charts[key] = value
             chartPresentations[key] = artifacts.presentation
@@ -311,7 +312,19 @@ final class MarketStore {
         defer { loadingCompanyLogoSymbols.remove(symbol) }
         if let path = try? await service.companyLogo(symbol: symbol, name: name) {
             companyLogoPaths[symbol] = path
-            MarketCompanyLogoPathCache.save(companyLogoPaths)
+            scheduleCompanyLogoCacheSave()
+        }
+    }
+
+    private func scheduleCompanyLogoCacheSave() {
+        companyLogoCacheSaveTask?.cancel()
+        let paths = companyLogoPaths
+        companyLogoCacheSaveTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) }
+            catch { return }
+            await MarketCompanyLogoPathCache.saveOffMain(paths)
+            guard !Task.isCancelled else { return }
+            self?.companyLogoCacheSaveTask = nil
         }
     }
 
@@ -436,6 +449,10 @@ enum MarketCompanyLogoPathCache {
     static func save(_ paths: [String: String], defaults: UserDefaults = .standard) {
         defaults.set(paths, forKey: defaultsKey)
         defaults.set(Date(), forKey: savedAtKey)
+    }
+
+    static func saveOffMain(_ paths: [String: String]) async {
+        save(paths)
     }
 }
 
