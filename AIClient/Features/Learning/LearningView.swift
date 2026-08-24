@@ -237,57 +237,38 @@ struct LearningView: View {
                 Button {
                     selectedRoute = route(for: milestone, at: currentIndex, total: milestones.count)
                 } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Color(red: 0.045, green: 0.12, blue: 0.22)
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.92))
-                        }
-                        .frame(width: 48, height: 48)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .bottom, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
                             Text("继续学习")
-                                .font(.system(size: 10.5, weight: .medium))
+                                    .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(.secondary)
                             Text("股票入门 · \(milestone.title)")
-                                .font(.system(size: 15.5, weight: .semibold))
+                                    .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
-
-                            HStack(spacing: 8) {
-                                ProgressView(
-                                    value: Double(completed),
-                                    total: Double(max(1, milestones.count))
-                                )
-                                .tint(KnowledgePagePalette.accent)
-
-                                Text("\(completed) / \(milestones.count)")
-                                    .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
                             }
+
+                            Spacer(minLength: 0)
+
+                            Text("\(completed) / \(milestones.count)")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
 
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(KnowledgePagePalette.accent, in: Circle())
+                        ProgressView(
+                            value: Double(completed),
+                            total: Double(max(1, milestones.count))
+                        )
+                        .tint(KnowledgePagePalette.accent)
                     }
-                    .padding(10)
-                    .background(KnowledgePagePalette.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
-                    }
+                    .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(LearningPressStyle())
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
             }
         } else {
             HStack(spacing: 12) {
@@ -330,79 +311,61 @@ struct LearningView: View {
         return Button {
             presentedSection = .investment
         } label: {
-            ZStack(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 12) {
+                knowledgeEditorialHeader(.investment)
+
+                HStack(spacing: 14) {
                 AsyncImage(url: lesson?.coverURL) { phase in
                     if case let .success(image) = phase {
                         image.resizable().scaledToFill()
                     } else {
                         Color(red: 0.035, green: 0.055, blue: 0.09)
-                            .overlay(alignment: .trailing) {
+                                .overlay {
                                 Image(systemName: "chart.line.uptrend.xyaxis")
-                                    .font(.system(size: 64, weight: .ultraLight))
-                                    .foregroundStyle(.white.opacity(0.12))
-                                    .padding(.trailing, 28)
+                                        .font(.system(size: 25, weight: .light))
+                                        .foregroundStyle(.white.opacity(0.72))
                             }
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 184)
+                    .frame(width: 132, height: 86)
                 .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                LinearGradient(
-                    colors: [.black.opacity(0.02), .black.opacity(0.84)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(lesson?.title ?? "从基础开始建立投资框架")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(3)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("投资学习")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(knowledgeSectionCount(.investment))
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.68))
-                        Spacer()
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 11, weight: .bold))
+                        if let lesson {
+                            Text("\(lesson.creator) · \(lesson.durationText)")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
-
-                    Text(lesson?.title ?? "从基础开始建立投资框架")
-                        .font(.system(size: 22, weight: .bold))
-                        .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .foregroundStyle(.white)
-                .padding(18)
+
+                knowledgeSectionDivider
             }
-            .frame(height: 184)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityHint("以弹窗展示投资学习")
     }
 
     private var knowledgeBooksRow: some View {
-        let books = Array((store.bookshelf?.books ?? []).prefix(3))
+        let books = Array((store.bookshelf?.books ?? []).prefix(4))
         return Button {
             presentedSection = .books
         } label: {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 8) {
-                    knowledgeEditorialHeader(.books)
-                    Spacer(minLength: 0)
-                    if let book = books.first {
-                        Text("正在阅读")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text(book.title)
-                            .font(.system(size: 15, weight: .semibold, design: .serif))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 12) {
+                knowledgeEditorialHeader(.books)
 
-                HStack(alignment: .center, spacing: -10) {
-                    ForEach(Array(books.enumerated()), id: \.element.id) { index, book in
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(books) { book in
+                        VStack(alignment: .leading, spacing: 6) {
                         AsyncImage(url: book.coverURL) { phase in
                             if case let .success(image) = phase {
                                 image.resizable().scaledToFill()
@@ -415,23 +378,23 @@ struct LearningView: View {
                                     }
                             }
                         }
-                        .frame(width: 56, height: 92)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 108)
                         .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .stroke(.white.opacity(0.85), lineWidth: 1)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                            Text(book.title)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
                         }
-                        .shadow(color: .black.opacity(0.14), radius: 4, y: 2)
-                        .rotationEffect(.degrees(Double(index - 1) * 2.2))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+
+                knowledgeSectionDivider
             }
-            .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
-            .padding(16)
-            .background(KnowledgePagePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay { knowledgeEditorialStroke(radius: 18) }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityHint("以弹窗展示书籍")
@@ -444,9 +407,11 @@ struct LearningView: View {
         return Button {
             presentedSection = .concepts
         } label: {
-            HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                knowledgeEditorialHeader(.concepts)
+
+                HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 10) {
-                    knowledgeEditorialHeader(.concepts)
                     if let concept {
                         Text(concept.title)
                             .font(.system(size: 19, weight: .bold, design: .serif))
@@ -467,12 +432,11 @@ struct LearningView: View {
                     .frame(width: 62, height: 74)
                     .background(Color.primary.opacity(0.045))
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                knowledgeSectionDivider
             }
-            .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
-            .padding(16)
-            .background(KnowledgePagePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay { knowledgeEditorialStroke(radius: 18) }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityHint("以弹窗展示概念卡片")
@@ -504,11 +468,7 @@ struct LearningView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
-            .padding(16)
-            .background(KnowledgePagePalette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay { knowledgeEditorialStroke(radius: 18) }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityHint("以弹窗展示思想图谱")
@@ -517,21 +477,20 @@ struct LearningView: View {
     private func knowledgeEditorialHeader(_ section: KnowledgeSection) -> some View {
         HStack(spacing: 7) {
             Text(section.title)
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 19, weight: .bold))
                 .foregroundStyle(.primary)
             Text(knowledgeSectionCount(section))
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Image(systemName: "arrow.up.right")
-                .font(.system(size: 10.5, weight: .bold))
-                .foregroundStyle(.primary.opacity(0.58))
         }
     }
 
-    private func knowledgeEditorialStroke(radius: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
+    private var knowledgeSectionDivider: some View {
+        Rectangle()
+            .fill(KnowledgePagePalette.stroke)
+            .frame(height: 0.7)
+            .padding(.top, 3)
     }
 
     private func knowledgePopup(_ section: KnowledgeSection) -> some View {
