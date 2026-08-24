@@ -24,6 +24,13 @@ struct MarketView: View {
     private let store: MarketStore
     private let sentimentStore: RetailSentimentStore
     private let onCompactHeaderChange: (Bool) -> Void
+    @State private var showsMacro = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--market-macro-sheet-preview")
+        #else
+        false
+        #endif
+    }()
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -73,8 +80,31 @@ struct MarketView: View {
             store: store,
             sentimentStore: sentimentStore,
             onCompactHeaderChange: onCompactHeaderChange,
+            onOpenMacro: {
+                showsMacro = true
+                showsDetail = true
+            },
             onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) }
         )
+        .sheet(isPresented: $showsMacro, onDismiss: {
+            showsDetail = false
+        }) {
+            NavigationStack {
+                ChinaMacroView()
+                    .navigationTitle("宏观观察")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showsMacro = false }
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.canvas)
+        }
         .sheet(item: $selectedDetail, onDismiss: {
             showsDetail = false
         }) { route in
@@ -113,7 +143,7 @@ struct MarketView: View {
                 showsDetail = true
             }
         }
-        .onAppear { showsDetail = selectedDetail != nil }
+        .onAppear { showsDetail = selectedDetail != nil || showsMacro }
         .onDisappear { showsDetail = false }
     }
 }
@@ -122,6 +152,7 @@ private struct MarketHomeView: View {
     let store: MarketStore
     let sentimentStore: RetailSentimentStore
     let onCompactHeaderChange: (Bool) -> Void
+    let onOpenMacro: () -> Void
     let onSelectIndex: (String) -> Void
     @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
@@ -155,7 +186,10 @@ private struct MarketHomeView: View {
                         }
                         .frame(height: 1)
 
-                        MarketSentimentOverviewStrip(store: sentimentStore)
+                        MarketSentimentOverviewStrip(
+                            store: sentimentStore,
+                            onOpenMacro: onOpenMacro
+                        )
 
                         ZStack(alignment: .topTrailing) {
                             MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: selectIndex)
@@ -259,12 +293,28 @@ private struct MarketHomeView: View {
 
 private struct MarketSentimentOverviewStrip: View {
     let store: RetailSentimentStore
+    let onOpenMacro: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("市场情绪")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("市场情绪")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: onOpenMacro) {
+                    HStack(spacing: 3) {
+                        Text("宏观")
+                            .foregroundStyle(.primary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 11.5, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("打开宏观观察")
+            }
 
             HStack(spacing: 0) {
                 ForEach(SentimentMarket.marketOverviewOrder) { market in
