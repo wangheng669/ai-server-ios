@@ -53,6 +53,16 @@ struct MarketView: View {
     private let sentimentStore: RetailSentimentStore
     private let onCompactHeaderChange: (Bool) -> Void
     @State private var globalRankingStore: GlobalRankingStore
+    @State private var holdingsStore: FamousHoldingsStore
+    @State private var investorShowsDetail = false
+    @State private var showsInvestors = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
+            ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--holdings-detail-preview=") })
+        #else
+        false
+        #endif
+    }()
     @State private var showsGlobalRanking = {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
@@ -110,6 +120,7 @@ struct MarketView: View {
         self.onCompactHeaderChange = onCompactHeaderChange
         _showsDetail = showsDetail
         _globalRankingStore = State(initialValue: GlobalRankingStore())
+        _holdingsStore = State(initialValue: FamousHoldingsStore())
     }
 
     @MainActor
@@ -143,8 +154,34 @@ struct MarketView: View {
                 showsGlobalRanking = true
                 showsDetail = true
             },
+            holdingsStore: holdingsStore,
+            onOpenInvestors: {
+                showsInvestors = true
+                showsDetail = true
+            },
             onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) }
         )
+        .sheet(isPresented: $showsInvestors, onDismiss: {
+            investorShowsDetail = false
+            showsDetail = false
+        }) {
+            NavigationStack {
+                FamousHoldingsView(store: holdingsStore, showsDetail: $investorShowsDetail)
+                    .navigationTitle("知名投资人")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { showsInvestors = false }
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+            .presentationDetents([.fraction(0.82), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.canvas)
+            .presentationContentInteraction(.resizes)
+        }
         .sheet(isPresented: $showsGlobalRanking, onDismiss: {
             showsDetail = false
         }) {
@@ -241,7 +278,8 @@ struct MarketView: View {
             }
         }
         .onAppear {
-            showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil || showsGlobalRanking
+            showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil ||
+                showsGlobalRanking || showsInvestors
         }
         .onDisappear { showsDetail = false }
     }
@@ -309,6 +347,8 @@ private struct MarketHomeView: View {
     let onOpenSentiment: (SentimentMarket) -> Void
     let rankingStore: GlobalRankingStore
     let onOpenGlobalRanking: () -> Void
+    let holdingsStore: FamousHoldingsStore
+    let onOpenInvestors: () -> Void
     let onSelectIndex: (String) -> Void
     @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
@@ -362,6 +402,11 @@ private struct MarketHomeView: View {
                                 onOpen: onOpenGlobalRanking
                             )
                             .padding(.top, MarketStyle.pageSpacing)
+
+                            FamousInvestorsSummaryCard(
+                                store: holdingsStore,
+                                onOpen: onOpenInvestors
+                            )
 
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
@@ -573,6 +618,112 @@ private struct GlobalRankingSummaryCard: View {
         let country = countryLeader.map { "最大经济体\($0.localizedName)" } ?? "最大经济体数据加载中"
         let asset = assetLeader.map { "最大资产\($0.name)" } ?? "最大资产数据加载中"
         return "\(country)，\(asset)"
+    }
+}
+
+private struct FamousInvestorsSummaryCard: View {
+    let store: FamousHoldingsStore
+    let onOpen: () -> Void
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+
+    private var managers: [FamousHoldingsManager] {
+        (store.holdings?.managers ?? []).sorted { managerPriority($0.key) < managerPriority($1.key) }
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack {
+                    Label("知名投资人", systemImage: "person.2.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    HStack(spacing: 3) {
+                        Text("查看全部")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(MarketStyle.accent)
+                }
+
+                if managers.isEmpty {
+                    HStack(spacing: 8) {
+                        if store.isLoading {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(store.errorMessage == nil ? "正在读取最新持仓披露" : "投资人持仓暂不可用")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(height: 42)
+                } else {
+                    HStack(spacing: 12) {
+                        HStack(spacing: -9) {
+                            ForEach(Array(managers.prefix(3).enumerated()), id: \.element.key) { index, manager in
+                                InvestorPortraitImage(manager: manager, contentMode: .fill)
+                                    .frame(width: 38, height: 38)
+                                    .clipShape(Circle())
+                                    .overlay {
+                                        Circle().stroke(InvestmentDesign.secondarySurface, lineWidth: 2)
+                                    }
+                                    .zIndex(Double(managers.count - index))
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(compactSummaryText)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text("SEC 13F 最新披露")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.trailing, 104)
+                }
+
+                Text("公开 13F 持仓 · 增减仓与组合变化")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(MarketStyle.accent.opacity(0.18), lineWidth: 0.8)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("知名投资人")
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint("打开知名投资人的公开持仓")
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.load()
+        }
+    }
+
+    private var summaryText: String {
+        guard let holdings = store.holdings else { return "" }
+        return "\(holdings.managers.count) 位投资人 · \(holdings.periodLabel)"
+    }
+
+    private var compactSummaryText: String {
+        guard let holdings = store.holdings else { return "" }
+        return "\(holdings.managers.count) 位 · \(holdings.periodLabel)"
+    }
+
+    private var accessibilityValue: String {
+        guard !managers.isEmpty else { return store.errorMessage == nil ? "数据加载中" : "数据暂不可用" }
+        return "\(summaryText)，\(managers.prefix(3).map(\.displayName).joined(separator: "、"))"
     }
 }
 
