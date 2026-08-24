@@ -155,7 +155,7 @@ struct AIServerClientApp: App {
 }
 
 private enum EditorialTab: Hashable {
-    case world, signal, observation, investment, company, learning, people, city
+    case world, signal, observation, investment, company, learning, people
 
     static let researchTabs: [EditorialTab] = [.investment, .company, .people]
 
@@ -168,7 +168,6 @@ private enum EditorialTab: Hashable {
         case .world: "今日"
         case .investment: "数据"
         case .learning: "知识"
-        case .city: "城市"
         }
     }
 
@@ -222,7 +221,7 @@ private struct EditorialRootView: View {
         if ProcessInfo.processInfo.arguments.contains("--city-preview") ||
             ProcessInfo.processInfo.arguments.contains("--city-province-preview") ||
             ProcessInfo.processInfo.arguments.contains("--city-city-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--city-district-preview") { return .city }
+            ProcessInfo.processInfo.arguments.contains("--city-district-preview") { return .learning }
         return .world
         #else
         .world
@@ -299,7 +298,6 @@ private struct EditorialRootView: View {
         case .company: false
         case .learning: learningShowsDetail
         case .people: peopleShowsDetail
-        case .city: false
         }
     }
 
@@ -342,9 +340,6 @@ private struct EditorialRootView: View {
                         notificationPersonID: $notificationPersonID,
                         notificationVideoID: $notificationVideoID
                     )
-                }
-                tabContent(.city) {
-                    CityNewsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -394,7 +389,7 @@ private struct EditorialRootView: View {
                     )
                 }
             }
-            .padding(.bottom, selectedTab == .city ? -30 : -13)
+            .padding(.bottom, -13)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -467,7 +462,7 @@ private struct EditorialRootView: View {
                 lastDynamicTab = tab
             case .investment, .company, .people:
                 lastResearchTab = tab
-            case .world, .learning, .city:
+            case .world, .learning:
                 break
             }
         }
@@ -503,21 +498,20 @@ private struct RootNavigationBar: View {
             intelligenceItem
             researchItem
             item(.learning, title: "知识", icon: "books.vertical")
-            item(.city, title: "城市", icon: "map")
         }
-        .frame(maxWidth: selection == .city ? .infinity : 368)
-        .frame(height: selection == .city ? 58 : 54)
+        .frame(maxWidth: 368)
+        .frame(height: 54)
         .background(
             Color(uiColor: .systemBackground),
-            in: RoundedRectangle(cornerRadius: selection == .city ? 29 : 14, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: selection == .city ? 29 : 14, style: .continuous)
-                .stroke(Color.primary.opacity(selection == .city ? 0.09 : 0.16), lineWidth: 0.7)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.16), lineWidth: 0.7)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, selection == .city ? 0 : 11)
-        .padding(.bottom, selection == .city ? 0 : 2)
+        .padding(.horizontal, 11)
+        .padding(.bottom, 2)
     }
 
     private var intelligenceItem: some View {
@@ -627,8 +621,8 @@ private struct RootNavigationBar: View {
             if isSelected {
                 Capsule()
                     .fill(InvestmentDesign.accent.opacity(0.1))
-                    .padding(.horizontal, selection == .city && title == "城市" ? 0 : 7)
-                    .padding(.vertical, selection == .city && title == "城市" ? 0 : 2)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
             }
         }
     }

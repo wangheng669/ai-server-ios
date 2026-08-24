@@ -23,6 +23,17 @@ struct LearningView: View {
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
     @State private var shuffledConcepts: [KnowledgeConceptCard] = []
+    @State private var showsCity = {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("--city-preview") ||
+            arguments.contains("--city-province-preview") ||
+            arguments.contains("--city-city-preview") ||
+            arguments.contains("--city-district-preview")
+        #else
+        return false
+        #endif
+    }()
     @State private var presentedSection: KnowledgeSection? = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
@@ -79,7 +90,7 @@ struct LearningView: View {
             .presentationContentInteraction(.scrolls)
         }
         .sheet(isPresented: ideologyPersonIsPresented, onDismiss: {
-            showsDetail = presentedSection != nil || selectedRoute != nil
+            updateShowsDetail()
         }) {
             PersonDetailSheet(
                 selectedPerson: $selectedIdeologyPerson,
@@ -90,6 +101,14 @@ struct LearningView: View {
             .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
+        }
+        .sheet(isPresented: $showsCity, onDismiss: updateShowsDetail) {
+            CityNewsView()
+                .environment(\.rootBottomChromeHeight, 0)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationContentInteraction(.scrolls)
         }
         .task {
             async let catalog: Void = store.load()
@@ -138,13 +157,16 @@ struct LearningView: View {
             }
         }
         .onChange(of: selectedRoute, initial: true) { _, route in
-            showsDetail = route != nil || selectedIdeologyPerson != nil || presentedSection != nil
+            updateShowsDetail()
         }
         .onChange(of: selectedIdeologyPerson) { _, person in
-            showsDetail = selectedRoute != nil || person != nil || presentedSection != nil
+            updateShowsDetail()
         }
         .onChange(of: presentedSection) { _, section in
-            showsDetail = section != nil || selectedRoute != nil || selectedIdeologyPerson != nil
+            updateShowsDetail()
+        }
+        .onChange(of: showsCity) { _, _ in
+            updateShowsDetail()
         }
         .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
             guard rootTabIsActive,
@@ -225,6 +247,7 @@ struct LearningView: View {
             knowledgeInvestmentFeature
             knowledgeBooksRow
             knowledgeConceptRow
+            knowledgeCityRow
             knowledgeIdeologyRow
         }
         .padding(.horizontal, 16)
@@ -514,6 +537,53 @@ struct LearningView: View {
         .accessibilityHint("以弹窗展示思想图谱")
     }
 
+    private var knowledgeCityRow: some View {
+        Button {
+            showsCity = true
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    Text("城市观察")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text("广东 · 21 个城市")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.primary.opacity(0.43))
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 13) {
+                    Image("ShenzhenSkyline")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 76, height: 58)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("从广东进入城市知识地图")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("查看区域概况、城市名片与发展动态")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.primary.opacity(0.62))
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.primary.opacity(0.34))
+                }
+
+                knowledgeSectionDivider
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .buttonStyle(LearningPressStyle())
+        .accessibilityHint("以弹窗展示城市观察")
+    }
+
     private func knowledgeEditorialHeader(_ section: KnowledgeSection) -> some View {
         HStack(spacing: 7) {
             Text(section.title)
@@ -611,6 +681,13 @@ struct LearningView: View {
         withAnimation(.smooth(duration: 0.24)) {
             presentedSection = nil
         }
+    }
+
+    private func updateShowsDetail() {
+        showsDetail = selectedRoute != nil ||
+            selectedIdeologyPerson != nil ||
+            presentedSection != nil ||
+            showsCity
     }
 
     @ViewBuilder
