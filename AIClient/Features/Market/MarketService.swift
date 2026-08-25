@@ -101,8 +101,11 @@ struct MarketService {
     }
 
     func prewarmInvestorMoodVideos(_ items: [InvestorMoodItem]) async {
-        for item in items.prefix(6) {
-            guard let url = item.prewarmURL else { continue }
+        await marketRunWithLimitedConcurrency(
+            Array(items.prefix(6)),
+            maximumConcurrentRequests: 3
+        ) { item in
+            guard let url = item.prewarmURL else { return }
             var request = URLRequest(url: url)
             request.timeoutInterval = 4
             request.cachePolicy = .reloadIgnoringLocalCacheData
