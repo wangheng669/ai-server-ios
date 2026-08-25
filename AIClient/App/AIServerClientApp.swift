@@ -203,6 +203,7 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
             ProcessInfo.processInfo.arguments.contains("--institution-research-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ||
             ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
             ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
@@ -281,6 +282,7 @@ private struct EditorialRootView: View {
             ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
             ProcessInfo.processInfo.arguments.contains("--institution-research-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ||
             ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") ||
             ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
             ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) { return nil }
