@@ -223,14 +223,6 @@ struct MarketView: View {
                 FamousHoldingsView(store: holdingsStore, showsDetail: $investorShowsDetail)
                     .navigationTitle("知名投资人")
                     .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            MarketSheetCloseButton(
-                                action: { showsInvestors = false },
-                                accessibilityLabel: "关闭知名投资人"
-                            )
-                        }
-                    }
             }
             .presentationDetents([.fraction(0.82), .large])
             .presentationDragIndicator(.visible)
@@ -245,14 +237,6 @@ struct MarketView: View {
                 InstitutionResearchView(store: institutionResearchStore)
                     .navigationTitle("机构研究")
                     .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            MarketSheetCloseButton(
-                                action: { showsInstitutionResearch = false },
-                                accessibilityLabel: "关闭机构研究"
-                            )
-                        }
-                    }
             }
             .presentationDetents([.fraction(0.82), .large])
             .presentationDragIndicator(.visible)
@@ -267,14 +251,6 @@ struct MarketView: View {
                 IndustryPanoramaView()
                     .navigationTitle("产业全景")
                     .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            MarketSheetCloseButton(
-                                action: { showsIndustries = false },
-                                accessibilityLabel: "关闭产业全景"
-                            )
-                        }
-                    }
             }
             .presentationDetents([.fraction(0.82), .large])
             .presentationDragIndicator(.visible)
@@ -289,14 +265,6 @@ struct MarketView: View {
                 CountryGDPRankingView(store: globalRankingStore)
                     .navigationTitle("全球排行")
                     .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            MarketSheetCloseButton(
-                                action: { showsGlobalRanking = false },
-                                accessibilityLabel: "关闭全球排行"
-                            )
-                        }
-                    }
             }
             .presentationDetents([.fraction(0.82), .large])
             .presentationDragIndicator(.visible)
@@ -311,14 +279,6 @@ struct MarketView: View {
                 ChinaMacroView()
                     .navigationTitle("宏观观察")
                     .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            MarketSheetCloseButton(
-                                action: { showsMacro = false },
-                                accessibilityLabel: "关闭宏观观察"
-                            )
-                        }
-                    }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -418,25 +378,6 @@ struct MarketView: View {
     }
 }
 
-private struct MarketSheetCloseButton: View {
-    let action: () -> Void
-    let accessibilityLabel: String
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.system(size: 13, weight: .bold))
-                .frame(width: 34, height: 34)
-                .overlay {
-                    Circle()
-                        .stroke(InvestmentDesign.divider, lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-    }
-}
-
 private struct MarketSentimentSheet: View {
     let store: RetailSentimentStore
     let marketStore: MarketStore
@@ -454,11 +395,6 @@ private struct MarketSentimentSheet: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                MarketSheetCloseButton(
-                    action: dismiss.callAsFunction,
-                    accessibilityLabel: "关闭散户正在说"
-                )
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)
@@ -2244,7 +2180,6 @@ private struct MarketQuotesSheet: View {
     let store: MarketStore
     let onSelectQuote: (String) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var chinaScope: ChinaIndexScope = .core
     @State private var displayedLogoPaths: [String: String]
 
@@ -2349,14 +2284,6 @@ private struct MarketQuotesSheet: View {
             .background(MarketStyle.surface)
             .navigationTitle("\(region.rawValue) · 市场行情")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    MarketSheetCloseButton(
-                        action: dismiss.callAsFunction,
-                        accessibilityLabel: "关闭市场行情"
-                    )
-                }
-            }
         }
         .task(id: requestID) {
             guard region != .commodity else { return }
@@ -2397,8 +2324,6 @@ private struct MarketQuotesSheet: View {
 private struct ChinaMarketStructureSheet: View {
     let structure: MarketStructure?
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -2408,14 +2333,6 @@ private struct ChinaMarketStructureSheet: View {
             .background(MarketStyle.surface)
             .navigationTitle("A 股市场")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    MarketSheetCloseButton(
-                        action: dismiss.callAsFunction,
-                        accessibilityLabel: "关闭 A 股市场"
-                    )
-                }
-            }
         }
     }
 }
@@ -4340,7 +4257,6 @@ private enum CompanyPETimeRange: String, CaseIterable, Identifiable {
 
 struct CompanyValuationHistorySheet: View {
     let route: CompanyValuationHistoryRoute
-    @Environment(\.dismiss) private var dismiss
     @State private var selectedKind: CompanyPEKind
     @State private var selectedRange: CompanyPETimeRange = .all
     @State private var selectedDate: Date?
@@ -4377,10 +4293,6 @@ struct CompanyValuationHistorySheet: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("PE 历史变化")
             .navigationBarTitleDisplayMode(.inline)
-            .overlay(alignment: .bottomTrailing) {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭 PE 历史详情")
-                    .padding(16)
-            }
         }
         .task(id: route.symbol) { await load() }
         .onChange(of: selectedKind) { _, _ in selectedDate = nil }
