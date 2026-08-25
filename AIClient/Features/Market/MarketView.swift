@@ -562,9 +562,6 @@ private struct MarketHomeView: View {
                 .background(MarketStyle.canvas)
                 .coordinateSpace(name: "market-scroll")
                 .scrollIndicators(.hidden)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Color.clear.frame(height: 58)
-                }
                 .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
                     onCompactHeaderChange(offset < -28)
                 }
