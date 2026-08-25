@@ -1283,7 +1283,7 @@ private struct InvestorMoodVideoCard: View {
     }
 }
 
-private struct InvestorMoodVideoPlayerSheet: View {
+struct InvestorMoodVideoPlayerSheet: View {
     let item: InvestorMoodItem
     @Environment(\.dismiss) private var dismiss
     @State private var player = AVPlayer()
