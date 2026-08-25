@@ -502,14 +502,6 @@ private struct MarketHomeView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        GeometryReader { geometry in
-                            Color.clear.preference(
-                                key: MarketHomeScrollOffsetPreferenceKey.self,
-                                value: geometry.frame(in: .named("market-scroll")).minY
-                            )
-                        }
-                        .frame(height: 1)
-
                         VStack(spacing: 0) {
                             MarketRegionPicker(store: store, selection: $selectedMarket)
                                 .padding(.horizontal, MarketStyle.pageInset)
@@ -560,11 +552,9 @@ private struct MarketHomeView: View {
                     .background(MarketStyle.canvas)
                 }
                 .background(MarketStyle.canvas)
-                .coordinateSpace(name: "market-scroll")
+                .scrollDisabled(true)
                 .scrollIndicators(.hidden)
-                .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
-                    onCompactHeaderChange(offset < -28)
-                }
+                .onAppear { onCompactHeaderChange(false) }
                 .task {
                     #if DEBUG
                     if ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") {
@@ -1450,14 +1440,6 @@ private struct MarketSentimentOverviewStrip: View {
         if score >= 70 { return InvestmentDesign.warning }
         if score <= 35 { return MarketStyle.accent }
         return .primary
-    }
-}
-
-private struct MarketHomeScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
