@@ -5,6 +5,8 @@ import UIKit
 private enum MarketStyle {
     static let canvas = InvestmentDesign.surface
     static let surface = InvestmentDesign.surface
+    static let cardSurface = InvestmentDesign.surface
+    static let cardBorder = InvestmentDesign.divider
     static let divider = InvestmentDesign.divider
     static let gain = InvestmentDesign.gain
     static let loss = InvestmentDesign.loss
@@ -637,10 +639,10 @@ private struct MarketResearchEntryCard: View {
             }
             .padding(13)
             .frame(maxWidth: .infinity, minHeight: 102, alignment: .leading)
-            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(MarketStyle.accent.opacity(0.14), lineWidth: 0.8)
+                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
@@ -706,10 +708,10 @@ private struct GlobalRankingSummaryCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(MarketStyle.accent.opacity(0.18), lineWidth: 0.8)
+                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
@@ -810,7 +812,7 @@ private struct FamousInvestorsSummaryCard: View {
                                     .frame(width: 38, height: 38)
                                     .clipShape(Circle())
                                     .overlay {
-                                        Circle().stroke(InvestmentDesign.secondarySurface, lineWidth: 2)
+                                        Circle().stroke(MarketStyle.cardSurface, lineWidth: 2)
                                     }
                                     .zIndex(Double(managers.count - index))
                             }
@@ -837,10 +839,10 @@ private struct FamousInvestorsSummaryCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(MarketStyle.accent.opacity(0.18), lineWidth: 0.8)
+                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
