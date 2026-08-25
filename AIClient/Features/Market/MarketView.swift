@@ -449,6 +449,26 @@ private struct MarketHomeView: View {
                         }
                         .frame(height: 1)
 
+                        VStack(spacing: MarketStyle.pageSpacing) {
+                            GlobalRankingSummaryCard(
+                                store: rankingStore,
+                                onOpen: onOpenGlobalRanking
+                            )
+
+                            FamousInvestorsSummaryCard(
+                                store: holdingsStore,
+                                onOpen: onOpenInvestors
+                            )
+
+                            MarketResearchEntryGrid(
+                                onOpenInstitutionResearch: onOpenInstitutionResearch,
+                                onOpenIndustries: onOpenIndustries
+                            )
+                            .id("market-research-entry-grid")
+                        }
+                        .padding(.vertical, MarketStyle.pageSpacing)
+                        .background(MarketStyle.canvas)
+
                         MarketSentimentOverviewStrip(
                             store: sentimentStore,
                             onOpenMacro: onOpenMacro,
@@ -464,23 +484,6 @@ private struct MarketHomeView: View {
                         .background(MarketStyle.surface)
 
                         VStack(spacing: MarketStyle.pageSpacing) {
-                            GlobalRankingSummaryCard(
-                                store: rankingStore,
-                                onOpen: onOpenGlobalRanking
-                            )
-                            .padding(.top, MarketStyle.pageSpacing)
-
-                            FamousInvestorsSummaryCard(
-                                store: holdingsStore,
-                                onOpen: onOpenInvestors
-                            )
-
-                            MarketResearchEntryGrid(
-                                onOpenInstitutionResearch: onOpenInstitutionResearch,
-                                onOpenIndustries: onOpenIndustries
-                            )
-                            .id("market-research-entry-grid")
-
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
                                     message: error,
