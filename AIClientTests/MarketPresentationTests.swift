@@ -22,6 +22,11 @@ private actor MarketConcurrencyProbe {
 }
 
 final class MarketPresentationTests: XCTestCase {
+    func testCompactResearchDateUsesChineseMonthAndDay() {
+        XCTAssertEqual(marketCompactResearchDate("2026-07-22"), "7月22日")
+        XCTAssertEqual(marketCompactResearchDate("unknown"), "unknown")
+    }
+
     func testMarketDecodingDiagnosticIncludesMissingFieldPath() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"market_dashboard_v4","generatedAt":"2026-08-24T10:00:00Z","refreshIntervalMs":30000}}"#.utf8)
 
