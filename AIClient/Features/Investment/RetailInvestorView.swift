@@ -1300,16 +1300,26 @@ private struct InvestorMoodVideoPlayerSheet: View {
     let item: InvestorMoodItem
     @Environment(\.dismiss) private var dismiss
     @State private var player = AVPlayer()
+    @State private var hasStartedPlayback = false
+    @State private var playbackFailed = false
+    @State private var playbackAttempt = 0
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    VideoPlayer(player: player)
-                        .aspectRatio(9 / 16, contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .background(.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    ZStack {
+                        VideoPlayer(player: player)
+
+                        if !hasStartedPlayback {
+                            loadingCover
+                                .transition(.opacity)
+                        }
+                    }
+                    .aspectRatio(9 / 16, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .background(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -1338,12 +1348,90 @@ private struct InvestorMoodVideoPlayerSheet: View {
                     .padding(16)
             }
         }
-        .task(id: item.id) {
-            guard let url = item.playbackURL ?? item.directPlaybackURL else { return }
-            player.replaceCurrentItem(with: AVPlayerItem(url: url))
-            player.play()
+        .task(id: "\(item.id)-\(playbackAttempt)") {
+            await startPlayback()
         }
         .onDisappear { player.pause() }
+    }
+
+    private var loadingCover: some View {
+        ZStack {
+            Color.black
+            AsyncImage(url: item.directCoverURL) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else if phase.error != nil {
+                    proxyLoadingCover
+                }
+            }
+            .clipped()
+
+            LinearGradient(
+                colors: [.black.opacity(0.05), .black.opacity(0.5)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack(spacing: 10) {
+                if playbackFailed {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 28, weight: .medium))
+                    Text("视频暂时无法加载")
+                        .font(.system(size: 13, weight: .semibold))
+                    Button("重试") {
+                        playbackAttempt += 1
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white.opacity(0.22))
+                } else {
+                    ProgressView()
+                        .tint(.white)
+                    Text("视频加载中")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.white)
+        }
+    }
+
+    private var proxyLoadingCover: some View {
+        AsyncImage(url: item.coverPlaybackURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            }
+        }
+        .clipped()
+    }
+
+    @MainActor
+    private func startPlayback() async {
+        guard let url = item.playbackURL ?? item.directPlaybackURL else {
+            playbackFailed = true
+            return
+        }
+
+        hasStartedPlayback = false
+        playbackFailed = false
+        let playerItem = AVPlayerItem(url: url)
+        playerItem.preferredForwardBufferDuration = 1
+        player.automaticallyWaitsToMinimizeStalling = false
+        player.replaceCurrentItem(with: playerItem)
+        player.playImmediately(atRate: 1)
+
+        while !Task.isCancelled {
+            if playerItem.status == .failed {
+                playbackFailed = true
+                return
+            }
+            let seconds = player.currentTime().seconds
+            if player.timeControlStatus == .playing, seconds.isFinite, seconds > 0 {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    hasStartedPlayback = true
+                }
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
 }
 
