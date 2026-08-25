@@ -1332,8 +1332,7 @@ private struct InvestorMoodVideoPlayerSheet: View {
                 }
                 .padding(16)
             }
-            .navigationTitle("原视频")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .bottomTrailing) {
                 DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭原视频")
                     .padding(16)
