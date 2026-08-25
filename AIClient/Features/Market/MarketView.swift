@@ -115,6 +115,14 @@ struct MarketView: View {
         #endif
     }()
     @State private var pendingMarketDetail: MarketDetailRoute?
+    @State private var showsChinaMarketStructure = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--market-structure-sheet-preview") ||
+            ProcessInfo.processInfo.arguments.contains("--market-structure-preview")
+        #else
+        false
+        #endif
+    }()
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -194,6 +202,10 @@ struct MarketView: View {
             },
             onOpenMarketQuotes: { region in
                 selectedMarketQuotesRegion = region
+                showsDetail = true
+            },
+            onOpenChinaMarketStructure: {
+                showsChinaMarketStructure = true
                 showsDetail = true
             }
         )
@@ -331,6 +343,16 @@ struct MarketView: View {
             .presentationBackground(MarketStyle.surface)
             .presentationContentInteraction(.resizes)
         }
+        .sheet(isPresented: $showsChinaMarketStructure, onDismiss: {
+            showsDetail = false
+        }) {
+            ChinaMarketStructureSheet(structure: store.dashboard?.marketStructure)
+                .presentationDetents([.fraction(0.62), .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationBackground(MarketStyle.surface)
+                .presentationContentInteraction(.resizes)
+        }
         .sheet(item: $selectedDetail, onDismiss: {
             showsDetail = false
         }) { route in
@@ -374,7 +396,7 @@ struct MarketView: View {
         .onAppear {
             showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil ||
                 selectedMarketQuotesRegion != nil || showsGlobalRanking || showsInvestors ||
-                showsInstitutionResearch || showsIndustries
+                showsInstitutionResearch || showsIndustries || showsChinaMarketStructure
         }
         .onDisappear { showsDetail = false }
     }
@@ -447,6 +469,7 @@ private struct MarketHomeView: View {
     let onOpenInstitutionResearch: () -> Void
     let onOpenIndustries: () -> Void
     let onOpenMarketQuotes: (MarketRegion) -> Void
+    let onOpenChinaMarketStructure: () -> Void
     @State private var selectedMarket: MarketRegion = {
         #if DEBUG
         guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-region=") }) else {
@@ -508,7 +531,8 @@ private struct MarketHomeView: View {
                             MarketTerminalHero(
                                 store: store,
                                 region: selectedMarket,
-                                onOpenMarketQuotes: { onOpenMarketQuotes(selectedMarket) }
+                                onOpenMarketQuotes: { onOpenMarketQuotes(selectedMarket) },
+                                onOpenChinaMarketStructure: onOpenChinaMarketStructure
                             )
                             MarketRegionPicker(store: store, selection: $selectedMarket)
                                 .padding(.top, 14)
@@ -522,10 +546,6 @@ private struct MarketHomeView: View {
                                     message: error,
                                     isRetrying: store.isRetrying
                                 ) { await store.refresh() }
-                            }
-                            if selectedMarket == .china {
-                                ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
-                                    .id("market-structure")
                             }
                         }
                         // The root navigation already reserves its own safe-area inset.
@@ -549,22 +569,12 @@ private struct MarketHomeView: View {
                 }
                 .task {
                     #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("--market-structure-preview") {
-                        try? await Task.sleep(for: .seconds(2))
-                        proxy.scrollTo("market-structure", anchor: .top)
-                    } else if ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") {
+                    if ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") {
                         try? await Task.sleep(for: .seconds(2))
                         proxy.scrollTo("market-research-entry-grid", anchor: .center)
                     }
                     #endif
                 }
-                #if DEBUG
-                .onChange(of: store.dashboard?.marketStructure?.generatedAt) { _, generatedAt in
-                    guard generatedAt != nil,
-                          ProcessInfo.processInfo.arguments.contains("--market-structure-preview") else { return }
-                    proxy.scrollTo("market-structure", anchor: .top)
-                }
-                #endif
             }
             .overlay(alignment: .top) {
                 MarketStyle.surface
@@ -1073,6 +1083,7 @@ private struct MarketTerminalHero: View {
     let store: MarketStore
     let region: MarketRegion
     let onOpenMarketQuotes: () -> Void
+    let onOpenChinaMarketStructure: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
@@ -1141,7 +1152,10 @@ private struct MarketTerminalHero: View {
                     }
                 }
             } else if region == .china {
-                ChinaMarketMetrics(store: store)
+                ChinaMarketMetrics(
+                    store: store,
+                    onOpenMarketStructure: onOpenChinaMarketStructure
+                )
             } else if region == .japan {
                 RegionalMarketMetrics(
                     store: store,
@@ -1393,6 +1407,7 @@ private struct RegionalMarketMetrics: View {
 
 private struct ChinaMarketMetrics: View {
     let store: MarketStore
+    let onOpenMarketStructure: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var exchangeRate: MarketQuote? { store.quote(symbol: "USDCNY") }
@@ -1417,7 +1432,12 @@ private struct ChinaMarketMetrics: View {
                     Divider()
                     turnoverView.frame(height: 58)
                     Divider()
-                    MarketBreadthMetric(breadth: breadth, isStale: breadthIsStale).frame(height: 58)
+                    MarketBreadthMetric(
+                        breadth: breadth,
+                        isStale: breadthIsStale,
+                        onOpenMarketStructure: onOpenMarketStructure
+                    )
+                    .frame(height: 58)
                 }
                 .dynamicTypeSize(.large)
             } else {
@@ -1426,7 +1446,11 @@ private struct ChinaMarketMetrics: View {
                     TerminalDivider()
                     turnoverView
                     TerminalDivider()
-                    MarketBreadthMetric(breadth: breadth, isStale: breadthIsStale)
+                    MarketBreadthMetric(
+                        breadth: breadth,
+                        isStale: breadthIsStale,
+                        onOpenMarketStructure: onOpenMarketStructure
+                    )
                 }
             }
         }
@@ -1461,10 +1485,29 @@ private struct ChinaMarketMetrics: View {
 private struct MarketBreadthMetric: View {
     let breadth: MarketBreadth?
     var isStale = false
+    let onOpenMarketStructure: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("市场宽度").font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+            HStack(spacing: 4) {
+                Text("市场宽度")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                Button(action: onOpenMarketStructure) {
+                    HStack(spacing: 1) {
+                        Text("杠杆")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 7.5, weight: .bold))
+                    }
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(MarketStyle.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("资金与杠杆信号")
+                .accessibilityHint("打开 A 股资金与杠杆详情")
+            }
             Text(isStale ? "数据过期" : (breadth.map { "\($0.up) / \($0.down)" } ?? "—"))
                 .font(.system(size: 15, weight: .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.72)
             HStack(spacing: 3) {
@@ -1867,6 +1910,30 @@ private struct MarketQuotesSheet: View {
 
     private var requestID: String {
         "\(region.dashboardID):\(requestedQuotes.map(\.symbol).joined(separator: ","))"
+    }
+}
+
+private struct ChinaMarketStructureSheet: View {
+    let structure: MarketStructure?
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                ChinaMarketStructurePanel(structure: structure)
+            }
+            .scrollIndicators(.hidden)
+            .background(MarketStyle.surface)
+            .navigationTitle("A 股市场")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
     }
 }
 
