@@ -1250,59 +1250,142 @@ private struct MarketRetailInvestorStrip: View {
     let store: RetailSentimentStore
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("散户")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.primary)
+        Group {
+            if let item = validSample {
+                HStack(alignment: .center, spacing: 11) {
+                    sampleThumbnail(item)
 
-            Rectangle()
-                .fill(MarketStyle.divider)
-                .frame(width: 0.5, height: 34)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
+                            Text("散户样本")
+                                .font(.system(size: 14, weight: .bold))
 
-            if let item = store.investorMood?.items.first {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(item.nickname)
-                            .font(.system(size: 11, weight: .semibold))
+                            Text(item.nickname)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+
+                            moodBadge(item.label)
+
+                            Spacer(minLength: 0)
+
+                            Text(RetailSentimentFormat.compactRelativeTime(item.createdAt))
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        Text(summary(for: item))
+                            .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        Text(item.label)
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(RetailSentimentFormat.moodColor(item.label))
-                        Text(RetailSentimentFormat.compactRelativeTime(item.createdAt))
+
+                        Text("公开视频 · 1 个有效样本")
                             .font(.system(size: 9.5))
                             .foregroundStyle(.tertiary)
                     }
-
-                    Text(summary(for: item))
-                        .font(.system(size: 11))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, 9)
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("散户样本")
+                        .font(.system(size: 14, weight: .bold))
+                    Text(store.isLoading ? "正在加载最新观点" : "暂无有效样本")
+                        .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text(store.isLoading ? "正在加载最新观点" : "暂无最新观点")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
             }
         }
         .padding(.horizontal, MarketStyle.pageInset)
-        .frame(minHeight: 52)
+        .frame(minHeight: 82)
         .overlay(alignment: .bottom) {
             Rectangle().fill(MarketStyle.divider).frame(height: 0.5)
         }
         .accessibilityElement(children: .combine)
     }
 
+    private var validSample: InvestorMoodItem? {
+        store.investorMood?.items.first { item in
+            guard !item.stale else { return false }
+            guard !item.analysis.contains("未涉及投资内容") else { return false }
+            let content = ([item.description, item.analysis, item.transcript] + item.reasons)
+                .joined(separator: " ")
+                .lowercased()
+            let investmentTerms = [
+                "股票", "股市", "股民", "投资", "交易", "行情", "仓位", "持仓",
+                "短线", "长线", "指数", "基金", "a股", "美股", "港股", "亏损", "盈利",
+            ]
+            return investmentTerms.contains(where: content.contains)
+        }
+    }
+
+    private func sampleThumbnail(_ item: InvestorMoodItem) -> some View {
+        ZStack {
+            AsyncImage(url: item.directCoverURL) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else if phase.error != nil {
+                    proxiedThumbnail(item)
+                } else {
+                    thumbnailPlaceholder
+                }
+            }
+
+            Circle()
+                .fill(.black.opacity(0.62))
+                .frame(width: 23, height: 23)
+
+            Image(systemName: "play.fill")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: 0.5)
+        }
+        .frame(width: 58, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipped()
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func proxiedThumbnail(_ item: InvestorMoodItem) -> some View {
+        AsyncImage(url: item.coverPlaybackURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            } else {
+                thumbnailPlaceholder
+            }
+        }
+    }
+
+    private var thumbnailPlaceholder: some View {
+        Color(uiColor: .secondarySystemBackground)
+            .overlay {
+                Image(systemName: "video.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+    }
+
+    private func moodBadge(_ label: String) -> some View {
+        let tint = RetailSentimentFormat.moodColor(label)
+        return Text(label)
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+
     private func summary(for item: InvestorMoodItem) -> String {
-        if !item.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return item.transcript
+        let candidates: [String?] = [item.reasons.first, item.analysis, item.description, item.transcript]
+        for candidate in candidates {
+            if let candidate,
+               !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return candidate
+            }
         }
-        if !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return item.description
-        }
-        return item.analysis
+        return "当前样本暂无观点摘要"
     }
 }
 
