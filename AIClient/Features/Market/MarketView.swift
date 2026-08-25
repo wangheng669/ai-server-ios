@@ -225,8 +225,10 @@ struct MarketView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("完成") { showsInvestors = false }
-                                .fontWeight(.semibold)
+                            MarketSheetCloseButton(
+                                action: { showsInvestors = false },
+                                accessibilityLabel: "关闭知名投资人"
+                            )
                         }
                     }
             }
@@ -245,8 +247,10 @@ struct MarketView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("完成") { showsInstitutionResearch = false }
-                                .fontWeight(.semibold)
+                            MarketSheetCloseButton(
+                                action: { showsInstitutionResearch = false },
+                                accessibilityLabel: "关闭机构研究"
+                            )
                         }
                     }
             }
@@ -265,8 +269,10 @@ struct MarketView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("完成") { showsIndustries = false }
-                                .fontWeight(.semibold)
+                            MarketSheetCloseButton(
+                                action: { showsIndustries = false },
+                                accessibilityLabel: "关闭产业全景"
+                            )
                         }
                     }
             }
@@ -285,8 +291,10 @@ struct MarketView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("完成") { showsGlobalRanking = false }
-                                .fontWeight(.semibold)
+                            MarketSheetCloseButton(
+                                action: { showsGlobalRanking = false },
+                                accessibilityLabel: "关闭全球排行"
+                            )
                         }
                     }
             }
@@ -305,8 +313,10 @@ struct MarketView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("完成") { showsMacro = false }
-                                .fontWeight(.semibold)
+                            MarketSheetCloseButton(
+                                action: { showsMacro = false },
+                                accessibilityLabel: "关闭宏观观察"
+                            )
                         }
                     }
             }
@@ -408,6 +418,25 @@ struct MarketView: View {
     }
 }
 
+private struct MarketSheetCloseButton: View {
+    let action: () -> Void
+    let accessibilityLabel: String
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 13, weight: .bold))
+                .frame(width: 34, height: 34)
+                .overlay {
+                    Circle()
+                        .stroke(InvestmentDesign.divider, lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 private struct MarketSentimentSheet: View {
     let store: RetailSentimentStore
     let marketStore: MarketStore
@@ -426,17 +455,10 @@ private struct MarketSentimentSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .bold))
-                        .frame(width: 34, height: 34)
-                        .overlay {
-                            Circle()
-                                .stroke(InvestmentDesign.divider, lineWidth: 1)
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭散户正在说")
+                MarketSheetCloseButton(
+                    action: dismiss.callAsFunction,
+                    accessibilityLabel: "关闭散户正在说"
+                )
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)
@@ -2329,8 +2351,10 @@ private struct MarketQuotesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                        .fontWeight(.semibold)
+                    MarketSheetCloseButton(
+                        action: dismiss.callAsFunction,
+                        accessibilityLabel: "关闭市场行情"
+                    )
                 }
             }
         }
@@ -2386,8 +2410,10 @@ private struct ChinaMarketStructureSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                        .fontWeight(.semibold)
+                    MarketSheetCloseButton(
+                        action: dismiss.callAsFunction,
+                        accessibilityLabel: "关闭 A 股市场"
+                    )
                 }
             }
         }
