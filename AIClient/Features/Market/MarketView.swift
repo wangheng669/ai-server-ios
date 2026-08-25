@@ -221,11 +221,9 @@ struct MarketView: View {
         }) {
             NavigationStack {
                 FamousHoldingsView(store: holdingsStore, showsDetail: $investorShowsDetail)
-                    .navigationTitle("知名投资人")
-                    .navigationBarTitleDisplayMode(.inline)
             }
             .presentationDetents([.fraction(0.82), .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.canvas)
             .presentationContentInteraction(.resizes)
@@ -235,11 +233,9 @@ struct MarketView: View {
         }) {
             NavigationStack {
                 InstitutionResearchView(store: institutionResearchStore)
-                    .navigationTitle("机构研究")
-                    .navigationBarTitleDisplayMode(.inline)
             }
             .presentationDetents([.fraction(0.82), .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.canvas)
             .presentationContentInteraction(.resizes)
@@ -249,11 +245,9 @@ struct MarketView: View {
         }) {
             NavigationStack {
                 IndustryPanoramaView()
-                    .navigationTitle("产业全景")
-                    .navigationBarTitleDisplayMode(.inline)
             }
             .presentationDetents([.fraction(0.82), .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.canvas)
             .presentationContentInteraction(.resizes)
@@ -263,11 +257,9 @@ struct MarketView: View {
         }) {
             NavigationStack {
                 CountryGDPRankingView(store: globalRankingStore)
-                    .navigationTitle("全球排行")
-                    .navigationBarTitleDisplayMode(.inline)
             }
             .presentationDetents([.fraction(0.82), .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.surface)
             .presentationContentInteraction(.resizes)
@@ -277,11 +269,9 @@ struct MarketView: View {
         }) {
             NavigationStack {
                 ChinaMacroView()
-                    .navigationTitle("宏观观察")
-                    .navigationBarTitleDisplayMode(.inline)
             }
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.canvas)
         }
@@ -314,7 +304,7 @@ struct MarketView: View {
                 selectedMarketQuotesRegion = nil
             }
             .presentationDetents([.fraction(0.72), .large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(MarketStyle.surface)
             .presentationContentInteraction(.resizes)
@@ -324,7 +314,7 @@ struct MarketView: View {
         }) {
             ChinaMarketStructureSheet(structure: store.dashboard?.marketStructure)
                 .presentationDetents([.fraction(0.62), .large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
                 .presentationCornerRadius(28)
                 .presentationBackground(MarketStyle.surface)
                 .presentationContentInteraction(.resizes)
@@ -341,7 +331,7 @@ struct MarketView: View {
             )
             .id(route.symbol)
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(MarketStyle.surface)
             .presentationContentInteraction(.resizes)
@@ -387,22 +377,6 @@ private struct MarketSentimentSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("散户正在说")
-                        .font(.system(size: 22, weight: .bold))
-                    Text(headerSubtitle)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 12)
-            .background(InvestmentDesign.surface)
-
-            Divider().overlay(InvestmentDesign.divider)
-
             RetailInvestorView(
                 store: store,
                 marketStore: marketStore,
@@ -412,11 +386,6 @@ private struct MarketSentimentSheet: View {
         }
         .background(InvestmentDesign.surface)
         .accessibilityAction(.escape) { dismiss() }
-    }
-
-    private var headerSubtitle: String {
-        guard let board = store.investorMood else { return "正在加载最新观点" }
-        return "\(board.items.count) 个样本 · \(RetailSentimentFormat.compactRelativeTime(board.generatedAt))更新"
     }
 }
 
@@ -2282,8 +2251,6 @@ private struct MarketQuotesSheet: View {
             }
             .scrollIndicators(.hidden)
             .background(MarketStyle.surface)
-            .navigationTitle("\(region.rawValue) · 市场行情")
-            .navigationBarTitleDisplayMode(.inline)
         }
         .task(id: requestID) {
             guard region != .commodity else { return }
@@ -2331,8 +2298,6 @@ private struct ChinaMarketStructureSheet: View {
             }
             .scrollIndicators(.hidden)
             .background(MarketStyle.surface)
-            .navigationTitle("A 股市场")
-            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -4291,8 +4256,6 @@ struct CompanyValuationHistorySheet: View {
                 .padding(18)
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("PE 历史变化")
-            .navigationBarTitleDisplayMode(.inline)
         }
         .task(id: route.symbol) { await load() }
         .onChange(of: selectedKind) { _, _ in selectedDate = nil }
