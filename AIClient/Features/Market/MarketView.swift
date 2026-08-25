@@ -100,17 +100,6 @@ struct MarketView: View {
         false
         #endif
     }()
-    @State private var selectedSentimentMarket: SentimentMarket? = {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") {
-            return .korea
-        }
-        return ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ? .china : nil
-        #else
-        nil
-        #endif
-    }()
-    @State private var sentimentShowsDetail = false
     @State private var selectedMarketQuotesRegion: MarketRegion? = {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ? .unitedStates : nil
@@ -181,10 +170,6 @@ struct MarketView: View {
             onCompactHeaderChange: onCompactHeaderChange,
             onOpenMacro: {
                 showsMacro = true
-                showsDetail = true
-            },
-            onOpenSentiment: { market in
-                selectedSentimentMarket = market
                 showsDetail = true
             },
             rankingStore: globalRankingStore,
@@ -275,22 +260,6 @@ struct MarketView: View {
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.canvas)
         }
-        .sheet(item: $selectedSentimentMarket, onDismiss: {
-            sentimentShowsDetail = false
-            showsDetail = false
-        }) { market in
-            MarketSentimentSheet(
-                store: sentimentStore,
-                marketStore: store,
-                initialMarket: market,
-                showsDetail: $sentimentShowsDetail
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationBackground(InvestmentDesign.surface)
-            .presentationContentInteraction(.resizes)
-        }
         .sheet(item: $selectedMarketQuotesRegion, onDismiss: {
             if let route = pendingMarketDetail {
                 pendingMarketDetail = nil
@@ -360,32 +329,11 @@ struct MarketView: View {
             }
         }
         .onAppear {
-            showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil ||
+            showsDetail = selectedDetail != nil || showsMacro ||
                 selectedMarketQuotesRegion != nil || showsGlobalRanking || showsInvestors ||
                 showsInstitutionResearch || showsIndustries || showsChinaMarketStructure
         }
         .onDisappear { showsDetail = false }
-    }
-}
-
-private struct MarketSentimentSheet: View {
-    let store: RetailSentimentStore
-    let marketStore: MarketStore
-    let initialMarket: SentimentMarket
-    @Binding var showsDetail: Bool
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            RetailInvestorView(
-                store: store,
-                marketStore: marketStore,
-                initialMarket: initialMarket,
-                showsDetail: $showsDetail
-            )
-        }
-        .background(InvestmentDesign.surface)
-        .accessibilityAction(.escape) { dismiss() }
     }
 }
 
@@ -394,7 +342,6 @@ private struct MarketHomeView: View {
     let sentimentStore: RetailSentimentStore
     let onCompactHeaderChange: (Bool) -> Void
     let onOpenMacro: () -> Void
-    let onOpenSentiment: (SentimentMarket) -> Void
     let rankingStore: GlobalRankingStore
     let onOpenGlobalRanking: () -> Void
     let holdingsStore: FamousHoldingsStore
@@ -452,11 +399,7 @@ private struct MarketHomeView: View {
                                 .padding(.bottom, 8)
                             }
 
-                            MarketSentimentOverviewStrip(
-                                store: sentimentStore,
-                                onOpenMacro: onOpenMacro,
-                                onOpenSentiment: onOpenSentiment
-                            )
+                            MarketRetailInvestorStrip(store: sentimentStore)
 
                             MarketEditorialFeed(
                                 marketStore: store,
@@ -1303,70 +1246,63 @@ private struct MarketEditorialFeed: View {
     }
 }
 
-private struct MarketSentimentOverviewStrip: View {
+private struct MarketRetailInvestorStrip: View {
     let store: RetailSentimentStore
-    let onOpenMacro: () -> Void
-    let onOpenSentiment: (SentimentMarket) -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(SentimentMarket.marketOverviewOrder.enumerated()), id: \.element.id) { index, market in
-                sentimentItem(for: market)
-                if index < SentimentMarket.marketOverviewOrder.count - 1 {
-                    Rectangle()
-                        .fill(MarketStyle.divider)
-                        .frame(width: 0.5, height: 47)
+        HStack(spacing: 10) {
+            Text("散户")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.primary)
+
+            Rectangle()
+                .fill(MarketStyle.divider)
+                .frame(width: 0.5, height: 34)
+
+            if let item = store.investorMood?.items.first {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(item.nickname)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(item.label)
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(RetailSentimentFormat.moodColor(item.label))
+                        Text(RetailSentimentFormat.compactRelativeTime(item.createdAt))
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Text(summary(for: item))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(store.isLoading ? "正在加载最新观点" : "暂无最新观点")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.horizontal, MarketStyle.pageInset)
-        .padding(.vertical, 2)
+        .frame(minHeight: 52)
         .overlay(alignment: .bottom) {
             Rectangle().fill(MarketStyle.divider).frame(height: 0.5)
         }
-        .accessibilityElement(children: .contain)
+        .accessibilityElement(children: .combine)
     }
 
-    private func sentimentItem(for market: SentimentMarket) -> some View {
-        let snapshot = store.snapshot(for: market)
-        let isLoading = market == .china
-            ? store.isLoading
-            : store.isLoadingDetails(for: market)
-
-        return Button { onOpenSentiment(market) } label: {
-            VStack(spacing: 3) {
-                Text(market.title)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(snapshot.map { String(Int($0.score.rounded())) } ?? "—")
-                    .font(.system(size: 19, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(scoreTint(snapshot))
-                    .contentTransition(.numericText())
-                Text(sentimentLabel(snapshot: snapshot, isLoading: isLoading))
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, minHeight: 48)
+    private func summary(for item: InvestorMoodItem) -> String {
+        if !item.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return item.transcript
         }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(market.title)市场情绪")
-        .accessibilityValue(snapshot.map { "\(Int($0.score.rounded()))分，\($0.label)" } ?? (isLoading ? "加载中" : "暂无数据"))
-        .accessibilityHint("查看散户观点")
-    }
-
-    private func sentimentLabel(snapshot: SentimentSnapshot?, isLoading: Bool) -> String {
-        if let label = snapshot?.label, !label.isEmpty { return label }
-        return isLoading ? "加载中" : "暂无数据"
-    }
-
-    private func scoreTint(_ snapshot: SentimentSnapshot?) -> Color {
-        guard let score = snapshot?.score else { return .secondary }
-        if score >= 70 { return InvestmentDesign.warning }
-        if score <= 35 { return MarketStyle.accent }
-        return .primary
+        if !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return item.description
+        }
+        return item.analysis
     }
 }
 
