@@ -3,8 +3,9 @@ import SwiftUI
 import UIKit
 
 private enum MarketStyle {
-    static let canvas = InvestmentDesign.surface
+    static let canvas = InvestmentDesign.canvas
     static let surface = InvestmentDesign.surface
+    static let secondarySurface = InvestmentDesign.secondarySurface
     static let cardSurface = InvestmentDesign.surface
     static let cardBorder = InvestmentDesign.divider
     static let divider = InvestmentDesign.divider
@@ -13,7 +14,9 @@ private enum MarketStyle {
     static let accent = InvestmentDesign.accent
     static let live = Color(red: 0.08, green: 0.72, blue: 0.40)
     static let purple = accent
-    static let pageSpacing: CGFloat = 10
+    static let pageSpacing: CGFloat = 12
+    static let pageInset: CGFloat = 16
+    static let cornerRadius: CGFloat = 18
 }
 
 func marketRunWithLimitedConcurrency<Element>(
@@ -502,68 +505,85 @@ private struct MarketHomeView: View {
                         .frame(height: 1)
 
                         VStack(spacing: MarketStyle.pageSpacing) {
-                            GlobalRankingSummaryCard(
-                                store: rankingStore,
-                                onOpen: onOpenGlobalRanking
+                            MarketPageHeader(store: store)
+
+                            VStack(spacing: 0) {
+                                MarketRegionPicker(store: store, selection: $selectedMarket)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 12)
+                                    .padding(.bottom, 8)
+
+                                Divider()
+                                    .overlay(MarketStyle.divider)
+                                    .padding(.horizontal, 16)
+
+                                MarketTerminalHero(
+                                    store: store,
+                                    region: selectedMarket,
+                                    onOpenMarketQuotes: { onOpenMarketQuotes(selectedMarket) },
+                                    onOpenChinaMarketStructure: onOpenChinaMarketStructure
+                                )
+                                .simultaneousGesture(regionSwipeGesture)
+                            }
+                            .background(
+                                MarketStyle.cardSurface,
+                                in: RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous)
                             )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous)
+                                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
+                            }
 
-                            FamousInvestorsSummaryCard(
-                                store: holdingsStore,
-                                onOpen: onOpenInvestors
-                            )
-
-                            MarketResearchEntryGrid(
-                                onOpenInstitutionResearch: onOpenInstitutionResearch,
-                                onOpenIndustries: onOpenIndustries
-                            )
-                            .id("market-research-entry-grid")
-                        }
-                        .padding(.vertical, MarketStyle.pageSpacing)
-                        .background(MarketStyle.canvas)
-
-                        MarketSentimentOverviewStrip(
-                            store: sentimentStore,
-                            onOpenMacro: onOpenMacro,
-                            onOpenSentiment: onOpenSentiment
-                        )
-
-                        ZStack(alignment: .topTrailing) {
-                            MarketTerminalHero(
-                                store: store,
-                                region: selectedMarket,
-                                onOpenMarketQuotes: { onOpenMarketQuotes(selectedMarket) },
-                                onOpenChinaMarketStructure: onOpenChinaMarketStructure
-                            )
-                            MarketRegionPicker(store: store, selection: $selectedMarket)
-                                .padding(.top, 14)
-                                .padding(.trailing, 4)
-                        }
-                        .background(MarketStyle.surface)
-
-                        VStack(spacing: MarketStyle.pageSpacing) {
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
                                     message: error,
                                     isRetrying: store.isRetrying
                                 ) { await store.refresh() }
                             }
+
+                            MarketSentimentOverviewStrip(
+                                store: sentimentStore,
+                                onOpenMacro: onOpenMacro,
+                                onOpenSentiment: onOpenSentiment
+                            )
+
+                            VStack(alignment: .leading, spacing: MarketStyle.pageSpacing) {
+                                MarketSectionHeading(
+                                    title: "研究与洞察",
+                                    subtitle: "从宏观格局到机构持仓"
+                                )
+
+                                MarketResearchEntryGrid(
+                                    onOpenInstitutionResearch: onOpenInstitutionResearch,
+                                    onOpenIndustries: onOpenIndustries
+                                )
+                                .id("market-research-entry-grid")
+
+                                GlobalRankingSummaryCard(
+                                    store: rankingStore,
+                                    onOpen: onOpenGlobalRanking
+                                )
+
+                                FamousInvestorsSummaryCard(
+                                    store: holdingsStore,
+                                    onOpen: onOpenInvestors
+                                )
+                            }
                         }
-                        // The root navigation already reserves its own safe-area inset.
+                        .padding(.horizontal, MarketStyle.pageInset)
+                        .padding(.top, 10)
                         .padding(.bottom, 24)
                         .background(MarketStyle.canvas)
                     }
                     .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .top)
                     .background(MarketStyle.canvas)
                 }
-                // Match the hero surface above the scroll view so the status-bar area does not
-                // appear as a detached strip before the first section.
-                .background(MarketStyle.surface)
+                .background(MarketStyle.canvas)
                 .coordinateSpace(name: "market-scroll")
                 .scrollIndicators(.hidden)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     Color.clear.frame(height: 58)
                 }
-                .simultaneousGesture(regionSwipeGesture)
                 .onPreferenceChange(MarketHomeScrollOffsetPreferenceKey.self) { offset in
                     onCompactHeaderChange(offset < -28)
                 }
@@ -577,7 +597,7 @@ private struct MarketHomeView: View {
                 }
             }
             .overlay(alignment: .top) {
-                MarketStyle.surface
+                MarketStyle.canvas
                     .frame(height: viewport.safeAreaInsets.top)
                     .ignoresSafeArea(edges: .top)
                     .allowsHitTesting(false)
@@ -606,6 +626,73 @@ private struct MarketHomeView: View {
     }
 }
 
+private struct MarketPageHeader: View {
+    let store: MarketStore
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("市场脉搏")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                Text("全球行情、情绪与研究线索")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusTint)
+                    .frame(width: 7, height: 7)
+                Text(statusLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(MarketStyle.cardSurface, in: Capsule())
+            .overlay {
+                Capsule().stroke(MarketStyle.cardBorder, lineWidth: 0.8)
+            }
+        }
+        .padding(.horizontal, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("市场脉搏，\(statusLabel)")
+    }
+
+    private var statusLabel: String {
+        if store.isShowingCachedSnapshot { return "缓存行情" }
+        if store.dashboard == nil { return "正在连接" }
+        return store.hasOpenMarket ? "市场交易中" : "行情已同步"
+    }
+
+    private var statusTint: Color {
+        if store.isShowingCachedSnapshot { return InvestmentDesign.warning }
+        return store.dashboard == nil ? .secondary : MarketStyle.live
+    }
+}
+
+private struct MarketSectionHeading: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(alignment: .lastTextBaseline) {
+            Text(title)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(subtitle)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 2)
+        .padding(.top, 6)
+    }
+}
+
 private struct MarketResearchEntryGrid: View {
     let onOpenInstitutionResearch: () -> Void
     let onOpenIndustries: () -> Void
@@ -625,7 +712,6 @@ private struct MarketResearchEntryGrid: View {
                 action: onOpenIndustries
             )
         }
-        .padding(.horizontal, 16)
     }
 }
 
@@ -663,12 +749,12 @@ private struct MarketResearchEntryCard: View {
             }
             .padding(13)
             .frame(maxWidth: .infinity, minHeight: 102, alignment: .leading)
-            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous)
                     .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
@@ -732,15 +818,14 @@ private struct GlobalRankingSummaryCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous)
                     .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 16)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("全球排行")
         .accessibilityValue(accessibilityValue)
@@ -863,15 +948,14 @@ private struct FamousInvestorsSummaryCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous)
                     .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 16)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("知名投资人")
         .accessibilityValue(accessibilityValue)
@@ -904,45 +988,50 @@ private struct MarketSentimentOverviewStrip: View {
     let onOpenSentiment: (SentimentMarket) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button { onOpenSentiment(.china) } label: {
-                    HStack(spacing: 3) {
-                        Text("市场情绪")
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(MarketStyle.accent)
+                        Text("情绪温度")
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
                     }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("打开散户正在说")
                 Spacer()
                 Button(action: onOpenMacro) {
                     HStack(spacing: 3) {
-                        Text("宏观")
-                            .foregroundStyle(.primary)
+                        Text("宏观观察")
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
                     }
                     .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(MarketStyle.accent)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("打开宏观观察")
             }
 
-            HStack(spacing: 0) {
+            HStack(spacing: 8) {
                 ForEach(SentimentMarket.marketOverviewOrder) { market in
                     sentimentItem(for: market)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-        .overlay(alignment: .bottom) {
-            Divider().opacity(0.55)
+        .padding(14)
+        .background(
+            MarketStyle.cardSurface,
+            in: RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: MarketStyle.cornerRadius, style: .continuous)
+                .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
         }
         .accessibilityElement(children: .contain)
     }
@@ -954,21 +1043,25 @@ private struct MarketSentimentOverviewStrip: View {
             : store.isLoadingDetails(for: market)
 
         return Button { onOpenSentiment(market) } label: {
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 Text(market.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text(snapshot.map { String(Int($0.score.rounded())) } ?? "—")
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .font(.system(size: 21, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(scoreTint(snapshot))
                     .contentTransition(.numericText())
                 Text(sentimentLabel(snapshot: snapshot, isLoading: isLoading))
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(
+                MarketStyle.secondarySurface,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
@@ -980,6 +1073,13 @@ private struct MarketSentimentOverviewStrip: View {
     private func sentimentLabel(snapshot: SentimentSnapshot?, isLoading: Bool) -> String {
         if let label = snapshot?.label, !label.isEmpty { return label }
         return isLoading ? "加载中" : "暂无数据"
+    }
+
+    private func scoreTint(_ snapshot: SentimentSnapshot?) -> Color {
+        guard let score = snapshot?.score else { return .secondary }
+        if score >= 70 { return InvestmentDesign.warning }
+        if score <= 35 { return MarketStyle.accent }
+        return .primary
     }
 }
 
@@ -1095,22 +1195,52 @@ private struct MarketTerminalHero: View {
     private var displayedQuote: MarketQuote? { overnightQuote ?? quote }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 0) {
             Button(action: onOpenMarketQuotes) {
-                ZStack(alignment: .topTrailing) {
+                VStack(spacing: 14) {
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(displayedQuote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name)
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(sessionTint)
+                                    .frame(width: 6, height: 6)
+                                Text(sessionLabel)
+                                Text(displayedQuote?.symbol ?? region.primarySymbol)
+                            }
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                                .font(.system(size: 21, weight: .bold, design: .rounded))
+                                .foregroundStyle(.primary)
+                            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(quoteTint(displayedQuote))
+                        }
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                    }
+
                     heroChart
-                    heroValueOverlay
-                        .padding(.top, 8)
-                        .padding(.trailing, 8)
+                        .frame(height: dynamicTypeSize.isAccessibilitySize ? 190 : 132)
                 }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: dynamicTypeSize.isAccessibilitySize ? 260 : 244)
-                    .padding(.trailing, 80)
-                    .contentShape(Rectangle())
+                .contentShape(Rectangle())
             }
             .buttonStyle(MarketPressStyle())
             .accessibilityLabel(heroAccessibilityLabel)
             .accessibilityHint("打开指数与核心股票")
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
 
             Group {
             if region == .commodity {
@@ -1202,21 +1332,29 @@ private struct MarketTerminalHero: View {
             }
             }
             .frame(height: dynamicTypeSize.isAccessibilitySize ? 180 : 76)
-            .padding(.top, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
             .overlay(alignment: .top) {
-                Divider().opacity(0.55)
+                Divider()
+                    .overlay(MarketStyle.divider)
+                    .padding(.horizontal, 16)
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 16)
-        .padding(.bottom, 18)
-        .background(MarketTerminalPalette.header)
     }
 
     private var sessionLabel: String {
         if region == .crypto { return "24H 交易中" }
         if overnightQuote != nil { return "股票休市" }
         return quote?.tradingSession.displayLabel ?? "行情更新"
+    }
+
+    private var sessionTint: Color {
+        switch quote?.tradingSession {
+        case .regular, .premarket, .postmarket, .overnight, .alwaysOpen:
+            MarketStyle.live
+        case .closed, .unknown, .none:
+            .secondary
+        }
     }
 
     private func cryptoMetric(symbol: String) -> some View {
@@ -1267,27 +1405,6 @@ private struct MarketTerminalHero: View {
             trend: store.trendValues(for: displayedQuote),
             isOvernight: overnightQuote != nil
         )
-    }
-
-    private var heroValueOverlay: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                .font(.system(size: 19, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.primary)
-            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
-                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                .foregroundStyle(quoteTint(displayedQuote))
-        }
-        .monospacedDigit()
-        .lineLimit(1)
-        .minimumScaleFactor(0.72)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            MarketTerminalPalette.header.opacity(0.88),
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-        )
-        .dynamicTypeSize(.large)
     }
 
     private var heroAccessibilityLabel: String {
@@ -1658,14 +1775,14 @@ private struct MarketRegionPicker: View {
     @Binding var selection: MarketRegion
 
     var body: some View {
-        VStack(spacing: 1) {
-            ForEach(MarketRegion.allCases) { region in
-                regionButton(region)
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(MarketRegion.allCases) { region in
+                    regionButton(region)
+                }
             }
         }
-        .padding(3)
-        .frame(width: 68)
-        .background(Color.clear)
+        .scrollIndicators(.hidden)
     }
 
     private func regionButton(_ region: MarketRegion) -> some View {
@@ -1682,34 +1799,26 @@ private struct MarketRegionPicker: View {
         return Button {
             selection = region
         } label: {
-            VStack(spacing: 1) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(movementQuote == nil ? status.tint : movementTint)
+                    .frame(width: 5, height: 5)
                 Text(region.rawValue)
                     .font(.system(size: 12, weight: weight))
-                    .foregroundStyle(movementTint)
-                HStack(spacing: 3) {
-                    Circle()
-                        .fill(status.tint)
-                        .frame(width: 4, height: 4)
-                    Text(status.label)
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(status.tint)
-                }
+                    .foregroundStyle(isSelected ? MarketStyle.accent : .primary)
             }
-                .lineLimit(1)
-                .frame(width: 62, height: 33)
-                .background {
-                    if movementQuote != nil {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(movementTint.opacity(isSelected ? 0.12 : 0.07))
-                    }
-                }
-                .overlay {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(MarketStyle.accent.opacity(0.45), lineWidth: 0.75)
-                    }
-                }
-                .contentShape(Rectangle())
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                isSelected ? MarketStyle.accent.opacity(0.11) : MarketStyle.secondarySurface,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(isSelected ? MarketStyle.accent.opacity(0.35) : Color.clear, lineWidth: 0.8)
+            }
+            .contentShape(Capsule())
         }
         .id(region)
         .buttonStyle(.plain)
