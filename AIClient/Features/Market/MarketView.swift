@@ -6,7 +6,7 @@ private enum MarketStyle {
     static let canvas = InvestmentDesign.surface
     static let surface = InvestmentDesign.surface
     static let secondarySurface = InvestmentDesign.secondarySurface
-    static let cardSurface = InvestmentDesign.surface
+    static let cardSurface = InvestmentDesign.secondarySurface
     static let cardBorder = InvestmentDesign.divider
     static let divider = InvestmentDesign.divider
     static let gain = InvestmentDesign.gain
@@ -206,6 +206,7 @@ struct MarketView: View {
                 showsDetail = true
             }
         )
+        .preferredColorScheme(.dark)
         .sheet(isPresented: $showsRetailInvestors, onDismiss: {
             retailInvestorShowsDetail = false
             showsDetail = false
@@ -449,7 +450,6 @@ private struct MarketHomeView: View {
                     .background(MarketStyle.canvas)
                 }
                 .background(MarketStyle.canvas)
-                .scrollDisabled(true)
                 .scrollIndicators(.hidden)
                 .onAppear { onCompactHeaderChange(false) }
                 .task {
@@ -463,10 +463,8 @@ private struct MarketHomeView: View {
                 .task(id: rootTabIsActive) {
                     guard rootTabIsActive else { return }
                     async let research: Void = researchStore.load()
-                    async let ranking: Void = rankingStore.loadSummary()
-                    async let holdings: Void = holdingsStore.load()
                     async let macro: Void = macroStore.load()
-                    _ = await (research, ranking, holdings, macro)
+                    _ = await (research, macro)
                 }
             }
             .overlay(alignment: .top) {
@@ -549,7 +547,12 @@ private struct MarketPageHeader: View {
 
 private struct MarketSectionHeading: View {
     let title: String
-    let subtitle: String
+    let subtitle: String?
+
+    init(_ title: String, subtitle: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+    }
 
     var body: some View {
         HStack(alignment: .lastTextBaseline) {
@@ -557,12 +560,13 @@ private struct MarketSectionHeading: View {
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(.primary)
             Spacer()
-            Text(subtitle)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 2)
-        .padding(.top, 6)
     }
 }
 
@@ -890,14 +894,24 @@ private struct MarketEditorialFeed: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            researchFeed
-            industryFeed
-            rankingFeed
-            investorsFeed
-            macroFeed
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                MarketSectionHeading("机构观点")
+                researchFeed
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                MarketSectionHeading("行业机会")
+                industryFeed
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                MarketSectionHeading("宏观观察")
+                macroFeed
+            }
         }
         .padding(.horizontal, MarketStyle.pageInset)
+        .padding(.top, 14)
     }
 
     private var researchFeed: some View {
@@ -940,6 +954,13 @@ private struct MarketEditorialFeed: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("机构研究")
         .accessibilityHint("打开全部机构研究")
@@ -988,17 +1009,23 @@ private struct MarketEditorialFeed: View {
     private var industryFeed: some View {
         Button(action: onOpenIndustries) {
             VStack(spacing: 0) {
-                hairline
-                ForEach(Array(industries.enumerated()), id: \.element.symbol) { _, industry in
+                ForEach(Array(industries.enumerated()), id: \.element.symbol) { index, industry in
                     industryRow(title: industry.title, symbol: industry.symbol)
+                    if index < industries.count - 1 { hairline }
                 }
-                hairline
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
+        }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("产业全景")
+        .accessibilityLabel("行业机会")
         .accessibilityHint("打开产业链与景气详情")
     }
 
@@ -1015,17 +1042,16 @@ private struct MarketEditorialFeed: View {
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(quote.map { number($0.price, digits: 2) } ?? "—")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .monospacedDigit()
-                .frame(width: 58, alignment: .trailing)
             Text(quote?.formattedPercent ?? "—")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(tint)
                 .monospacedDigit()
                 .frame(width: 54, alignment: .trailing)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.tertiary)
         }
-        .frame(height: 28)
+        .frame(height: 34)
     }
 
     private func industryStatus(_ quote: MarketQuote?) -> String {
@@ -1191,6 +1217,13 @@ private struct MarketEditorialFeed: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("宏观数据速览")
         .accessibilityHint("打开宏观观察")
@@ -1278,69 +1311,69 @@ private struct MarketRetailInvestorStrip: View {
     let onOpen: () -> Void
 
     var body: some View {
-        Group {
-            if let item = validSample {
-                Button {
-                    onOpen()
-                } label: {
-                    HStack(alignment: .center, spacing: 11) {
-                        sampleThumbnail(item)
+        VStack(alignment: .leading, spacing: 8) {
+            MarketSectionHeading("散户观点")
 
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(spacing: 6) {
-                                Text("散户样本")
-                                    .font(.system(size: 14, weight: .bold))
+            Group {
+                if let item = validSample {
+                    Button {
+                        onOpen()
+                    } label: {
+                        HStack(alignment: .center, spacing: 12) {
+                            sampleThumbnail(item)
 
-                                Text(item.nickname)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Text("散户样本")
+                                        .font(.system(size: 13.5, weight: .bold))
 
-                                moodBadge(item.label)
+                                    Text(item.nickname)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .lineLimit(1)
 
-                                Spacer(minLength: 0)
+                                    moodBadge(item.label)
+                                }
 
-                                Text(RetailSentimentFormat.compactRelativeTime(item.createdAt))
-                                    .font(.system(size: 9.5))
+                                Text(summary(for: item))
+                                    .font(.system(size: 13.5, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+
+                                Text("\(RetailSentimentFormat.compactRelativeTime(item.createdAt)) · 公开视频")
+                                    .font(.system(size: 10.5, weight: .medium))
                                     .foregroundStyle(.tertiary)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Text(summary(for: item))
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-
-                            Text("公开视频 · 查看全部散户")
-                                .font(.system(size: 9.5))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.tertiary)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.tertiary)
+                        .contentShape(Rectangle())
+                        .padding(12)
                     }
-                    .contentShape(Rectangle())
-                    .padding(.vertical, 9)
+                    .buttonStyle(.plain)
+                    .accessibilityHint("查看全部散户观点")
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("散户样本")
+                            .font(.system(size: 13.5, weight: .bold))
+                        Text(store.isLoading ? "正在加载最新观点" : "暂无有效样本")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                    .padding(12)
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("查看全部散户观点")
-            } else {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("散户样本")
-                        .font(.system(size: 14, weight: .bold))
-                    Text(store.isLoading ? "正在加载最新观点" : "暂无有效样本")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 14)
+            }
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
         }
         .padding(.horizontal, MarketStyle.pageInset)
-        .frame(minHeight: 82)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(MarketStyle.divider).frame(height: 0.5)
-        }
+        .padding(.top, 14)
         .accessibilityElement(children: .combine)
     }
 
@@ -1380,8 +1413,8 @@ private struct MarketRetailInvestorStrip: View {
                 .foregroundStyle(.white)
                 .offset(x: 0.5)
         }
-        .frame(width: 58, height: 64)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(width: 72, height: 78)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .clipped()
         .accessibilityHidden(true)
     }
@@ -1522,6 +1555,9 @@ private struct MarketTerminalHero: View {
     let onOpenMarketQuotes: () -> Void
     let onOpenChinaMarketStructure: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var selectedRange: MarketRange = .day
+
+    private let chartRanges: [MarketRange] = [.day, .week, .month, .year]
 
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
     private var overnightQuote: MarketQuote? {
@@ -1532,150 +1568,209 @@ private struct MarketTerminalHero: View {
     private var displayedQuote: MarketQuote? { overnightQuote ?? quote }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: onOpenMarketQuotes) {
-                VStack(spacing: 6) {
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(displayedQuote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(spacing: 10) {
+                Button(action: onOpenMarketQuotes) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 7) {
+                            Text(heroTitle)
                                 .font(.system(size: 18, weight: .bold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(sessionTint)
-                                    .frame(width: 6, height: 6)
-                                Text(sessionLabel)
-                                Text(displayedQuote?.symbol ?? region.primarySymbol)
+                                .minimumScaleFactor(0.75)
+                            Spacer(minLength: 6)
+                            Circle()
+                                .fill(sessionTint)
+                                .frame(width: 6, height: 6)
+                            Text(sessionLabel)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Group {
+                            if dynamicTypeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    heroPrice
+                                    heroChart.frame(height: 118)
+                                }
+                            } else {
+                                HStack(alignment: .center, spacing: 18) {
+                                    heroPrice.frame(width: 126, alignment: .leading)
+                                    heroChart.frame(maxWidth: .infinity).frame(height: 96)
+                                }
                             }
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.secondary)
                         }
-
-                        Spacer(minLength: 8)
-
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                                .font(.system(size: 21, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
-                            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                                .foregroundStyle(quoteTint(displayedQuote))
-                        }
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
                     }
-
-                    heroChart
-                        .frame(height: dynamicTypeSize.isAccessibilitySize ? 124 : 48)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(MarketPressStyle())
-            .accessibilityLabel(heroAccessibilityLabel)
-            .accessibilityHint("打开指数与核心股票")
-            .padding(.horizontal, 16)
-            .padding(.top, 9)
-            .padding(.bottom, 7)
+                .buttonStyle(MarketPressStyle())
+                .accessibilityLabel(heroAccessibilityLabel)
+                .accessibilityHint("打开指数与核心股票")
 
+                HStack(spacing: 4) {
+                    ForEach(chartRanges) { range in
+                        Button {
+                            selectedRange = range
+                        } label: {
+                            Text(range == .day ? "日内" : range.rawValue)
+                                .font(.system(size: 11, weight: selectedRange == range ? .semibold : .medium))
+                                .foregroundStyle(selectedRange == range ? .primary : .secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 7)
+                                .background(
+                                    selectedRange == range ? Color.secondary.opacity(0.16) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedRange == range ? .isSelected : [])
+                    }
+                }
+                .padding(3)
+                .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .padding(14)
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                MarketSectionHeading("市场温度")
+                temperatureMetrics
+            }
+        }
+        .padding(.horizontal, MarketStyle.pageInset)
+        .padding(.top, 8)
+        .onChange(of: region) { _, _ in selectedRange = .day }
+        .task(id: chartLoadID) {
+            guard selectedRange != .day else { return }
+            await store.loadChart(symbol: chartSymbol, range: selectedRange)
+        }
+    }
+
+    private var heroPrice: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(quoteTint(displayedQuote))
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.68)
+    }
+
+    @ViewBuilder
+    private var temperatureMetrics: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 8) {
+                metricContent
+            }
+            .dynamicTypeSize(.large)
+        } else {
+            metricContent
+        }
+    }
+
+    @ViewBuilder
+    private var metricContent: some View {
+        if region == .commodity {
+            HStack(spacing: 8) {
+                temperatureCard { marketMetric(symbol: "CL1!") }
+                temperatureCard { marketMetric(symbol: "HG1!") }
+                temperatureCard { marketMetric(symbol: "SI1!") }
+            }
+        } else if region == .crypto {
+            HStack(spacing: 8) {
+                temperatureCard { cryptoMetric(symbol: "BINANCE:ETHUSDT") }
+                temperatureCard { cryptoMetric(symbol: "BINANCE:SOLUSDT") }
+                temperatureCard { cryptoMetric(symbol: "BINANCE:BNBUSDT") }
+            }
+        } else if region == .unitedStates {
+            HStack(spacing: 8) {
+                temperatureCard { unitedStatesVIXMetric }
+                temperatureCard { MarketTerminalSentiment(sentiment: store.dashboard?.sentiment) }
+                temperatureCard { unitedStatesYieldMetric }
+            }
+        } else {
             Group {
-            if region == .commodity {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(spacing: 0) {
-                        marketMetric(symbol: "CL1!").frame(height: 58)
-                        Divider()
-                        marketMetric(symbol: "HG1!").frame(height: 58)
-                        Divider()
-                        marketMetric(symbol: "SI1!").frame(height: 58)
-                    }
-                    .dynamicTypeSize(.large)
+                if region == .china {
+                    ChinaMarketMetrics(store: store, onOpenMarketStructure: onOpenChinaMarketStructure)
+                } else if region == .japan {
+                    RegionalMarketMetrics(
+                        store: store,
+                        exchangeTitle: "美元兑日元",
+                        exchangeSymbol: "USDJPY",
+                        exchangeDigits: 2,
+                        yieldTitle: "日本 10Y 国债",
+                        yieldSymbol: "JP10Y",
+                        companionTitle: "东证指数",
+                        companionSymbol: "^TOPX"
+                    )
+                } else if region == .korea {
+                    RegionalMarketMetrics(
+                        store: store,
+                        exchangeTitle: "美元兑韩元",
+                        exchangeSymbol: "USDKRW",
+                        exchangeDigits: 1,
+                        yieldTitle: "韩国 10Y 国债",
+                        yieldSymbol: "KR10Y",
+                        companionTitle: "KOSPI 指数",
+                        companionSymbol: "^KS11"
+                    )
                 } else {
-                    HStack(spacing: 0) {
-                        marketMetric(symbol: "CL1!")
-                        TerminalDivider()
-                        marketMetric(symbol: "HG1!")
-                        TerminalDivider()
-                        marketMetric(symbol: "SI1!")
-                    }
+                    EuropeMarketMetrics(store: store)
                 }
-            } else if region == .crypto {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(spacing: 0) {
-                        cryptoMetric(symbol: "BINANCE:ETHUSDT").frame(height: 58)
-                        Divider()
-                        cryptoMetric(symbol: "BINANCE:SOLUSDT").frame(height: 58)
-                        Divider()
-                        cryptoMetric(symbol: "BINANCE:BNBUSDT").frame(height: 58)
-                    }
-                    .dynamicTypeSize(.large)
-                } else {
-                    HStack(spacing: 0) {
-                        cryptoMetric(symbol: "BINANCE:ETHUSDT")
-                        TerminalDivider()
-                        cryptoMetric(symbol: "BINANCE:SOLUSDT")
-                        TerminalDivider()
-                        cryptoMetric(symbol: "BINANCE:BNBUSDT")
-                    }
-                }
-            } else if region == .china {
-                ChinaMarketMetrics(
-                    store: store,
-                    onOpenMarketStructure: onOpenChinaMarketStructure
-                )
-            } else if region == .japan {
-                RegionalMarketMetrics(
-                    store: store,
-                    exchangeTitle: "美元兑日元",
-                    exchangeSymbol: "USDJPY",
-                    exchangeDigits: 2,
-                    yieldTitle: "日本 10Y 国债",
-                    yieldSymbol: "JP10Y",
-                    companionTitle: "东证指数",
-                    companionSymbol: "^TOPX"
-                )
-            } else if region == .korea {
-                RegionalMarketMetrics(
-                    store: store,
-                    exchangeTitle: "美元兑韩元",
-                    exchangeSymbol: "USDKRW",
-                    exchangeDigits: 1,
-                    yieldTitle: "韩国 10Y 国债",
-                    yieldSymbol: "KR10Y",
-                    companionTitle: "KOSPI 指数",
-                    companionSymbol: "^KS11"
-                )
-            } else if region == .unitedStates {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(spacing: 0) {
-                        unitedStatesVIXMetric.frame(height: 58)
-                        Divider()
-                        MarketTerminalSentiment(sentiment: store.dashboard?.sentiment).frame(height: 58)
-                        Divider()
-                        unitedStatesYieldMetric.frame(height: 58)
-                    }
-                    .dynamicTypeSize(.large)
-                } else {
-                    HStack(spacing: 0) {
-                        unitedStatesVIXMetric
-                        TerminalDivider()
-                        MarketTerminalSentiment(sentiment: store.dashboard?.sentiment)
-                        TerminalDivider()
-                        unitedStatesYieldMetric
-                    }
-                }
-            } else {
-                 EuropeMarketMetrics(store: store)
             }
+            .frame(height: dynamicTypeSize.isAccessibilitySize ? 180 : 82)
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
-            .frame(height: dynamicTypeSize.isAccessibilitySize ? 180 : 54)
-            .padding(.top, 4)
-            .padding(.bottom, 4)
-            .overlay(alignment: .top) {
-                Divider()
-                    .overlay(MarketStyle.divider)
-                    .padding(.horizontal, 16)
+        }
+    }
+
+    private func temperatureCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, minHeight: dynamicTypeSize.isAccessibilitySize ? 66 : 88)
+            .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
+    }
+
+    private var heroTitle: String {
+        if displayedQuote?.symbol == "SPY" || region.primarySymbol == "SPY" {
+            return "标普 500 ETF（SPY）"
+        }
+        return displayedQuote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
+    }
+
+    private var chartSymbol: String {
+        quote?.historicalSymbol ?? quote?.symbol ?? region.primarySymbol
+    }
+
+    private var chartLoadID: String { "\(chartSymbol)-\(selectedRange.rawValue)" }
+
+    private var selectedTrend: [Double] {
+        if selectedRange == .day { return store.trendValues(for: displayedQuote) }
+        return store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.values ?? []
+    }
+
+    private var chartLabels: [String] {
+        switch selectedRange {
+        case .day:
+            return overnightQuote == nil ? ["开盘", "盘中", "最新"] : ["夜盘开盘", "夜盘中", "最新"]
+        case .week: return ["5日前", "本周", "最新"]
+        case .month: return ["1月前", "本月", "最新"]
+        case .year: return ["1年前", "年内", "最新"]
+        case .quarter, .fiveYears, .maximum: return ["起点", "期间", "最新"]
         }
     }
 
@@ -1738,16 +1833,15 @@ private struct MarketTerminalHero: View {
 
     private var heroChart: some View {
         TerminalLeadChart(
-            quote: displayedQuote,
-            trend: store.trendValues(for: displayedQuote),
-            isOvernight: overnightQuote != nil
+            trend: selectedTrend,
+            color: quoteTint(displayedQuote),
+            labels: chartLabels
         )
     }
 
     private var heroAccessibilityLabel: String {
-        let name = displayedQuote?.presentationName ?? quote?.presentationName ?? CoreDescriptor(symbol: region.primarySymbol).name
-        guard let displayedQuote else { return "\(name)，等待行情" }
-        return "\(name)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
+        guard let displayedQuote else { return "\(heroTitle)，等待行情" }
+        return "\(heroTitle)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
     }
 }
 
@@ -1988,9 +2082,9 @@ private struct MarketBreadthMetric: View {
 }
 
 private struct TerminalLeadChart: View {
-    let quote: MarketQuote?
     let trend: [Double]
-    let isOvernight: Bool
+    let color: Color
+    let labels: [String]
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 7) {
@@ -1998,25 +2092,18 @@ private struct TerminalLeadChart: View {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.20))
                     .frame(height: 0.5)
-                Sparkline(values: trend, color: quoteTint(quote))
+                Sparkline(values: trend, color: color)
                     .padding(.vertical, 5)
             }
             HStack {
-                Text(isOvernight ? "夜盘开盘" : "开盘")
+                Text(labels[0])
                 Spacer()
-                Text(isOvernight ? "夜盘中" : "盘中")
+                Text(labels[1])
                 Spacer()
-                Text(trailingLabel)
+                Text(labels[2])
             }
             .font(.caption2)
             .foregroundStyle(Color.secondary)
-        }
-    }
-
-    private var trailingLabel: String {
-        switch quote?.marketSession {
-        case "regular", "pre": "最新"
-        default: "收盘"
         }
     }
 }
@@ -2130,21 +2217,15 @@ private struct MarketRegionPicker: View {
             ? marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol])
             : nil
         let movementQuote = overnightQuote ?? quote
-        let movementTint = tabMovementTint(for: movementQuote)
         let status = tabStatus(for: region, quote: quote, overnightQuote: overnightQuote)
 
         return Button {
             selection = region
         } label: {
             VStack(spacing: 6) {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(movementQuote == nil ? status.tint : movementTint)
-                        .frame(width: 5, height: 5)
-                    Text(region.rawValue)
-                        .font(.system(size: 12, weight: weight))
-                        .foregroundStyle(isSelected ? MarketStyle.accent : .primary)
-                }
+                Text(region.rawValue)
+                    .font(.system(size: 12, weight: weight))
+                    .foregroundStyle(isSelected ? MarketStyle.accent : .primary)
                 Capsule()
                     .fill(isSelected ? MarketStyle.accent : .clear)
                     .frame(height: 2)
