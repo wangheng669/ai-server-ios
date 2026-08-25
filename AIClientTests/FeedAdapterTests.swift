@@ -408,8 +408,8 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNil(query["final_score"])
     }
 
-    func testWeChatAggregatesMaobidaoAndXiaohuAI() {
-        XCTAssertEqual(APIClient.weChatFeedIDs, [57, 2373])
+    func testWeChatAggregatesConfiguredFeeds() {
+        XCTAssertEqual(APIClient.weChatFeedIDs, [57, 2373, 19])
     }
 
     func testWeChatMergedPostsAreNewestFirstAndDeduplicated() throws {

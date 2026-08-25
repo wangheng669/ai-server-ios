@@ -1465,7 +1465,8 @@ struct NewsFeedView: View {
     private var weChatAccounts: [WeChatAccount] {
         [
             .init(id: 57, name: "猫笔刀"),
-            .init(id: 2373, name: "小互 AI")
+            .init(id: 2373, name: "小互 AI"),
+            .init(id: 19, name: "量子位")
         ]
     }
 
