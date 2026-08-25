@@ -230,7 +230,7 @@ struct APIClient {
         ]
     }
 
-    static let weChatFeedIDs = [57, 2373]
+    static let weChatFeedIDs = [57, 2373, 19]
 
     private func fetchWeChatPosts(page: Int, limit: Int) async throws -> [Post] {
         let requestedCount = page * limit
