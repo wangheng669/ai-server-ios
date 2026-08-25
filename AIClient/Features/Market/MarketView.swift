@@ -107,6 +107,14 @@ struct MarketView: View {
         #endif
     }()
     @State private var sentimentShowsDetail = false
+    @State private var selectedCoreStocksRegion: MarketRegion? = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ? .unitedStates : nil
+        #else
+        nil
+        #endif
+    }()
+    @State private var pendingCoreStockDetail: MarketDetailRoute?
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -182,6 +190,10 @@ struct MarketView: View {
             },
             onOpenIndustries: {
                 showsIndustries = true
+                showsDetail = true
+            },
+            onOpenCoreStocks: { region in
+                selectedCoreStocksRegion = region
                 showsDetail = true
             },
             onSelectIndex: { selectedDetail = MarketDetailRoute(symbol: $0) }
@@ -302,6 +314,24 @@ struct MarketView: View {
             .presentationBackground(InvestmentDesign.surface)
             .presentationContentInteraction(.resizes)
         }
+        .sheet(item: $selectedCoreStocksRegion, onDismiss: {
+            if let route = pendingCoreStockDetail {
+                pendingCoreStockDetail = nil
+                selectedDetail = route
+            } else {
+                showsDetail = false
+            }
+        }) { region in
+            MarketCoreStocksSheet(region: region, store: store) { symbol in
+                pendingCoreStockDetail = MarketDetailRoute(symbol: symbol)
+                selectedCoreStocksRegion = nil
+            }
+            .presentationDetents([.fraction(0.72), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(MarketStyle.surface)
+            .presentationContentInteraction(.resizes)
+        }
         .sheet(item: $selectedDetail, onDismiss: {
             showsDetail = false
         }) { route in
@@ -344,7 +374,8 @@ struct MarketView: View {
         }
         .onAppear {
             showsDetail = selectedDetail != nil || showsMacro || selectedSentimentMarket != nil ||
-                showsGlobalRanking || showsInvestors || showsInstitutionResearch || showsIndustries
+                selectedCoreStocksRegion != nil || showsGlobalRanking || showsInvestors ||
+                showsInstitutionResearch || showsIndustries
         }
         .onDisappear { showsDetail = false }
     }
@@ -416,6 +447,7 @@ private struct MarketHomeView: View {
     let onOpenInvestors: () -> Void
     let onOpenInstitutionResearch: () -> Void
     let onOpenIndustries: () -> Void
+    let onOpenCoreStocks: (MarketRegion) -> Void
     let onSelectIndex: (String) -> Void
     @State private var blocksSelectionDuringRegionSwipe = false
     @State private var selectedMarket: MarketRegion = {
@@ -476,7 +508,11 @@ private struct MarketHomeView: View {
                         )
 
                         ZStack(alignment: .topTrailing) {
-                            MarketTerminalHero(store: store, region: selectedMarket, onSelectIndex: selectIndex)
+                            MarketTerminalHero(
+                                store: store,
+                                region: selectedMarket,
+                                onOpenCoreStocks: { onOpenCoreStocks(selectedMarket) }
+                            )
                             MarketRegionPicker(store: store, selection: $selectedMarket)
                                 .padding(.top, 14)
                                 .padding(.trailing, 4)
@@ -1061,7 +1097,7 @@ func marketAdjacentRegion(from current: MarketRegion, offset: Int) -> MarketRegi
 private struct MarketTerminalHero: View {
     let store: MarketStore
     let region: MarketRegion
-    let onSelectIndex: (String) -> Void
+    let onOpenCoreStocks: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
@@ -1074,7 +1110,7 @@ private struct MarketTerminalHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Button { if quote != nil { onSelectIndex(region.primarySymbol) } } label: {
+            Button(action: onOpenCoreStocks) {
                 ZStack(alignment: .topTrailing) {
                     heroChart
                     heroValueOverlay
@@ -1088,7 +1124,7 @@ private struct MarketTerminalHero: View {
             }
             .buttonStyle(MarketPressStyle())
             .accessibilityLabel(heroAccessibilityLabel)
-            .accessibilityHint("打开代表指数详情")
+            .accessibilityHint("打开核心股票")
 
             Group {
             if region == .commodity {
@@ -1723,10 +1759,6 @@ private struct MarketIndexTable: View {
 
     private var symbols: [String] { region == .china && chinaScope == .all ? region.allSymbols : region.symbols }
     private var quotes: [MarketQuote] { symbols.compactMap { store.quote(symbol: $0) } }
-    private var coreStocks: [MarketQuote] {
-        store.dashboard?.componentsByRegion[region.dashboardID] ?? []
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             if region == .china {
@@ -1756,33 +1788,6 @@ private struct MarketIndexTable: View {
                 }
             }
 
-            if !coreStocks.isEmpty {
-                HStack {
-                    Text(store.dashboard?.componentsMeta?.label ?? "核心股票")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-                .padding(.bottom, 6)
-
-                Divider().opacity(0.45)
-                ForEach(Array(coreStocks.enumerated()), id: \.element.symbol) { index, quote in
-                    Button { onSelectIndex(quote.symbol) } label: {
-                        MarketIndexTableRow(
-                            quote: quote,
-                            overnightQuote: nil,
-                            trend: store.listTrendValues(for: quote),
-                            companyLogoPath: displayedLogoPaths[quote.symbol],
-                            showsCompanyLogo: true
-                        )
-                    }
-                    .buttonStyle(MarketPressStyle())
-                    if index < coreStocks.count - 1 { Divider().opacity(0.45).padding(.leading, 18) }
-                }
-            }
-
         }
         .padding(.leading, 12)
         .padding(.trailing, 24)
@@ -1794,7 +1799,7 @@ private struct MarketIndexTable: View {
         .animation(.easeOut(duration: 0.16), value: region)
         .task(id: componentLogoRequestID) {
             guard region != .commodity else { return }
-            let requestedQuotes = Array((quotes + coreStocks).reduce(into: [String: MarketQuote]()) {
+            let requestedQuotes = Array(quotes.reduce(into: [String: MarketQuote]()) {
                 $0[$1.symbol] = $1
             }.values)
             await marketRunWithLimitedConcurrency(requestedQuotes) { quote in
@@ -1807,18 +1812,125 @@ private struct MarketIndexTable: View {
             displayedLogoPaths = store.companyLogoPaths
         }
         .task(id: componentChartRequestID) {
-            await marketRunWithLimitedConcurrency(quotes + coreStocks) { quote in
+            await marketRunWithLimitedConcurrency(quotes) { quote in
                 await store.loadChart(symbol: quote.symbol, range: .day)
             }
         }
     }
 
     private var componentLogoRequestID: String {
-        "\(region.dashboardID):\((quotes + coreStocks).map(\.symbol).joined(separator: ","))"
+        "\(region.dashboardID):\(quotes.map(\.symbol).joined(separator: ","))"
     }
 
     private var componentChartRequestID: String {
         "day:\(componentLogoRequestID)"
+    }
+}
+
+private struct MarketCoreStocksSheet: View {
+    let region: MarketRegion
+    let store: MarketStore
+    let onSelectStock: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayedLogoPaths: [String: String]
+
+    init(region: MarketRegion, store: MarketStore, onSelectStock: @escaping (String) -> Void) {
+        self.region = region
+        self.store = store
+        self.onSelectStock = onSelectStock
+        _displayedLogoPaths = State(initialValue: store.companyLogoPaths)
+    }
+
+    private var stocks: [MarketQuote] {
+        store.dashboard?.componentsByRegion[region.dashboardID] ?? []
+    }
+
+    private var title: String {
+        store.dashboard?.componentsMeta?.label ?? "核心股票"
+    }
+
+    private var selectionDescription: String? {
+        switch store.dashboard?.componentsMeta?.selectionBasis {
+        case "regional-market-leaders": "区域市场代表公司"
+        case "market-cap": "按市值筛选"
+        default: nil
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if stocks.isEmpty {
+                    ContentUnavailableView(
+                        "暂无核心股票",
+                        systemImage: "chart.line.uptrend.xyaxis",
+                        description: Text("\(region.rawValue)市场暂未提供核心股票")
+                    )
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            if let selectionDescription {
+                                Text(selectionDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 10)
+                            }
+
+                            ForEach(Array(stocks.enumerated()), id: \.element.symbol) { index, quote in
+                                Button { onSelectStock(quote.symbol) } label: {
+                                    MarketIndexTableRow(
+                                        quote: quote,
+                                        overnightQuote: nil,
+                                        trend: store.listTrendValues(for: quote),
+                                        companyLogoPath: displayedLogoPaths[quote.symbol],
+                                        showsCompanyLogo: true
+                                    )
+                                }
+                                .buttonStyle(MarketPressStyle())
+
+                                if index < stocks.count - 1 {
+                                    Divider().opacity(0.45).padding(.leading, 18)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 24)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
+            .background(MarketStyle.surface)
+            .navigationTitle("\(region.rawValue) · \(title)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .task(id: requestID) {
+            await marketRunWithLimitedConcurrency(stocks) { quote in
+                await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
+                guard let path = await store.companyLogoPaths[quote.symbol],
+                      let url = marketCompanyLogoURL(path) else { return }
+                _ = await MarketLogoImageCache.shared.image(for: url)
+            }
+            guard !Task.isCancelled else { return }
+            displayedLogoPaths = store.companyLogoPaths
+        }
+        .task(id: "charts:\(requestID)") {
+            await marketRunWithLimitedConcurrency(stocks) { quote in
+                await store.loadChart(symbol: quote.symbol, range: .day)
+            }
+        }
+    }
+
+    private var requestID: String {
+        "\(region.dashboardID):\(stocks.map(\.symbol).joined(separator: ","))"
     }
 }
 
