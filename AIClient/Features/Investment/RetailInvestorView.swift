@@ -6,19 +6,23 @@ struct RetailInvestorView: View {
     @Binding private var showsDetail: Bool
     private let store: RetailSentimentStore
     private let marketStore: MarketStore
+    private let displaysSheetChrome: Bool
     @State private var selectedMarket: SentimentMarket = .china
     @State private var playbackItem: InvestorMoodItem?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.dismiss) private var dismiss
 
     @MainActor
     init(
         store: RetailSentimentStore,
         marketStore: MarketStore,
         initialMarket: SentimentMarket = .china,
-        showsDetail: Binding<Bool> = .constant(false)
+        showsDetail: Binding<Bool> = .constant(false),
+        displaysSheetChrome: Bool = false
     ) {
         self.store = store
         self.marketStore = marketStore
+        self.displaysSheetChrome = displaysSheetChrome
         _selectedMarket = State(initialValue: initialMarket)
         _showsDetail = showsDetail
         #if DEBUG
@@ -40,7 +44,7 @@ struct RetailInvestorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                investorMoodContent(showsHeader: false)
+                investorMoodContent(showsHeader: displaysSheetChrome)
                     .background(InvestmentDesign.surface)
                 .padding(.bottom, 24)
             }
@@ -50,6 +54,15 @@ struct RetailInvestorView: View {
                 await store.load(marketStore: marketStore)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .bottomTrailing) {
+                if displaysSheetChrome {
+                    DetailSheetCloseButton(
+                        action: dismiss.callAsFunction,
+                        accessibilityLabel: "关闭散户观点"
+                    )
+                    .padding(16)
+                }
+            }
         }
         .onAppear { showsDetail = false }
         .onDisappear { showsDetail = false }
@@ -1283,7 +1296,7 @@ private struct InvestorMoodVideoCard: View {
     }
 }
 
-struct InvestorMoodVideoPlayerSheet: View {
+private struct InvestorMoodVideoPlayerSheet: View {
     let item: InvestorMoodItem
     @Environment(\.dismiss) private var dismiss
     @State private var player = AVPlayer()

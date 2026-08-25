@@ -61,7 +61,8 @@ struct MarketView: View {
     @State private var holdingsStore: FamousHoldingsStore
     @StateObject private var institutionResearchStore: InstitutionResearchStore
     @State private var investorShowsDetail = false
-    @State private var selectedRetailSample: InvestorMoodItem?
+    @State private var retailInvestorShowsDetail = false
+    @State private var showsRetailInvestors = false
     @State private var showsInstitutionResearch = {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("--institution-research-preview")
@@ -200,20 +201,26 @@ struct MarketView: View {
                 showsChinaMarketStructure = true
                 showsDetail = true
             },
-            onOpenRetailSample: { item in
-                selectedRetailSample = item
+            onOpenRetailInvestors: {
+                showsRetailInvestors = true
                 showsDetail = true
             }
         )
-        .sheet(item: $selectedRetailSample, onDismiss: {
+        .sheet(isPresented: $showsRetailInvestors, onDismiss: {
+            retailInvestorShowsDetail = false
             showsDetail = false
-        }) { item in
-            InvestorMoodVideoPlayerSheet(item: item)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
-                .presentationBackground(InvestmentDesign.surface)
-                .presentationContentInteraction(.resizes)
+        }) {
+            RetailInvestorView(
+                store: sentimentStore,
+                marketStore: store,
+                showsDetail: $retailInvestorShowsDetail,
+                displaysSheetChrome: true
+            )
+            .presentationDetents([.fraction(0.82), .large])
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(28)
+            .presentationBackground(InvestmentDesign.surface)
+            .presentationContentInteraction(.resizes)
         }
         .sheet(isPresented: $showsInvestors, onDismiss: {
             investorShowsDetail = false
@@ -347,7 +354,7 @@ struct MarketView: View {
             showsDetail = selectedDetail != nil || showsMacro ||
                 selectedMarketQuotesRegion != nil || showsGlobalRanking || showsInvestors ||
                 showsInstitutionResearch || showsIndustries || showsChinaMarketStructure ||
-                selectedRetailSample != nil
+                showsRetailInvestors
         }
         .onDisappear { showsDetail = false }
     }
@@ -367,7 +374,7 @@ private struct MarketHomeView: View {
     let onOpenIndustries: () -> Void
     let onOpenMarketQuotes: (MarketRegion) -> Void
     let onOpenChinaMarketStructure: () -> Void
-    let onOpenRetailSample: (InvestorMoodItem) -> Void
+    let onOpenRetailInvestors: () -> Void
     @State private var macroStore = ChinaMacroStore()
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var selectedMarket: MarketRegion = {
@@ -418,7 +425,7 @@ private struct MarketHomeView: View {
 
                             MarketRetailInvestorStrip(
                                 store: sentimentStore,
-                                onOpen: onOpenRetailSample
+                                onOpen: onOpenRetailInvestors
                             )
 
                             MarketEditorialFeed(
@@ -1268,13 +1275,13 @@ private struct MarketEditorialFeed: View {
 
 private struct MarketRetailInvestorStrip: View {
     let store: RetailSentimentStore
-    let onOpen: (InvestorMoodItem) -> Void
+    let onOpen: () -> Void
 
     var body: some View {
         Group {
             if let item = validSample {
                 Button {
-                    onOpen(item)
+                    onOpen()
                 } label: {
                     HStack(alignment: .center, spacing: 11) {
                         sampleThumbnail(item)
@@ -1302,17 +1309,21 @@ private struct MarketRetailInvestorStrip: View {
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
 
-                            Text("公开视频 · 1 个有效样本")
+                            Text("公开视频 · 查看全部散户")
                                 .font(.system(size: 9.5))
                                 .foregroundStyle(.tertiary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
                     }
                     .contentShape(Rectangle())
                     .padding(.vertical, 9)
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("播放这条散户观点视频")
+                .accessibilityHint("查看全部散户观点")
             } else {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("散户样本")
