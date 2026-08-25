@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import OSLog
 
 private let marketServiceLogger = Logger(
@@ -254,12 +255,132 @@ struct MarketService {
             let diagnostic = marketDecodingDiagnostic(error)
             let requestID = response.value(forHTTPHeaderField: "x-request-id") ?? "missing"
             let contentType = response.value(forHTTPHeaderField: "content-type") ?? "missing"
+            let actualValue = marketDecodingActualValue(in: data, error: error)
             marketServiceLogger.error(
                 "Decoding failed endpoint=\(url?.path ?? "unknown", privacy: .public) request_id=\(requestID, privacy: .public) response_type=\(String(reflecting: type), privacy: .public) bytes=\(data.count) content_type=\(contentType, privacy: .public) category=\(diagnostic.category, privacy: .public) path=\(diagnostic.path, privacy: .public) expected=\(diagnostic.expectedType ?? "unknown", privacy: .public) detail=\(diagnostic.detail, privacy: .public)"
             )
+            let report = MarketDecodingFailureReport(
+                eventID: UUID().uuidString.lowercased(),
+                requestID: requestID == "missing" ? nil : requestID,
+                endpoint: url?.path ?? "unknown",
+                query: url?.query,
+                responseType: String(reflecting: type),
+                category: diagnostic.category,
+                path: diagnostic.path,
+                expectedType: diagnostic.expectedType,
+                actualType: actualValue?.type,
+                actualValue: actualValue?.preview,
+                detail: diagnostic.detail,
+                httpStatus: response.statusCode,
+                contentType: contentType,
+                responseBytes: data.count,
+                responseSHA256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
+                appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                buildVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+                occurredAt: ISO8601DateFormatter().string(from: Date())
+            )
+            Task {
+                await sendMarketDecodingFailureReport(
+                    report,
+                    baseURL: baseURL,
+                    session: session
+                )
+            }
             throw MarketServiceError.decoding(error)
         }
     }
+}
+
+struct MarketDecodingFailureReport: Encodable, Equatable, Sendable {
+    let eventID: String
+    let requestID: String?
+    let endpoint: String
+    let query: String?
+    let responseType: String
+    let category: String
+    let path: String
+    let expectedType: String?
+    let actualType: String?
+    let actualValue: String?
+    let detail: String
+    let httpStatus: Int
+    let contentType: String
+    let responseBytes: Int
+    let responseSHA256: String
+    let appVersion: String?
+    let buildVersion: String?
+    let occurredAt: String
+}
+
+struct MarketDecodingActualValue: Equatable {
+    let type: String
+    let preview: String?
+}
+
+func marketDecodingActualValue(in data: Data, error: Error) -> MarketDecodingActualValue? {
+    guard let root = try? JSONSerialization.jsonObject(with: data),
+          let codingPath = marketDecodingCodingPath(error) else { return nil }
+    var current: Any = root
+    for key in codingPath {
+        if let index = key.intValue {
+            guard let values = current as? [Any], values.indices.contains(index) else {
+                return MarketDecodingActualValue(type: "missing", preview: nil)
+            }
+            current = values[index]
+        } else {
+            guard let values = current as? [String: Any], let value = values[key.stringValue] else {
+                return MarketDecodingActualValue(type: "missing", preview: nil)
+            }
+            current = value
+        }
+    }
+    switch current {
+    case is NSNull:
+        return MarketDecodingActualValue(type: "null", preview: nil)
+    case let value as Bool:
+        return MarketDecodingActualValue(type: "boolean", preview: String(value))
+    case let value as NSNumber:
+        return MarketDecodingActualValue(type: "number", preview: value.stringValue)
+    case let value as String:
+        return MarketDecodingActualValue(type: "string", preview: "string(length=\(value.count))")
+    case let value as [Any]:
+        return MarketDecodingActualValue(type: "array", preview: "count=\(value.count)")
+    case let value as [String: Any]:
+        let keys = value.keys.sorted().prefix(12).joined(separator: ",")
+        return MarketDecodingActualValue(type: "object", preview: "keys=\(keys)")
+    default:
+        return MarketDecodingActualValue(type: String(describing: type(of: current)), preview: nil)
+    }
+}
+
+private func marketDecodingCodingPath(_ error: Error) -> [CodingKey]? {
+    guard let error = error as? DecodingError else { return nil }
+    switch error {
+    case let .typeMismatch(_, context), let .valueNotFound(_, context), let .dataCorrupted(context):
+        return context.codingPath
+    case let .keyNotFound(key, context):
+        return context.codingPath + [key]
+    @unknown default:
+        return nil
+    }
+}
+
+private func sendMarketDecodingFailureReport(
+    _ report: MarketDecodingFailureReport,
+    baseURL: URL,
+    session: URLSession
+) async {
+    let url = baseURL.appending(path: "api/ios/v1/ios/client-diagnostics")
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+    guard let body = try? JSONEncoder().encode(report) else { return }
+    request.httpBody = body
+    do {
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
+    } catch { }
 }
 
 struct MarketDecodingDiagnostic: Equatable {

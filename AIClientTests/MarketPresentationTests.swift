@@ -53,6 +53,25 @@ final class MarketPresentationTests: XCTestCase {
             XCTAssertEqual(diagnostic.category, "typeMismatch")
             XCTAssertEqual(diagnostic.path, "$.data.refreshIntervalMs")
             XCTAssertEqual(diagnostic.expectedType, "Swift.Int")
+            XCTAssertEqual(
+                marketDecodingActualValue(in: data, error: error),
+                MarketDecodingActualValue(type: "string", preview: "string(length=5)")
+            )
+        }
+    }
+
+    func testMarketDecodingActualValueDoesNotIncludeRawStringContent() throws {
+        let data = Data(#"{"value":"private-market-value"}"#.utf8)
+        struct Payload: Decodable { let value: Int }
+
+        do {
+            _ = try JSONDecoder().decode(Payload.self, from: data)
+            XCTFail("Expected payload decoding to fail")
+        } catch {
+            let actual = marketDecodingActualValue(in: data, error: error)
+            XCTAssertEqual(actual?.type, "string")
+            XCTAssertEqual(actual?.preview, "string(length=20)")
+            XCTAssertFalse(actual?.preview?.contains("private-market-value") == true)
         }
     }
 
