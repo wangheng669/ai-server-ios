@@ -210,7 +210,6 @@ struct MarketView: View {
                 showsDetail = true
             }
         )
-        .preferredColorScheme(.dark)
         .sheet(isPresented: $showsRetailInvestors, onDismiss: {
             retailInvestorShowsDetail = false
             showsDetail = false
