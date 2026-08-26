@@ -1784,8 +1784,10 @@ private struct MarketTerminalHero: View {
     }
 
     private var selectedTrend: [Double] {
-        if selectedRange == .day { return store.trendValues(for: displayedQuote) }
-        return store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.values ?? []
+        marketPreferredLeadChartTrend(
+            chartValues: store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.values ?? [],
+            fallbackValues: store.trendValues(for: displayedQuote)
+        )
     }
 
     private var selectedPeriodReturn: Double? {

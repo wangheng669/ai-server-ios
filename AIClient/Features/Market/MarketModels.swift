@@ -1312,6 +1312,10 @@ func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 60) -> [
     )
 }
 
+func marketPreferredLeadChartTrend(chartValues: [Double], fallbackValues: [Double]) -> [Double] {
+    chartValues.count >= 2 ? chartValues : fallbackValues
+}
+
 private func marketSampledChartTrend(displayPoints: [MarketChartPoint], limit: Int = 60) -> [Double] {
     let values = displayPoints
         .compactMap(\.displayValue)
