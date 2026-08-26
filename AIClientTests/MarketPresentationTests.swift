@@ -1478,6 +1478,20 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketNearestChartIndex(fraction: 2, fractions: fractions), 4)
     }
 
+    func testLeadSparklineDoesNotExaggerateTinyRelativeMoves() {
+        let bounds = marketSparklineBounds([7_686, 7_691], minimumRelativeRange: 0.0025)
+
+        XCTAssertEqual(bounds.upper - bounds.lower, 7_691 * 0.0025, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(bounds.lower, 7_686)
+        XCTAssertGreaterThanOrEqual(bounds.upper, 7_691)
+    }
+
+    func testLeadSparklineKeepsRealRangeWhenMovementIsLarger() {
+        let bounds = marketSparklineBounds([100, 104, 102], minimumRelativeRange: 0.0025)
+
+        XCTAssertEqual(bounds, MarketSparklineBounds(lower: 100, upper: 104))
+    }
+
     private func chartPoint(
         timestamp: Int64,
         open: Double? = nil,
