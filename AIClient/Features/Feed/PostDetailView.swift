@@ -184,7 +184,7 @@ struct PostDetailView: View {
                     .padding(.bottom, sheetCloseBottomPadding)
             }
         }
-        .navigationTitle(navigationTitle)
+        .navigationTitle(presentedAsSheet ? "" : navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(hidesNavigationBar ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(hidesNavigationBar)
@@ -487,7 +487,9 @@ struct PostDetailView: View {
 
     private var weChatDetail: some View {
         VStack(spacing: 0) {
-            weChatDetailHeader
+            if !presentedAsSheet {
+                weChatDetailHeader
+            }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -802,8 +804,10 @@ struct PostDetailView: View {
                 .accessibilityLabel("更多")
             }
 
-            Text("微博正文")
-                .font(.system(size: 17, weight: .semibold))
+            if !presentedAsSheet {
+                Text("微博正文")
+                    .font(.system(size: 17, weight: .semibold))
+            }
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 8)
@@ -1422,8 +1426,10 @@ struct PostDetailView: View {
             .accessibilityHidden(presentedAsSheet)
 
             Spacer()
-            Text("Truth")
-                .font(.system(size: 17, weight: .semibold))
+            if !presentedAsSheet {
+                Text("Truth")
+                    .font(.system(size: 17, weight: .semibold))
+            }
             Spacer()
 
             if let link = post.linkURL {
@@ -1592,18 +1598,20 @@ struct PostDetailView: View {
             .disabled(presentedAsSheet)
             .accessibilityHidden(presentedAsSheet)
 
-            HStack(spacing: 5) {
-                Text("知乎")
-                    .foregroundStyle(.blue)
-                    .fontWeight(.semibold)
-                if let hotMeta = post.zhihuHotMeta {
-                    Text("· \(hotMeta)")
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            if !presentedAsSheet {
+                HStack(spacing: 5) {
+                    Text("知乎")
+                        .foregroundStyle(.blue)
+                        .fontWeight(.semibold)
+                    if let hotMeta = post.zhihuHotMeta {
+                        Text("· \(hotMeta)")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
+                .font(.system(size: 14))
+                .minimumScaleFactor(0.82)
             }
-            .font(.system(size: 14))
-            .minimumScaleFactor(0.82)
 
             Spacer(minLength: 4)
 
@@ -2120,7 +2128,9 @@ struct PostDetailView: View {
 
     private var xDetail: some View {
         VStack(spacing: 0) {
-            xNavigationBar
+            if !presentedAsSheet {
+                xNavigationBar
+            }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
