@@ -5435,7 +5435,7 @@ private struct MarketDetailChart: View {
     }
 
     private var chartCaption: String {
-        let base = selectedRange.apiInterval == "1m" ? "分时走势" : "日 K 线"
+        let base = selectedRange.apiInterval == "1d" ? "日 K 线" : "分时走势"
         let dated = chart.map { "\(base) · \($0.tradingDate)" } ?? base
         let sessionText = presentation?.extendedSessionLabel.map { " · \($0)" } ?? ""
         let referenceText = usesFallbackChart ? " · 参考 \(displayedSymbol)" : ""
@@ -5479,7 +5479,7 @@ private struct MarketDetailChart: View {
         switch quality.status {
         case .complete:
             guard points.last?.state == "provisional" else { return nil }
-            return selectedRange.apiInterval == "1m" ? "当前分钟更新中" : "当日数据更新中"
+            return selectedRange.apiInterval == "1d" ? "当日数据更新中" : "当前分钟更新中"
         case .repairing:
             return "数据补齐中 · 已有 \(quality.actual)/\(quality.expected) 个真实数据点"
         case .partial:
