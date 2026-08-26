@@ -520,8 +520,6 @@ struct PostDetailView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
-        .safeAreaInset(edge: .bottom, spacing: 0) { weChatBottomBar }
-        .sensoryFeedback(.success, trigger: isRSSBookmarked)
     }
 
     private var weChatArticleBlocks: [RSSArticleBlock] {
@@ -586,37 +584,6 @@ struct PostDetailView: View {
 
     private func rssReaderParagraphText(_ text: String) -> String {
         RSSReaderParagraphFormatter.text(text)
-    }
-
-    private var weChatBottomBar: some View {
-        HStack(spacing: 0) {
-            Button {
-                isRSSBookmarked.toggle()
-                RSSBookmarkStore.set(isRSSBookmarked, postID: post.id)
-            } label: {
-                Label(isRSSBookmarked ? "已收藏" : "收藏", systemImage: isRSSBookmarked ? "bookmark.fill" : "bookmark")
-                    .frame(maxWidth: .infinity)
-            }
-
-            Divider().frame(height: 26)
-
-            if let link = post.linkURL {
-                ShareLink(item: link) {
-                    Label("分享", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity)
-                }
-            } else {
-                Label("分享", systemImage: "square.and.arrow.up")
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-            }
-
-        }
-        .font(.system(size: 13.5, weight: .medium))
-        .foregroundStyle(.primary)
-        .frame(height: 56)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider().opacity(0.65) }
     }
 
     private var weiboDetail: some View {
