@@ -159,10 +159,6 @@ struct VolatilityResearchSection: View {
         }
         .padding(14)
         .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.8)
-        }
     }
 
     private func instrumentCard(_ item: VolatilityResearchInstrument, lookbackDays: Int) -> some View {
@@ -239,10 +235,6 @@ struct VolatilityResearchSection: View {
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.6)
-        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.name)，\(item.value, specifier: "%.1f")，较\(lookbackDays)日峰值\(item.drawdownFromPeakPercent, specifier: "%.1f")%")
     }
@@ -256,10 +248,6 @@ struct VolatilityResearchSection: View {
         }
         .frame(maxWidth: .infinity, minHeight: 92)
         .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(InvestmentDesign.divider, lineWidth: 0.8)
-        }
     }
 
     private var retryCard: some View {
@@ -275,10 +263,6 @@ struct VolatilityResearchSection: View {
             .font(.system(size: 13, weight: .medium))
             .padding(14)
             .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(InvestmentDesign.divider, lineWidth: 0.8)
-            }
         }
         .buttonStyle(.plain)
     }
