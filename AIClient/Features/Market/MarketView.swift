@@ -3989,7 +3989,7 @@ private struct MarketIndexDetailView: View {
             if !isIndex && !isCrypto {
                 await store.loadChart(symbol: historicalSymbol, range: .year)
             }
-            if let quote, !isCommodity {
+            if let quote, !isCommodity, symbol != "^VIX" {
                 await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
             }
             #if DEBUG
@@ -5719,11 +5719,39 @@ private struct MarketInstrumentLogo: View {
 
     @ViewBuilder
     var body: some View {
-        if let commodity = CommodityLogoKind(symbol: quote.symbol) {
+        if quote.symbol == "^VIX" {
+            VIXLogo(size: size)
+        } else if let commodity = CommodityLogoKind(symbol: quote.symbol) {
             CommodityLogo(kind: commodity, size: size)
         } else {
             CompanyLogo(quote: quote, path: path, size: size)
         }
+    }
+}
+
+private struct VIXLogo: View {
+    var size: CGFloat = 40
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.98, green: 0.42, blue: 0.24), Color(red: 0.72, green: 0.12, blue: 0.28)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            Text("VIX")
+                .font(.system(size: size * 0.28, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+                .stroke(Color.white.opacity(0.24), lineWidth: 0.75)
+        }
+        .accessibilityLabel("VIX 恐慌指数标识")
     }
 }
 
