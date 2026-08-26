@@ -1226,6 +1226,24 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
     }
 }
 
+struct MarketPeriodReturn: Equatable, Sendable {
+    let change: Double
+    let percent: Double
+}
+
+func marketPeriodReturn(points: [MarketChartPoint]) -> MarketPeriodReturn? {
+    guard points.count >= 2,
+          let first = points.first?.close,
+          let last = points.last?.close,
+          first.isFinite,
+          last.isFinite,
+          first > 0 else { return nil }
+    return MarketPeriodReturn(
+        change: last - first,
+        percent: (last / first - 1) * 100
+    )
+}
+
 struct MarketChartPresentation: Sendable {
     let points: [MarketChartPoint]
     let values: [Double]
