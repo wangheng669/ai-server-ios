@@ -22,6 +22,37 @@ private actor MarketConcurrencyProbe {
 }
 
 final class MarketPresentationTests: XCTestCase {
+    func testDecodesServerBackedVolatilityResearch() throws {
+        let data = Data(#"{"data":{"generatedAt":"2026-08-26T04:00:00Z","lookbackDays":90,"summary":"VIX 与日经波动率均已回落。","isStale":false,"items":[{"id":"nikkei225-vi","market":"日本","name":"日经平均波动率指数","shortName":"Nikkei 225 VI","value":32.0,"previousClose":34.0,"dailyChangePercent":-5.88,"peakValue":40.0,"peakDate":"2026-07-20","drawdownFromPeakPercent":-20.0,"asOf":"2026-08-26","regime":"偏高","interpretation":"较峰值明显回落。","history":[{"date":"2026-08-25","value":34.0},{"date":"2026-08-26","value":32.0}],"source":{"title":"Nikkei Indexes 官方日线","url":"https://indexes.nikkei.co.jp/en/nkave/index/profile?idx=nk225vi"}}]}}"#.utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let payload = try decoder.decode(VolatilityResearchResponse.self, from: data).data
+
+        XCTAssertEqual(payload.lookbackDays, 90)
+        XCTAssertEqual(payload.items.first?.shortName, "Nikkei 225 VI")
+        XCTAssertEqual(payload.items.first?.drawdownFromPeakPercent, -20)
+        XCTAssertEqual(payload.items.first?.history.count, 2)
+        XCTAssertFalse(payload.isStale)
+    }
+
+    @MainActor
+    func testVolatilityResearchStoreForceReloadReplacesPayload() async {
+        var fetchCount = 0
+        let store = VolatilityResearchStore {
+            fetchCount += 1
+            return VolatilityResearchPayload(
+                generatedAt: Date(timeIntervalSince1970: TimeInterval(fetchCount)),
+                lookbackDays: 90,
+                summary: "第\(fetchCount)次",
+                items: [],
+                isStale: false
+            )
+        }
+        await store.load()
+        await store.load(force: true)
+        XCTAssertEqual(store.payload?.summary, "第2次")
+    }
+
     func testCompactResearchDateUsesChineseMonthAndDay() {
         XCTAssertEqual(marketCompactResearchDate("2026-07-22"), "7月22日")
         XCTAssertEqual(marketCompactResearchDate("unknown"), "unknown")
