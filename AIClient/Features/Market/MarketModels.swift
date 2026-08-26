@@ -1163,9 +1163,21 @@ struct MarketChart: Decodable, Sendable {
     let timezone: String
     let session: String
     let interval: String
+    let periodReturn: MarketChartPeriodReturn?
     let quality: MarketChartQuality
     let quote: MarketChartQuote
     let candles: [MarketChartPoint]
+}
+
+struct MarketChartPeriodReturn: Decodable, Sendable {
+    let range: String
+    let basis: String
+    let startPrice: Double?
+    let endPrice: Double?
+    let change: Double?
+    let percent: Double?
+    let startTimestamp: Int64?
+    let endTimestamp: Int64?
 }
 
 enum MarketChartQualityStatus: String, Decodable, Sendable {
@@ -1224,24 +1236,6 @@ func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint
         }
         return true
     }
-}
-
-struct MarketPeriodReturn: Equatable, Sendable {
-    let change: Double
-    let percent: Double
-}
-
-func marketPeriodReturn(points: [MarketChartPoint]) -> MarketPeriodReturn? {
-    guard points.count >= 2,
-          let first = points.first?.close,
-          let last = points.last?.close,
-          first.isFinite,
-          last.isFinite,
-          first > 0 else { return nil }
-    return MarketPeriodReturn(
-        change: last - first,
-        percent: (last / first - 1) * 100
-    )
 }
 
 struct MarketChartPresentation: Sendable {
