@@ -1251,6 +1251,20 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.maximum.apiLimit, 600)
     }
 
+    func testLeadChartPrefersLoadedRangePointsOverDashboardSummary() {
+        let chartValues = Array(0..<390).map(Double.init)
+        let fallbackValues = Array(0..<40).map(Double.init)
+
+        XCTAssertEqual(
+            marketPreferredLeadChartTrend(chartValues: chartValues, fallbackValues: fallbackValues),
+            chartValues
+        )
+        XCTAssertEqual(
+            marketPreferredLeadChartTrend(chartValues: [1], fallbackValues: fallbackValues),
+            fallbackValues
+        )
+    }
+
     func testDailyChartPointsRemainInOneDrawableSegment() {
         let previous = MarketChartPoint(timestamp: 1_000, open: 10, high: 11, low: 9, close: 10, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
         let nextDay = MarketChartPoint(timestamp: 1_000 + 24 * 60 * 60 * 1_000, open: 11, high: 12, low: 10, close: 11, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
