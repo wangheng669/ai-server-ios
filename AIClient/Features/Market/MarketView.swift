@@ -1620,15 +1620,16 @@ private struct MarketTerminalHero: View {
                         Button {
                             selectedRange = range
                         } label: {
-                            Text(range == .day ? "日内" : range.rawValue)
-                                .font(.system(size: 11, weight: selectedRange == range ? .semibold : .medium))
-                                .foregroundStyle(selectedRange == range ? MarketStyle.accent : .secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                                .background(
-                                    selectedRange == range ? MarketStyle.accent.opacity(0.10) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                )
+                            VStack(spacing: 4) {
+                                Text(range == .day ? "日内" : range.rawValue)
+                                    .font(.system(size: 11, weight: selectedRange == range ? .semibold : .medium))
+                                    .foregroundStyle(selectedRange == range ? MarketStyle.accent : .secondary)
+                                Capsule()
+                                    .fill(selectedRange == range ? MarketStyle.accent : .clear)
+                                    .frame(width: 18, height: 2)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(selectedRange == range ? .isSelected : [])
@@ -2131,12 +2132,21 @@ private struct TerminalLeadChart: View {
     let labels: [String]
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 7) {
+        VStack(alignment: .trailing, spacing: 5) {
+            Text(amplitudeText)
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
             ZStack {
                 Rectangle()
-                    .fill(Color.secondary.opacity(0.20))
+                    .fill(Color.secondary.opacity(0.12))
                     .frame(height: 0.5)
-                Sparkline(values: trend, color: color)
+                Sparkline(
+                    values: trend,
+                    color: color,
+                    minimumRelativeRange: 0.0025,
+                    showsLatestPoint: true
+                )
                     .padding(.vertical, 5)
             }
             HStack {
@@ -2149,6 +2159,15 @@ private struct TerminalLeadChart: View {
             .font(.caption2)
             .foregroundStyle(Color.secondary)
         }
+    }
+
+    private var amplitudeText: String {
+        guard let first = trend.first,
+              first != 0,
+              let minimum = trend.min(),
+              let maximum = trend.max() else { return "区间振幅 —" }
+        let amplitude = (maximum - minimum) / abs(first) * 100
+        return "区间振幅 \(number(amplitude, digits: 2))%"
     }
 }
 
@@ -5995,9 +6014,11 @@ private struct Sparkline: View {
     let values: [Double]
     let color: Color
     var showsFill = true
+    var minimumRelativeRange = 0.0
+    var showsLatestPoint = false
     var body: some View {
         GeometryReader { proxy in
-            let points = chartPoints(values, size: proxy.size)
+            let points = chartPoints(values, size: proxy.size, minimumRelativeRange: minimumRelativeRange)
             if points.count > 1 {
                 ZStack {
                     if showsFill {
@@ -6014,6 +6035,15 @@ private struct Sparkline: View {
                     }
                     Path { path in guard let first = points.first else { return }; path.move(to: first); points.dropFirst().forEach { path.addLine(to: $0) } }
                         .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                    if showsLatestPoint, let latest = points.last {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 5, height: 5)
+                            .position(
+                                x: min(max(latest.x, 2.5), proxy.size.width - 2.5),
+                                y: min(max(latest.y, 2.5), proxy.size.height - 2.5)
+                            )
+                    }
                 }
             } else {
                 Capsule().fill(Color.secondary.opacity(0.12)).frame(height: 1)
@@ -6075,9 +6105,30 @@ private func marketLocalTime(_ timestamp: Int64?, city: String, timeZone: String
     return "\(city) \(formatter.string(from: Date(timeIntervalSince1970: Double(timestamp) / 1000)))"
 }
 
-private func chartPoints(_ values: [Double], size: CGSize) -> [CGPoint] {
-    let minValue = values.min() ?? 0, maxValue = values.max() ?? 1, range = max(maxValue - minValue, 0.01)
-    return values.enumerated().map { CGPoint(x: size.width * CGFloat($0.offset) / CGFloat(max(values.count - 1, 1)), y: size.height * (1 - CGFloat(($0.element - minValue) / range))) }
+struct MarketSparklineBounds: Equatable {
+    let lower: Double
+    let upper: Double
+}
+
+func marketSparklineBounds(_ values: [Double], minimumRelativeRange: Double) -> MarketSparklineBounds {
+    guard let minimum = values.min(), let maximum = values.max() else {
+        return MarketSparklineBounds(lower: 0, upper: 1)
+    }
+    let midpoint = (minimum + maximum) / 2
+    let reference = max(abs(values.first ?? 0), abs(values.last ?? 0), 1)
+    let displayedRange = max(maximum - minimum, reference * max(minimumRelativeRange, 0), 0.01)
+    return MarketSparklineBounds(lower: midpoint - displayedRange / 2, upper: midpoint + displayedRange / 2)
+}
+
+private func chartPoints(_ values: [Double], size: CGSize, minimumRelativeRange: Double = 0) -> [CGPoint] {
+    let bounds = marketSparklineBounds(values, minimumRelativeRange: minimumRelativeRange)
+    let range = bounds.upper - bounds.lower
+    return values.enumerated().map {
+        CGPoint(
+            x: size.width * CGFloat($0.offset) / CGFloat(max(values.count - 1, 1)),
+            y: size.height * (1 - CGFloat(($0.element - bounds.lower) / range))
+        )
+    }
 }
 
 private func quoteTint(_ quote: MarketQuote?) -> Color { guard let quote else { return .secondary }; return quote.isUp ? MarketStyle.gain : MarketStyle.loss }
