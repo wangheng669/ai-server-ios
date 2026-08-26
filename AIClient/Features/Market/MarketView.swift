@@ -3917,6 +3917,17 @@ private struct MarketIndexDetailView: View {
         guard historicalSymbol != chartSymbol else { return nil }
         return historicalSymbol
     }
+    private var selectedRangePresentation: MarketChartPresentation? {
+        let primary = store.chartPresentation(symbol: chartSymbol, range: selectedRange)
+        guard (primary?.points.count ?? 0) < 2,
+              let chartFallbackSymbol else { return primary }
+        return store.chartPresentation(symbol: chartFallbackSymbol, range: selectedRange)
+    }
+    private var selectedPeriodReturn: MarketPeriodReturn? {
+        guard selectedRange != .day,
+              let points = selectedRangePresentation?.points else { return nil }
+        return marketPeriodReturn(points: points)
+    }
     private var isIndex: Bool {
         store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
             || CoreDescriptor(symbol: symbol).isIndex
@@ -4064,10 +4075,10 @@ private struct MarketIndexDetailView: View {
                     .monospacedDigit()
                     .tracking(-1.2)
                     .foregroundStyle(marketDisplayTint(quote))
-                Text(quote.map { "\(signed($0.marketDisplayChangeValue, digits: cryptoChangeDigits($0)))  \($0.marketDisplayFormattedPercent)" } ?? "等待行情数据")
+                Text(detailPerformanceText)
                     .font(.system(size: 18, weight: .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(marketDisplayTint(quote))
+                    .foregroundStyle(detailPerformanceTint)
                 Text(quote?.marketAsOfLabel ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -4076,6 +4087,25 @@ private struct MarketIndexDetailView: View {
         .padding(.horizontal, 18)
         .padding(.top, 24)
         .padding(.bottom, 14)
+    }
+
+    private var detailPerformanceText: String {
+        if selectedRange == .day {
+            return quote.map {
+                "\(signed($0.marketDisplayChangeValue, digits: cryptoChangeDigits($0)))  \($0.marketDisplayFormattedPercent)"
+            } ?? "等待行情数据"
+        }
+        guard let selectedPeriodReturn else { return "正在计算\(selectedRange.rawValue)收益率" }
+        let prefix = selectedPeriodReturn.percent >= 0 ? "+" : "−"
+        return "\(selectedRange.rawValue)收益率  \(prefix)\(number(abs(selectedPeriodReturn.percent), digits: 2))%"
+    }
+
+    private var detailPerformanceTint: Color {
+        guard selectedRange != .day else { return marketDisplayTint(quote) }
+        guard let selectedPeriodReturn else { return .secondary }
+        if selectedPeriodReturn.percent > 0 { return MarketStyle.gain }
+        if selectedPeriodReturn.percent < 0 { return MarketStyle.loss }
+        return .secondary
     }
 
     private var keyData: some View {

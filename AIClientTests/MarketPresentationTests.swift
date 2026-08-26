@@ -1246,6 +1246,28 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.maximum.apiLimit, 600)
     }
 
+    func testMarketPeriodReturnUsesSelectedChartEndpoints() throws {
+        let points = [
+            MarketChartPoint(timestamp: 1, open: 99, high: 101, low: 98, close: 100, volume: nil, state: "confirmed", source: "test", session: nil),
+            MarketChartPoint(timestamp: 2, open: 100, high: 112, low: 100, close: 110, volume: nil, state: "confirmed", source: "test", session: nil)
+        ]
+
+        let result = try XCTUnwrap(marketPeriodReturn(points: points))
+
+        XCTAssertEqual(result.change, 10, accuracy: 0.0001)
+        XCTAssertEqual(result.percent, 10, accuracy: 0.0001)
+    }
+
+    func testMarketPeriodReturnRejectsMissingOrInvalidBaseline() {
+        let zeroBaseline = [
+            MarketChartPoint(timestamp: 1, open: 0, high: 0, low: 0, close: 0, volume: nil, state: "confirmed", source: "test", session: nil),
+            MarketChartPoint(timestamp: 2, open: 1, high: 1, low: 1, close: 1, volume: nil, state: "confirmed", source: "test", session: nil)
+        ]
+
+        XCTAssertNil(marketPeriodReturn(points: []))
+        XCTAssertNil(marketPeriodReturn(points: zeroBaseline))
+    }
+
     func testDailyChartPointsRemainInOneDrawableSegment() {
         let previous = MarketChartPoint(timestamp: 1_000, open: 10, high: 11, low: 9, close: 10, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
         let nextDay = MarketChartPoint(timestamp: 1_000 + 24 * 60 * 60 * 1_000, open: 11, high: 12, low: 10, close: 11, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
