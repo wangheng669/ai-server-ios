@@ -217,7 +217,7 @@ struct MarketView: View {
                 showsDetail: $retailInvestorShowsDetail,
                 displaysSheetChrome: true
             )
-            .presentationDetents([.fraction(0.82), .large])
+            .presentationDetents([.fraction(0.52), .large])
             .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationBackground(InvestmentDesign.surface)
