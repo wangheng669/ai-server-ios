@@ -631,11 +631,11 @@ struct RetailInvestorView: View {
     }
 
     private func investorMoodContent(showsHeader: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             if showsHeader {
                 HStack {
                     Text("散户正在说")
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(size: 16, weight: .bold))
                     Spacer()
                     Text("视频由后台自动解读")
                         .font(.system(size: 10.5, weight: .medium))
@@ -649,8 +649,8 @@ struct RetailInvestorView: View {
                 investorMoodList(items)
             }
         }
-        .padding(.top, showsHeader ? 16 : 12)
-        .padding(.bottom, 10)
+        .padding(.top, showsHeader ? 12 : 8)
+        .padding(.bottom, 6)
     }
 
     private func investorMoodList(_ items: [InvestorMoodItem]) -> some View {
@@ -666,7 +666,7 @@ struct RetailInvestorView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 16)
     }
 
     private var methodologyNote: some View {
@@ -1198,10 +1198,10 @@ private struct InvestorMoodVideoCard: View {
 
     var body: some View {
         Button(action: onPlay) {
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: 11) {
                 thumbnail
-                    .frame(width: 96, height: 128)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(width: 78, height: 104)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .overlay(alignment: .bottomTrailing) {
                         if item.createdAt != nil {
                             Text(RetailSentimentFormat.compactRelativeTime(item.createdAt))
@@ -1210,27 +1210,27 @@ private struct InvestorMoodVideoCard: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(.black.opacity(0.68), in: Capsule())
-                                .padding(6)
+                                .padding(5)
                         }
                     }
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 7) {
                         Text(item.nickname)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .lineLimit(1)
                         moodBadge
                         Spacer(minLength: 0)
                     }
                     Text(transcript)
-                        .font(.system(size: 13.5))
+                        .font(.system(size: 12.5))
                         .foregroundStyle(.primary)
-                        .lineLimit(5)
-                        .lineSpacing(3)
+                        .lineLimit(3)
+                        .lineSpacing(2)
                 }
             }
             .contentShape(Rectangle())
-            .padding(.vertical, 14)
+            .padding(.vertical, 9)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(item.nickname)，\(item.label)，\(RetailSentimentFormat.compactRelativeTime(item.createdAt))，\(transcript)")
@@ -1252,9 +1252,9 @@ private struct InvestorMoodVideoCard: View {
             }
             Circle()
                 .fill(.black.opacity(0.58))
-                .frame(width: 38, height: 38)
+                .frame(width: 32, height: 32)
             Image(systemName: "play.fill")
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
                 .offset(x: 1)
         }
