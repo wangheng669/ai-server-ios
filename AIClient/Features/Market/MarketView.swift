@@ -1650,7 +1650,6 @@ private struct MarketTerminalHero: View {
         .padding(.top, 8)
         .onChange(of: region) { _, _ in selectedRange = .day }
         .task(id: chartLoadID) {
-            guard selectedRange != .day else { return }
             await store.loadChart(symbol: chartSymbol, range: selectedRange)
         }
     }
@@ -1663,6 +1662,9 @@ private struct MarketTerminalHero: View {
             Text(heroPerformanceText)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundStyle(heroPerformanceTint)
+            Text(heroVolatilityText)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
         }
         .monospacedDigit()
         .lineLimit(1)
@@ -1778,6 +1780,10 @@ private struct MarketTerminalHero: View {
         return store.chart(symbol: chartSymbol, range: selectedRange)?.periodReturn?.percent
     }
 
+    private var selectedPeriodVolatility: Double? {
+        store.chart(symbol: chartSymbol, range: selectedRange)?.periodVolatility?.percent
+    }
+
     private var heroPerformanceText: String {
         if selectedRange == .day {
             return displayedQuote.map(marketHeroChangeText) ?? "等待行情"
@@ -1793,6 +1799,11 @@ private struct MarketTerminalHero: View {
         if selectedPeriodReturn > 0 { return MarketStyle.gain }
         if selectedPeriodReturn < 0 { return MarketStyle.loss }
         return .secondary
+    }
+
+    private var heroVolatilityText: String {
+        guard let selectedPeriodVolatility else { return "波动率载入中" }
+        return "年化波动率 \(number(selectedPeriodVolatility, digits: 2))%"
     }
 
     private var chartLabels: [String] {
@@ -3949,6 +3960,9 @@ private struct MarketIndexDetailView: View {
         guard selectedRange != .day else { return nil }
         return selectedRangeChart?.periodReturn?.percent
     }
+    private var selectedPeriodVolatility: Double? {
+        selectedRangeChart?.periodVolatility?.percent
+    }
     private var isIndex: Bool {
         store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
             || CoreDescriptor(symbol: symbol).isIndex
@@ -4100,6 +4114,10 @@ private struct MarketIndexDetailView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(detailPerformanceTint)
+                Text(detailVolatilityText)
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
                 Text(quote?.marketAsOfLabel ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -4127,6 +4145,11 @@ private struct MarketIndexDetailView: View {
         if selectedPeriodReturn > 0 { return MarketStyle.gain }
         if selectedPeriodReturn < 0 { return MarketStyle.loss }
         return .secondary
+    }
+
+    private var detailVolatilityText: String {
+        guard let selectedPeriodVolatility else { return "年化波动率载入中" }
+        return "\(selectedRange.rawValue)年化波动率  \(number(selectedPeriodVolatility, digits: 2))%"
     }
 
     private var keyData: some View {
