@@ -1565,7 +1565,7 @@ private struct MarketTerminalHero: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedRange: MarketRange = .day
 
-    private let chartRanges: [MarketRange] = [.day, .week, .month, .year]
+    private let chartRanges: [MarketRange] = [.day, .week, .month, .quarter, .year, .fiveYears, .maximum]
 
     private var quote: MarketQuote? { store.quote(symbol: region.primarySymbol) }
     private var overnightQuote: MarketQuote? {
@@ -1577,9 +1577,9 @@ private struct MarketTerminalHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Button(action: onOpenMarketQuotes) {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 7) {
                             Text(heroTitle)
                                 .font(.system(size: 18, weight: .bold))
@@ -1595,19 +1595,7 @@ private struct MarketTerminalHero: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        Group {
-                            if dynamicTypeSize.isAccessibilitySize {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    heroPrice
-                                    heroChart.frame(height: 118)
-                                }
-                            } else {
-                                HStack(alignment: .center, spacing: 18) {
-                                    heroPrice.frame(width: 126, alignment: .leading)
-                                    heroChart.frame(maxWidth: .infinity).frame(height: 96)
-                                }
-                            }
-                        }
+                        heroPrice
                     }
                     .contentShape(Rectangle())
                 }
@@ -1636,8 +1624,14 @@ private struct MarketTerminalHero: View {
                     }
                 }
                 .padding(.top, 2)
+
+                heroChart
+                    .frame(height: dynamicTypeSize.isAccessibilitySize ? 220 : 178)
+
+                heroStatistics
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -1656,16 +1650,25 @@ private struct MarketTerminalHero: View {
             async let year: Void = store.loadChart(symbol: chartSymbol, range: .year)
             _ = await (day, week, month, year)
         }
+        .task(id: ChartKey(symbol: chartSymbol, range: selectedRange)) {
+            await store.loadChart(symbol: chartSymbol, range: selectedRange)
+        }
     }
 
     private var heroPrice: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-            Text(heroPerformanceText)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(heroPerformanceTint)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                Text(heroPerformanceText)
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(heroPerformanceTint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(heroPerformanceTint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                Spacer(minLength: 0)
+            }
             Text(heroVolatilityText)
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
@@ -1673,6 +1676,31 @@ private struct MarketTerminalHero: View {
         .monospacedDigit()
         .lineLimit(1)
         .minimumScaleFactor(0.68)
+    }
+
+    private var heroStatistics: some View {
+        HStack(spacing: 0) {
+            heroStatistic("开盘", value: displayedQuote?.openPrice)
+            heroStatistic("最高", value: displayedQuote?.high)
+            heroStatistic("最低", value: displayedQuote?.low)
+            heroStatistic("前收", value: displayedQuote?.previousClose)
+        }
+        .padding(.top, 2)
+    }
+
+    private func heroStatistic(_ label: String, value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(value.map { number($0, digits: cryptoPriceDigits($0, symbol: displayedQuote?.symbol ?? "")) } ?? "—")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -1809,6 +1837,15 @@ private struct MarketTerminalHero: View {
     }
 
     private var chartLabels: [String] {
+        if selectedRange != .day,
+           let chart = store.chart(symbol: chartSymbol, range: selectedRange),
+           let points = store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.points,
+           let first = points.first,
+           let last = points.last {
+            return [first, points[points.count / 2], last].map {
+                chartTime($0.timestamp, range: selectedRange, timezone: chart.timezone)
+            }
+        }
         switch selectedRange {
         case .day:
             return overnightQuote == nil ? ["开盘", "盘中", "最新"] : ["夜盘开盘", "夜盘中", "最新"]
@@ -2130,6 +2167,25 @@ private struct TerminalLeadChart: View {
     let trend: [Double]
     let color: Color
     let labels: [String]
+    @State private var selectedIndex: Int?
+
+    private var points: [MarketLeadChartPoint] {
+        trend.enumerated().map { MarketLeadChartPoint(index: $0.offset, value: $0.element) }
+    }
+
+    private var activePoint: MarketLeadChartPoint? {
+        guard !points.isEmpty else { return nil }
+        return points[min(max(selectedIndex ?? points.count - 1, 0), points.count - 1)]
+    }
+
+    private var bounds: MarketSparklineBounds {
+        marketSparklineBounds(trend, minimumRelativeRange: 0.0025)
+    }
+
+    private var xAxisValues: [Int] {
+        guard points.count > 1 else { return [0] }
+        return Array(Set([0, points.count / 2, points.count - 1])).sorted()
+    }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 5) {
@@ -2137,28 +2193,108 @@ private struct TerminalLeadChart: View {
                 .font(.system(size: 9.5, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-            ZStack {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.12))
-                    .frame(height: 0.5)
-                Sparkline(
-                    values: trend,
-                    color: color,
-                    minimumRelativeRange: 0.0025,
-                    showsLatestPoint: true
+            if points.count > 1 {
+                Chart {
+                    ForEach(points) { point in
+                        AreaMark(
+                            x: .value("位置", point.index),
+                            yStart: .value("图表下界", bounds.lower),
+                            yEnd: .value("价格", point.value)
+                        )
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [color.opacity(0.18), color.opacity(0.01)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        LineMark(
+                            x: .value("位置", point.index),
+                            y: .value("价格", point.value)
+                        )
+                        .foregroundStyle(color)
+                        .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    }
+
+                    if let activePoint {
+                        if selectedIndex != nil {
+                            RuleMark(x: .value("查看位置", activePoint.index))
+                                .foregroundStyle(color.opacity(0.25))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        }
+                        PointMark(
+                            x: .value("当前位置", activePoint.index),
+                            y: .value("当前价格", activePoint.value)
+                        )
+                        .foregroundStyle(color)
+                        .symbolSize(selectedIndex == nil ? 28 : 45)
+                        .annotation(position: .top, spacing: 5) {
+                            if selectedIndex != nil {
+                                Text(number(activePoint.value, digits: marketAxisDigits(values: trend)))
+                                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                                    .monospacedDigit()
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            }
+                        }
+                    }
+                }
+                .chartYScale(domain: bounds.lower...bounds.upper)
+                .chartXAxis {
+                    AxisMarks(values: xAxisValues) { value in
+                        AxisGridLine().foregroundStyle(.clear)
+                        AxisTick().foregroundStyle(.clear)
+                        AxisValueLabel {
+                            if let index = value.as(Int.self) {
+                                Text(axisLabel(for: index))
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) {
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.12))
+                        AxisTick().foregroundStyle(.clear)
+                        AxisValueLabel()
+                            .font(.system(size: 9, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        if let plotFrame = proxy.plotFrame {
+                            let frame = geometry[plotFrame]
+                            Rectangle()
+                                .fill(.clear)
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            guard frame.contains(value.location) else { return }
+                                            let locationX = value.location.x - frame.origin.x
+                                            if let index: Int = proxy.value(atX: locationX) {
+                                                selectedIndex = min(max(index, 0), points.count - 1)
+                                            }
+                                        }
+                                        .onEnded { _ in selectedIndex = nil }
+                                )
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "走势载入中",
+                    systemImage: "chart.xyaxis.line",
+                    description: Text("正在获取真实行情点")
                 )
-                    .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            HStack {
-                Text(labels[0])
-                Spacer()
-                Text(labels[1])
-                Spacer()
-                Text(labels[2])
-            }
-            .font(.caption2)
-            .foregroundStyle(Color.secondary)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("行情走势图，(amplitudeText)")
     }
 
     private var amplitudeText: String {
@@ -2169,6 +2305,19 @@ private struct TerminalLeadChart: View {
         let amplitude = (maximum - minimum) / abs(first) * 100
         return "区间振幅 \(number(amplitude, digits: 2))%"
     }
+
+    private func axisLabel(for index: Int) -> String {
+        guard !labels.isEmpty, points.count > 1 else { return "" }
+        if index == 0 { return labels[0] }
+        if index == points.count - 1 { return labels[min(2, labels.count - 1)] }
+        return labels[min(1, labels.count - 1)]
+    }
+}
+
+private struct MarketLeadChartPoint: Identifiable {
+    let index: Int
+    let value: Double
+    var id: Int { index }
 }
 
 private struct TerminalDivider: View {
