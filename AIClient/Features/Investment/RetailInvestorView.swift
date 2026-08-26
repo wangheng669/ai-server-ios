@@ -1317,9 +1317,10 @@ private struct InvestorMoodVideoPlayerSheet: View {
                         }
                     }
                     .aspectRatio(9 / 16, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: 240)
                     .background(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
