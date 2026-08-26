@@ -192,6 +192,7 @@ struct NewsFeedView: View {
     private let opensZhihuDetailPreview = ProcessInfo.processInfo.arguments.contains("--zhihu-detail-preview")
     private let opensYouTubeDetailPreview = ProcessInfo.processInfo.arguments.contains("--youtube-detail-preview")
     private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
+    private let opensWeChatDetailPreview = ProcessInfo.processInfo.arguments.contains("--wechat-detail-preview")
 
     init(
         showsDetail: Binding<Bool> = .constant(false),
@@ -342,6 +343,15 @@ struct NewsFeedView: View {
             if opensZhihuDetailPreview,
                selectedPost == nil,
                let first = model.posts.first(where: { $0.sourceName == "知乎" }) {
+                selectedPost = first
+            } else if opensWeChatDetailPreview,
+                      selectedPost == nil,
+                      let first = model.posts.first(where: { post in
+                          guard let source = post.source,
+                                source.hasPrefix("rss:"),
+                                let feedID = Int(source.dropFirst(4)) else { return false }
+                          return APIClient.weChatFeedIDs.contains(feedID)
+                      }) {
                 selectedPost = first
             } else if opensYouTubeDetailPreview,
                       selectedPost == nil,
@@ -1850,13 +1860,15 @@ private struct EmbeddedWebPage: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    hotTopicMark
-                    Text(source.hotTopicPageTitle)
-                        .font(.system(size: 16, weight: .semibold))
+            if !presentedAsSheet {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        hotTopicMark
+                        Text(source.hotTopicPageTitle)
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .accessibilityElement(children: .combine)
                 }
-                .accessibilityElement(children: .combine)
             }
             if source == .weibo {
                 ToolbarItem(placement: .topBarTrailing) {
