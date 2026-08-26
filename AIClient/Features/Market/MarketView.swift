@@ -1660,9 +1660,9 @@ private struct MarketTerminalHero: View {
             Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
-            Text(displayedQuote.map(marketHeroChangeText) ?? "等待行情")
+            Text(heroPerformanceText)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(quoteTint(displayedQuote))
+                .foregroundStyle(heroPerformanceTint)
         }
         .monospacedDigit()
         .lineLimit(1)
@@ -1773,6 +1773,29 @@ private struct MarketTerminalHero: View {
         return store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.values ?? []
     }
 
+    private var selectedPeriodReturn: MarketPeriodReturn? {
+        guard selectedRange != .day,
+              let points = store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.points else { return nil }
+        return marketPeriodReturn(points: points)
+    }
+
+    private var heroPerformanceText: String {
+        if selectedRange == .day {
+            return displayedQuote.map(marketHeroChangeText) ?? "等待行情"
+        }
+        guard let selectedPeriodReturn else { return "正在计算\(selectedRange.rawValue)收益率" }
+        let prefix = selectedPeriodReturn.percent >= 0 ? "+" : "−"
+        return "\(selectedRange.rawValue)收益率 \(prefix)\(number(abs(selectedPeriodReturn.percent), digits: 2))%"
+    }
+
+    private var heroPerformanceTint: Color {
+        guard selectedRange != .day else { return quoteTint(displayedQuote) }
+        guard let selectedPeriodReturn else { return .secondary }
+        if selectedPeriodReturn.percent > 0 { return MarketStyle.gain }
+        if selectedPeriodReturn.percent < 0 { return MarketStyle.loss }
+        return .secondary
+    }
+
     private var chartLabels: [String] {
         switch selectedRange {
         case .day:
@@ -1844,14 +1867,14 @@ private struct MarketTerminalHero: View {
     private var heroChart: some View {
         TerminalLeadChart(
             trend: selectedTrend,
-            color: quoteTint(displayedQuote),
+            color: heroPerformanceTint,
             labels: chartLabels
         )
     }
 
     private var heroAccessibilityLabel: String {
         guard let displayedQuote else { return "\(heroTitle)，等待行情" }
-        return "\(heroTitle)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(displayedQuote.formattedPercent)，\(sessionLabel)"
+        return "\(heroTitle)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(heroPerformanceText)，\(sessionLabel)"
     }
 }
 
