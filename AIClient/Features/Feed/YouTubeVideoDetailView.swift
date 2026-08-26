@@ -121,7 +121,7 @@ struct YouTubeVideoDetailView: View {
                     .padding(16)
             }
         }
-        .navigationTitle("视频详情")
+        .navigationTitle(presentedAsSheet ? "" : "视频详情")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
