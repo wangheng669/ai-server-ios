@@ -900,8 +900,6 @@ private struct MarketEditorialFeed: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VolatilityResearchSection()
-
             VStack(alignment: .leading, spacing: 8) {
                 MarketSectionHeading("机构观点")
                 researchFeed
@@ -1739,16 +1737,7 @@ private struct MarketTerminalHero: View {
                 if region == .china {
                     ChinaMarketMetrics(store: store, onOpenMarketStructure: onOpenChinaMarketStructure)
                 } else if region == .japan {
-                    RegionalMarketMetrics(
-                        store: store,
-                        exchangeTitle: "美元兑日元",
-                        exchangeSymbol: "USDJPY",
-                        exchangeDigits: 2,
-                        yieldTitle: "日本 10Y 国债",
-                        yieldSymbol: "JP10Y",
-                        companionTitle: "东证指数",
-                        companionSymbol: "^TOPX"
-                    )
+                    JapanMarketMetrics(store: store)
                 } else if region == .korea {
                     RegionalMarketMetrics(
                         store: store,
@@ -1918,6 +1907,83 @@ private struct MarketTerminalHero: View {
     private var heroAccessibilityLabel: String {
         guard let displayedQuote else { return "\(heroTitle)，等待行情" }
         return "\(heroTitle)，最新价 \(number(displayedQuote.price, digits: cryptoPriceDigits(displayedQuote.price, symbol: displayedQuote.symbol)))，\(heroPerformanceText)，\(sessionLabel)"
+    }
+}
+
+private struct JapanMarketMetrics: View {
+    let store: MarketStore
+    @StateObject private var volatilityStore = VolatilityResearchStore()
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+
+    private var exchangeQuote: MarketQuote? { store.quote(symbol: "USDJPY") }
+    private var yieldQuote: MarketQuote? { store.quote(symbol: "JP10Y") }
+    private var volatility: VolatilityResearchInstrument? {
+        volatilityStore.payload?.items.first { $0.market == "日本" }
+    }
+
+    var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 0) {
+                    exchangeMetric.frame(height: 58)
+                    Divider()
+                    yieldMetric.frame(height: 58)
+                    Divider()
+                    volatilityMetric.frame(height: 58)
+                }
+                .dynamicTypeSize(.large)
+            } else {
+                HStack(spacing: 0) {
+                    exchangeMetric
+                    TerminalDivider()
+                    yieldMetric
+                    TerminalDivider()
+                    volatilityMetric
+                }
+            }
+        }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await volatilityStore.load()
+        }
+    }
+
+    private var exchangeMetric: some View {
+        MarketTerminalMetric(
+            title: "美元兑日元",
+            value: exchangeQuote.map { number($0.price, digits: 2) } ?? "—",
+            change: exchangeQuote?.formattedPercent ?? "USDJPY",
+            tint: quoteTint(exchangeQuote),
+            trend: exchangeQuote?.trend ?? []
+        )
+    }
+
+    private var yieldMetric: some View {
+        MarketTerminalMetric(
+            title: "日本 10Y 国债",
+            value: yieldQuote.map { String(format: "%.2f%%", $0.price) } ?? "—",
+            change: yieldQuote?.formattedPercent ?? "等待行情",
+            tint: quoteTint(yieldQuote),
+            trend: yieldQuote?.trend ?? []
+        )
+    }
+
+    private var volatilityMetric: some View {
+        MarketTerminalMetric(
+            title: volatility?.shortName ?? "日经 225 VI",
+            value: volatility.map { number($0.value, digits: 1) } ?? "—",
+            change: volatility.map { String(format: "%+.2f%%", $0.dailyChangePercent) } ?? "等待行情",
+            tint: volatilityTint,
+            trend: volatility?.history.map(\.value) ?? []
+        )
+    }
+
+    private var volatilityTint: Color {
+        guard let change = volatility?.dailyChangePercent else { return .secondary }
+        if change > 0 { return MarketStyle.loss }
+        if change < 0 { return MarketStyle.gain }
+        return .secondary
     }
 }
 
