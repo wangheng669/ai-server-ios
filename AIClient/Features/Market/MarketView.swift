@@ -1573,7 +1573,7 @@ private struct MarketTerminalHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(spacing: 9) {
+            VStack(spacing: 7) {
                 Button(action: onOpenMarketQuotes) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 7) {
@@ -1613,7 +1613,7 @@ private struct MarketTerminalHero: View {
                                     .frame(width: 18, height: 2)
                             }
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 2)
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(selectedRange == range ? .isSelected : [])
@@ -1622,7 +1622,7 @@ private struct MarketTerminalHero: View {
                 .padding(.top, 2)
 
                 heroChart
-                    .frame(height: dynamicTypeSize.isAccessibilitySize ? 220 : 178)
+                    .frame(height: dynamicTypeSize.isAccessibilitySize ? 190 : 150)
 
                 heroStatistics
             }
@@ -2248,7 +2248,7 @@ private struct TerminalLeadChart: View {
     }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 5) {
+        VStack(alignment: .trailing, spacing: 3) {
             Text(amplitudeText)
                 .font(.system(size: 9.5, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
