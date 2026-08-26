@@ -1297,10 +1297,12 @@ private struct InvestorMoodVideoCard: View {
 }
 
 private struct InvestorMoodVideoPlayerSheet: View {
+    private static let playbackPreparationTimeout: Duration = .seconds(6)
+
     let item: InvestorMoodItem
     @Environment(\.dismiss) private var dismiss
     @State private var player = AVPlayer()
-    @State private var hasStartedPlayback = false
+    @State private var isPlaybackReady = false
     @State private var playbackFailed = false
     @State private var playbackAttempt = 0
 
@@ -1311,7 +1313,7 @@ private struct InvestorMoodVideoPlayerSheet: View {
                     ZStack {
                         VideoPlayer(player: player)
 
-                        if !hasStartedPlayback {
+                        if !isPlaybackReady {
                             loadingCover
                                 .transition(.opacity)
                         }
@@ -1406,33 +1408,49 @@ private struct InvestorMoodVideoPlayerSheet: View {
 
     @MainActor
     private func startPlayback() async {
-        guard let url = item.playbackURL ?? item.directPlaybackURL else {
+        let playbackURLs = [item.playbackURL, item.directPlaybackURL]
+            .compactMap { $0 }
+            .reduce(into: [URL]()) { result, url in
+                if !result.contains(url) { result.append(url) }
+            }
+        guard !playbackURLs.isEmpty else {
             playbackFailed = true
             return
         }
 
-        hasStartedPlayback = false
+        isPlaybackReady = false
         playbackFailed = false
-        let playerItem = AVPlayerItem(url: url)
-        playerItem.preferredForwardBufferDuration = 1
-        player.automaticallyWaitsToMinimizeStalling = false
-        player.replaceCurrentItem(with: playerItem)
-        player.playImmediately(atRate: 1)
-
-        while !Task.isCancelled {
-            if playerItem.status == .failed {
-                playbackFailed = true
+        for url in playbackURLs {
+            if await preparePlayback(from: url) {
                 return
             }
-            let seconds = player.currentTime().seconds
-            if player.timeControlStatus == .playing, seconds.isFinite, seconds > 0 {
+            guard !Task.isCancelled else { return }
+        }
+        playbackFailed = true
+    }
+
+    @MainActor
+    private func preparePlayback(from url: URL) async -> Bool {
+        let playerItem = AVPlayerItem(url: url)
+        playerItem.preferredForwardBufferDuration = 1
+        player.automaticallyWaitsToMinimizeStalling = true
+        player.replaceCurrentItem(with: playerItem)
+        player.play()
+
+        let deadline = ContinuousClock.now.advanced(by: Self.playbackPreparationTimeout)
+        while !Task.isCancelled, ContinuousClock.now < deadline {
+            if playerItem.status == .failed {
+                return false
+            }
+            if playerItem.status == .readyToPlay {
                 withAnimation(.easeOut(duration: 0.18)) {
-                    hasStartedPlayback = true
+                    isPlaybackReady = true
                 }
-                return
+                return true
             }
             try? await Task.sleep(for: .milliseconds(100))
         }
+        return false
     }
 }
 
