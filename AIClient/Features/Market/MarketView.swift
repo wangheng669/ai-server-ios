@@ -1319,8 +1319,6 @@ private struct MarketRetailInvestorStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            MarketSectionHeading("散户观点")
-
             Group {
                 if let item = validSample {
                     Button {
