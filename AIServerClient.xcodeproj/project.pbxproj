@@ -15,6 +15,7 @@
 		AA2000000000000000000001 /* GoogleSignalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000002 /* GoogleSignalTests.swift */; };
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
 		0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F23 /* MarketView.swift */; };
+		A4C0294615B549F6B4884150 /* VolatilityResearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C0294615B549F6B4884151 /* VolatilityResearchView.swift */; };
 		0C1A2B3C4D5E6F708192A3B4 /* ChinaMacroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D2E3F405162738495A6B7C8 /* ChinaMacroView.swift */; };
 		0D1E2F30415263748596A7B8 /* CompanyResearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2F30415263748596A7B8C9 /* CompanyResearchView.swift */; };
 		0E1F2A3B4C5D6E7F8091A2B3 /* InstitutionResearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3A4B5C6D7E8091A2B3C4D5 /* InstitutionResearchView.swift */; };
@@ -130,6 +131,7 @@
 		07CD0E8186D0B14FE290474A /* LearningDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDetailView.swift; sourceTree = "<group>"; };
 		08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryGDPDetailView.swift; sourceTree = "<group>"; };
 		0964D64008AE6D9891C78345 /* MarketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketService.swift; sourceTree = "<group>"; };
+		A4C0294615B549F6B4884151 /* VolatilityResearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolatilityResearchView.swift; sourceTree = "<group>"; };
 		097BF52E5F2C1BE5326021E6 /* ServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSetupView.swift; sourceTree = "<group>"; };
 		1304CD1593E840EFAF32E208 /* PeopleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleStore.swift; sourceTree = "<group>"; };
 		137FDCB7037445C35ED02C74 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -382,6 +384,7 @@
 				0964D64008AE6D9891C78345 /* MarketService.swift */,
 				82E95DF23DE2CBD0DEEC463B /* MarketStore.swift */,
 				33DF2FE619F731E7105C5F23 /* MarketView.swift */,
+				A4C0294615B549F6B4884151 /* VolatilityResearchView.swift */,
 			);
 			path = Market;
 			sourceTree = "<group>";
@@ -646,6 +649,7 @@
 				681EF7E93F4BE35044B2149C /* MarketService.swift in Sources */,
 				212E02E9454406B9CEE36D72 /* MarketStore.swift in Sources */,
 				0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */,
+				A4C0294615B549F6B4884150 /* VolatilityResearchView.swift in Sources */,
 				FFAD6FA1551774C67C10B5A6 /* NewsFeedView.swift in Sources */,
 				D0B100000000000000000001 /* WeiboEmbeddedPagePolicy.swift in Sources */,
 				C844C5ED835C1B08C94DC464 /* NewsFeedViewModel.swift in Sources */,

@@ -900,6 +900,8 @@ private struct MarketEditorialFeed: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            VolatilityResearchSection()
+
             VStack(alignment: .leading, spacing: 8) {
                 MarketSectionHeading("机构观点")
                 researchFeed
