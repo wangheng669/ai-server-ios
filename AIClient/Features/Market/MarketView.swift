@@ -197,6 +197,10 @@ struct MarketView: View {
                 selectedMarketQuotesRegion = region
                 showsDetail = true
             },
+            onOpenMarketDetail: { symbol in
+                selectedDetail = MarketDetailRoute(symbol: symbol)
+                showsDetail = true
+            },
             onOpenChinaMarketStructure: {
                 showsChinaMarketStructure = true
                 showsDetail = true
@@ -374,6 +378,7 @@ private struct MarketHomeView: View {
     let onOpenInstitutionResearch: () -> Void
     let onOpenIndustries: () -> Void
     let onOpenMarketQuotes: (MarketRegion) -> Void
+    let onOpenMarketDetail: (String) -> Void
     let onOpenChinaMarketStructure: () -> Void
     let onOpenRetailInvestors: () -> Void
     @State private var macroStore = ChinaMacroStore()
@@ -411,6 +416,7 @@ private struct MarketHomeView: View {
                                 store: store,
                                 region: selectedMarket,
                                 onOpenMarketQuotes: { onOpenMarketQuotes(selectedMarket) },
+                                onOpenVIXHistory: { onOpenMarketDetail("^VIX") },
                                 onOpenChinaMarketStructure: onOpenChinaMarketStructure
                             )
                             .simultaneousGesture(regionSwipeGesture)
@@ -1553,6 +1559,7 @@ private struct MarketTerminalHero: View {
     let store: MarketStore
     let region: MarketRegion
     let onOpenMarketQuotes: () -> Void
+    let onOpenVIXHistory: () -> Void
     let onOpenChinaMarketStructure: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedRange: MarketRange = .day
@@ -1689,7 +1696,12 @@ private struct MarketTerminalHero: View {
             }
         } else if region == .unitedStates {
             HStack(spacing: 8) {
-                temperatureCard { unitedStatesVIXMetric }
+                Button(action: onOpenVIXHistory) {
+                    temperatureCard { unitedStatesVIXMetric }
+                }
+                .buttonStyle(MarketPressStyle())
+                .frame(maxWidth: .infinity)
+                .accessibilityHint("查看 VIX 历史走势")
                 temperatureCard { MarketTerminalSentiment(sentiment: store.dashboard?.sentiment) }
                 temperatureCard { unitedStatesYieldMetric }
             }
@@ -3885,8 +3897,15 @@ private struct MarketIndexDetailView: View {
     let store: MarketStore
     let onSelectSymbol: (String) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedRange = MarketRange.day
+    @State private var selectedRange: MarketRange
     @State private var presentedValuation: CompanyValuationHistoryRoute?
+
+    init(symbol: String, store: MarketStore, onSelectSymbol: @escaping (String) -> Void) {
+        self.symbol = symbol
+        self.store = store
+        self.onSelectSymbol = onSelectSymbol
+        _selectedRange = State(initialValue: symbol == "^VIX" ? .month : .day)
+    }
 
     private var quote: MarketQuote? { store.quote(symbol: symbol) }
     private var constituent: MarketIndexConstituent? { store.constituent(symbol: symbol) }
