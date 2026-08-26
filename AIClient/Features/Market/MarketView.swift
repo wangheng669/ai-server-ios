@@ -6,7 +6,7 @@ private enum MarketStyle {
     static let canvas = InvestmentDesign.surface
     static let surface = InvestmentDesign.surface
     static let secondarySurface = InvestmentDesign.secondarySurface
-    static let cardSurface = InvestmentDesign.secondarySurface
+    static let cardSurface = InvestmentDesign.surface
     static let cardBorder = InvestmentDesign.divider
     static let divider = InvestmentDesign.divider
     static let gain = InvestmentDesign.gain

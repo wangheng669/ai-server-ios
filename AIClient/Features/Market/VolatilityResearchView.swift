@@ -158,7 +158,7 @@ struct VolatilityResearchSection: View {
             .foregroundStyle(.secondary)
         }
         .padding(14)
-        .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(InvestmentDesign.divider, lineWidth: 0.8)
@@ -255,7 +255,11 @@ struct VolatilityResearchSection: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 92)
-        .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 16))
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(InvestmentDesign.divider, lineWidth: 0.8)
+        }
     }
 
     private var retryCard: some View {
@@ -270,7 +274,11 @@ struct VolatilityResearchSection: View {
             }
             .font(.system(size: 13, weight: .medium))
             .padding(14)
-            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 16))
+            .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(InvestmentDesign.divider, lineWidth: 0.8)
+            }
         }
         .buttonStyle(.plain)
     }
