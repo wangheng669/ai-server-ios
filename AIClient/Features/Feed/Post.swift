@@ -171,6 +171,37 @@ enum RSSArticleBlock: Hashable {
     case image(URL)
 }
 
+enum QbitAIArticleParser {
+    static func extractBodyHTML(from html: String) -> String? {
+        guard let articleStart = html.range(
+            of: #"<div\b[^>]*\bclass\s*=\s*[\"'][^\"']*\barticle\b[^\"']*[\"'][^>]*>"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) else { return nil }
+
+        let articleRemainder = String(html[articleStart.upperBound...])
+        let endMarkers = ["<!--版权声明-->", "<div class=\"line_font\"", "<div class='line_font'"]
+        let end = endMarkers.compactMap {
+            articleRemainder.range(of: $0, options: .caseInsensitive)?.lowerBound
+        }.min() ?? articleRemainder.endIndex
+        var body = String(articleRemainder[..<end])
+
+        let chromePatterns = [
+            #"<h1\b[^>]*>[\s\S]*?</h1>"#,
+            #"<div\b[^>]*\bclass\s*=\s*[\"'][^\"']*\barticle_info\b[^\"']*[\"'][^>]*>[\s\S]*?</div>"#,
+            #"<div\b[^>]*\bclass\s*=\s*[\"'][^\"']*\bzhaiyao\b[^\"']*[\"'][^>]*>[\s\S]*?</div>"#,
+        ]
+        for pattern in chromePatterns {
+            body = body.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.isEmpty ? nil : body
+    }
+}
+
 struct XCommentsResponse: Decodable {
     let success: Bool
     let data: Payload
@@ -1089,7 +1120,11 @@ struct Post: Codable, Identifiable, Hashable {
         }
     }
     var rssArticleBlocks: [RSSArticleBlock] {
-        let preferredContent = clean(contentZH) ?? clean(content)
+        rssArticleBlocks(overridingContent: nil)
+    }
+
+    func rssArticleBlocks(overridingContent: String?) -> [RSSArticleBlock] {
+        let preferredContent = clean(overridingContent) ?? clean(contentZH) ?? clean(content)
         guard let preferredContent else {
             return [.paragraph(text: displayContent, emojis: [])]
         }
@@ -1549,6 +1584,13 @@ struct Post: Codable, Identifiable, Hashable {
         }
     }
     var isRSS: Bool { (source ?? "").hasPrefix("rss:") }
+    var isQbitAIArticle: Bool {
+        if source == "rss:19" { return true }
+        return [postLink, meta?.rssArticleLink].compactMap { $0 }.contains { value in
+            guard let host = URL(string: value)?.host()?.lowercased() else { return false }
+            return host == "qbitai.com" || host.hasSuffix(".qbitai.com")
+        }
+    }
     var hasDedicatedFeedTab: Bool {
         source == FeedSource.newYorkTimes.rawValue ||
             source == FeedSource.wechat.rawValue ||
