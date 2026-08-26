@@ -1649,8 +1649,12 @@ private struct MarketTerminalHero: View {
         .padding(.horizontal, MarketStyle.pageInset)
         .padding(.top, 8)
         .onChange(of: region) { _, _ in selectedRange = .day }
-        .task(id: chartLoadID) {
-            await store.loadChart(symbol: chartSymbol, range: selectedRange)
+        .task(id: chartSymbol) {
+            async let day: Void = store.loadChart(symbol: chartSymbol, range: .day)
+            async let week: Void = store.loadChart(symbol: chartSymbol, range: .week)
+            async let month: Void = store.loadChart(symbol: chartSymbol, range: .month)
+            async let year: Void = store.loadChart(symbol: chartSymbol, range: .year)
+            _ = await (day, week, month, year)
         }
     }
 
@@ -1767,8 +1771,6 @@ private struct MarketTerminalHero: View {
     private var chartSymbol: String {
         quote?.historicalSymbol ?? quote?.symbol ?? region.primarySymbol
     }
-
-    private var chartLoadID: String { "\(chartSymbol)-\(selectedRange.rawValue)" }
 
     private var selectedTrend: [Double] {
         if selectedRange == .day { return store.trendValues(for: displayedQuote) }
