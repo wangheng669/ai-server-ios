@@ -1636,10 +1636,7 @@ private struct MarketTerminalHero: View {
                     .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                MarketSectionHeading("市场温度")
-                temperatureMetrics
-            }
+            temperatureMetrics
         }
         .padding(.horizontal, MarketStyle.pageInset)
         .padding(.top, 8)
