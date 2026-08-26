@@ -1577,12 +1577,12 @@ private struct MarketTerminalHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(spacing: 12) {
+            VStack(spacing: 9) {
                 Button(action: onOpenMarketQuotes) {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 7) {
                             Text(heroTitle)
-                                .font(.system(size: 18, weight: .bold))
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
@@ -1631,12 +1631,8 @@ private struct MarketTerminalHero: View {
                 heroStatistics
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.vertical, 8)
             .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(MarketStyle.cardBorder, lineWidth: 0.8)
-            }
 
             temperatureMetrics
         }
@@ -1656,21 +1652,21 @@ private struct MarketTerminalHero: View {
     }
 
     private var heroPrice: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayedQuote.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                 Text(heroPerformanceText)
-                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(heroPerformanceTint)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
                     .background(heroPerformanceTint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 Spacer(minLength: 0)
             }
             Text(heroVolatilityText)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
         }
         .monospacedDigit()
