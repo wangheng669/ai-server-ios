@@ -1244,8 +1244,8 @@ final class MarketPresentationTests: XCTestCase {
     func testMarketRangesUseExpectedIntervalsAndLimits() {
         XCTAssertEqual(MarketRange.day.apiInterval, "1m")
         XCTAssertEqual(MarketRange.week.apiRange, "5d")
-        XCTAssertEqual(MarketRange.week.apiInterval, "1d")
-        XCTAssertEqual(MarketRange.week.apiLimit, 8)
+        XCTAssertEqual(MarketRange.week.apiInterval, "15m")
+        XCTAssertEqual(MarketRange.week.apiLimit, 1_000)
         XCTAssertEqual(MarketRange.month.apiInterval, "1d")
         XCTAssertEqual(MarketRange.fiveYears.apiLimit, 600)
         XCTAssertEqual(MarketRange.maximum.apiLimit, 600)

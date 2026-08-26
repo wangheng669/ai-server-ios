@@ -1437,12 +1437,18 @@ enum MarketRange: String, CaseIterable, Identifiable {
         }
     }
 
-    var apiInterval: String { self == .day ? "1m" : "1d" }
+    var apiInterval: String {
+        switch self {
+        case .day: "1m"
+        case .week: "15m"
+        case .month, .quarter, .year, .fiveYears, .maximum: "1d"
+        }
+    }
 
     var apiLimit: Int {
         switch self {
         case .day: 600
-        case .week: 8
+        case .week: 1_000
         case .month: 64
         case .quarter: 128
         case .year: 400
