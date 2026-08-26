@@ -577,13 +577,15 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDecodesMarketChartQualityContract() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","periodReturn":{"range":"1d","basis":"previous-close","startPrice":3864.37,"endPrice":3883.58,"change":19.21,"percent":0.4971,"startTimestamp":null,"endTimestamp":1784691000000},"quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
         XCTAssertEqual(response.data.quality.status, .repairing)
         XCTAssertEqual(response.data.quality.missing.count, 1)
         XCTAssertEqual(response.data.candles.first?.state, "confirmed")
         XCTAssertEqual(response.data.candles.first?.session, "regular")
         XCTAssertEqual(response.data.tradingDate, "2026-07-22")
+        XCTAssertEqual(response.data.periodReturn?.basis, "previous-close")
+        XCTAssertEqual(response.data.periodReturn?.percent, 0.4971)
     }
 
     func testUnavailableEmptyStockChartRequestsAControlledRetry() throws {
@@ -1244,28 +1246,6 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.month.apiInterval, "1d")
         XCTAssertEqual(MarketRange.fiveYears.apiLimit, 600)
         XCTAssertEqual(MarketRange.maximum.apiLimit, 600)
-    }
-
-    func testMarketPeriodReturnUsesSelectedChartEndpoints() throws {
-        let points = [
-            MarketChartPoint(timestamp: 1, open: 99, high: 101, low: 98, close: 100, volume: nil, state: "confirmed", source: "test", session: nil),
-            MarketChartPoint(timestamp: 2, open: 100, high: 112, low: 100, close: 110, volume: nil, state: "confirmed", source: "test", session: nil)
-        ]
-
-        let result = try XCTUnwrap(marketPeriodReturn(points: points))
-
-        XCTAssertEqual(result.change, 10, accuracy: 0.0001)
-        XCTAssertEqual(result.percent, 10, accuracy: 0.0001)
-    }
-
-    func testMarketPeriodReturnRejectsMissingOrInvalidBaseline() {
-        let zeroBaseline = [
-            MarketChartPoint(timestamp: 1, open: 0, high: 0, low: 0, close: 0, volume: nil, state: "confirmed", source: "test", session: nil),
-            MarketChartPoint(timestamp: 2, open: 1, high: 1, low: 1, close: 1, volume: nil, state: "confirmed", source: "test", session: nil)
-        ]
-
-        XCTAssertNil(marketPeriodReturn(points: []))
-        XCTAssertNil(marketPeriodReturn(points: zeroBaseline))
     }
 
     func testDailyChartPointsRemainInOneDrawableSegment() {

@@ -1773,10 +1773,9 @@ private struct MarketTerminalHero: View {
         return store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.values ?? []
     }
 
-    private var selectedPeriodReturn: MarketPeriodReturn? {
-        guard selectedRange != .day,
-              let points = store.chartPresentation(symbol: chartSymbol, range: selectedRange)?.points else { return nil }
-        return marketPeriodReturn(points: points)
+    private var selectedPeriodReturn: Double? {
+        guard selectedRange != .day else { return nil }
+        return store.chart(symbol: chartSymbol, range: selectedRange)?.periodReturn?.percent
     }
 
     private var heroPerformanceText: String {
@@ -1784,15 +1783,15 @@ private struct MarketTerminalHero: View {
             return displayedQuote.map(marketHeroChangeText) ?? "等待行情"
         }
         guard let selectedPeriodReturn else { return "正在计算\(selectedRange.rawValue)收益率" }
-        let prefix = selectedPeriodReturn.percent >= 0 ? "+" : "−"
-        return "\(selectedRange.rawValue)收益率 \(prefix)\(number(abs(selectedPeriodReturn.percent), digits: 2))%"
+        let prefix = selectedPeriodReturn >= 0 ? "+" : "−"
+        return "\(selectedRange.rawValue)收益率 \(prefix)\(number(abs(selectedPeriodReturn), digits: 2))%"
     }
 
     private var heroPerformanceTint: Color {
         guard selectedRange != .day else { return quoteTint(displayedQuote) }
         guard let selectedPeriodReturn else { return .secondary }
-        if selectedPeriodReturn.percent > 0 { return MarketStyle.gain }
-        if selectedPeriodReturn.percent < 0 { return MarketStyle.loss }
+        if selectedPeriodReturn > 0 { return MarketStyle.gain }
+        if selectedPeriodReturn < 0 { return MarketStyle.loss }
         return .secondary
     }
 
@@ -3940,16 +3939,15 @@ private struct MarketIndexDetailView: View {
         guard historicalSymbol != chartSymbol else { return nil }
         return historicalSymbol
     }
-    private var selectedRangePresentation: MarketChartPresentation? {
+    private var selectedRangeChart: MarketChart? {
         let primary = store.chartPresentation(symbol: chartSymbol, range: selectedRange)
         guard (primary?.points.count ?? 0) < 2,
-              let chartFallbackSymbol else { return primary }
-        return store.chartPresentation(symbol: chartFallbackSymbol, range: selectedRange)
+              let chartFallbackSymbol else { return store.chart(symbol: chartSymbol, range: selectedRange) }
+        return store.chart(symbol: chartFallbackSymbol, range: selectedRange)
     }
-    private var selectedPeriodReturn: MarketPeriodReturn? {
-        guard selectedRange != .day,
-              let points = selectedRangePresentation?.points else { return nil }
-        return marketPeriodReturn(points: points)
+    private var selectedPeriodReturn: Double? {
+        guard selectedRange != .day else { return nil }
+        return selectedRangeChart?.periodReturn?.percent
     }
     private var isIndex: Bool {
         store.dashboard?.coreIndices.contains(where: { $0.symbol == symbol }) == true
@@ -4119,15 +4117,15 @@ private struct MarketIndexDetailView: View {
             } ?? "等待行情数据"
         }
         guard let selectedPeriodReturn else { return "正在计算\(selectedRange.rawValue)收益率" }
-        let prefix = selectedPeriodReturn.percent >= 0 ? "+" : "−"
-        return "\(selectedRange.rawValue)收益率  \(prefix)\(number(abs(selectedPeriodReturn.percent), digits: 2))%"
+        let prefix = selectedPeriodReturn >= 0 ? "+" : "−"
+        return "\(selectedRange.rawValue)收益率  \(prefix)\(number(abs(selectedPeriodReturn), digits: 2))%"
     }
 
     private var detailPerformanceTint: Color {
         guard selectedRange != .day else { return marketDisplayTint(quote) }
         guard let selectedPeriodReturn else { return .secondary }
-        if selectedPeriodReturn.percent > 0 { return MarketStyle.gain }
-        if selectedPeriodReturn.percent < 0 { return MarketStyle.loss }
+        if selectedPeriodReturn > 0 { return MarketStyle.gain }
+        if selectedPeriodReturn < 0 { return MarketStyle.loss }
         return .secondary
     }
 
