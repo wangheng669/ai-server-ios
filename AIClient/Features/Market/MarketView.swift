@@ -418,7 +418,6 @@ private struct MarketHomeView: View {
                                 onOpenVIXHistory: { onOpenMarketDetail("^VIX") },
                                 onOpenChinaMarketStructure: onOpenChinaMarketStructure
                             )
-                            .simultaneousGesture(regionSwipeGesture)
 
                             if let error = regionalHealthMessage {
                                 MarketErrorBanner(
@@ -485,20 +484,6 @@ private struct MarketHomeView: View {
         let relevant = store.healthIssues.filter { selectedMarket.relevantHealthSymbols.contains($0.symbol) }
         if let summary = marketHealthSummary(relevant) { return summary }
         return store.healthIssues.isEmpty ? store.errorMessage : nil
-    }
-
-    private var regionSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onEnded { value in
-                if let offset = marketRegionSwipeOffset(
-                    horizontalDistance: value.translation.width,
-                    verticalDistance: value.translation.height,
-                    projectedHorizontalDistance: value.predictedEndTranslation.width
-                ), let destination = marketAdjacentRegion(from: selectedMarket, offset: offset) {
-                    selectedMarket = destination
-                    UIAccessibility.post(notification: .announcement, argument: destination.rawValue)
-                }
-            }
     }
 }
 
@@ -1525,31 +1510,6 @@ enum MarketRegion: String, CaseIterable, Identifiable {
         case .crypto: Set(symbols)
         }
     }
-}
-
-func marketRegionSwipeOffset(
-    horizontalDistance: CGFloat,
-    verticalDistance: CGFloat,
-    projectedHorizontalDistance: CGFloat
-) -> Int? {
-    guard abs(horizontalDistance) > abs(verticalDistance) * 1.2 else { return nil }
-    guard abs(horizontalDistance) >= 44 || abs(projectedHorizontalDistance) >= 80 else { return nil }
-    let directionDistance = abs(horizontalDistance) >= 44
-        ? horizontalDistance
-        : projectedHorizontalDistance
-    return directionDistance < 0 ? 1 : -1
-}
-
-func marketRegionSwipeBlocksSelection(horizontalDistance: CGFloat, verticalDistance: CGFloat) -> Bool {
-    abs(horizontalDistance) >= 12 && abs(horizontalDistance) > abs(verticalDistance) * 1.2
-}
-
-func marketAdjacentRegion(from current: MarketRegion, offset: Int) -> MarketRegion? {
-    let regions = MarketRegion.allCases
-    guard let currentIndex = regions.firstIndex(of: current) else { return nil }
-    let destinationIndex = currentIndex + offset
-    guard regions.indices.contains(destinationIndex) else { return nil }
-    return regions[destinationIndex]
 }
 
 private struct MarketTerminalHero: View {
