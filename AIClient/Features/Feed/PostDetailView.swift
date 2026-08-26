@@ -184,7 +184,7 @@ struct PostDetailView: View {
                     .padding(.bottom, sheetCloseBottomPadding)
             }
         }
-        .navigationTitle(post.isWeiboRSS ? "微博正文" : (post.isNewYorkTimes ? "纽约时报" : (post.sourceName == "X" ? "帖子" : (post.isYouTube ? "YouTube" : (["知乎", "Truth"].contains(post.sourceName) || isWeChatArticle ? "" : "详情")))))
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar((post.isRSS || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube) ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(post.isRSS || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName) || post.isYouTube)
@@ -274,6 +274,16 @@ struct PostDetailView: View {
     private var sheetCloseBottomPadding: CGFloat {
         post.isWeiboRSS || isWeChatArticle
             || ["知乎", "Truth", "雪球"].contains(post.sourceName) ? 72 : 16
+    }
+
+    private var navigationTitle: String {
+        if isGenericRSSDetail || isWeChatArticle { return "" }
+        if post.isWeiboRSS { return "微博正文" }
+        if post.isNewYorkTimes { return "纽约时报" }
+        if post.sourceName == "X" { return "帖子" }
+        if post.isYouTube { return "YouTube" }
+        if ["知乎", "Truth"].contains(post.sourceName) { return "" }
+        return "详情"
     }
 
     @ViewBuilder
