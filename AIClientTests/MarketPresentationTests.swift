@@ -577,7 +577,7 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testDecodesMarketChartQualityContract() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","periodReturn":{"range":"1d","basis":"previous-close","startPrice":3864.37,"endPrice":3883.58,"change":19.21,"percent":0.4971,"startTimestamp":null,"endTimestamp":1784691000000},"quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","periodReturn":{"range":"1d","basis":"previous-close","startPrice":3864.37,"endPrice":3883.58,"change":19.21,"percent":0.4971,"startTimestamp":null,"endTimestamp":1784691000000},"periodVolatility":{"range":"1d","basis":"annualized-log-returns","percent":18.42,"observationCount":118,"annualizationPeriods":98280},"quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
         XCTAssertEqual(response.data.quality.status, .repairing)
         XCTAssertEqual(response.data.quality.missing.count, 1)
@@ -586,6 +586,9 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.tradingDate, "2026-07-22")
         XCTAssertEqual(response.data.periodReturn?.basis, "previous-close")
         XCTAssertEqual(response.data.periodReturn?.percent, 0.4971)
+        XCTAssertEqual(response.data.periodVolatility?.basis, "annualized-log-returns")
+        XCTAssertEqual(response.data.periodVolatility?.percent, 18.42)
+        XCTAssertEqual(response.data.periodVolatility?.observationCount, 118)
     }
 
     func testUnavailableEmptyStockChartRequestsAControlledRetry() throws {

@@ -1164,6 +1164,7 @@ struct MarketChart: Decodable, Sendable {
     let session: String
     let interval: String
     let periodReturn: MarketChartPeriodReturn?
+    let periodVolatility: MarketChartPeriodVolatility?
     let quality: MarketChartQuality
     let quote: MarketChartQuote
     let candles: [MarketChartPoint]
@@ -1178,6 +1179,14 @@ struct MarketChartPeriodReturn: Decodable, Sendable {
     let percent: Double?
     let startTimestamp: Int64?
     let endTimestamp: Int64?
+}
+
+struct MarketChartPeriodVolatility: Decodable, Sendable {
+    let range: String
+    let basis: String
+    let percent: Double?
+    let observationCount: Int
+    let annualizationPeriods: Int
 }
 
 enum MarketChartQualityStatus: String, Decodable, Sendable {
