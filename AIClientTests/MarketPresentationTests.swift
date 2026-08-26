@@ -1208,6 +1208,24 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.maximum.apiLimit, 600)
     }
 
+    func testInternationalMarketsUseGreenForGainsAndRedForLosses() {
+        for region in [MarketRegion.unitedStates, .europe, .commodity, .crypto] {
+            XCTAssertEqual(marketMovementUsesGreen(change: 1, region: region), true)
+            XCTAssertEqual(marketMovementUsesGreen(change: -1, region: region), false)
+        }
+    }
+
+    func testEastAsianMarketsKeepRedForGainsAndGreenForLosses() {
+        for region in [MarketRegion.china, .japan, .korea] {
+            XCTAssertEqual(marketMovementUsesGreen(change: 1, region: region), false)
+            XCTAssertEqual(marketMovementUsesGreen(change: -1, region: region), true)
+        }
+    }
+
+    func testFlatMarketMovementUsesNeutralColor() {
+        XCTAssertNil(marketMovementUsesGreen(change: 0, region: .unitedStates))
+    }
+
     func testLeadChartPrefersLoadedRangePointsOverDashboardSummary() {
         let chartValues = Array(0..<390).map(Double.init)
         let fallbackValues = Array(0..<40).map(Double.init)

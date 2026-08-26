@@ -1465,6 +1465,15 @@ enum MarketRegion: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    var usesGreenForGain: Bool {
+        switch self {
+        case .unitedStates, .europe, .commodity, .crypto:
+            true
+        case .china, .japan, .korea:
+            false
+        }
+    }
+
     var symbols: [String] {
         switch self {
         case .unitedStates: ["SPY", "QQQ", "DIA", "^VIX"]
@@ -1769,11 +1778,9 @@ private struct MarketTerminalHero: View {
     }
 
     private var heroPerformanceTint: Color {
-        guard selectedRange != .day else { return quoteTint(displayedQuote) }
+        guard selectedRange != .day else { return regionalQuoteTint(displayedQuote, region: region) }
         guard let selectedPeriodReturn else { return .secondary }
-        if selectedPeriodReturn > 0 { return MarketStyle.gain }
-        if selectedPeriodReturn < 0 { return MarketStyle.loss }
-        return .secondary
+        return marketMovementTint(selectedPeriodReturn, region: region)
     }
 
     private var heroVolatilityText: String {
@@ -1822,7 +1829,7 @@ private struct MarketTerminalHero: View {
             title: value?.presentationName ?? CoreDescriptor(symbol: symbol).name,
             value: value.map { number($0.price, digits: cryptoPriceDigits($0.price, symbol: $0.symbol)) } ?? "—",
             change: value?.formattedPercent ?? "—",
-            tint: quoteTint(value),
+            tint: regionalQuoteTint(value, region: region),
             trend: store.trendValues(for: value)
         )
     }
@@ -1833,7 +1840,7 @@ private struct MarketTerminalHero: View {
             title: value?.presentationName ?? CoreDescriptor(symbol: symbol).name,
             value: value.map { number($0.price, digits: 2) } ?? "—",
             change: value?.formattedPercent ?? "—",
-            tint: quoteTint(value),
+            tint: regionalQuoteTint(value, region: region),
             trend: store.trendValues(for: value)
         )
     }
@@ -1843,7 +1850,7 @@ private struct MarketTerminalHero: View {
             title: "VIX 恐慌指数",
             value: store.quote(symbol: "^VIX").map { number($0.price, digits: 1) } ?? "—",
             change: store.quote(symbol: "^VIX")?.formattedPercent ?? "—",
-            tint: quoteTint(store.quote(symbol: "^VIX")),
+            tint: regionalQuoteTint(store.quote(symbol: "^VIX"), region: .unitedStates),
             trend: store.trendValues(for: store.quote(symbol: "^VIX"))
         )
     }
@@ -1853,7 +1860,7 @@ private struct MarketTerminalHero: View {
             title: "美国 10Y 国债收益率",
             value: store.quote(symbol: "^TNX").map { String(format: "%.2f%%", $0.price) } ?? "—",
             change: store.quote(symbol: "^TNX")?.formattedPercent ?? "—",
-            tint: quoteTint(store.quote(symbol: "^TNX")),
+            tint: regionalQuoteTint(store.quote(symbol: "^TNX"), region: .unitedStates),
             trend: store.trendValues(for: store.quote(symbol: "^TNX"))
         )
     }
@@ -1982,7 +1989,7 @@ private struct EuropeMarketMetrics: View {
             title: title,
             value: quote.map { number($0.price, digits: 2) } ?? "—",
             change: quote?.formattedPercent ?? "等待行情",
-            tint: quoteTint(quote),
+            tint: regionalQuoteTint(quote, region: .europe),
             trend: quote?.trend ?? []
         )
     }
@@ -2424,7 +2431,7 @@ private struct MarketTerminalSentiment: View {
 
     private var sentimentTint: Color {
         guard let score = sentiment?.score, let previous = sentiment?.previousClose else { return Color.secondary }
-        return score >= previous ? MarketStyle.gain : MarketStyle.loss
+        return marketMovementTint(score - previous, region: .unitedStates)
     }
 }
 
@@ -6303,6 +6310,20 @@ private func chartPoints(_ values: [Double], size: CGSize, minimumRelativeRange:
 }
 
 private func quoteTint(_ quote: MarketQuote?) -> Color { guard let quote else { return .secondary }; return quote.isUp ? MarketStyle.gain : MarketStyle.loss }
+private func regionalQuoteTint(_ quote: MarketQuote?, region: MarketRegion) -> Color {
+    guard let quote else { return .secondary }
+    return marketMovementTint(quote.percentValue, region: region)
+}
+
+func marketMovementUsesGreen(change: Double, region: MarketRegion) -> Bool? {
+    guard change != 0 else { return nil }
+    return change > 0 ? region.usesGreenForGain : !region.usesGreenForGain
+}
+
+private func marketMovementTint(_ change: Double, region: MarketRegion) -> Color {
+    guard let usesGreen = marketMovementUsesGreen(change: change, region: region) else { return .secondary }
+    return usesGreen ? MarketStyle.loss : MarketStyle.gain
+}
 private func marketDisplayTint(_ quote: MarketQuote?) -> Color {
     guard let quote else { return .secondary }
     return quote.marketDisplayPercentValue >= 0 ? MarketStyle.gain : MarketStyle.loss
