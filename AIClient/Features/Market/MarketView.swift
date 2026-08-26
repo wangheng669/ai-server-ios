@@ -1615,18 +1615,18 @@ private struct MarketTerminalHero: View {
                 .accessibilityLabel(heroAccessibilityLabel)
                 .accessibilityHint("打开指数与核心股票")
 
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     ForEach(chartRanges) { range in
                         Button {
                             selectedRange = range
                         } label: {
                             Text(range == .day ? "日内" : range.rawValue)
                                 .font(.system(size: 11, weight: selectedRange == range ? .semibold : .medium))
-                                .foregroundStyle(selectedRange == range ? .primary : .secondary)
+                                .foregroundStyle(selectedRange == range ? MarketStyle.accent : .secondary)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 7)
+                                .padding(.vertical, 6)
                                 .background(
-                                    selectedRange == range ? Color.secondary.opacity(0.16) : .clear,
+                                    selectedRange == range ? MarketStyle.accent.opacity(0.10) : .clear,
                                     in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 )
                         }
@@ -1634,8 +1634,7 @@ private struct MarketTerminalHero: View {
                         .accessibilityAddTraits(selectedRange == range ? .isSelected : [])
                     }
                 }
-                .padding(3)
-                .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.top, 2)
             }
             .padding(14)
             .background(MarketStyle.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
