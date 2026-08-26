@@ -1721,6 +1721,54 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.rssArticleBlocks[2], .paragraph(text: "第二段正文。", emojis: []))
     }
 
+    func testQbitAIArticleUsesRemoteBodyWithoutPageChromeOrRelatedStories() throws {
+        let remoteHTML = """
+        <header>首页 资讯 智库</header>
+        <div class="article">
+          <h1>量子位文章标题</h1>
+          <div class="article_info"><span>量子位的朋友们</span></div>
+          <div class="zhaiyao"><p>列表里已经展示的摘要。</p></div>
+          <p>完整正文第一段。</p>
+          <div class="pgc-img"><img src="https://i.qbitai.com/article-image.jpeg"></div>
+          <p>完整正文最后一段。</p>
+          <!--版权声明-->
+          <div class="line_font">版权所有</div>
+        </div>
+        <div class="tags">相关文章与页面底部</div>
+        """
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 3025709,
+            "source": "rss:19",
+            "content": "列表摘要",
+            "post_link": "https://www.qbitai.com/2026/08/479314.html"
+        ])
+        let post = try JSONDecoder().decode(Post.self, from: payload)
+        let body = try XCTUnwrap(QbitAIArticleParser.extractBodyHTML(from: remoteHTML))
+        let blocks = post.rssArticleBlocks(overridingContent: body)
+
+        XCTAssertTrue(post.isQbitAIArticle)
+        XCTAssertEqual(blocks.count, 3)
+        XCTAssertEqual(blocks[0], .paragraph(text: "完整正文第一段。", emojis: []))
+        guard case .image(let imageURL) = blocks[1] else {
+            return XCTFail("Expected the article image between the two paragraphs")
+        }
+        XCTAssertTrue(imageURL.path.hasSuffix("/api/ios/v1/image-proxy"))
+        XCTAssertEqual(blocks[2], .paragraph(text: "完整正文最后一段。", emojis: []))
+        XCTAssertFalse(body.contains("列表里已经展示的摘要"))
+        XCTAssertFalse(body.contains("相关文章与页面底部"))
+    }
+
+    func testQbitAIArticleIsRecognizedByHostOutsideKnownFeedID() throws {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 88,
+            "source": "rss:88",
+            "post_link": "https://i.qbitai.com/2026/08/example.html"
+        ])
+        let post = try JSONDecoder().decode(Post.self, from: payload)
+
+        XCTAssertTrue(post.isQbitAIArticle)
+    }
+
     func testWeChatArticleKeepsEmojiAtInlineSizeInsteadOfArticleImageSize() throws {
         let html = """
         <p>正文</p><img class="rich_pages wxw-img" data-ratio="1" data-w="20" style="display:inline-block;width:20px;vertical-align:middle" src="https://wechat2rss.xlab.app/img-proxy/?k=1&amp;u=https%3A%2F%2Fres.wx.qq.com%2Ft%2Fwx_fed%2Fwe-emoji%2Fres%2Fassets%2FExpression%2FExpression_94%402x.png"/>

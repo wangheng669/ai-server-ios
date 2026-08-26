@@ -88,6 +88,8 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretationTask: Task<Void, Never>?
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
+    @State private var qbitAIArticleBlocks: [RSSArticleBlock]?
+    @State private var isLoadingQbitAIArticle: Bool
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
     @State private var selectedWikipediaEntity: WikipediaSelection?
     @State private var presentedWikipediaEntity: WikipediaEntity?
@@ -131,6 +133,7 @@ struct PostDetailView: View {
         _post = State(initialValue: post)
         _newYorkTimesArticle = State(initialValue: storedArticle)
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
+        _isLoadingQbitAIArticle = State(initialValue: post.isQbitAIArticle)
         _isTruthBookmarked = State(initialValue: TruthBookmarkStore.contains(post.id))
         _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
         _isLoadingXFullText = State(initialValue:
@@ -493,9 +496,20 @@ struct PostDetailView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 28)
 
-                    LazyVStack(alignment: .leading, spacing: 20) {
-                        ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
-                            rssArticleBlock(block, isWeChat: true)
+                    if isLoadingQbitAIArticle {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("正在加载完整文章…")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 15))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 28)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 20) {
+                            ForEach(Array(weChatArticleBlocks.enumerated()), id: \.offset) { _, block in
+                                rssArticleBlock(block, isWeChat: true)
+                            }
                         }
                     }
 
@@ -508,6 +522,10 @@ struct PostDetailView: View {
         .background(Color(uiColor: .systemBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) { weChatBottomBar }
         .sensoryFeedback(.success, trigger: isRSSBookmarked)
+    }
+
+    private var weChatArticleBlocks: [RSSArticleBlock] {
+        qbitAIArticleBlocks ?? post.rssArticleBlocks
     }
 
     private var weChatDetailHeader: some View {
@@ -2593,6 +2611,9 @@ struct PostDetailView: View {
                 isLoadingXFullText = false
             }
         }
+        if post.isQbitAIArticle {
+            await loadQbitAIArticle(using: client)
+        }
         let replyContextTask: Task<Void, Never>? = if post.sourceName == "X" {
             Task { await loadXReplyContext(using: client) }
         } else {
@@ -2661,6 +2682,18 @@ struct PostDetailView: View {
         } catch {
             // The existing "回复 @用户" label remains as a useful fallback.
         }
+    }
+
+    private func loadQbitAIArticle(using client: APIClient) async {
+        defer { isLoadingQbitAIArticle = false }
+        guard let link = post.linkURL,
+              let payload = try? await client.fetchArticlePreview(url: link, preferRemote: true).data,
+              !Task.isCancelled else { return }
+        let html = payload.contentZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? payload.content
+            : payload.contentZH
+        guard let articleHTML = QbitAIArticleParser.extractBodyHTML(from: html) else { return }
+        qbitAIArticleBlocks = post.rssArticleBlocks(overridingContent: articleHTML)
     }
 
     nonisolated private static func containsHanCharacters(_ value: String) -> Bool {
