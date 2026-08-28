@@ -1051,49 +1051,61 @@ struct PostDetailView: View {
                     }
 
                     if post.xueqiuQuoteBody != nil {
-                        HStack(spacing: 9) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                            Text("查看对话")
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
+                        Button { openXueqiuOriginal() } label: {
+                            HStack(spacing: 9) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                Text("查看对话")
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .font(.system(size: 15.5))
+                            .foregroundStyle(.secondary)
                         }
-                        .font(.system(size: 15.5))
-                        .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
+                        .disabled(post.linkURL == nil)
+                        .accessibilityIdentifier("xueqiu-view-conversation")
                     }
 
                     if let quoteBody = post.xueqiuQuoteBody {
-                        VStack(alignment: .leading, spacing: 14) {
-                            (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
-                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
-                                .environment(\.openURL, xueqiuLinkOpenAction)
-                                .font(.system(size: 16.5))
-                                .lineSpacing(7)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        Button { openXueqiuOriginal() } label: {
+                            VStack(alignment: .leading, spacing: 14) {
+                                (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
+                                    .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
+                                    .font(.system(size: 16.5))
+                                    .lineSpacing(7)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                            if !post.xueqiuQuoteImageURLs.isEmpty {
-                                PostMediaGrid(
-                                    post: post,
-                                    imageURLs: post.xueqiuQuoteImageURLs,
-                                    singleImageMaxHeight: 520,
-                                    availableWidth: UIScreen.main.bounds.width - 60,
-                                    cornerRadius: 7
-                                )
-                            }
-
-                            HStack(spacing: 4) {
-                                Text("相关讨论")
-                                if let replies = post.meta?.metrics?.replies, replies > 0 {
-                                    Text(replies.formattedFeedCount)
+                                if !post.xueqiuQuoteImageURLs.isEmpty {
+                                    PostMediaGrid(
+                                        post: post,
+                                        imageURLs: post.xueqiuQuoteImageURLs,
+                                        singleImageMaxHeight: 520,
+                                        availableWidth: UIScreen.main.bounds.width - 60,
+                                        cornerRadius: 7
+                                    )
                                 }
+
+                                HStack(spacing: 4) {
+                                    Text("相关讨论")
+                                    if let replies = post.meta?.metrics?.replies, replies > 0 {
+                                        Text(replies.formattedFeedCount)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
                             }
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 14)
+                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
+                        .buttonStyle(.plain)
+                        .disabled(post.linkURL == nil)
+                        .accessibilityLabel("打开相关讨论")
+                        .accessibilityIdentifier("xueqiu-related-discussion")
                     }
 
                     if !post.videoURLs.isEmpty || !post.xueqiuUnplacedImageURLs.isEmpty {
