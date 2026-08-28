@@ -181,6 +181,7 @@ struct WikipediaLinkedParagraph: View {
     let text: String
     let entities: [WikipediaEntity]
     var articleLinks: [NewYorkTimesArticleLink] = []
+    var openArticleLink: ((URL) -> Void)? = nil
     let select: (WikipediaEntity) -> Void
 
     var body: some View {
@@ -189,6 +190,11 @@ struct WikipediaLinkedParagraph: View {
             .lineSpacing(8)
             .textSelection(.enabled)
             .environment(\.openURL, OpenURLAction { url in
+                if articleLinks.contains(where: { $0.url == url }),
+                   let openArticleLink {
+                    openArticleLink(url)
+                    return .handled
+                }
                 guard url.scheme == "aiserver-wikipedia",
                       let entity = entities.first(where: { $0.id == url.host }) else { return .systemAction }
                 select(entity)

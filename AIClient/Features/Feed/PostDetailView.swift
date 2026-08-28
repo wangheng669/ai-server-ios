@@ -115,6 +115,7 @@ struct PostDetailView: View {
     @State private var isSpeechPlaying = false
     @State private var speechErrorMessage: String?
     @State private var presentedXueqiuLink: InAppBrowserDestination?
+    @State private var presentedNewYorkTimesLink: InAppBrowserDestination?
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -193,6 +194,7 @@ struct PostDetailView: View {
             WikipediaReaderView(entity: entity)
                 .wikipediaReaderPresentation()
         }
+        .inAppBrowserCover(item: $presentedNewYorkTimesLink)
         .imageGallery(item: $weiboImageSelection)
         // The Bilibili web player uses horizontal drags for seeking. Disabling the
         // navigation pop recognizer on this screen prevents a scrub from popping
@@ -360,7 +362,10 @@ struct PostDetailView: View {
                                             WikipediaLinkedParagraph(
                                                 text: text,
                                                 entities: wikipediaEntitiesByParagraph[index] ?? [],
-                                                articleLinks: links
+                                                articleLinks: links,
+                                                openArticleLink: { url in
+                                                    presentedNewYorkTimesLink = InAppBrowserDestination(url: url)
+                                                }
                                             ) { entity in
                                                 withAnimation(.easeOut(duration: 0.18)) {
                                                     selectedWikipediaEntity = WikipediaSelection(
