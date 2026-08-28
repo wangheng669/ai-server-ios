@@ -1876,6 +1876,35 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertFalse(EnglishWebArticleCandidate.shouldTranslate(language: "en", text: "Short navigation label"))
     }
 
+    func testEnglishWebArticleIdentityChangesWhenLazyLoadedBlocksArrive() {
+        let first = EnglishWebArticleBlock(id: "article#0", text: "First paragraph", isVisible: true)
+        let second = EnglishWebArticleBlock(id: "article#1", text: "Lazy loaded paragraph", isVisible: false)
+        let initial = EnglishWebArticleCandidate(title: "Title", pageURL: "https://example.com/story", blocks: [first])
+        let expanded = EnglishWebArticleCandidate(title: "Title", pageURL: "https://example.com/story", blocks: [first, second])
+
+        XCTAssertNotEqual(initial.identity, expanded.identity)
+        XCTAssertEqual(expanded.text, "First paragraph\n\nLazy loaded paragraph")
+    }
+
+    func testVisibleEnglishWebArticleBlocksTranslateFirst() {
+        let later = EnglishWebArticleBlock(id: "article#9", text: "Later paragraph", isVisible: false)
+        let visible = EnglishWebArticleBlock(id: "article#2", text: "Visible paragraph", isVisible: true)
+
+        XCTAssertEqual([later, visible].sorted(by: EnglishWebArticleBlock.translationPriority).first, visible)
+    }
+
+    func testNewYorkTimesChineseAlternateMustBeTrusted() throws {
+        let source = "https://www.nytimes.com/2026/08/04/technology/example.html"
+        let chinese = "https://cn.nytimes.com/technology/20260828/example/"
+
+        XCTAssertEqual(
+            NewYorkTimesLocalePolicy.trustedChineseAlternate(chinese, from: source),
+            try XCTUnwrap(URL(string: chinese))
+        )
+        XCTAssertNil(NewYorkTimesLocalePolicy.trustedChineseAlternate("https://example.com/fake", from: source))
+        XCTAssertNil(NewYorkTimesLocalePolicy.trustedChineseAlternate(chinese, from: "https://example.com/story"))
+    }
+
     func testGenericArticlePreviewStillUsesPersistedCache() throws {
         let article = try XCTUnwrap(URL(string: "https://example.com/article"))
         let base = try XCTUnwrap(URL(string: "https://api.wanghengai.xin"))
