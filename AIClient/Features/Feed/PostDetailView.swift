@@ -2763,6 +2763,12 @@ struct PostDetailView: View {
     }
 
     private func enrichNewYorkTimesArticle(_ article: NewYorkTimesArticle) async {
+        let linkedURLs = article.blocks.flatMap { block -> [URL] in
+            guard case .linkedParagraph(_, let links) = block else { return [] }
+            return links.map(\.url)
+        }
+        ServerArticlePreviewCache.shared.prefetch(linkedURLs)
+
         let paragraphs = article.blocks.compactMap { block -> String? in
             switch block {
             case .paragraph(let text), .linkedParagraph(let text, _): text
