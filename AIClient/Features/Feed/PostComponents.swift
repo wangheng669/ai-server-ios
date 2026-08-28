@@ -90,6 +90,7 @@ enum ExternalAccessPolicy {
         "sina.com.cn", "sina.cn", "zhihu.com", "xueqiu.com", "futunn.com",
         "douyin.com", "toutiao.com", "baidu.com", "qq.com", "weixin.qq.com",
         "163.com", "sohu.com", "ifeng.com", "cctv.com", "cctv.cn", "12371.cn",
+        "nytimes.com", "nyt.com",
     ]
 
     static func requiresServerRelay(_ url: URL) -> Bool {
