@@ -38,6 +38,12 @@ struct InAppBrowserSheet: View {
     var showsTitleHeader = true
     var onDismiss: (() -> Void)?
     @State private var title = ""
+    @State private var englishArticle: EnglishWebArticleCandidate?
+    @State private var translatedArticle: TranslatedWebArticle?
+    @State private var isTranslating = false
+    @State private var translatingIdentity: Int?
+    @State private var translationFailed = false
+    @State private var showsOriginal = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -62,7 +68,19 @@ struct InAppBrowserSheet: View {
             if ExternalAccessPolicy.requiresServerRelay(url) {
                 ServerArticleReaderView(url: url) { title = $0 }
             } else {
-                MinimalInAppWebView(url: url, title: $title)
+                ZStack {
+                    MinimalInAppWebView(
+                        url: url,
+                        title: $title,
+                        englishArticleLoaded: { englishArticle = $0 }
+                    )
+                    .opacity(translatedArticle != nil && !showsOriginal ? 0 : 1)
+                    .allowsHitTesting(translatedArticle == nil || showsOriginal)
+
+                    if let translatedArticle, !showsOriginal {
+                        TranslatedWebArticleView(article: translatedArticle, sourceURL: url)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -71,8 +89,83 @@ struct InAppBrowserSheet: View {
             DetailSheetCloseButton(action: close, accessibilityLabel: "关闭网页详情")
                 .padding(16)
         }
+        .overlay(alignment: .bottomLeading) {
+            translationControl
+                .padding(16)
+        }
         .accessibilityIdentifier("in-app-browser")
         .accessibilityAction(.escape) { close() }
+        .task(id: englishArticle?.identity) {
+            guard let englishArticle else { return }
+            await translate(englishArticle)
+        }
+    }
+
+    @ViewBuilder
+    private var translationControl: some View {
+        if translatedArticle != nil {
+            Button {
+                showsOriginal.toggle()
+                title = showsOriginal ? (englishArticle?.title ?? title) : (translatedArticle?.title ?? title)
+            } label: {
+                Label(showsOriginal ? "查看中文" : "查看原文", systemImage: "character.book.closed")
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 16)
+                    .frame(height: 44)
+                    .background(.regularMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        } else if isTranslating {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("正在翻译为中文…")
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+            .background(.regularMaterial, in: Capsule())
+        } else if translationFailed, let englishArticle {
+            Button("重试翻译") {
+                Task { await translate(englishArticle) }
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+            .background(.regularMaterial, in: Capsule())
+            .buttonStyle(.plain)
+        }
+    }
+
+    @MainActor
+    private func translate(_ article: EnglishWebArticleCandidate) async {
+        guard translatedArticle?.sourceIdentity != article.identity else { return }
+        translatingIdentity = article.identity
+        isTranslating = true
+        translationFailed = false
+        defer {
+            if translatingIdentity == article.identity {
+                isTranslating = false
+                translatingIdentity = nil
+            }
+        }
+        do {
+            let translatedTitle = try await PersonArticleTranslationService.shared.translate(article.title)
+            let translatedText = try await PersonArticleTranslationService.shared.translate(article.text)
+            guard !Task.isCancelled, englishArticle?.identity == article.identity else { return }
+            translatedArticle = TranslatedWebArticle(
+                title: translatedTitle.isEmpty ? article.title : translatedTitle,
+                text: translatedText,
+                sourceIdentity: article.identity
+            )
+            title = translatedArticle?.title ?? title
+            showsOriginal = false
+        } catch is CancellationError {
+            return
+        } catch {
+            if translatingIdentity == article.identity {
+                translationFailed = true
+            }
+        }
     }
 
     private func close() {
@@ -81,6 +174,67 @@ struct InAppBrowserSheet: View {
         } else {
             dismiss()
         }
+    }
+}
+
+struct EnglishWebArticleCandidate: Equatable {
+    let title: String
+    let text: String
+
+    var identity: Int { text.hashValue }
+
+    static func shouldTranslate(language: String, text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.count >= 120 else { return false }
+        let normalizedLanguage = language.lowercased()
+        if normalizedLanguage.hasPrefix("zh") { return false }
+
+        var latinLetters = 0
+        var hanCharacters = 0
+        for scalar in value.unicodeScalars.prefix(4_000) {
+            switch scalar.value {
+            case 65...90, 97...122:
+                latinLetters += 1
+            case 0x4E00...0x9FFF:
+                hanCharacters += 1
+            default:
+                break
+            }
+        }
+        return normalizedLanguage.hasPrefix("en") || latinLetters >= max(80, hanCharacters * 4)
+    }
+}
+
+private struct TranslatedWebArticle: Equatable {
+    let title: String
+    let text: String
+    let sourceIdentity: Int
+}
+
+private struct TranslatedWebArticleView: View {
+    let article: TranslatedWebArticle
+    let sourceURL: URL
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(article.title)
+                    .font(.system(size: 25, weight: .bold, design: .serif))
+                    .lineSpacing(4)
+                Text(sourceURL.host ?? "英文网页")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(article.text)
+                    .font(.system(size: 17, design: .serif))
+                    .lineSpacing(7)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+            .padding(.bottom, 64)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityIdentifier("translated-web-article")
     }
 }
 
@@ -290,8 +444,11 @@ extension View {
 private struct MinimalInAppWebView: UIViewRepresentable {
     let url: URL
     @Binding var title: String
+    var englishArticleLoaded: ((EnglishWebArticleCandidate) -> Void)?
 
-    func makeCoordinator() -> Coordinator { Coordinator(title: $title) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(title: $title, englishArticleLoaded: englishArticleLoaded)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -350,8 +507,16 @@ private struct MinimalInAppWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         @Binding private var title: String
+        private let englishArticleLoaded: ((EnglishWebArticleCandidate) -> Void)?
+        private var lastArticleIdentity: Int?
 
-        init(title: Binding<String>) { _title = title }
+        init(
+            title: Binding<String>,
+            englishArticleLoaded: ((EnglishWebArticleCandidate) -> Void)?
+        ) {
+            _title = title
+            self.englishArticleLoaded = englishArticleLoaded
+        }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
             updateTitle(from: webView)
@@ -359,6 +524,11 @@ private struct MinimalInAppWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             updateTitle(from: webView)
+            extractEnglishArticle(from: webView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                self.extractEnglishArticle(from: webView)
+            }
         }
 
         func webView(
@@ -384,6 +554,44 @@ private struct MinimalInAppWebView: UIViewRepresentable {
                 self.title = value
             }
         }
+
+        private func extractEnglishArticle(from webView: WKWebView) {
+            guard englishArticleLoaded != nil else { return }
+            webView.evaluateJavaScript(Self.articleExtractionScript) { [weak self] result, _ in
+                guard let self,
+                      let values = result as? [String: Any],
+                      let text = values["text"] as? String,
+                      let language = values["language"] as? String,
+                      EnglishWebArticleCandidate.shouldTranslate(language: language, text: text) else { return }
+                let title = (values["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let candidate = EnglishWebArticleCandidate(title: title, text: text)
+                guard candidate.identity != self.lastArticleIdentity else { return }
+                self.lastArticleIdentity = candidate.identity
+                DispatchQueue.main.async {
+                    self.englishArticleLoaded?(candidate)
+                }
+            }
+        }
+
+        private static let articleExtractionScript = #"""
+        (() => {
+          const root = document.querySelector('section[name="articleBody"]')
+            || document.querySelector('article')
+            || document.querySelector('main');
+          if (!root) return { title: '', text: '', language: document.documentElement.lang || '' };
+          const paragraphs = Array.from(root.querySelectorAll('p'))
+            .map((node) => (node.innerText || '').trim())
+            .filter((value) => value.length > 0);
+          const paragraphText = paragraphs.join('\n\n');
+          const fallbackText = (root.innerText || '').trim();
+          const text = (paragraphText.length >= 120 ? paragraphText : fallbackText).slice(0, 50000);
+          return {
+            title: (document.querySelector('h1')?.innerText || document.title || '').trim(),
+            text,
+            language: document.documentElement.lang || root.lang || ''
+          };
+        })()
+        """#
     }
 }
 

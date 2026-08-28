@@ -239,7 +239,16 @@ private struct EditorialRootView: View {
     @State private var notificationVideoID: Int64?
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var lastResearchTab: EditorialTab = .investment
-    @State private var presentedExternalLink: InAppBrowserDestination?
+    @State private var presentedExternalLink: InAppBrowserDestination? = {
+        #if DEBUG
+        let prefix = "--in-app-browser-preview="
+        guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }),
+              let url = URL(string: String(argument.dropFirst(prefix.count))) else { return nil }
+        return InAppBrowserDestination(url: url)
+        #else
+        return nil
+        #endif
+    }()
     @State private var signalSection: GoogleSignalSection = .highlights
     @State private var signalSentiment: GoogleSignalSentimentFilter = .all
     @State private var showsSignalFilters = false
