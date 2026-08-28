@@ -1862,6 +1862,20 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(ExternalAccessPolicy.requiresServerRelay(article))
     }
 
+    func testEnglishWebArticleIsEligibleForAutomaticTranslation() {
+        let text = String(repeating: "Artificial intelligence companies should explain how they manage serious risks. ", count: 4)
+
+        XCTAssertTrue(EnglishWebArticleCandidate.shouldTranslate(language: "en-US", text: text))
+        XCTAssertTrue(EnglishWebArticleCandidate.shouldTranslate(language: "", text: text))
+    }
+
+    func testChineseOrShortWebContentDoesNotTriggerAutomaticTranslation() {
+        let chinese = String(repeating: "人工智能公司应当说明如何管理重大风险。", count: 10)
+
+        XCTAssertFalse(EnglishWebArticleCandidate.shouldTranslate(language: "zh-CN", text: chinese))
+        XCTAssertFalse(EnglishWebArticleCandidate.shouldTranslate(language: "en", text: "Short navigation label"))
+    }
+
     func testGenericArticlePreviewStillUsesPersistedCache() throws {
         let article = try XCTUnwrap(URL(string: "https://example.com/article"))
         let base = try XCTUnwrap(URL(string: "https://api.wanghengai.xin"))
