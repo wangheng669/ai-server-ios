@@ -65,6 +65,7 @@ struct InAppBrowserSheet: View {
                 MinimalInAppWebView(url: url, title: $title)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .overlay(alignment: .bottomTrailing) {
             DetailSheetCloseButton(action: close, accessibilityLabel: "关闭网页详情")
@@ -163,9 +164,7 @@ struct ServerArticleReaderView: View {
     private func load() async {
         loadError = nil
         do {
-            let next = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchArticlePreview(url: url)
-                .data
+            let next = try await ServerArticlePreviewCache.shared.payload(for: url)
             payload = next
             titleChanged?(displayTitle(next))
         } catch {
@@ -205,6 +204,58 @@ struct ServerArticleReaderView: View {
             }
             .prefix(8)
             .map { $0 }
+    }
+}
+
+@MainActor
+final class ServerArticlePreviewCache {
+    static let shared = ServerArticlePreviewCache()
+
+    private var payloads: [URL: ArticlePreviewResponse.Payload] = [:]
+    private var payloadOrder: [URL] = []
+    private var loadingTasks: [URL: Task<ArticlePreviewResponse.Payload, Error>] = [:]
+
+    func payload(for url: URL) async throws -> ArticlePreviewResponse.Payload {
+        if let payload = payloads[url] { return payload }
+        if let task = loadingTasks[url] { return try await task.value }
+
+        let task = Task {
+            try await APIClient(baseURL: ServerConfiguration.currentURL)
+                .fetchArticlePreview(url: url)
+                .data
+        }
+        loadingTasks[url] = task
+        do {
+            let payload = try await task.value
+            store(payload, for: url)
+            loadingTasks[url] = nil
+            return payload
+        } catch {
+            loadingTasks[url] = nil
+            throw error
+        }
+    }
+
+    func prefetch(_ urls: [URL], limit: Int = 6) {
+        var seen = Set<URL>()
+        let pending = urls.filter { url in
+            guard seen.insert(url).inserted,
+                  seen.count <= limit else { return false }
+            return payloads[url] == nil && loadingTasks[url] == nil
+        }
+        Task {
+            for url in pending {
+                _ = try? await payload(for: url)
+            }
+        }
+    }
+
+    private func store(_ payload: ArticlePreviewResponse.Payload, for url: URL) {
+        if payloads[url] == nil { payloadOrder.append(url) }
+        payloads[url] = payload
+        while payloadOrder.count > 24 {
+            payloads[payloadOrder.removeFirst()] = nil
+        }
     }
 }
 
