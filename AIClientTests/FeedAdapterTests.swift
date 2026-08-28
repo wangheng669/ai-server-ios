@@ -1848,6 +1848,20 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(components.queryItems?.first(where: { $0.name == "prefer_remote" })?.value, "true")
     }
 
+    func testNewYorkTimesLinksOpenDirectlyInTheInAppBrowser() throws {
+        let article = try XCTUnwrap(URL(string: "https://www.nytimes.com/2026/08/04/technology/white-house-ai-framework.html"))
+        let chineseArticle = try XCTUnwrap(URL(string: "https://cn.nytimes.com/technology/20260828/bill-gates-ai-risks/"))
+
+        XCTAssertFalse(ExternalAccessPolicy.requiresServerRelay(article))
+        XCTAssertFalse(ExternalAccessPolicy.requiresServerRelay(chineseArticle))
+    }
+
+    func testUnrecognizedExternalLinksStillUseServerReader() throws {
+        let article = try XCTUnwrap(URL(string: "https://example.com/article"))
+
+        XCTAssertTrue(ExternalAccessPolicy.requiresServerRelay(article))
+    }
+
     func testGenericArticlePreviewStillUsesPersistedCache() throws {
         let article = try XCTUnwrap(URL(string: "https://example.com/article"))
         let base = try XCTUnwrap(URL(string: "https://api.wanghengai.xin"))
