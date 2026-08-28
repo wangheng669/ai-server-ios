@@ -453,6 +453,14 @@ func marketPreferredListTrend(chartValues: [Double]?, snapshotValues: [Double]) 
     return chartValues
 }
 
+func marketPinnedListTrend(current: [Double], incoming: [Double]) -> [Double] {
+    // Once a sparkline has enough points to convey its shape, keep that shape
+    // stable for the lifetime of the row. A later chart response may use a
+    // different session or sampling window and should not visually replace it.
+    guard current.count < 3 else { return current }
+    return incoming.count > current.count ? incoming : current
+}
+
 enum MarketCompanyLogoPathCache {
     private static let defaultsKey = "market.companyLogoPaths.v1"
     private static let savedAtKey = "market.companyLogoPaths.savedAt.v1"
