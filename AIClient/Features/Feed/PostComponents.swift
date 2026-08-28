@@ -44,6 +44,9 @@ struct InAppBrowserSheet: View {
     @State private var translatingIdentity: Int?
     @State private var translationFailed = false
     @State private var showsOriginal = false
+    @State private var translatedBlocks: [String: String] = [:]
+    @State private var translatedTitle = ""
+    @State private var translatedTitleSource = ""
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -138,7 +141,7 @@ struct InAppBrowserSheet: View {
 
     @MainActor
     private func translate(_ article: EnglishWebArticleCandidate) async {
-        guard translatedArticle?.sourceIdentity != article.identity else { return }
+        guard translatedArticle?.sourceIdentity != article.identity || translatedArticle?.isComplete == false else { return }
         translatingIdentity = article.identity
         isTranslating = true
         translationFailed = false
@@ -149,16 +152,53 @@ struct InAppBrowserSheet: View {
             }
         }
         do {
-            let translatedTitle = try await PersonArticleTranslationService.shared.translate(article.title)
-            let translatedText = try await PersonArticleTranslationService.shared.translate(article.text)
+            let pending = article.blocks.filter { translatedBlocks[$0.id] == nil }
+            if let first = pending.sorted(by: EnglishWebArticleBlock.translationPriority).first {
+                translatedBlocks[first.id] = try await PersonArticleTranslationService.shared.translate(first.text)
+                guard !Task.isCancelled, englishArticle?.identity == article.identity else { return }
+                publishTranslation(for: article)
+            } else {
+                publishTranslation(for: article)
+            }
+
+            if translatedTitleSource != article.title {
+                let value = try await PersonArticleTranslationService.shared.translate(article.title)
+                guard !Task.isCancelled, englishArticle?.identity == article.identity else { return }
+                translatedTitle = value.isEmpty ? article.title : value
+                translatedTitleSource = article.title
+                publishTranslation(for: article)
+            }
+
+            let remaining = article.blocks.filter { translatedBlocks[$0.id] == nil }
+                .sorted(by: EnglishWebArticleBlock.translationPriority)
+            await withTaskGroup(of: (String, String?).self) { group in
+                var iterator = remaining.makeIterator()
+                for _ in 0..<3 {
+                    guard let block = iterator.next() else { break }
+                    group.addTask {
+                        let value = try? await PersonArticleTranslationService.shared.translate(block.text)
+                        return (block.id, value)
+                    }
+                }
+                for await (id, value) in group {
+                    guard !Task.isCancelled, englishArticle?.identity == article.identity else {
+                        group.cancelAll()
+                        return
+                    }
+                    if let value, !value.isEmpty {
+                        translatedBlocks[id] = value
+                        publishTranslation(for: article)
+                    }
+                    if let block = iterator.next() {
+                        group.addTask {
+                            let value = try? await PersonArticleTranslationService.shared.translate(block.text)
+                            return (block.id, value)
+                        }
+                    }
+                }
+            }
             guard !Task.isCancelled, englishArticle?.identity == article.identity else { return }
-            translatedArticle = TranslatedWebArticle(
-                title: translatedTitle.isEmpty ? article.title : translatedTitle,
-                text: translatedText,
-                sourceIdentity: article.identity
-            )
-            title = translatedArticle?.title ?? title
-            showsOriginal = false
+            publishTranslation(for: article)
         } catch is CancellationError {
             return
         } catch {
@@ -166,6 +206,24 @@ struct InAppBrowserSheet: View {
                 translationFailed = true
             }
         }
+    }
+
+    @MainActor
+    private func publishTranslation(for article: EnglishWebArticleCandidate) {
+        let blocks = article.blocks.map { block in
+            TranslatedWebArticleBlock(
+                id: block.id,
+                text: translatedBlocks[block.id]
+            )
+        }
+        translatedArticle = TranslatedWebArticle(
+            title: translatedTitle.isEmpty ? article.title : translatedTitle,
+            blocks: blocks,
+            sourceIdentity: article.identity,
+            isComplete: blocks.allSatisfy { $0.text != nil }
+        )
+        title = translatedArticle?.title ?? title
+        showsOriginal = false
     }
 
     private func close() {
@@ -179,9 +237,30 @@ struct InAppBrowserSheet: View {
 
 struct EnglishWebArticleCandidate: Equatable {
     let title: String
-    let text: String
+    let pageURL: String
+    let blocks: [EnglishWebArticleBlock]
 
-    var identity: Int { text.hashValue }
+    var text: String { blocks.map(\.text).joined(separator: "\n\n") }
+    var identity: Int { [pageURL, title, blocks.map(\.id).joined(separator: "|")].hashValue }
+
+    init(title: String, text: String) {
+        self.title = title
+        pageURL = ""
+        blocks = text.components(separatedBy: "\n\n").enumerated().compactMap { index, value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : EnglishWebArticleBlock(
+                id: "\(index):\(trimmed.hashValue)",
+                text: trimmed,
+                isVisible: index < 2
+            )
+        }
+    }
+
+    init(title: String, pageURL: String, blocks: [EnglishWebArticleBlock]) {
+        self.title = title
+        self.pageURL = pageURL
+        self.blocks = blocks
+    }
 
     static func shouldTranslate(language: String, text: String) -> Bool {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -205,10 +284,27 @@ struct EnglishWebArticleCandidate: Equatable {
     }
 }
 
+struct EnglishWebArticleBlock: Equatable {
+    let id: String
+    let text: String
+    let isVisible: Bool
+
+    static func translationPriority(_ lhs: Self, _ rhs: Self) -> Bool {
+        if lhs.isVisible != rhs.isVisible { return lhs.isVisible }
+        return lhs.id.localizedStandardCompare(rhs.id) == .orderedAscending
+    }
+}
+
 private struct TranslatedWebArticle: Equatable {
     let title: String
-    let text: String
+    let blocks: [TranslatedWebArticleBlock]
     let sourceIdentity: Int
+    let isComplete: Bool
+}
+
+private struct TranslatedWebArticleBlock: Identifiable, Equatable {
+    let id: String
+    let text: String?
 }
 
 private struct TranslatedWebArticleView: View {
@@ -224,10 +320,22 @@ private struct TranslatedWebArticleView: View {
                 Text(sourceURL.host ?? "英文网页")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(article.text)
-                    .font(.system(size: 17, design: .serif))
-                    .lineSpacing(7)
-                    .textSelection(.enabled)
+                ForEach(article.blocks) { block in
+                    if let text = block.text {
+                        Text(text)
+                            .font(.system(size: 17, design: .serif))
+                            .lineSpacing(7)
+                            .textSelection(.enabled)
+                    } else {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("正在翻译这一段…")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 44, alignment: .leading)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
@@ -251,6 +359,18 @@ enum ExternalAccessPolicy {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = url.host?.lowercased() else { return false }
         return !directHostSuffixes.contains(where: { host == $0 || host.hasSuffix(".\($0)") })
+    }
+}
+
+enum NewYorkTimesLocalePolicy {
+    static func trustedChineseAlternate(_ value: String, from sourceValue: String) -> URL? {
+        guard let source = URL(string: sourceValue),
+              let sourceHost = source.host?.lowercased(),
+              sourceHost == "nytimes.com" || sourceHost.hasSuffix(".nytimes.com"),
+              let target = URL(string: value),
+              target.scheme?.lowercased() == "https",
+              target.host?.lowercased() == "cn.nytimes.com" else { return nil }
+        return target
     }
 }
 
@@ -453,6 +573,12 @@ private struct MinimalInAppWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.add(context.coordinator, name: Coordinator.articleMessageName)
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: Coordinator.articleObservationScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
         if Self.isWeChatURL(url) {
             configuration.userContentController.addUserScript(WKUserScript(
                 source: Self.weChatRevealScript,
@@ -505,10 +631,12 @@ private struct MinimalInAppWebView: UIViewRepresentable {
     })();
     """#
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+        static let articleMessageName = "codexArticleContent"
         @Binding private var title: String
         private let englishArticleLoaded: ((EnglishWebArticleCandidate) -> Void)?
         private var lastArticleIdentity: Int?
+        private var attemptedChineseAlternates: Set<URL> = []
 
         init(
             title: Binding<String>,
@@ -525,10 +653,11 @@ private struct MinimalInAppWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             updateTitle(from: webView)
             extractEnglishArticle(from: webView)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak webView] in
-                guard let self, let webView else { return }
-                self.extractEnglishArticle(from: webView)
-            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == Self.articleMessageName else { return }
+            acceptArticleValues(message.body, webView: message.webView)
         }
 
         func webView(
@@ -557,40 +686,105 @@ private struct MinimalInAppWebView: UIViewRepresentable {
 
         private func extractEnglishArticle(from webView: WKWebView) {
             guard englishArticleLoaded != nil else { return }
-            webView.evaluateJavaScript(Self.articleExtractionScript) { [weak self] result, _ in
-                guard let self,
-                      let values = result as? [String: Any],
-                      let text = values["text"] as? String,
-                      let language = values["language"] as? String,
-                      EnglishWebArticleCandidate.shouldTranslate(language: language, text: text) else { return }
-                let title = (values["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let candidate = EnglishWebArticleCandidate(title: title, text: text)
-                guard candidate.identity != self.lastArticleIdentity else { return }
-                self.lastArticleIdentity = candidate.identity
-                DispatchQueue.main.async {
-                    self.englishArticleLoaded?(candidate)
-                }
+            webView.evaluateJavaScript("window.__codexExtractArticle?.()") { [weak self] result, _ in
+                self?.acceptArticleValues(result, webView: webView)
             }
         }
 
-        private static let articleExtractionScript = #"""
+        private func acceptArticleValues(_ result: Any?, webView: WKWebView?) {
+            guard let values = result as? [String: Any] else { return }
+            let pageURL = values["url"] as? String ?? ""
+            if let alternateValue = values["chineseURL"] as? String,
+               let alternate = NewYorkTimesLocalePolicy.trustedChineseAlternate(alternateValue, from: pageURL),
+               !attemptedChineseAlternates.contains(alternate) {
+                attemptedChineseAlternates.insert(alternate)
+                webView?.load(URLRequest(url: alternate))
+                return
+            }
+            guard
+                  let rawBlocks = values["blocks"] as? [[String: Any]],
+                  let language = values["language"] as? String else { return }
+            let blocks = rawBlocks.compactMap { value -> EnglishWebArticleBlock? in
+                guard let id = value["id"] as? String,
+                      let text = value["text"] as? String,
+                      !text.isEmpty else { return nil }
+                return EnglishWebArticleBlock(
+                    id: id,
+                    text: text,
+                    isVisible: value["visible"] as? Bool ?? false
+                )
+            }
+            let text = blocks.map(\.text).joined(separator: "\n\n")
+            guard EnglishWebArticleCandidate.shouldTranslate(language: language, text: text) else { return }
+            let title = (values["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let candidate = EnglishWebArticleCandidate(title: title, pageURL: pageURL, blocks: blocks)
+            guard candidate.identity != lastArticleIdentity else { return }
+            lastArticleIdentity = candidate.identity
+            DispatchQueue.main.async { [weak self] in
+                self?.englishArticleLoaded?(candidate)
+            }
+        }
+
+        static let articleObservationScript = #"""
         (() => {
-          const root = document.querySelector('section[name="articleBody"]')
-            || document.querySelector('article')
-            || document.querySelector('main');
-          if (!root) return { title: '', text: '', language: document.documentElement.lang || '' };
-          const paragraphs = Array.from(root.querySelectorAll('p'))
-            .map((node) => (node.innerText || '').trim())
-            .filter((value) => value.length > 0);
-          const paragraphText = paragraphs.join('\n\n');
-          const fallbackText = (root.innerText || '').trim();
-          const text = (paragraphText.length >= 120 ? paragraphText : fallbackText).slice(0, 50000);
-          return {
-            title: (document.querySelector('h1')?.innerText || document.title || '').trim(),
-            text,
-            language: document.documentElement.lang || root.lang || ''
+          if (window.__codexArticleObserverInstalled) return;
+          window.__codexArticleObserverInstalled = true;
+          let lastSignature = '';
+          let timer = 0;
+          window.__codexExtractArticle = () => {
+            const root = document.querySelector('section[name="articleBody"]')
+              || document.querySelector('article')
+              || document.querySelector('main');
+            const chineseURL = Array.from(document.querySelectorAll('link[rel="alternate"][hreflang]'))
+              .find((link) => (link.hreflang || '').toLowerCase().startsWith('zh'))?.href || '';
+            if (!root) return {
+              title: '', url: location.href, chineseURL, blocks: [], language: document.documentElement.lang || ''
+            };
+            const nodes = Array.from(root.querySelectorAll('h2,h3,p,blockquote,li,figcaption'));
+            let total = 0;
+            const blocks = [];
+            nodes.forEach((node, index) => {
+              if (total >= 100000 || blocks.length >= 400) return;
+              const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
+              if (text.length < 2) return;
+              const rect = node.getBoundingClientRect();
+              const visible = rect.bottom >= -120 && rect.top <= window.innerHeight + 240;
+              total += text.length;
+              blocks.push({
+                id: location.href + '#' + index + ':' + text.length + ':' + text.slice(0, 48),
+                text,
+                visible
+              });
+            });
+            if (blocks.length === 0) {
+              const text = (root.innerText || '').trim().slice(0, 100000);
+              if (text.length > 0) blocks.push({ id: location.href + '#fallback', text, visible: true });
+            }
+            return {
+              title: (document.querySelector('h1')?.innerText || document.title || '').trim(),
+              url: location.href,
+              chineseURL,
+              blocks,
+              language: document.documentElement.lang || root.lang || ''
+            };
           };
-        })()
+          const post = () => {
+            const value = window.__codexExtractArticle();
+            const signature = value.blocks.map((block) => block.id + ':' + block.visible).join('|');
+            if (signature === lastSignature) return;
+            lastSignature = signature;
+            window.webkit.messageHandlers.codexArticleContent.postMessage(value);
+          };
+          const schedule = () => {
+            clearTimeout(timer);
+            timer = setTimeout(post, 180);
+          };
+          new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+          addEventListener('scroll', schedule, { passive: true });
+          post();
+          setTimeout(post, 700);
+          setTimeout(post, 2200);
+        })();
         """#
     }
 }
