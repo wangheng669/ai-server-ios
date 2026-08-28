@@ -355,6 +355,31 @@ struct PostDetailView: View {
                                                 }
                                             }
                                         }
+                                    case .linkedParagraph(let text, let links):
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            WikipediaLinkedParagraph(
+                                                text: text,
+                                                entities: wikipediaEntitiesByParagraph[index] ?? [],
+                                                articleLinks: links
+                                            ) { entity in
+                                                withAnimation(.easeOut(duration: 0.18)) {
+                                                    selectedWikipediaEntity = WikipediaSelection(
+                                                        paragraphIndex: index,
+                                                        entity: entity
+                                                    )
+                                                }
+                                            }
+                                            if let selection = selectedWikipediaEntity,
+                                               selection.paragraphIndex == index {
+                                                WikipediaEntityCard(entity: selection.entity) {
+                                                    presentedWikipediaEntity = selection.entity
+                                                } close: {
+                                                    withAnimation(.easeOut(duration: 0.15)) {
+                                                        selectedWikipediaEntity = nil
+                                                    }
+                                                }
+                                            }
+                                        }
                                     case .image(let url, let caption, let credit):
                                         if !NewYorkTimesArticle.isSameImageAsset(url, post.imageURLs.first) {
                                             NewYorkTimesArticleImage(
@@ -2734,15 +2759,20 @@ struct PostDetailView: View {
 
     private func enrichNewYorkTimesArticle(_ article: NewYorkTimesArticle) async {
         let paragraphs = article.blocks.compactMap { block -> String? in
-            guard case .paragraph(let text) = block else { return nil }
-            return text
+            switch block {
+            case .paragraph(let text), .linkedParagraph(let text, _): text
+            case .image: nil
+            }
         }
         let paragraphEntities = await WikipediaEntityResolver.shared.resolve(paragraphs: paragraphs)
         guard !Task.isCancelled else { return }
         var blockEntities: [Int: [WikipediaEntity]] = [:]
         var paragraphIndex = 0
         for (blockIndex, block) in article.blocks.enumerated() {
-            guard case .paragraph = block else { continue }
+            switch block {
+            case .paragraph, .linkedParagraph: break
+            case .image: continue
+            }
             blockEntities[blockIndex] = paragraphEntities[paragraphIndex]
             paragraphIndex += 1
         }

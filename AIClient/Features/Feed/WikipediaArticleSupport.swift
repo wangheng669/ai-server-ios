@@ -180,6 +180,7 @@ private struct WikipediaQueryResponse: Decodable {
 struct WikipediaLinkedParagraph: View {
     let text: String
     let entities: [WikipediaEntity]
+    var articleLinks: [NewYorkTimesArticleLink] = []
     let select: (WikipediaEntity) -> Void
 
     var body: some View {
@@ -214,6 +215,18 @@ struct WikipediaLinkedParagraph: View {
                 }
                 searchStart = range.upperBound
             }
+        }
+        var linkSearchStart = text.startIndex
+        for link in articleLinks where !link.label.isEmpty {
+            guard linkSearchStart < text.endIndex,
+                  let range = text.range(of: link.label, range: linkSearchStart..<text.endIndex),
+                  let lower = AttributedString.Index(range.lowerBound, within: value),
+                  let upper = AttributedString.Index(range.upperBound, within: value) else { continue }
+            let attributedRange = lower..<upper
+            value[attributedRange].link = link.url
+            value[attributedRange].foregroundColor = .blue
+            value[attributedRange].underlineStyle = .single
+            linkSearchStart = range.upperBound
         }
         return value
     }
