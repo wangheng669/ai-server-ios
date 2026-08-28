@@ -2645,10 +2645,10 @@ private struct MarketQuotesSheet: View {
 
     private func quoteRow(_ quote: MarketQuote) -> some View {
         Button { onSelectQuote(quote.symbol) } label: {
-            MarketIndexTableRow(
+            StableMarketIndexTableRow(
                 quote: quote,
                 overnightQuote: nil,
-                trend: store.listTrendValues(for: quote),
+                incomingTrend: store.listTrendValues(for: quote),
                 companyLogoPath: displayedLogoPaths[quote.symbol],
                 showsCompanyLogo: true
             )
@@ -2658,6 +2658,46 @@ private struct MarketQuotesSheet: View {
 
     private var requestID: String {
         "\(region.dashboardID):\(requestedQuotes.map(\.symbol).joined(separator: ","))"
+    }
+}
+
+private struct StableMarketIndexTableRow: View {
+    let quote: MarketQuote
+    let overnightQuote: MarketQuote?
+    let incomingTrend: [Double]
+    let companyLogoPath: String?
+    let showsCompanyLogo: Bool
+    @State private var displayedTrend: [Double]
+
+    init(
+        quote: MarketQuote,
+        overnightQuote: MarketQuote?,
+        incomingTrend: [Double],
+        companyLogoPath: String?,
+        showsCompanyLogo: Bool
+    ) {
+        self.quote = quote
+        self.overnightQuote = overnightQuote
+        self.incomingTrend = incomingTrend
+        self.companyLogoPath = companyLogoPath
+        self.showsCompanyLogo = showsCompanyLogo
+        _displayedTrend = State(initialValue: incomingTrend)
+    }
+
+    var body: some View {
+        MarketIndexTableRow(
+            quote: quote,
+            overnightQuote: overnightQuote,
+            trend: displayedTrend,
+            companyLogoPath: companyLogoPath,
+            showsCompanyLogo: showsCompanyLogo
+        )
+        .onChange(of: incomingTrend) { _, newValue in
+            displayedTrend = marketPinnedListTrend(
+                current: displayedTrend,
+                incoming: newValue
+            )
+        }
     }
 }
 

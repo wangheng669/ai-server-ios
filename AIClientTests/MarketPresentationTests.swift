@@ -1399,6 +1399,25 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(values, chart)
     }
 
+    func testPinnedMarketListTrendKeepsEstablishedShape() {
+        let initial = [10.0, 11.0, 10.5, 12.0]
+        let loadedChart = [20.0, 18.0, 21.0, 19.0]
+
+        XCTAssertEqual(
+            marketPinnedListTrend(current: initial, incoming: loadedChart),
+            initial
+        )
+    }
+
+    func testPinnedMarketListTrendCanUpgradeSparsePlaceholder() {
+        let loadedChart = [10.0, 11.0, 10.5, 12.0]
+
+        XCTAssertEqual(
+            marketPinnedListTrend(current: [10.0, 12.0], incoming: loadedChart),
+            loadedChart
+        )
+    }
+
     func testVolumeScaleUsesRobustPercentileCeiling() throws {
         let rows = (1...20).map { index in
             #"{"timestamp":\#(index),"open":10,"high":11,"low":9,"close":10,"volume":\#(index * 100),"state":"confirmed","source":"test","session":"regular"}"#
