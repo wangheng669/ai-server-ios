@@ -659,7 +659,7 @@ struct APIClient {
 
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
         let response = try await fetchArticlePreview(url: url, preferRemote: true)
-        if let article = NewYorkTimesArticleParser.extract(from: response.data.content) { return article }
+        if let article = NewYorkTimesArticleParser.extract(from: response.data.content, baseURL: url) { return article }
         guard let article = NewYorkTimesArticle.storedText(response.data.textContent) else {
             throw APIError.decoding(NYTimesArticleError.bodyMissing)
         }
@@ -863,7 +863,13 @@ struct NewYorkTimesArticle: Equatable {
 
 enum NewYorkTimesArticleBlock: Equatable {
     case paragraph(String)
+    case linkedParagraph(String, links: [NewYorkTimesArticleLink])
     case image(url: URL, caption: String?, credit: String?)
+}
+
+struct NewYorkTimesArticleLink: Equatable {
+    let label: String
+    let url: URL
 }
 
 enum NewYorkTimesArticleParser {
@@ -875,8 +881,12 @@ enum NewYorkTimesArticleParser {
         pattern: #"</?div\b[^>]*>"#,
         options: [.caseInsensitive]
     )
+    private static let anchorRegex = try! NSRegularExpression(
+        pattern: #"<a\b[^>]*>(.*?)</a\s*>"#,
+        options: [.caseInsensitive, .dotMatchesLineSeparators]
+    )
 
-    static func extract(from html: String) -> NewYorkTimesArticle? {
+    static func extract(from html: String, baseURL: URL? = nil) -> NewYorkTimesArticle? {
         let range = NSRange(html.startIndex..<html.endIndex, in: html)
         let blocks = paragraphOpeningRegex.matches(in: html, range: range).compactMap { match -> NewYorkTimesArticleBlock? in
             guard let fragment = balancedContent(for: match, in: html) else { return nil }
@@ -888,9 +898,31 @@ enum NewYorkTimesArticleParser {
                 )
             }
             guard let paragraph = decodeHTML(fragment), !paragraph.isEmpty else { return nil }
+            let links = links(in: fragment, baseURL: baseURL)
+            if !links.isEmpty { return .linkedParagraph(paragraph, links: links) }
             return .paragraph(paragraph)
         }
         return blocks.isEmpty ? nil : NewYorkTimesArticle(blocks: blocks)
+    }
+
+    private static func links(in fragment: String, baseURL: URL?) -> [NewYorkTimesArticleLink] {
+        let nsFragment = fragment as NSString
+        let range = NSRange(location: 0, length: nsFragment.length)
+        return anchorRegex.matches(in: fragment, range: range).compactMap { match in
+            let anchor = nsFragment.substring(with: match.range)
+            guard let href = attribute(named: "href", in: anchor).flatMap(decodeHTML),
+                  let labelRange = Range(match.range(at: 1), in: fragment),
+                  let label = decodeHTML(String(fragment[labelRange])),
+                  !label.isEmpty else { return nil }
+            let resolvedURL: URL?
+            if let baseURL {
+                resolvedURL = URL(string: href, relativeTo: baseURL)?.absoluteURL
+            } else {
+                resolvedURL = URL(string: href).flatMap { $0.scheme == nil ? nil : $0 }
+            }
+            guard let url = resolvedURL else { return nil }
+            return NewYorkTimesArticleLink(label: label, url: url)
+        }
     }
 
     private static func balancedContent(for opening: NSTextCheckingResult, in html: String) -> String? {

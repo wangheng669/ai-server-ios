@@ -1234,6 +1234,30 @@ final class PostDecodingTests: XCTestCase {
         )
     }
 
+    func testPreservesNewYorkTimesParagraphLinks() throws {
+        let html = """
+        <section class="article-body">
+          <div class="article-paragraph">白宫正在制定的那种<a href="/usa/artificial-intelligence-policy.html">自愿性措施</a>引发讨论。</div>
+        </section>
+        """
+        let baseURL = try XCTUnwrap(URL(string: "https://cn.nytimes.com/usa/20260828/example/"))
+
+        XCTAssertEqual(
+            NewYorkTimesArticleParser.extract(from: html, baseURL: baseURL),
+            NewYorkTimesArticle(blocks: [
+                .linkedParagraph(
+                    "白宫正在制定的那种自愿性措施引发讨论。",
+                    links: [
+                        NewYorkTimesArticleLink(
+                            label: "自愿性措施",
+                            url: try XCTUnwrap(URL(string: "https://cn.nytimes.com/usa/artificial-intelligence-policy.html"))
+                        )
+                    ]
+                )
+            ])
+        )
+    }
+
     func testPreservesNewYorkTimesInlineImageOrderAndCaption() throws {
         let html = """
         <section class="article-body">
