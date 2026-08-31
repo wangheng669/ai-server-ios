@@ -392,9 +392,12 @@ struct NewsFeedView: View {
                     }
                 }
                 .frame(width: sourceSelectorExpandedWidth, height: 54)
-                .background(Color(uiColor: .systemBackground), in: Capsule())
+                .background(
+                    Color(uiColor: .systemBackground),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
                 .overlay {
-                    Capsule()
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
                 }
                 .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
@@ -415,17 +418,18 @@ struct NewsFeedView: View {
                     isSourceSelectorExpanded.toggle()
                 }
             } label: {
-                ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
                     sourceIcon(model.source)
                         .frame(width: 24, height: 24)
                         .scaleEffect(isSourceSelectorExpanded ? 0.90 : 1)
-                        .offset(y: isSourceSelectorExpanded ? -4 : 0)
 
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.bottom, 4)
-                        .opacity(isSourceSelectorExpanded ? 1 : 0)
+                    if isSourceSelectorExpanded {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(height: 8)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
                 }
                     .frame(width: 44, height: 44)
                     .background(Color(uiColor: .systemBackground), in: Circle())
@@ -922,15 +926,28 @@ struct NewsFeedView: View {
                 selectSourceFromTap(source)
             }
         } label: {
-            ZStack(alignment: .bottom) {
-                sourceIcon(source)
-                    .frame(width: 24, height: 24)
+            ZStack(alignment: .topTrailing) {
+                ZStack(alignment: .bottom) {
+                    sourceIcon(source)
+                        .frame(width: 24, height: 24)
 
-                Capsule()
-                    .fill(InvestmentDesign.accent)
-                    .frame(width: 24, height: 3)
-                    .padding(.bottom, 1)
-                    .opacity(isSelected ? 1 : 0)
+                    Capsule()
+                        .fill(InvestmentDesign.accent)
+                        .frame(width: 24, height: 3)
+                        .padding(.bottom, 1)
+                        .opacity(isSelected ? 1 : 0)
+                }
+                .frame(width: 44, height: 44)
+
+                if source == .bilibili {
+                    Text("6")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 16, height: 16)
+                        .background(Color.red, in: Circle())
+                        .offset(x: 1, y: 1)
+                        .accessibilityHidden(true)
+                }
             }
                 .frame(width: 44, height: 44)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
