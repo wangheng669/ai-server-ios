@@ -418,12 +418,13 @@ struct NewsFeedView: View {
                 ZStack(alignment: .bottom) {
                     sourceIcon(model.source)
                         .frame(width: 24, height: 24)
-                        .offset(y: isSourceSelectorExpanded ? -3 : 0)
+                        .scaleEffect(isSourceSelectorExpanded ? 0.88 : 1)
+                        .offset(y: isSourceSelectorExpanded ? -5 : 0)
 
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 7, weight: .bold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.bottom, 5)
+                        .padding(.bottom, 3)
                         .opacity(isSourceSelectorExpanded ? 1 : 0)
                 }
                     .frame(width: 44, height: 44)
@@ -927,8 +928,8 @@ struct NewsFeedView: View {
 
                 Capsule()
                     .fill(InvestmentDesign.accent)
-                    .frame(width: 18, height: 3)
-                    .padding(.bottom, 2)
+                    .frame(width: 28, height: 3)
+                    .padding(.bottom, 1)
                     .opacity(isSelected ? 1 : 0)
             }
                 .frame(width: 44, height: 44)
