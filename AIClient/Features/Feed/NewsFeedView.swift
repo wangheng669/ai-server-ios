@@ -236,7 +236,7 @@ struct NewsFeedView: View {
                     }
                     sourceSelector
                 }
-                    .padding(.trailing, 16)
+                    .padding(.trailing, 8)
                     .padding(
                         .bottom,
                         FeedChromeLayout.sourceSelectorBottomPadding(
@@ -392,12 +392,12 @@ struct NewsFeedView: View {
                     }
                 }
                 .frame(width: sourceSelectorExpandedWidth, height: 54)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Color(uiColor: .systemBackground), in: Capsule())
                 .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    Capsule()
                         .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
                 }
-                .shadow(color: .black.opacity(0.10), radius: 16, y: 7)
+                .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
                 .transition(
                     .asymmetric(
                         insertion: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity),
@@ -418,19 +418,19 @@ struct NewsFeedView: View {
                 ZStack(alignment: .bottom) {
                     sourceIcon(model.source)
                         .frame(width: 24, height: 24)
-                        .scaleEffect(isSourceSelectorExpanded ? 0.88 : 1)
-                        .offset(y: isSourceSelectorExpanded ? -5 : 0)
+                        .scaleEffect(isSourceSelectorExpanded ? 0.90 : 1)
+                        .offset(y: isSourceSelectorExpanded ? -4 : 0)
 
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.bottom, 3)
+                        .padding(.bottom, 4)
                         .opacity(isSourceSelectorExpanded ? 1 : 0)
                 }
                     .frame(width: 44, height: 44)
-                    .background(.regularMaterial, in: Circle())
+                    .background(Color(uiColor: .systemBackground), in: Circle())
                     .overlay(Circle().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+                    .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -442,8 +442,8 @@ struct NewsFeedView: View {
     }
 
     private var sourceSelectorExpandedWidth: CGFloat {
-        let contentWidth = CGFloat(FeedSource.allCases.count) * 55 + 8
-        let availableWidth = UIScreen.main.bounds.width - 32 - 52
+        let contentWidth = CGFloat(FeedSource.allCases.count) * 45 + 8
+        let availableWidth = UIScreen.main.bounds.width - 16 - 44 - 8
         return min(contentWidth, max(54, availableWidth))
     }
 
@@ -928,7 +928,7 @@ struct NewsFeedView: View {
 
                 Capsule()
                     .fill(InvestmentDesign.accent)
-                    .frame(width: 28, height: 3)
+                    .frame(width: 24, height: 3)
                     .padding(.bottom, 1)
                     .opacity(isSelected ? 1 : 0)
             }
