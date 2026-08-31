@@ -69,6 +69,39 @@ private enum YouTubePersonFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private struct XPlatformLogoShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let scale = min(rect.width, rect.height) / 24
+        let originX = rect.midX - 12 * scale
+        let originY = rect.midY - 12 * scale
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: originX + x * scale, y: originY + y * scale)
+        }
+
+        var path = Path()
+        path.move(to: point(18.244, 2.25))
+        path.addLine(to: point(21.552, 2.25))
+        path.addLine(to: point(14.325, 10.51))
+        path.addLine(to: point(22.827, 21.75))
+        path.addLine(to: point(16.17, 21.75))
+        path.addLine(to: point(10.956, 14.933))
+        path.addLine(to: point(4.99, 21.75))
+        path.addLine(to: point(1.68, 21.75))
+        path.addLine(to: point(9.41, 12.915))
+        path.addLine(to: point(1.254, 2.25))
+        path.addLine(to: point(8.08, 2.25))
+        path.addLine(to: point(12.793, 8.481))
+        path.closeSubpath()
+
+        path.move(to: point(17.083, 19.77))
+        path.addLine(to: point(18.916, 19.77))
+        path.addLine(to: point(7.084, 4.126))
+        path.addLine(to: point(5.117, 4.126))
+        path.closeSubpath()
+        return path
+    }
+}
+
 enum FeedChromeLayout {
     static let headerHeight: CGFloat = 0
     static let sourceSelectorSpacing: CGFloat = 12
@@ -986,9 +1019,8 @@ struct NewsFeedView: View {
                 .scaledToFit()
                 .frame(width: 23, height: 23)
         } else if source == .x {
-            Text("X")
-                .font(.system(size: 18, weight: .bold, design: .default))
-                .foregroundStyle(.primary)
+            XPlatformLogoShape()
+                .fill(.primary, style: FillStyle(eoFill: true))
                 .frame(width: 22, height: 22)
         } else if source == .baidu {
             Image("BaiduMark")
