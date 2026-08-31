@@ -415,8 +415,17 @@ struct NewsFeedView: View {
                     isSourceSelectorExpanded.toggle()
                 }
             } label: {
-                sourceIcon(model.source)
-                    .frame(width: 24, height: 24)
+                ZStack(alignment: .bottom) {
+                    sourceIcon(model.source)
+                        .frame(width: 24, height: 24)
+                        .offset(y: isSourceSelectorExpanded ? -3 : 0)
+
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 5)
+                        .opacity(isSourceSelectorExpanded ? 1 : 0)
+                }
                     .frame(width: 44, height: 44)
                     .background(.regularMaterial, in: Circle())
                     .overlay(Circle().stroke(InvestmentDesign.divider.opacity(0.9), lineWidth: 0.5))
@@ -912,13 +921,17 @@ struct NewsFeedView: View {
                 selectSourceFromTap(source)
             }
         } label: {
-            sourceIcon(source)
-                .frame(width: 24, height: 24)
+            ZStack(alignment: .bottom) {
+                sourceIcon(source)
+                    .frame(width: 24, height: 24)
+
+                Capsule()
+                    .fill(InvestmentDesign.accent)
+                    .frame(width: 18, height: 3)
+                    .padding(.bottom, 2)
+                    .opacity(isSelected ? 1 : 0)
+            }
                 .frame(width: 44, height: 44)
-                .background(
-                    isSelected ? InvestmentDesign.accent.opacity(0.07) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
