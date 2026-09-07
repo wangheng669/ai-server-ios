@@ -26,13 +26,9 @@ GitHub `main` 是两台 Mac 唯一的稳定代码源。主项目目录长期停�
 
 ## 模拟器与共享资源
 
-- 统一复用现有 `iPhone 16e`。只有会改变或读取运行中模拟器状态的操作才需要锁：测试、安装、启动、清理 App 数据和界面操作均通过 `./ci/with-ios-simulator-lock.sh --label <任务名> -- <命令>`。纯编译（包括 generic device build，以及使用独立 DerivedData 且不安装/启动 App 的 `build`、`build-for-testing`）不占模拟器锁。
-- 使用 Computer Use、截图、辅助功能树、`idb`、Maestro、`simctl io/ui` 或 Xcode UI 控制 **iOS 模拟器** 时，先用同一标签 `--hold`，再执行 `--assert-held`；普通网页浏览不属于模拟器操作。
-- 不得同时启动两个模拟器自动化会话。以实际加锁结果判断是否可用；`--status` 仅用于诊断，不得抢占有效锁。等待和持锁时限使用脚本默认值，中央排队参数由工作流设置。资源繁忙时释放当前执行轮次并报告持有者；`--hold` 只用于立即进行的交互验收，结束、失败或转去修改代码时立即释放。
-- 同一模拟器的测试和交互、同一真机的安装、main 集成发布各自互斥；独立检查和使用独立 DerivedData 的纯编译可并行，中央集成队列保持串行。等待共享资源超过 2 分钟时，说明资源、持有者和排队原因；等待期间不得占用模拟器锁。
-- 普通任务的 Xcode 构建缓存放在任务 worktree 内已忽略的 `DerivedData/`；其他临时产物可放已忽略目录或系统临时目录，不得提交或污染主工作区；`artifacts/` 仅用于人工验收证据，随任务 worktree 在验收后清理。
-- 安装增量清理由 `ci/sign-and-install-ios.sh` 自动执行，不得在 Runner 持久配置中关闭；操作细节见 `ci/prune-ios-install-deltas.sh --help`。
-- 测试范围由中央流程和 `ci/is-low-risk-ios-diff.sh` 自动判定，不得人工绕过；低风险 App 变更仍须签名构建、真机稳定性检查、安装和发布验收。
+- 复用 `iPhone 16e`；模拟器测试、安装、启动、数据清理和界面操作统一通过 `./ci/with-ios-simulator-lock.sh --label <任务名> -- <命令>`。交互验收用同一标签先 `--hold`、再 `--assert-held`，结束或转去修改代码时立即释放。
+- 不抢占有效锁；同一真机安装互斥，集成发布使用中央串行队列。独立检查和使用独立 DerivedData 的纯编译可并行。
+- Xcode 构建缓存使用任务 worktree 内已忽略的 `DerivedData/`；其他临时产物放已忽略目录或系统临时目录，不得提交或污染主工作区。
 
 ## 后端与安全边界
 
