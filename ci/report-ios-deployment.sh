@@ -52,6 +52,8 @@ deployment_run_id=${IOS_DEPLOYMENT_RUN_ID:-${GITHUB_RUN_ID:-}}
 deployment_mode=${IOS_DELIVERY_MODE:-central}
 deployment_device_id=${IOS_DEVICE_ID:-${DEVICE_UDID:-}}
 deployment_device_name=${IOS_DEVICE_NAME:-}
+# Legacy API field: acceptance describes automated delivery checks only.
+# It does not attest to functional verification or user approval.
 acceptance=pending
 installed_at=""
 accepted_at=""

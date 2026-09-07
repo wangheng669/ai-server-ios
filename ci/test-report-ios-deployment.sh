@@ -40,4 +40,15 @@ jq -e '
   (.acceptedAt == .installedAt)
 ' "$test_root/payload.json" >/dev/null
 
-echo 'iOS deployment metadata report test passed.'
+# acceptance is automated delivery, never proof of a functional user check.
+for stage in published-no-app-change published-pending-install; do
+  PATH="$test_root/bin:$PATH" DEPLOYMENT_STATUS_API_KEY=test \
+    IOS_TEST_PAYLOAD="$test_root/payload.json" \
+    ./ci/report-ios-deployment.sh succeeded 1 "$stage"
+  if [[ "$stage" == published-no-app-change ]]; then
+    jq -e '.acceptance == "accepted" and .installedAt == "" and (.acceptedAt | length > 0)' "$test_root/payload.json" >/dev/null
+  else
+    jq -e '.acceptance == "pending-install" and .installedAt == "" and .acceptedAt == ""' "$test_root/payload.json" >/dev/null
+  fi
+done
+echo 'iOS automated delivery metadata checks passed.'

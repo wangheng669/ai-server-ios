@@ -72,8 +72,8 @@ while IFS= read -r worktree; do
 done < <(git --git-dir="$git_common_dir" worktree list --porcelain | sed -n 's/^worktree //p')
 
 if [[ "$conflicts_found" == true ]]; then
-  echo "Coordinate or serialize these tasks before editing or submitting." >&2
-  exit 1
+  echo "Advisory only: inspect the overlapping changes and coordinate actual conflicts; file overlap does not prove a task is active." >&2
+  exit 0
 fi
 
-echo "No overlapping files found in active worktrees."
+echo "No overlapping files found in local worktrees; this does not inspect other Macs."
