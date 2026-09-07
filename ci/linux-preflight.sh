@@ -69,6 +69,10 @@ if git diff --name-only "$merge_base"...HEAD -- ci/with-ios-simulator-lock.sh ci
   bash ci/test-with-ios-simulator-lock.sh
 fi
 
+if git diff --name-only "$merge_base"...HEAD -- ci/automatic-main-sync.sh ci/finish-task.sh ci/check-worktree-overlap.sh ci/test-task-lifecycle.sh | grep -q .; then
+  bash ci/test-task-lifecycle.sh
+fi
+
 if python3 -c 'import yaml' >/dev/null 2>&1; then
   python3 - <<'PY'
 from pathlib import Path

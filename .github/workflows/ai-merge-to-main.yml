@@ -368,18 +368,6 @@ jobs:
             sleep $((attempt * 3))
           done
 
-      - name: Delete merged task branch
-        if: success()
-        env:
-          SOURCE_BRANCH: ${{ github.ref_name }}
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
-          git push \
-            --force-with-lease="refs/heads/$SOURCE_BRANCH:$SOURCE_SHA" \
-            origin ":refs/heads/$SOURCE_BRANCH"
-
       - name: Install directly from selected central Mac
         id: local_install
         if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true' && steps.central_prepare.outputs.device_gate_failed != 'true'

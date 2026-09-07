@@ -36,12 +36,8 @@ case "$current_branch" in
   main)
     ;;
   codex/*)
-    if ! git merge-base --is-ancestor HEAD origin/main; then
-      log "Skipped: $current_branch has not been merged into origin/main."
-      exit 0
-    fi
-    git switch main
-    log "Returned the primary working tree to main after $current_branch was merged."
+    log "Skipped: task workspaces are managed by their creator."
+    exit 0
     ;;
   "")
     log "Skipped: the primary working tree has a detached HEAD."
@@ -60,41 +56,6 @@ fi
 
 git merge --ff-only origin/main
 
-primary_worktree="$(git rev-parse --show-toplevel)"
-codex_worktree_root="$HOME/.codex/worktrees/"
-
-while IFS= read -r worktree_path; do
-  [[ -n "$worktree_path" && "$worktree_path" != "$primary_worktree" ]] || continue
-  case "$worktree_path/" in
-    "$codex_worktree_root"*) ;;
-    *) continue ;;
-  esac
-
-  worktree_branch="$(git -C "$worktree_path" branch --show-current 2>/dev/null || true)"
-  [[ "$worktree_branch" == codex/* ]] || continue
-  [[ "$(git config --get "branch.$worktree_branch.remote" 2>/dev/null || true)" == origin ]] ||
-    continue
-  git merge-base --is-ancestor "$worktree_branch" origin/main 2>/dev/null || continue
-  [[ -z "$(git -C "$worktree_path" status --porcelain 2>/dev/null)" ]] || continue
-
-  git worktree remove "$worktree_path"
-  log "Removed merged task worktree $worktree_path."
-done < <(git worktree list --porcelain | sed -n 's/^worktree //p')
-
-git worktree prune
-
-while IFS= read -r branch; do
-  [[ -n "$branch" ]] || continue
-  [[ "$(git config --get "branch.$branch.remote" 2>/dev/null || true)" == origin ]] ||
-    continue
-  if git branch -d "$branch" >/dev/null; then
-    log "Deleted merged local branch $branch."
-  fi
-done < <(
-  git for-each-ref \
-    --format='%(refname:short)' \
-    --merged origin/main \
-    refs/heads/codex/
-)
+# Task cleanup is explicit and belongs to ci/finish-task.sh.
 
 log "Primary working tree is clean on origin/main at $(git rev-parse --short HEAD)."
