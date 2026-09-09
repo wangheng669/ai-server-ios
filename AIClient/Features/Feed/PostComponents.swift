@@ -5,6 +5,65 @@ import AVKit
 import CryptoKit
 import WebKit
 
+@MainActor
+final class XAuthorVerificationStore: ObservableObject {
+    static let shared = XAuthorVerificationStore()
+    private struct Entry: Codable, Equatable {
+        let verified: Bool
+        let expiresAt: Date
+    }
+    @Published private var entries: [String: Entry]
+    private let defaults: UserDefaults
+    private let now: () -> Date
+    private let key = "x.author-verification.v1"
+
+    init(defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
+        self.defaults = defaults
+        self.now = now
+        entries = defaults.data(forKey: "x.author-verification.v1")
+            .flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:]
+    }
+
+    func isVerified(handle: String?, reported: Bool?) -> Bool {
+        if let reported { return reported }
+        guard let key = normalized(handle), let entry = entries[key], entry.expiresAt > now() else { return false }
+        return entry.verified
+    }
+
+    func record(posts: [Post]) {
+        var updated = entries
+        let date = now()
+        for post in posts where post.sourceName == "X" && !post.isXRetweetWrapper {
+            guard let handle = normalized(post.user?.userScreenName), let verified = post.user?.verified else { continue }
+            if let existing = updated[handle], existing.expiresAt > date { continue }
+            updated[handle] = Entry(verified: verified, expiresAt: date.addingTimeInterval(6 * 3600))
+        }
+        save(updated)
+    }
+
+    func recordLive(handle: String?, verified: Bool?) {
+        guard let handle = normalized(handle), let verified else { return }
+        let date = now()
+        if let existing = entries[handle], existing.verified == verified,
+           existing.expiresAt > date.addingTimeInterval(3 * 3600) { return }
+        var updated = entries
+        updated[handle] = Entry(verified: verified, expiresAt: date.addingTimeInterval(6 * 3600))
+        save(updated)
+    }
+
+    private func normalized(_ handle: String?) -> String? {
+        guard let value = handle?.trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t")).lowercased(), !value.isEmpty else { return nil }
+        return value
+    }
+
+    private func save(_ updated: [String: Entry]) {
+        guard updated != entries else { return }
+        let active = updated.filter { $0.value.expiresAt > now() }
+        entries = Dictionary(uniqueKeysWithValues: active.sorted { $0.value.expiresAt > $1.value.expiresAt }.prefix(400).map { ($0.key, $0.value) })
+        if let data = try? JSONEncoder().encode(entries) { defaults.set(data, forKey: key) }
+    }
+}
+
 struct DetailSheetCloseButton: View {
     let action: () -> Void
     var accessibilityLabel = "关闭详情"
@@ -862,6 +921,7 @@ struct AvatarView: View {
                 targetSize: CGSize(width: size, height: size),
                 prefersCompactXAvatar: true
             )
+            guard !Task.isCancelled else { return }
             if rejectsUpscaledImages,
                let cgImage = loaded?.cgImage,
                min(cgImage.width, cgImage.height) < Int(size * UIScreen.main.scale * 0.9) {
@@ -913,6 +973,7 @@ struct RemoteImage: View {
                     height: targetHeight
                 )
             )
+            guard !Task.isCancelled else { return }
             image = loadedImage
             if let loadedImage { onImageLoaded?(loadedImage) }
             finished = true
@@ -1135,8 +1196,12 @@ actor ImageLoader {
     private let cache = NSCache<NSString, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
     private var downloads: [URL: Download] = [:]
+    private var imageTasks: [String: Task<UIImage?, Never>] = [:]
 
-    private init() {
+    private let imageDataLoader: @Sendable (URL) async -> Data?
+
+    init(imageDataLoader: (@Sendable (URL) async -> Data?)? = nil) {
+        self.imageDataLoader = imageDataLoader ?? { await Self.download($0) }
         cache.totalCostLimit = 96 * 1024 * 1024
         cache.countLimit = 240
         dataCache.totalCostLimit = 48 * 1024 * 1024
@@ -1265,11 +1330,29 @@ actor ImageLoader {
         return components?.url ?? url
     }
 
-    private func image(for url: URL, targetSize: CGSize?, scale: CGFloat) async -> UIImage? {
-        let pixelLimit = targetSize.map { max($0.width, $0.height) * scale }
-        let cacheKey = NSString(string: "\(url.absoluteString)|\(Int(pixelLimit ?? 0))")
+    func image(for url: URL, targetSize: CGSize?, scale: CGFloat) async -> UIImage? {
+        let pixelLimit = Self.cachePixelLimit(targetSize: targetSize, scale: scale)
+        let key = "\(url.absoluteString)|\(Int(pixelLimit ?? 0))"
+        let cacheKey = key as NSString
         if let cached = cache.object(forKey: cacheKey) { return cached }
+        if let existing = imageTasks[key] { return await existing.value }
 
+        let task = Task { await self.loadImage(for: url, pixelLimit: pixelLimit, scale: scale, cacheKey: cacheKey) }
+        imageTasks[key] = task
+        let image = await task.value
+        imageTasks[key] = nil
+        return image
+    }
+
+    // Small layout differences should reuse the same decoded thumbnail.
+    static func cachePixelLimit(targetSize: CGSize?, scale: CGFloat) -> CGFloat? {
+        guard let targetSize else { return nil }
+        let pixels = max(targetSize.width, targetSize.height) * scale
+        guard pixels.isFinite, pixels > 0 else { return nil }
+        return ceil(pixels / 128) * 128
+    }
+
+    private func loadImage(for url: URL, pixelLimit: CGFloat?, scale: CGFloat, cacheKey: NSString) async -> UIImage? {
         let data: Data?
         var downloadedData = false
         var loadedFromDisk = false
@@ -1284,7 +1367,7 @@ actor ImageLoader {
             if let existing = downloads[url] {
                 download = existing
             } else {
-                let created = Download(id: UUID(), task: Task { await Self.download(url) })
+                let created = Download(id: UUID(), task: Task { await imageDataLoader(url) })
                 downloads[url] = created
                 download = created
             }
@@ -1306,7 +1389,7 @@ actor ImageLoader {
             if loadedFromDisk {
                 dataCache.removeObject(forKey: url as NSURL)
                 await ImageDiskCache.shared.removeData(for: url)
-                return await image(for: url, targetSize: targetSize, scale: scale)
+                return await loadImage(for: url, pixelLimit: pixelLimit, scale: scale, cacheKey: cacheKey)
             }
             return nil
         }
@@ -1453,10 +1536,16 @@ actor ImageDiskCache {
         guard totalBytes > maxBytes || entries.count > maxFileCount else { return }
 
         entries.sort { $0.date < $1.date }
-        while (totalBytes > maxBytes || entries.count > maxFileCount), !entries.isEmpty {
-            let oldest = entries.removeFirst()
-            try? FileManager.default.removeItem(at: oldest.url)
-            totalBytes -= oldest.size
+        var remainingCount = entries.count
+        for oldest in entries {
+            guard totalBytes > maxBytes || remainingCount > maxFileCount else { break }
+            do {
+                try FileManager.default.removeItem(at: oldest.url)
+                totalBytes -= oldest.size
+                remainingCount -= 1
+            } catch {
+                continue
+            }
         }
     }
 
@@ -1730,8 +1819,35 @@ struct ImageGallerySelection: Identifiable {
     let initialIndex: Int
 }
 
+enum XTimelineTextLayout {
+    private static let cache: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 400
+        return cache
+    }()
+
+    static func needsExpansion(_ text: String, width: CGFloat) -> Bool {
+        let width = max(1, width)
+        let key = "\(width)|\(text)" as NSString
+        if let cached = cache.object(forKey: key) { return cached.boolValue }
+        let font = UIFont.systemFont(ofSize: 15)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        let height = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font, .paragraphStyle: paragraph],
+            context: nil
+        ).height
+        let expanded = height > font.lineHeight * 9 + 2 * 8 + 0.5
+        cache.setObject(NSNumber(value: expanded), forKey: key)
+        return expanded
+    }
+}
+
 struct XFeedMediaView: View {
     let post: Post
+    var onOpenQuote: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1758,12 +1874,14 @@ struct XFeedMediaView: View {
 
             if let quote = post.xQuotedPost {
                 XFeedQuotedPostCard(quote: quote, availableWidth: availableWidth)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpenQuote?() }
             }
         }
     }
 
     private var availableWidth: CGFloat {
-        max(UIScreen.main.bounds.width - 78, 240)
+        max(UIScreen.main.bounds.width - 78, 1)
     }
 
     private var videoHeight: CGFloat {
@@ -1778,10 +1896,30 @@ struct XFeedMediaView: View {
     }
 }
 
+/// Shared reading typography for quoted and replied-to posts in the detail sheet.
+struct XDetailContextText: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(XPostTextFormatter.paragraphs(text).enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+                    .font(.system(size: 16))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .foregroundStyle(.primary)
+        .multilineTextAlignment(.leading)
+    }
+}
+
 struct XFeedQuotedPostCard: View {
     let quote: XQuotedPost
     let availableWidth: CGFloat
     var enablesTextSelection = false
+    var isDetail = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1816,7 +1954,7 @@ struct XFeedQuotedPostCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
@@ -1825,7 +1963,10 @@ struct XFeedQuotedPostCard: View {
 
     @ViewBuilder
     private func quotedText(_ text: String) -> some View {
-        if enablesTextSelection {
+        if isDetail {
+            XDetailContextText(text: text)
+                .textSelection(.enabled)
+        } else if enablesTextSelection {
             Text(text)
                 .font(.system(size: 15))
                 .lineSpacing(3)
@@ -1834,7 +1975,8 @@ struct XFeedQuotedPostCard: View {
         } else {
             Text(text)
                 .font(.system(size: 15))
-                .lineSpacing(3)
+                .lineSpacing(2)
+                .lineLimit(6)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1871,7 +2013,7 @@ struct XFeedQuotedPostCard: View {
               let mediaHeight = media.height,
               mediaWidth > 0,
               mediaHeight > 0 else { return 190 }
-        return min(availableWidth * CGFloat(mediaHeight) / CGFloat(mediaWidth), 460)
+        return min(max(1, availableWidth - 24) * CGFloat(mediaHeight) / CGFloat(mediaWidth), 460)
     }
 }
 
@@ -2605,22 +2747,42 @@ private struct XPlayerLayerView: UIViewRepresentable {
 struct FeedEngagementRow: View {
     let post: Post
     var showsOnlyLikeAndBookmark = false
+    var showsDetailActions = false
+    var showsTimelineActions = false
     @Environment(\.colorScheme) private var colorScheme
     @State private var isBookmarking = false
     @State private var isBookmarked = false
     @State private var bookmarkError: String?
 
-    init(post: Post, showsOnlyLikeAndBookmark: Bool = false) {
+    init(post: Post, showsOnlyLikeAndBookmark: Bool = false, showsDetailActions: Bool = false, showsTimelineActions: Bool = false) {
         self.post = post
         self.showsOnlyLikeAndBookmark = showsOnlyLikeAndBookmark
+        self.showsDetailActions = showsDetailActions
+        self.showsTimelineActions = showsTimelineActions
         _isBookmarked = State(initialValue: post.xTweetID.map(XBookmarkStore.contains) ?? false)
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: showsTimelineActions ? 4 : 12) {
+            if showsDetailActions || showsTimelineActions {
+                metric("bubble", post.meta?.metrics?.replies, label: "回复")
+                Spacer(minLength: 0)
+                metric("arrow.2.squarepath", post.meta?.metrics?.retweets, label: "转帖")
+            }
             Spacer(minLength: 0)
             metric("heart", post.meta?.metrics?.likes, label: "喜欢")
+            if showsDetailActions || showsTimelineActions { Spacer(minLength: 0) }
             bookmarkButton
+            if showsDetailActions || showsTimelineActions, let link = post.linkURL {
+                Spacer(minLength: 0)
+                ShareLink(item: link) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: showsTimelineActions ? 14 : 17))
+                        .frame(width: showsTimelineActions ? 24 : 36, height: showsTimelineActions ? 32 : 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("分享帖子")
+            }
         }
         .foregroundStyle(xToolbarColor)
         .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)

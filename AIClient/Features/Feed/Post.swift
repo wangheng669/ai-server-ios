@@ -328,6 +328,40 @@ struct XTweetDetailItem: Decodable, Equatable {
 }
 
 enum XPostTextFormatter {
+    private static let simplifiedTextCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 400
+        cache.totalCostLimit = 4 * 1024 * 1024
+        return cache
+    }()
+    private static let protectedTextPattern = try! NSRegularExpression(pattern: #"https?://[^\s]+|@[A-Za-z0-9_]+"#)
+
+    static func simplifiedChinese(_ value: String) -> String {
+        let key = value as NSString
+        if let cached = simplifiedTextCache.object(forKey: key) { return cached as String }
+        // Convert display text only; URL paths and account identifiers must remain exact.
+        var result = ""
+        var offset = 0
+        let matches = protectedTextPattern.matches(in: value, range: NSRange(location: 0, length: key.length))
+        for match in matches {
+            let plain = key.substring(with: NSRange(location: offset, length: match.range.location - offset))
+            result += plain.applyingTransform(StringTransform("Traditional-Simplified"), reverse: false) ?? plain
+            result += key.substring(with: match.range)
+            offset = NSMaxRange(match.range)
+        }
+        let tail = key.substring(from: offset)
+        result += tail.applyingTransform(StringTransform("Traditional-Simplified"), reverse: false) ?? tail
+        simplifiedTextCache.setObject(result as NSString, forKey: key, cost: value.utf8.count + result.utf8.count)
+        return result
+    }
+
+    static func timelineText(_ value: String) -> String {
+        simplifiedChinese(value)
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func commentText(_ text: String, replyingTo screenName: String?) -> String {
         guard let screenName = screenName?
             .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
@@ -359,7 +393,7 @@ enum XPostTextFormatter {
     }
 
     static func detailText(_ value: String) -> String {
-        value
+        simplifiedChinese(value)
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .replacingOccurrences(
@@ -737,10 +771,10 @@ struct Post: Codable, Identifiable, Hashable {
 
     var needsXQuotedTranslation: Bool {
         guard sourceName == "X",
-              let quote = meta?.quotedTweet,
+              let quote = xQuotedPost,
               xNonempty(quote.id) != nil,
               let original = quote.originalText,
-              xNonempty(quote.textZH) == nil else { return false }
+              (quote.textZH.map(Self.containsHanCharacters) != true) else { return false }
         return !Self.containsHanCharacters(original)
     }
 
@@ -760,6 +794,23 @@ struct Post: Codable, Identifiable, Hashable {
         )
         replaced.xReposterName = xReposterName
         return replaced
+    }
+
+    static func xContextPost(
+        tweetID: String?, text: String?, textZH: String?,
+        authorName: String?, screenName: String?, avatarURL: String?
+    ) -> Post? {
+        guard let tweetID = tweetID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !tweetID.isEmpty, tweetID.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let id = Int(tweetID) else { return nil }
+        return Post(
+            id: id, title: nil, text: nil, summary: nil, content: text,
+            contentZH: textZH, source: "x", formattedTime: nil,
+            weightReason: nil, finalScore: nil, weight: nil,
+            postLink: "https://x.com/i/status/\(tweetID)", articlePostAt: nil,
+            user: PostUser(userName: authorName, userScreenName: screenName, avatarURL: avatarURL, userDesc: nil),
+            postTags: nil, images: nil, videos: nil, feedRank: nil, meta: nil
+        )
     }
 
     func replacingXLiveDetail(with detail: XTweetDetailItem) -> Post {
@@ -1995,7 +2046,7 @@ struct XReplyContext: Codable, Hashable {
         case textZH = "text_zh"
     }
 
-    var displayText: String? { xNonempty(textZH) ?? xNonempty(text) }
+    var displayText: String? { (xNonempty(textZH) ?? xNonempty(text)).map(XPostTextFormatter.simplifiedChinese) }
     var handle: String? {
         guard let screenName = xNonempty(screenName) else { return nil }
         return screenName.hasPrefix("@") ? screenName : "@\(screenName)"
@@ -2016,7 +2067,7 @@ struct XQuotedPost: Codable, Hashable {
         case createdAt
     }
 
-    var displayText: String? { xNonempty(textZH) ?? xNonempty(text) }
+    var displayText: String? { (xNonempty(textZH) ?? xNonempty(text)).map(XPostTextFormatter.simplifiedChinese) }
     var originalText: String? { xNonempty(text) }
 }
 

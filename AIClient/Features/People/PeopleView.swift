@@ -4659,6 +4659,8 @@ private struct PersonPostTimelineRow: View {
 struct XReplyContextCard: View {
     let reply: XReplyContext
     let text: String
+    var isDetail = false
+    var isTimeline = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -4674,27 +4676,45 @@ struct XReplyContextCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         if let name = reply.authorName, !name.isEmpty {
-                            Text(name).font(.system(size: 13, weight: .semibold))
+                            Text(name).font(.system(size: isDetail ? 15 : 13, weight: .semibold))
                         }
                         if let handle = reply.handle {
-                            Text(handle).font(.system(size: 12)).foregroundStyle(.secondary)
+                            Text(handle).font(.system(size: isDetail ? 14 : 12)).foregroundStyle(.secondary)
                         }
                     }
-                    Text(text)
-                        .font(.system(size: 14))
-                        .lineSpacing(3)
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !isDetail && !isTimeline {
+                        replyText
+                    }
                 }
+            }
+            if isTimeline {
+                Text(text)
+                    .font(.system(size: 15))
+                    .lineSpacing(2)
+                    .lineLimit(6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if isDetail {
+                XDetailContextText(text: text)
+                    .textSelection(.enabled)
             }
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background((isDetail || isTimeline) ? Color(uiColor: .systemBackground) : Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
         }
+    }
+    private var replyText: some View {
+        Text(text)
+            .font(isDetail ? .body : .system(size: 14))
+            .lineSpacing(isDetail ? 5 : 3)
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -119,9 +119,67 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
 }
 
 struct PersonPushNavigationRequest: Equatable {
+    let id = UUID()
     let kind: String
     let contentID: String
     let personID: String
+}
+
+@MainActor
+enum NotificationPresentationDismissal {
+    private static var dismissal: Task<Void, Never>?
+
+    static func dismissPresentedContent(from root: UIViewController) async {
+        if let dismissal {
+            await dismissal.value
+            return
+        }
+        let task = Task { await dismissStack(from: root) }
+        dismissal = task
+        await task.value
+        dismissal = nil
+    }
+
+    private static func dismissStack(from root: UIViewController) async {
+        // A notification can arrive while a sheet is still animating.
+        while let presented = root.presentedViewController {
+            var top = presented
+            while let child = top.presentedViewController { top = child }
+            if let transition = top.transitionCoordinator {
+                await withCheckedContinuation { continuation in
+                    let registered = transition.animate(alongsideTransition: nil) { _ in
+                        continuation.resume()
+                    }
+                    if !registered { continuation.resume() }
+                }
+            }
+            guard root.presentedViewController != nil else { break }
+            await withCheckedContinuation { continuation in
+                root.dismiss(animated: true) { continuation.resume() }
+            }
+        }
+    }
+}
+
+private struct NotificationPresentationAnchor: UIViewRepresentable {
+    let resolve: (UIView) -> Void
+
+    final class AnchorView: UIView {
+        var resolve: ((UIView) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { resolve?(self) }
+        }
+    }
+
+    func makeUIView(context: Context) -> AnchorView {
+        let view = AnchorView(frame: .zero)
+        view.resolve = resolve
+        return view
+    }
+
+    func updateUIView(_ uiView: AnchorView, context: Context) {}
 }
 
 @MainActor
@@ -237,6 +295,7 @@ private struct EditorialRootView: View {
     @State private var notificationPostID: Int?
     @State private var notificationPersonID: String?
     @State private var notificationVideoID: Int64?
+    @State private var notificationPresentationAnchor: UIView?
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var lastResearchTab: EditorialTab = .investment
     @State private var presentedExternalLink: InAppBrowserDestination? = {
@@ -355,6 +414,12 @@ private struct EditorialRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .background {
+            NotificationPresentationAnchor { view in
+                notificationPresentationAnchor = view
+            }
+            .frame(width: 0, height: 0)
+        }
         .environment(\.rootBottomChromeHeight, rootBottomChromeHeight)
         .environment(\.openURL, OpenURLAction { url in
             guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
@@ -448,8 +513,18 @@ private struct EditorialRootView: View {
         .task {
             await marketSentimentStore.preload(marketStore: marketStore)
         }
-        .onChange(of: personPushNavigation.request, initial: true) { _, request in
-            guard let request else { return }
+        .task(id: NotificationNavigationTaskID(
+            requestID: personPushNavigation.request?.id,
+            isActive: scenePhase == .active,
+            anchorReady: notificationPresentationAnchor != nil
+        )) {
+            guard scenePhase == .active,
+                  let request = personPushNavigation.request,
+                  let root = notificationPresentationAnchor?.window?.rootViewController else { return }
+            await NotificationPresentationDismissal.dismissPresentedContent(from: root)
+            guard !Task.isCancelled, personPushNavigation.request?.id == request.id else { return }
+            presentedExternalLink = nil
+            showsSignalFilters = false
             switch request.kind {
             case "post":
                 selectedTab = .observation
@@ -494,6 +569,12 @@ private struct EditorialRootView: View {
                 value: selectedTab
             )
     }
+}
+
+private struct NotificationNavigationTaskID: Equatable {
+    let requestID: UUID?
+    let isActive: Bool
+    let anchorReady: Bool
 }
 
 private struct RootNavigationBar: View {
@@ -750,13 +831,9 @@ private struct TodayWorldPostBatchResponse: Decodable {
     let posts: [Post]
 }
 
-enum TodayWorldNestedSheetPresentationPolicy {
-    static let contentInteraction = PresentationContentInteraction.resizes
-}
-
 enum TodayWorldPostLoadingPolicy {
-    static func shouldLoad(isPostsSheetPresented: Bool, postsAreEmpty: Bool) -> Bool {
-        isPostsSheetPresented && postsAreEmpty
+    static func shouldLoad(isPostsPagePresented: Bool, postsAreEmpty: Bool) -> Bool {
+        isPostsPagePresented && postsAreEmpty
     }
 }
 
@@ -918,42 +995,43 @@ private struct TodayWorldView: View {
     ) -> some View {
         let section = final.sections.first { $0.id == selectedSectionKey } ?? final.sections[0]
         return NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    sectionSelector(final.sections, selectedID: section.id)
+            VStack(spacing: 0) {
+                sectionSelector(final.sections, selectedID: section.id)
+                    .padding(.top, 16)
+                Divider()
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(section.groups) { group in
+                            if section.groups.count > 1 || section.sectionKey == "investment" {
+                                Text(group.groupName)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 18)
+                                    .padding(.top, 14)
+                                    .padding(.bottom, 4)
+                            }
+                            ForEach(Array(group.systems.enumerated()), id: \.element.id) { index, system in
+                                if index > 0 { Divider().padding(.leading, 18) }
+                                systemRow(system)
+                            }
+                        }
 
-                    ForEach(section.groups) { group in
-                        if section.groups.count > 1 || section.sectionKey == "investment" {
-                            Text(group.groupName)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 18)
-                                .padding(.top, 14)
-                                .padding(.bottom, 4)
-                        }
-                        ForEach(Array(group.systems.enumerated()), id: \.element.id) { index, system in
-                            if index > 0 { Divider().padding(.leading, 18) }
-                            systemRow(system)
-                        }
+                        Color.clear.frame(height: 24)
                     }
-
-                    Color.clear.frame(height: 24)
+                    .padding(.top, 12)
                 }
-                .padding(.top, 12)
+                .id(section.id)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
-            .navigationTitle("昨日明细")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { showsReportDetails = false }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: Binding(
+                get: { selectedSystem != nil },
+                set: { if !$0 { selectedSystem = nil } }
+            )) {
+                if let system = selectedSystem {
+                    TodayWorldReportSourcesView(system: system, reportDate: reportDate)
                 }
             }
-        }
-        .sheet(item: $selectedSystem) { system in
-            TodayWorldReportSourcesSheet(system: system, reportDate: reportDate)
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
         }
     }
 
@@ -1056,6 +1134,7 @@ private struct TodayWorldView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("查看引用动态和原文")
+        .accessibilityIdentifier("yesterday-system-row")
     }
 
     private func signalLabel(_ level: String) -> String {
@@ -1154,8 +1233,7 @@ private func todayWorldSourceAvatarURL(_ key: String) -> URL? {
     return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)?v=2")
 }
 
-private struct TodayWorldReportSourcesSheet: View {
-    @Environment(\.dismiss) private var dismiss
+private struct TodayWorldReportSourcesView: View {
     let system: TodayWorldFinalReportSystem
     let reportDate: String
 
@@ -1173,15 +1251,13 @@ private struct TodayWorldReportSourcesSheet: View {
             summaryPage
         }
         .background(Color(uiColor: .systemBackground))
-        .sheet(isPresented: $isShowingPosts) {
-            postsSheet
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
-                .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
+        .toolbar(.visible, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $isShowingPosts) {
+            postsPageContent
                 .task(id: system.id) {
                     guard TodayWorldPostLoadingPolicy.shouldLoad(
-                        isPostsSheetPresented: isShowingPosts,
+                        isPostsPagePresented: isShowingPosts,
                         postsAreEmpty: posts.isEmpty
                     ) else { return }
                     await load()
@@ -1211,15 +1287,6 @@ private struct TodayWorldReportSourcesSheet: View {
 
             Spacer(minLength: 8)
 
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 38, height: 38)
-                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭")
         }
         .padding(.horizontal, 20)
         .padding(.top, 14)
@@ -1354,7 +1421,7 @@ private struct TodayWorldReportSourcesSheet: View {
         .overlay(alignment: .top) { Divider() }
     }
 
-    private var postsSheet: some View {
+    private var postsPageContent: some View {
         VStack(spacing: 0) {
             postsHeader
 
@@ -1378,12 +1445,14 @@ private struct TodayWorldReportSourcesSheet: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
-        .sheet(item: $selectedPost) { post in
-            TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
-                .presentationContentInteraction(TodayWorldNestedSheetPresentationPolicy.contentInteraction)
+        .toolbar(.visible, for: .navigationBar)
+        .navigationDestination(isPresented: Binding(
+            get: { selectedPost != nil },
+            set: { if !$0 { selectedPost = nil } }
+        )) {
+            if let post = selectedPost {
+                TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
+            }
         }
     }
 
@@ -1400,15 +1469,6 @@ private struct TodayWorldReportSourcesSheet: View {
 
             Spacer()
 
-            Button { isShowingPosts = false } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 38, height: 38)
-                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭动态")
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
@@ -1495,6 +1555,7 @@ private struct TodayWorldReportSourcesSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityHint("打开动态详情")
+        .accessibilityIdentifier("yesterday-post-row")
     }
 
     private func displayedContent(for post: Post) -> String? {
@@ -1737,25 +1798,22 @@ private struct TodayWorldPostDetailCarousel: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                if posts.count > 1 {
-                    navigationStrip
-                }
-
-                TabView(selection: $selectedPostID) {
-                    ForEach(posts) { post in
-                        PostDetailView(post: post, presentedAsSheet: true)
-                            .tag(post.id)
-                            .id(post.id)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: posts.count > 1 ? .automatic : .never))
+        VStack(spacing: 0) {
+            if posts.count > 1 {
+                navigationStrip
             }
-            .background(Color(uiColor: .systemBackground))
-            .navigationTitle("动态详情")
-            .navigationBarTitleDisplayMode(.inline)
+
+            TabView(selection: $selectedPostID) {
+                ForEach(posts) { post in
+                    PostDetailView(post: post)
+                        .tag(post.id)
+                        .id(post.id)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: posts.count > 1 ? .automatic : .never))
         }
+        .background(Color(uiColor: .systemBackground))
+        .navigationBarTitleDisplayMode(.inline)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("动态详情，第\(selectedIndex + 1)条，共\(posts.count)条")
         .accessibilityHint(posts.count > 1 ? "左右滑动切换动态" : "")

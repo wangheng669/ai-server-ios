@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E90000000000000000000001 /* NotificationPresentationDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* NotificationPresentationDismissalTests.swift */; };
+		B23D04D5AA0940CD901A8871 /* RetailSentimentRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB43659990474DFA932089A0 /* RetailSentimentRefreshTests.swift */; };
 		D30000000000000000000001 /* KnowledgeCityFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */; };
 		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
 		C17A00000000000000000004 /* CityNewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000005 /* CityNewsTests.swift */; };
@@ -119,6 +121,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		E90000000000000000000002 /* NotificationPresentationDismissalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPresentationDismissalTests.swift; sourceTree = "<group>"; };
+		AB43659990474DFA932089A0 /* RetailSentimentRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetailSentimentRefreshTests.swift; sourceTree = "<group>"; };
 		D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeCityFlowUITests.swift; sourceTree = "<group>"; };
 		D30000000000000000000003 /* AIClientUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AIClientUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
@@ -217,6 +221,8 @@
 				2E41B4D8C7F35A209B6E1D53 /* IdeologyCampTests.swift */,
 				3AFA9759085824610FC53E65 /* LearningServiceTests.swift */,
 				07AB1EAB21326C8E0E5C12EB /* MarketPresentationTests.swift */,
+				E90000000000000000000002 /* NotificationPresentationDismissalTests.swift */,
+				AB43659990474DFA932089A0 /* RetailSentimentRefreshTests.swift */,
 				5B1C505AD81867D98A0E00A9 /* PostDecodingTests.swift */,
 				3A2E35CDC5709772446DE280 /* ServerAddressValidatorTests.swift */,
 				D0B100000000000000000004 /* WeiboEmbeddedPagePolicyTests.swift */,
@@ -612,6 +618,8 @@
 				1D30A3C7B6E2491F8A5D0C42 /* IdeologyCampTests.swift in Sources */,
 				7C42227FAAD006BD492F3F7E /* LearningServiceTests.swift in Sources */,
 				F55F498E463A853C948EB388 /* MarketPresentationTests.swift in Sources */,
+				E90000000000000000000001 /* NotificationPresentationDismissalTests.swift in Sources */,
+				B23D04D5AA0940CD901A8871 /* RetailSentimentRefreshTests.swift in Sources */,
 				D146819617D52DA2230A9506 /* PostDecodingTests.swift in Sources */,
 				26D2AAFFCB9B9B48EE1CD558 /* ServerAddressValidatorTests.swift in Sources */,
 				D0B100000000000000000002 /* WeiboEmbeddedPagePolicyTests.swift in Sources */,

@@ -383,14 +383,15 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 
     var marketDisplayPercentValue: Double {
         guard hasActiveExtendedSessionQuote else { return percentValue }
-        if let sessionChangePercent { return sessionChangePercent }
-        guard let previousClose, previousClose > 0 else { return percentValue }
-        return (marketDisplayPrice - previousClose) / previousClose * 100
+        guard price.isFinite, price > 0 else { return percentValue }
+        return (marketDisplayPrice - price) / price * 100
     }
 
     var marketDisplayChangeValue: Double {
-        guard let previousClose else { return changeValue }
-        return marketDisplayPrice - previousClose
+        // Extended quotes are separate from the latest regular-session close.
+        // previousClose belongs to that regular session, not the new night session.
+        if hasActiveExtendedSessionQuote { return marketDisplayPrice - price }
+        return changeValue
     }
 
     var marketDisplayFormattedPercent: String {
@@ -400,7 +401,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     }
 
     var formattedSessionPercent: String? {
-        sessionChangePercent.map { String(format: "%@%.2f%%", $0 >= 0 ? "+" : "−", abs($0)) }
+        hasActiveExtendedSessionQuote ? marketDisplayFormattedPercent : nil
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1305,7 +1306,7 @@ func marketChartArtifacts(for chart: MarketChart) async throws -> MarketChartArt
     )
 }
 
-func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 60) -> [Double] {
+func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 120) -> [Double] {
     marketSampledChartTrend(
         displayPoints: marketChartDisplayPoints(points).sorted { $0.timestamp < $1.timestamp },
         limit: limit
@@ -1316,7 +1317,7 @@ func marketPreferredLeadChartTrend(chartValues: [Double], fallbackValues: [Doubl
     chartValues.count >= 2 ? chartValues : fallbackValues
 }
 
-private func marketSampledChartTrend(displayPoints: [MarketChartPoint], limit: Int = 60) -> [Double] {
+private func marketSampledChartTrend(displayPoints: [MarketChartPoint], limit: Int = 120) -> [Double] {
     let values = displayPoints
         .compactMap(\.displayValue)
         .filter { $0.isFinite && $0 > 0 }

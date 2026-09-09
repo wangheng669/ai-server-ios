@@ -56,7 +56,9 @@ private struct XBrandLogoShape: Shape {
 }
 
 struct PostDetailView: View {
+    @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
     private let presentedAsSheet: Bool
+    private let loadsStoredDetail: Bool
     private let shouldRefreshNewYorkTimesArticle: Bool
     private let rssAvatarURL: URL?
     @State private var post: Post
@@ -104,6 +106,8 @@ struct PostDetailView: View {
     @State private var weiboCommentCount: Int?
     @State private var isLoadingWeiboComments = false
     @State private var weiboCommentsError: String?
+    @State private var selectedXAuthor: XAuthorDestination?
+    @State private var selectedXContextPost: Post?
     @State private var xLiveDetail: XTweetDetailItem?
     @State private var xLiveTranslationText: String?
     @State private var xLiveReplyContext: XReplyContext?
@@ -123,9 +127,11 @@ struct PostDetailView: View {
         post: Post,
         preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil,
         rssAvatarURL: URL? = nil,
-        presentedAsSheet: Bool = false
+        presentedAsSheet: Bool = false,
+        loadsStoredDetail: Bool = true
     ) {
         self.presentedAsSheet = presentedAsSheet
+        self.loadsStoredDetail = loadsStoredDetail
         self.rssAvatarURL = rssAvatarURL
         self.shouldRefreshNewYorkTimesArticle = post.isNewYorkTimes && preloadedNewYorkTimesArticle == nil
         let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
@@ -185,6 +191,12 @@ struct PostDetailView: View {
                     .padding(.bottom, sheetCloseBottomPadding)
             }
         }
+        .navigationDestination(item: $selectedXAuthor) { author in
+            XAuthorPostsView(author: author)
+        }
+        .navigationDestination(item: $selectedXContextPost) { contextPost in
+            PostDetailView(post: contextPost, loadsStoredDetail: false)
+        }
         .navigationTitle(presentedAsSheet ? "" : navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(hidesNavigationBar ? .hidden : .visible, for: .navigationBar)
@@ -239,6 +251,9 @@ struct PostDetailView: View {
                 await loadBilibiliSubtitles()
                 await loadBilibiliSummary()
             }
+        }
+        .task(id: "\(post.xQuotedPost?.id ?? "")-\(post.needsXQuotedTranslation)") {
+            await translateQuotedPostIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
             if notification.object as? AVPlayerItem === speechPlayer?.currentItem {
@@ -2168,6 +2183,32 @@ struct PostDetailView: View {
         .foregroundStyle(.secondary)
     }
 
+    private func translateQuotedPostIfNeeded() async {
+        guard post.needsXQuotedTranslation,
+              let quote = post.xQuotedPost,
+              let tweetID = quote.id,
+              let text = quote.originalText else { return }
+        do {
+            let client = APIClient(baseURL: ServerConfiguration.currentURL)
+            var translation: String
+            do {
+                translation = try await client.fetchXTranslation(tweetID: tweetID).text
+            } catch is CancellationError {
+                return
+            } catch {
+                translation = try await PersonArticleTranslationService.shared.translate(text)
+            }
+            if !translation.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) {
+                translation = try await PersonArticleTranslationService.shared.translate(text)
+            }
+            guard !Task.isCancelled,
+                  translation.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) else { return }
+            post = post.replacingXQuotedTranslation(with: translation)
+        } catch {
+            // Preserve the source text when translation is temporarily unavailable.
+        }
+    }
+
     private var xDetail: some View {
         VStack(spacing: 0) {
             if !presentedAsSheet {
@@ -2176,13 +2217,16 @@ struct PostDetailView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if presentedAsSheet {
+                        xNavigationBar
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         xAuthorHeader
                         Group {
                             if isLoadingXFullText {
                                 xFullTextLoadingPlaceholder
                             } else {
-                                VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 16) {
                                     ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
                                         Text(xStyledParagraph(paragraph))
                                             .font(.system(size: 17, weight: .regular))
@@ -2194,12 +2238,23 @@ struct PostDetailView: View {
                                 .textSelection(.enabled)
                             }
                         }
-                        .padding(.top, 24)
+                        .padding(.top, 20)
 
                         if let reply = xResolvedReplyContext,
                            let replyText = reply.displayText {
-                            XReplyContextCard(reply: reply, text: replyText)
+                            XReplyContextCard(reply: reply, text: replyText, isDetail: true)
                                 .padding(.top, 14)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedXContextPost = Post.xContextPost(
+                                        tweetID: reply.id ?? post.meta?.inReplyToStatusID,
+                                        text: reply.text, textZH: reply.textZH,
+                                        authorName: reply.authorName, screenName: reply.screenName,
+                                        avatarURL: reply.avatarURL
+                                    )
+                                }
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityHint("打开被回复的原帖")
                         } else if isLoadingXReplyContext {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
@@ -2218,10 +2273,21 @@ struct PostDetailView: View {
                         if let quote = post.xQuotedPost {
                             XFeedQuotedPostCard(
                                 quote: quote,
-                                availableWidth: UIScreen.main.bounds.width - 42,
-                                enablesTextSelection: true
+                                availableWidth: UIScreen.main.bounds.width - 20,
+                                enablesTextSelection: true,
+                                isDetail: true
                             )
                                 .padding(.top, 16)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedXContextPost = Post.xContextPost(
+                                        tweetID: quote.id, text: quote.text, textZH: quote.textZH,
+                                        authorName: quote.author?.name, screenName: quote.author?.screenName,
+                                        avatarURL: quote.author?.profileImageURL
+                                    )
+                                }
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityHint("打开引用的原帖")
                         }
 
                         if let link = post.externalURL,
@@ -2255,49 +2321,66 @@ struct PostDetailView: View {
                         .foregroundStyle(.secondary)
                         .padding(.top, 18)
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 10)
                     .padding(.top, 14)
                     .padding(.bottom, 12)
 
                     Divider()
                     FeedEngagementRow(
                         post: xLiveDetail.map { post.replacingXLiveDetail(with: $0) } ?? post,
-                        showsOnlyLikeAndBookmark: true
+                        showsOnlyLikeAndBookmark: true,
+                        showsDetailActions: true
                     )
                         .padding(.horizontal, 15)
                         .frame(height: 44)
                     Divider()
 
+                    HStack {
+                        Text("回复").font(.system(size: 17, weight: .bold))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 18)
+                    .padding(.bottom, 8)
+
                     xCommentsSection
                 }
+                .padding(.bottom, presentedAsSheet ? 76 : 16)
             }
+            // Keep scrolled content inside the viewport, below the status bar.
+            .clipped()
         }
+        .background(Color(uiColor: .systemBackground))
     }
 
     private var xNavigationBar: some View {
-        HStack {
+        HStack(spacing: 0) {
             Button { dismiss() } label: {
-                Image(systemName: presentedAsSheet ? "xmark" : "arrow.left")
-                    .font(.system(size: 18, weight: .medium))
-                    .frame(width: 40, height: 48)
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 19, weight: .medium))
+                    .frame(width: 44, height: 44)
             }
-            .accessibilityLabel(dismissAccessibilityLabel)
-            .opacity(presentedAsSheet ? 0 : 1)
-            .disabled(presentedAsSheet)
-            .accessibilityHidden(presentedAsSheet)
-
+            .accessibilityLabel("返回")
             Spacer()
             Text("帖子")
-                .font(.system(size: 17, weight: .bold))
+                .font(.system(size: 18, weight: .bold))
             Spacer()
-
-            Color.clear
-                .frame(width: 40, height: 48)
-                .accessibilityHidden(true)
+            Menu {
+                Button("在 X 中查看", action: openXOriginal)
+                if let link = post.linkURL {
+                    ShareLink(item: link) { Label("分享帖子", systemImage: "square.and.arrow.up") }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 19, weight: .medium))
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("帖子选项")
         }
+        .buttonStyle(.plain)
         .foregroundStyle(.primary)
-        .padding(.horizontal, 8)
-        .frame(height: 50)
+        .padding(.horizontal, 2)
+        .frame(height: 48)
         .background(Color(uiColor: .systemBackground))
     }
 
@@ -2331,11 +2414,11 @@ struct PostDetailView: View {
     }
 
     private var xAuthorHeader: some View {
-        HStack(spacing: 9) {
-            AvatarView(url: xDetailAuthorAvatarURL, name: xDetailAuthorName, size: 40)
+        HStack(spacing: 10) {
+            AvatarView(url: xDetailAuthorAvatarURL, name: xDetailAuthorName, size: 44)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(xDetailAuthorName).font(.system(size: 15, weight: .bold)).lineLimit(1)
+                    Text(xDetailAuthorName).font(.system(size: 16, weight: .bold)).lineLimit(1)
                     if xDetailAuthorIsVerified {
                         Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.blue)
                     }
@@ -2345,14 +2428,18 @@ struct PostDetailView: View {
                 }
             }
             Spacer()
-            Button { openXOriginal() } label: {
-                XBrandMark()
-                    .frame(width: 22, height: 22)
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("在 X App 中打开")
+
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard let handle = xDetailAuthorHandle else { return }
+            selectedXAuthor = XAuthorDestination(
+                name: xDetailAuthorName,
+                screenName: handle, avatarURL: xDetailAuthorAvatarURL
+            )
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("查看该作者的帖子")
     }
 
     private var xDetailAuthorName: String {
@@ -2374,7 +2461,7 @@ struct PostDetailView: View {
     }
 
     private var xDetailAuthorIsVerified: Bool {
-        xLiveDetail?.author?.verified ?? post.user?.verified ?? false
+        verificationStore.isVerified(handle: xDetailAuthorHandle, reported: xLiveDetail?.author?.verified ?? post.user?.verified)
     }
 
     private func xStyledParagraph(_ paragraph: String) -> AttributedString {
@@ -2497,7 +2584,7 @@ struct PostDetailView: View {
             )
                 .id(videoURL)
                 .frame(height: xVideoHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
         } else if !post.videoURLs.isEmpty {
             Group {
                 if let player {
@@ -2512,7 +2599,7 @@ struct PostDetailView: View {
                 }
             }
             .frame(height: xVideoHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
         } else {
             PostMediaGrid(
                 post: post,
@@ -2520,8 +2607,8 @@ struct PostDetailView: View {
                     ? xDetailImageURLs
                     : (post.isXueqiu ? post.xueqiuUnplacedImageURLs : nil),
                 singleImageHeight: detailImageHeight,
-                availableWidth: UIScreen.main.bounds.width - 16,
-                cornerRadius: 6
+                availableWidth: UIScreen.main.bounds.width - 20,
+                cornerRadius: 14
             )
         }
     }
@@ -2629,7 +2716,7 @@ struct PostDetailView: View {
             await detectVideoAspectRatio(url: video)
         }
 
-        if post.sourceName != "X" || post.needsXStoredDetailRefresh,
+        if loadsStoredDetail, post.sourceName != "X" || post.needsXStoredDetailRefresh,
            let detail = try? await client.fetchPost(id: post.id) {
             if detail.hasTranslation || !post.hasTranslation {
                 post = detail
@@ -2651,6 +2738,7 @@ struct PostDetailView: View {
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
             if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
+                verificationStore.recordLive(handle: liveDetail.author?.screenName, verified: liveDetail.author?.verified)
                 xLiveDetail = liveDetail
                 if post.videoURLs.isEmpty,
                    let videoURL = liveDetail.videoURL,
@@ -2664,6 +2752,20 @@ struct PostDetailView: View {
                     fullOriginal: liveDetail.fullText
                 ) {
                     showsOriginal = true
+                }
+            }
+            if post.needsXTranslation {
+                do {
+                    let translation = try await client.fetchXTranslation(tweetID: tweetID).text
+                    if translation.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) {
+                        xLiveTranslationText = translation
+                    } else {
+                        xLiveTranslationText = try await PersonArticleTranslationService.shared.translate(xLiveDetail?.fullText ?? post.xStoredOriginalContent)
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    xLiveTranslationText = try? await PersonArticleTranslationService.shared.translate(xLiveDetail?.fullText ?? post.xStoredOriginalContent)
                 }
             }
             isLoadingXFullText = false
@@ -3890,4 +3992,141 @@ private struct NewYorkTimesArticleImage: View {
 
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+
+struct XAuthorDestination: Hashable, Identifiable {
+    var id: String { normalizedHandle }
+    let name: String
+    let screenName: String
+    let avatarURL: URL?
+
+    func resolvedAvatarURL(in posts: [Post]) -> URL? {
+        if let avatarURL { return avatarURL }
+        return posts.first { post in
+            post.user?.userScreenName?
+                .trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t"))
+                .lowercased() == normalizedHandle && post.avatarURL != nil
+        }?.avatarURL
+    }
+
+    var normalizedHandle: String {
+        screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t")).lowercased()
+    }
+
+}
+
+struct XAuthorPostsView: View {
+    let author: XAuthorDestination
+    @StateObject private var model: NewsFeedViewModel
+    @State private var selectedPost: Post?
+    @State private var isResolvingAuthor = true
+    @Environment(\.dismiss) private var dismiss
+
+    init(author: XAuthorDestination) {
+        self.author = author
+        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        _model = StateObject(wrappedValue: NewsFeedViewModel(
+            source: .x,
+            fetchXPostsWithCachePolicy: { page, limit, _, bypassCache in
+                try await client.fetchXAuthorPosts(page: page, limit: limit, screenName: author.normalizedHandle, bypassCache: bypassCache)
+            }
+        ))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "arrow.left").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("返回")
+                Spacer()
+                Text(author.name).font(.headline).lineLimit(1)
+                Spacer()
+                Color.clear.frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.primary)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 12) {
+                        AvatarView(url: author.resolvedAvatarURL(in: model.posts), name: author.name, size: 56)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(author.name).font(.title3.bold())
+                            Text("@" + author.normalizedHandle).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(16)
+                    Text("帖子").font(.headline).padding(.horizontal, 16).padding(.bottom, 12)
+                    Divider()
+                    if isResolvingAuthor || (model.isLoading && model.posts.isEmpty) {
+                        ProgressView("正在加载帖子…").frame(maxWidth: .infinity).padding(32)
+                    } else if let error = model.errorMessage, model.posts.isEmpty {
+                        ContentUnavailableView {
+                            Label("暂时无法加载", systemImage: "wifi.exclamationmark")
+                        } description: { Text(error) } actions: {
+                            Button("重试") { Task { await loadAuthor() } }
+                        }
+                    } else if model.posts.isEmpty {
+                        ContentUnavailableView("暂未收录该作者的帖子", systemImage: "text.bubble")
+                    } else {
+                        ForEach(model.posts) { post in
+                            let displayed = model.postForDisplay(post)
+                            NewsCardView(post: displayed, onOpen: { selectedPost = displayed })
+                                .task(id: post.id) { await model.prepareXAuthorPost(post) }
+                                .onAppear {
+                                    // A real row reliably appears in LazyVStack; a one-point
+                                    // clear footer can stay unrealized at the scroll boundary.
+                                    Task { await model.loadMoreIfNeeded(current: post) }
+                                }
+                            Divider()
+                        }
+                        if model.isLoadingMore {
+                            ProgressView().frame(maxWidth: .infinity).padding(20)
+                        }
+                        if model.canLoadMore, !model.isLoadingMore, let last = model.posts.last {
+                            Button("加载更早的帖子") {
+                                Task { await model.loadMoreIfNeeded(current: last) }
+                            }
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                        }
+                        if !model.canLoadMore {
+                            Text("已显示全部已收录帖子")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(20)
+                        }
+                        if model.errorMessage != nil {
+                            Button("加载失败，点击重试") {
+                                if let last = model.posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                            }.frame(maxWidth: .infinity).padding()
+                        }
+                    }
+                }
+            }
+            .clipped()
+            .refreshable {
+                await loadAuthor()
+            }
+        }
+        .background(Color(uiColor: .systemBackground))
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(item: $selectedPost) { post in PostDetailView(post: post) }
+        .task { await loadAuthor() }
+    }
+
+    private func loadAuthor() async {
+        isResolvingAuthor = true
+        defer { isResolvingAuthor = false }
+        if model.selectedXUserID == author.normalizedHandle {
+            await model.refresh()
+        } else {
+            await model.selectXUser(XFeedUser(id: author.normalizedHandle, name: author.name, screenName: author.normalizedHandle, avatarURL: author.avatarURL))
+        }
+    }
 }

@@ -95,9 +95,9 @@ struct MarketService {
         return try await request(url, as: FamousHoldingsResponse.self).data
     }
 
-    func investorMood() async throws -> InvestorMoodBoard {
+    func investorMood(refresh: Bool = false) async throws -> InvestorMoodBoard {
         let url = baseURL.appending(path: "api/ios/v1/market/dashboard/investor-mood")
-        return try await request(url, as: InvestorMoodResponse.self).data
+        return try await request(url, as: InvestorMoodResponse.self, bypassCache: refresh).data
     }
 
     func prewarmInvestorMoodVideos(_ items: [InvestorMoodItem]) async {

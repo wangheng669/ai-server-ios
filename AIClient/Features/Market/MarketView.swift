@@ -464,6 +464,10 @@ private struct MarketHomeView: View {
                     }
                     #endif
                 }
+                .task(id: listChartPrefetchID) {
+                    guard rootTabIsActive else { return }
+                    await store.preloadListCharts(symbols: listChartSymbols)
+                }
                 .task(id: rootTabIsActive) {
                     guard rootTabIsActive else { return }
                     async let research: Void = researchStore.load()
@@ -478,6 +482,16 @@ private struct MarketHomeView: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    private var listChartSymbols: [String] {
+        // Warm the selected region's stock sheet while the user reads its overview.
+        let stocks = store.dashboard?.componentsByRegion[selectedMarket.dashboardID] ?? []
+        return stocks.map(\.symbol) + selectedMarket.allSymbols
+    }
+
+    private var listChartPrefetchID: String {
+        "\(rootTabIsActive):\(selectedMarket.dashboardID):\(listChartSymbols.joined(separator: ","))"
     }
 
     private var regionalHealthMessage: String? {
@@ -2605,6 +2619,17 @@ private struct MarketQuotesSheet: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                            HStack {
+                                Text(commonStockSession.map { "报价 · \($0.displayLabel)" } ?? "报价 · 各股时段见下方")
+                                Spacer()
+                                Text("日内走势")
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 8)
+                            Text("曲线按最近交易日展示，可含盘前盘后及夜盘")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 18)
@@ -2612,7 +2637,7 @@ private struct MarketQuotesSheet: View {
                         .padding(.bottom, 8)
 
                         ForEach(Array(stocks.enumerated()), id: \.element.symbol) { index, quote in
-                            quoteRow(quote)
+                            quoteRow(quote, isStock: true)
                             if index < stocks.count - 1 {
                                 Divider().opacity(0.45).padding(.leading, 18)
                             }
@@ -2637,20 +2662,26 @@ private struct MarketQuotesSheet: View {
             displayedLogoPaths = store.companyLogoPaths
         }
         .task(id: "charts:\(requestID)") {
-            await marketRunWithLimitedConcurrency(requestedQuotes) { quote in
-                await store.loadChart(symbol: quote.symbol, range: .day)
-            }
+            await store.preloadListCharts(symbols: requestedQuotes.map(\.symbol))
         }
     }
 
-    private func quoteRow(_ quote: MarketQuote) -> some View {
+    private var commonStockSession: MarketTradingSession? {
+        guard let first = stocks.first?.tradingSession,
+              stocks.allSatisfy({ $0.tradingSession == first }) else { return nil }
+        return first
+    }
+
+    private func quoteRow(_ quote: MarketQuote, isStock: Bool = false) -> some View {
         Button { onSelectQuote(quote.symbol) } label: {
             StableMarketIndexTableRow(
                 quote: quote,
                 overnightQuote: nil,
                 incomingTrend: store.listTrendValues(for: quote),
                 companyLogoPath: displayedLogoPaths[quote.symbol],
-                showsCompanyLogo: true
+                showsCompanyLogo: true,
+                usesStockLayout: isStock,
+                commonSession: isStock ? commonStockSession : nil
             )
         }
         .buttonStyle(MarketPressStyle())
@@ -2667,6 +2698,8 @@ private struct StableMarketIndexTableRow: View {
     let incomingTrend: [Double]
     let companyLogoPath: String?
     let showsCompanyLogo: Bool
+    let usesStockLayout: Bool
+    let commonSession: MarketTradingSession?
     @State private var displayedTrend: [Double]
 
     init(
@@ -2674,13 +2707,17 @@ private struct StableMarketIndexTableRow: View {
         overnightQuote: MarketQuote?,
         incomingTrend: [Double],
         companyLogoPath: String?,
-        showsCompanyLogo: Bool
+        showsCompanyLogo: Bool,
+        usesStockLayout: Bool = false,
+        commonSession: MarketTradingSession? = nil
     ) {
         self.quote = quote
         self.overnightQuote = overnightQuote
         self.incomingTrend = incomingTrend
         self.companyLogoPath = companyLogoPath
         self.showsCompanyLogo = showsCompanyLogo
+        self.usesStockLayout = usesStockLayout
+        self.commonSession = commonSession
         _displayedTrend = State(initialValue: incomingTrend)
     }
 
@@ -2690,7 +2727,9 @@ private struct StableMarketIndexTableRow: View {
             overnightQuote: overnightQuote,
             trend: displayedTrend,
             companyLogoPath: companyLogoPath,
-            showsCompanyLogo: showsCompanyLogo
+            showsCompanyLogo: showsCompanyLogo,
+            usesStockLayout: usesStockLayout,
+            commonSession: commonSession
         )
         .onChange(of: incomingTrend) { _, newValue in
             displayedTrend = marketPinnedListTrend(
@@ -3127,6 +3166,8 @@ private struct MarketIndexTableRow: View {
     let trend: [Double]
     var companyLogoPath: String? = nil
     var showsCompanyLogo = false
+    var usesStockLayout = false
+    var commonSession: MarketTradingSession? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -3134,6 +3175,8 @@ private struct MarketIndexTableRow: View {
             if dynamicTypeSize.isAccessibilitySize {
                 accessibilityLayout
                     .dynamicTypeSize(.xLarge)
+            } else if usesStockLayout {
+                stockLayout
             } else {
                 standardLayout
             }
@@ -3142,7 +3185,48 @@ private struct MarketIndexTableRow: View {
         .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 88 : 62)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityHint("打开指数详情")
+        .accessibilityHint(usesStockLayout ? "打开股票详情" : "打开指数详情")
+    }
+
+    private var stockLayout: some View {
+        HStack(spacing: 10) {
+            if showsCompanyLogo {
+                MarketInstrumentLogo(quote: quote, path: companyLogoPath, size: 30)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayedName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(displayedCode)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if commonSession != quote.tradingSession || quote.visibleDelayMinutes != nil {
+                    Text(statusLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(number(displayedPrice, digits: cryptoPriceDigits(displayedPrice, symbol: displayedSymbol)))
+                    .font(.subheadline.weight(.medium))
+                Text(displayedPercent)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(displayedTint)
+            }
+            .monospacedDigit()
+            .fixedSize(horizontal: true, vertical: false)
+            Group {
+                if trend.count >= 2 {
+                    Sparkline(values: trend, color: displayedTint, showsFill: false)
+                } else {
+                    Text("—").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: 76, height: 34)
+        }
+        .padding(.vertical, 8)
+        .accessibilityLabel("\(displayedName)，\(displayedCode)，\(statusLabel)，价格 \(displayedPrice)，涨跌幅 \(displayedPercent)，涨跌额 \(displayedChangeText)")
     }
 
     private var standardLayout: some View {
@@ -4349,6 +4433,11 @@ private struct MarketIndexDetailView: View {
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                if selectedRange == .day, let quote, quote.hasActiveExtendedSessionQuote {
+                    Text("较最近常规收盘 · \(number(quote.price, digits: 2))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text(quote?.marketAsOfLabel ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -4385,15 +4474,25 @@ private struct MarketIndexDetailView: View {
 
     private var keyData: some View {
         VStack(spacing: 0) {
+            if quote?.hasActiveExtendedSessionQuote == true {
+                Text(store.chart(symbol: historicalSymbol, range: .year).map {
+                    "常规时段数据 · \($0.tradingDate)"
+                } ?? "最近常规交易时段数据")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+            }
             Divider()
             HStack(spacing: 0) {
-                metric(isCrypto ? "24H开盘" : "今开", quote?.openPrice)
+                metric(isCrypto ? "24H开盘" : quote?.hasActiveExtendedSessionQuote == true ? "开盘" : "今开", quote?.openPrice)
                 metricDivider
                 metric("最高", quote?.high, MarketStyle.gain)
                 metricDivider
                 metric("最低", quote?.low, MarketStyle.loss)
                 metricDivider
-                metric("昨收", quote?.previousClose)
+                metric(quote?.hasActiveExtendedSessionQuote == true ? "常规收盘" : "昨收",
+                       quote?.hasActiveExtendedSessionQuote == true ? quote?.price : quote?.previousClose)
             }
             Divider()
             HStack(spacing: 0) {
@@ -4401,7 +4500,7 @@ private struct MarketIndexDetailView: View {
                 metricDivider
                 textMetric("振幅", amplitudeText)
                 metricDivider
-                textMetric("涨跌额", quote.map { signed($0.marketDisplayChangeValue, digits: cryptoChangeDigits($0)) } ?? "—", marketDisplayTint(quote))
+                textMetric(quote?.hasActiveExtendedSessionQuote == true ? "常规涨跌" : "涨跌额", quote.map { signed($0.changeValue, digits: cryptoChangeDigits($0)) } ?? "—", quoteTint(quote))
                 if !isIndex && !isCrypto {
                     metricDivider
                     metric(
@@ -5227,6 +5326,18 @@ private struct MarketDetailChart: View {
                 }
             }
             Divider()
+            if selectedRange == .day, let chart {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("分时交易日 · \(chart.tradingDate)（交易所时间）")
+                    if let quote = store.quote(symbol: symbol), quote.hasActiveExtendedSessionQuote {
+                        Text("上方为\(quote.tradingSession.displayLabel)报价；曲线按所示交易日展示")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
+            }
             if let inspectedPointIndex {
                 chartReadout(point: points[inspectedPointIndex], index: inspectedPointIndex)
             }
@@ -5292,9 +5403,7 @@ private struct MarketDetailChart: View {
                 }
                 if !values.isEmpty, let inspectedPointIndex {
                     let inspectedPoint = points[inspectedPointIndex]
-                    let displayPrice = selectedPointIndex == nil
-                        ? chart?.quote.price ?? inspectedPoint.close
-                        : inspectedPoint.close
+                    let displayPrice = inspectedPoint.close
                     MarketChartPriceOverlay(
                         value: displayPrice,
                         xFraction: plotFractions.indices.contains(inspectedPointIndex) ? plotFractions[inspectedPointIndex] : 1,

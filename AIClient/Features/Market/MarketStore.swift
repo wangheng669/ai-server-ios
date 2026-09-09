@@ -128,6 +128,15 @@ final class MarketStore {
         scheduleMissingTrendBackfill()
     }
 
+    func preloadListCharts(symbols: [String]) async {
+        var seen = Set<String>()
+        let uniqueSymbols = symbols.filter { seen.insert($0).inserted }
+        await marketRunWithLimitedConcurrency(uniqueSymbols) { symbol in
+            // loadChart shares completed and in-flight requests with the sheet.
+            await self.loadChart(symbol: symbol, range: .day)
+        }
+    }
+
     func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
         let key = ChartKey(symbol: symbol, range: range)
         if !force, let cached = charts[key], marketChartCanUseCache(cached) { return }
@@ -255,9 +264,8 @@ final class MarketStore {
 
     func listTrendValues(for quote: MarketQuote?) -> [Double] {
         guard let quote else { return [] }
-        return marketPreferredListTrend(
-            chartValues: listTrendPresentations[ChartKey(symbol: quote.symbol, range: .day)],
-            snapshotValues: trendValues(for: quote)
+        return marketListChartTrend(
+            chartValues: listTrendPresentations[ChartKey(symbol: quote.symbol, range: .day)]
         )
     }
 
@@ -445,20 +453,20 @@ final class MarketStore {
 
 }
 
-func marketPreferredListTrend(chartValues: [Double]?, snapshotValues: [Double]) -> [Double] {
-    guard let chartValues, !chartValues.isEmpty else { return snapshotValues }
-    // A two-point intraday response only describes its endpoints and renders as a
-    // misleading diagonal. Keep the richer dashboard trend until the chart has shape.
-    if chartValues.count < 3, snapshotValues.count >= 3 { return snapshotValues }
-    return chartValues
+func marketListChartTrend(chartValues: [Double]?) -> [Double] {
+    // Dashboard trends cover only the latest minutes, not the chart's session.
+    // Leave a placeholder until session data arrives instead of changing windows.
+    chartValues ?? []
 }
 
 func marketPinnedListTrend(current: [Double], incoming: [Double]) -> [Double] {
-    // Once a sparkline has enough points to convey its shape, keep that shape
-    // stable for the lifetime of the row. A later chart response may use a
-    // different session or sampling window and should not visually replace it.
-    guard current.count < 3 else { return current }
-    return incoming.count > current.count ? incoming : current
+    // Accept the full-session chart and subsequent corrections, even when the
+    // point count is unchanged (or a new trading session has fewer points).
+    // Keep the existing shape only while the incoming response is a placeholder.
+    guard incoming.count >= 3 else {
+        return current.count >= incoming.count ? current : incoming
+    }
+    return incoming
 }
 
 enum MarketCompanyLogoPathCache {

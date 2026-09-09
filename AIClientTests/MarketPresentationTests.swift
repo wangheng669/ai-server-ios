@@ -609,9 +609,24 @@ final class MarketPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(quote.marketDisplayPrice, 219.195)
-        XCTAssertEqual(quote.marketDisplayChangeValue, -0.545, accuracy: 0.0001)
-        XCTAssertEqual(quote.marketDisplayPercentValue, -0.2480203877, accuracy: 0.0001)
-        XCTAssertEqual(quote.marketDisplayFormattedPercent, "−0.25%")
+        XCTAssertEqual(quote.marketDisplayChangeValue, 1.635, accuracy: 0.0001)
+        XCTAssertEqual(quote.marketDisplayPercentValue, 1.635 / 217.56 * 100, accuracy: 0.0001)
+        XCTAssertEqual(quote.marketDisplayFormattedPercent, "+0.75%")
+    }
+
+    func testExtendedSessionChangeUsesLatestRegularCloseAcrossHoliday() throws {
+        for session in ["pre", "post", "overnight"] {
+            let payload = """
+            {"symbol":"AAPL","name":"苹果","price":319.97,"previousClose":328.21,
+             "marketSession":"\(session)","sessionPrice":318.885,"sessionChangePercent":-2.8411687639}
+            """
+            let quote = try JSONDecoder().decode(MarketQuote.self, from: Data(payload.utf8))
+            XCTAssertEqual(quote.marketDisplayChangeValue, -1.085, accuracy: 0.0001)
+            XCTAssertEqual(quote.marketDisplayPercentValue, -1.085 / 319.97 * 100, accuracy: 0.0001)
+            XCTAssertEqual(quote.marketDisplayFormattedPercent, "−0.34%")
+            XCTAssertEqual(quote.formattedSessionPercent, "−0.34%")
+            XCTAssertEqual(quote.changeValue, -8.24, accuracy: 0.0001)
+        }
     }
 
     func testRegularSessionKeepsSnapshotQuoteForDisplay() throws {
@@ -1366,46 +1381,27 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertTrue(values.contains { $0 > 40 && $0 < 80 })
     }
 
-    func testMarketListTrendKeepsRichSnapshotWhenChartOnlyHasEndpoints() {
-        let snapshot = [10.0, 11.0, 10.5, 12.0]
-
-        let values = marketPreferredListTrend(
-            chartValues: [10.0, 12.0],
-            snapshotValues: snapshot
-        )
-
-        XCTAssertEqual(values, snapshot)
+    func testMarketListTrendWaitsForSessionDataInsteadOfDrawingSnapshot() {
+        XCTAssertEqual(marketListChartTrend(chartValues: nil), [])
+        XCTAssertEqual(marketListChartTrend(chartValues: []), [])
     }
 
-    func testMarketListTrendUsesChartOnceItHasShape() {
-        let chart = [10.0, 11.0, 10.5]
-
-        let values = marketPreferredListTrend(
-            chartValues: chart,
-            snapshotValues: [9.0, 9.5, 10.0, 10.5]
-        )
-
-        XCTAssertEqual(values, chart)
+    func testMarketListTrendShowsCachedSessionImmediately() {
+        let chart = (1...120).map(Double.init)
+        XCTAssertEqual(marketListChartTrend(chartValues: chart), chart)
     }
 
-    func testMarketListTrendStillUsesTwoPointChartWithoutRichFallback() {
-        let chart = [10.0, 12.0]
-
-        let values = marketPreferredListTrend(
-            chartValues: chart,
-            snapshotValues: [10.0]
-        )
-
-        XCTAssertEqual(values, chart)
+    func testMarketListTrendKeepsSparseSessionInsteadOfSwitchingWindows() {
+        XCTAssertEqual(marketListChartTrend(chartValues: [10, 12]), [10, 12])
     }
 
-    func testPinnedMarketListTrendKeepsEstablishedShape() {
+    func testPinnedMarketListTrendAcceptsUpdatedChartWithSamePointCount() {
         let initial = [10.0, 11.0, 10.5, 12.0]
         let loadedChart = [20.0, 18.0, 21.0, 19.0]
 
         XCTAssertEqual(
             marketPinnedListTrend(current: initial, incoming: loadedChart),
-            initial
+            loadedChart
         )
     }
 
@@ -1416,6 +1412,34 @@ final class MarketPresentationTests: XCTestCase {
             marketPinnedListTrend(current: [10.0, 12.0], incoming: loadedChart),
             loadedChart
         )
+    }
+
+    func testPinnedMarketListTrendReplacesFortyPointSnapshotWithFullSession() {
+        let snapshot = Array(repeating: 10.0, count: 40)
+        let fullSession = (0..<120).map { Double($0 + 1) }
+
+        XCTAssertEqual(marketPinnedListTrend(current: snapshot, incoming: fullSession), fullSession)
+        XCTAssertEqual(marketPinnedListTrend(current: fullSession, incoming: []), fullSession)
+        XCTAssertEqual(marketPinnedListTrend(current: fullSession, incoming: [10, 12]), fullSession)
+        XCTAssertEqual(marketPinnedListTrend(current: fullSession, incoming: [10, 11, 12]), [10, 11, 12])
+    }
+
+    func testMarketListTrendDefaultSamplingRetainsFullSessionAtHigherDensity() {
+        let points = (0..<390).map { index in
+            let value = Double(index + 1)
+            return MarketChartPoint(
+                timestamp: Int64(index), open: value, high: value,
+                low: value, close: value, volume: nil,
+                state: "confirmed", source: "test", session: "regular"
+            )
+        }
+        let values = marketSampledChartTrend(points)
+
+        XCTAssertEqual(values.count, 120)
+        XCTAssertEqual(values.first, 1)
+        XCTAssertEqual(values.last, 390)
+        XCTAssertTrue(values.contains { $0 > 190 && $0 < 200 })
+        XCTAssertEqual(marketSampledChartTrend(Array(points.prefix(80))).count, 80)
     }
 
     func testVolumeScaleUsesRobustPercentileCeiling() throws {

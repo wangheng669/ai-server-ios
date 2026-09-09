@@ -53,6 +53,7 @@ struct RetailInvestorView: View {
                 guard rootTabIsActive else { return }
                 await store.load(marketStore: marketStore)
             }
+            .refreshable { await store.refreshInvestorMood(force: true) }
             .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .bottomTrailing) {
                 if displaysSheetChrome {
@@ -644,7 +645,7 @@ struct RetailInvestorView: View {
                 .padding(.horizontal, 16)
             }
             if store.investorMood?.items.isEmpty != false {
-                placeholder("正在等待大曾子、王小雨等账号的最新有效样本")
+                placeholder(store.investorMoodErrorMessage ?? (store.isLoadingInvestorMood ? "正在读取最新样本" : "正在等待大曾子、王小雨等账号的最新有效样本"))
             } else if let items = store.investorMood?.items {
                 investorMoodList(items)
             }
@@ -1459,6 +1460,10 @@ private struct InvestorMoodVideoPlayerSheet: View {
 final class RetailSentimentStore {
     private(set) var dashboard: MarketDashboard?
     private(set) var investorMood: InvestorMoodBoard?
+    private(set) var investorMoodErrorMessage: String?
+    private(set) var isLoadingInvestorMood = false
+    private var investorMoodLoadedAt: Date?
+    private let investorMoodLoader: () async throws -> InvestorMoodBoard
     private(set) var temperature: MarketAShareTemperature?
     private(set) var koreaLeverage: MarketKoreaLeverage?
     private(set) var marketSnapshots: [SentimentMarket: MarketSentimentSnapshot] = [:]
@@ -1473,8 +1478,13 @@ final class RetailSentimentStore {
     private var detailErrors: [SentimentMarket: String] = [:]
     private var bootstrapTask: Task<MarketBootstrap, Error>?
 
-    init(baseURL: URL = ServerConfiguration.currentURL) {
-        service = MarketService(baseURL: baseURL)
+    init(
+        baseURL: URL = ServerConfiguration.currentURL,
+        investorMoodLoader: (() async throws -> InvestorMoodBoard)? = nil
+    ) {
+        let service = MarketService(baseURL: baseURL)
+        self.service = service
+        self.investorMoodLoader = investorMoodLoader ?? { try await service.investorMood(refresh: true) }
     }
 
     var breadth: MarketBreadth? { dashboard?.ashareOverview?.breadth }
@@ -1580,17 +1590,18 @@ final class RetailSentimentStore {
     func load(marketStore: MarketStore, force: Bool = false) async {
         if loaded, !force {
             dashboard = marketStore.dashboard ?? dashboard
+            await refreshInvestorMood()
             return
         }
         if !force, dashboard != nil, temperature != nil {
-            await loadInvestorMoodIfNeeded()
+            await refreshInvestorMood()
             loaded = true
             return
         }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
-        async let moodRequest = service.investorMood()
+        async let moodRequest: Void = refreshInvestorMood(force: force)
         async let temperatureRequest = service.aShareTemperature()
         if force || marketStore.dashboard == nil {
             await marketStore.refresh(force: force)
@@ -1598,17 +1609,7 @@ final class RetailSentimentStore {
         guard !Task.isCancelled else { return }
         dashboard = marketStore.dashboard
         if dashboard != nil { errorMessage = nil }
-        do {
-            let mood = try await moodRequest
-            investorMood = mood
-            Task {
-                await service.prewarmInvestorMoodVideos(mood.items)
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            if dashboard == nil { errorMessage = error.localizedDescription }
-        }
+        await moodRequest
         do {
             temperature = try await temperatureRequest
         } catch is CancellationError {
@@ -1663,16 +1664,27 @@ final class RetailSentimentStore {
         }
     }
 
-    private func loadInvestorMoodIfNeeded() async {
-        guard investorMood == nil else { return }
+    func refreshInvestorMood(force: Bool = false) async {
+        guard !isLoadingInvestorMood else { return }
+        if !force, let investorMoodLoadedAt,
+           Date().timeIntervalSince(investorMoodLoadedAt) < 60,
+           investorMood?.items.contains(where: { !$0.stale }) == true {
+            return
+        }
+        isLoadingInvestorMood = true
+        defer { isLoadingInvestorMood = false }
         do {
-            let mood = try await service.investorMood()
+            let mood = try await investorMoodLoader()
+            guard !Task.isCancelled else { return }
+            let previousIDs = Set(investorMood?.items.map(\.id) ?? [])
             investorMood = mood
-            Task { await service.prewarmInvestorMoodVideos(mood.items) }
+            investorMoodLoadedAt = Date()
+            investorMoodErrorMessage = nil
+            Task { await service.prewarmInvestorMoodVideos(mood.items.filter { !previousIDs.contains($0.id) }) }
         } catch is CancellationError {
             return
         } catch {
-            if dashboard == nil { errorMessage = error.localizedDescription }
+            investorMoodErrorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 

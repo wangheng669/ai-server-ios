@@ -23,3 +23,6 @@ build/
 *.xcuserstate
 xcuserdata/
 .DS_Store
+
+# Browser automation scratch output
+.playwright-mcp/

@@ -87,6 +87,26 @@ struct APIClient {
         }
     }
 
+    static func xAuthorPostQueryItems(page: Int, limit: Int, screenName: String) -> [URLQueryItem] {
+        let handle = screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t"))
+        return [
+            .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
+            .init(name: "source", value: "x"), .init(name: "x_author", value: handle),
+            .init(name: "sort", value: "time_desc"), .init(name: "include_zero_score", value: "true"),
+            .init(name: "group_similar", value: "0"),
+            .init(name: "x_feed_view", value: "all"),
+            .init(name: "include_disliked", value: "true")
+        ]
+    }
+
+    func fetchXAuthorPosts(page: Int, limit: Int, screenName: String, bypassCache: Bool) async throws -> [Post] {
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/post/list"), resolvingAgainstBaseURL: false)
+        components?.queryItems = Self.xAuthorPostQueryItems(page: page, limit: limit, screenName: screenName)
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: PostListResponse = try await get(url, cachePolicy: bypassCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
+        return response.data
+    }
+
     func fetchXFeedUsers() async throws -> [XFeedUser] {
         let response: XFeedUsersResponse = try await get(
             baseURL.appending(path: "api/ios/v1/x/users")

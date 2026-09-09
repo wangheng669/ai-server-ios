@@ -200,6 +200,7 @@ struct NewsFeedView: View {
     @Binding private var notificationPostID: Int?
     @StateObject private var model = NewsFeedViewModel()
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
+    @State private var searchedXAuthor: XAuthorDestination?
     @State private var selectedPost: Post?
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
@@ -236,6 +237,20 @@ struct NewsFeedView: View {
         _hidesTabBar = hidesTabBar
         _notificationPostID = notificationPostID
         WeiboSessionCookieStore.importFromEnvironmentIfPresent()
+    }
+
+    private var selectedXPost: Binding<Post?> {
+        Binding(
+            get: { selectedPost?.sourceName == "X" ? selectedPost : nil },
+            set: { selectedPost = $0 }
+        )
+    }
+
+    private var selectedNonXPost: Binding<Post?> {
+        Binding(
+            get: { selectedPost?.sourceName == "X" ? nil : selectedPost },
+            set: { selectedPost = $0 }
+        )
     }
 
     var body: some View {
@@ -281,7 +296,10 @@ struct NewsFeedView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedPost, onDismiss: {
+        .fullScreenCover(item: $searchedXAuthor) { author in
+            NavigationStack { XAuthorPostsView(author: author) }
+        }
+        .sheet(item: selectedNonXPost, onDismiss: {
             showsDetail = false
         }) { post in
             NavigationStack {
@@ -307,6 +325,13 @@ struct NewsFeedView: View {
             .presentationDragIndicator(.hidden)
             .presentationCornerRadius(28)
             .presentationContentInteraction(.scrolls)
+        }
+        .fullScreenCover(item: selectedXPost, onDismiss: {
+            showsDetail = false
+        }) { post in
+            NavigationStack {
+                PostDetailView(post: post, presentedAsSheet: true)
+            }
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
@@ -340,10 +365,15 @@ struct NewsFeedView: View {
         }
         .task(id: notificationPostID) {
             guard let postID = notificationPostID else { return }
-            defer { notificationPostID = nil }
+            defer {
+                if !Task.isCancelled, notificationPostID == postID {
+                    notificationPostID = nil
+                }
+            }
             guard let post = try? await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: postID) else {
                 return
             }
+            guard !Task.isCancelled, notificationPostID == postID else { return }
             selectedPost = post
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
@@ -758,6 +788,24 @@ struct NewsFeedView: View {
                     LazyVStack(spacing: 3) {
                         feedEntityMenuRow(nil)
                             .id(FeedEntitySelectorPositionPolicy.allAccountsID)
+                        if let handle = directXAuthorHandle {
+                            Button {
+                                isFeedEntitySelectorExpanded = false
+                                feedEntitySearch = ""
+                                searchedXAuthor = XAuthorDestination(name: handle, screenName: handle, avatarURL: nil)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person.crop.circle")
+                                    Text("查看 @\(handle) 的帖子").lineLimit(2)
+                                    Spacer(minLength: 0)
+                                }
+                                .font(.system(size: 13))
+                                .padding(.horizontal, 10)
+                                .frame(height: 49)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                         ForEach(filteredFeedEntityChoices) { choice in
                             feedEntityMenuRow(choice)
                                 .id(choice.id)
@@ -791,10 +839,17 @@ struct NewsFeedView: View {
         )
     }
 
+    private var directXAuthorHandle: String? {
+        guard model.source == .x, filteredFeedEntityChoices.isEmpty else { return nil }
+        let value = feedEntitySearch.trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t"))
+        guard value.range(of: #"^[A-Za-z0-9_]{1,15}$"#, options: .regularExpression) != nil else { return nil }
+        return value
+    }
+
     private var feedEntityMenuHeight: CGFloat {
         let headerHeight: CGFloat = 32
         let searchHeight: CGFloat = feedEntityChoices.count > 8 ? 42 : 0
-        let visibleRows = min(filteredFeedEntityChoices.count + 1, 5)
+        let visibleRows = min(filteredFeedEntityChoices.count + 1 + (directXAuthorHandle == nil ? 0 : 1), 5)
         return min(344, headerHeight + searchHeight + CGFloat(visibleRows * 52) + 8)
     }
 
@@ -1434,6 +1489,10 @@ struct NewsFeedView: View {
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
                 .allowsHitTesting(false)
             }
+        }
+        .task(id: "\(rootTabIsActive)-\(source == model.source)-x-translation-\(post.id)") {
+            guard rootTabIsActive, source == .x, source == model.source else { return }
+            await model.translateXPostIfNeeded(post)
         }
         .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
             await model.translateRSSPostIfNeeded(post)
@@ -3248,6 +3307,7 @@ private final class XAttributedTextBox {
 }
 
 struct NewsCardView: View {
+    @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
     private static let xTimelineCache: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
         cache.countLimit = 300
@@ -3264,6 +3324,7 @@ struct NewsCardView: View {
     var isFeaturedBilibili = false
     var isExpandedFlash = false
     var onOpen: (() -> Void)?
+    @State private var isXTextExpanded = false
     var body: some View {
         if post.isHotTopic { hotTopicCard }
         else if post.isFlash { flashCard }
@@ -3304,27 +3365,27 @@ struct NewsCardView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { onOpen?() }
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
                     xAuthorHeader
                         .contentShape(Rectangle())
                         .onTapGesture { onOpen?() }
 
                     VStack(alignment: .leading, spacing: 5) {
                         xRichText(xTimelineContent)
-                            .font(.system(size: 17, weight: .regular))
-                            .lineSpacing(3)
+                            .font(.system(size: 15, weight: .regular))
+                            .lineSpacing(2)
                             .multilineTextAlignment(.leading)
-                            .lineLimit(isLongXPost ? 8 : nil)
-                            .fixedSize(horizontal: false, vertical: !isLongXPost)
+                            .lineLimit(isLongXPost && !isXTextExpanded ? 9 : nil)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                        if isLongXPost {
-                            Button(action: { onOpen?() }) {
+                        if isLongXPost && !isXTextExpanded {
+                            Button(action: { isXTextExpanded = true }) {
                                 Text("显示更多")
                                     .font(.system(size: 15, weight: .regular))
                                     .foregroundStyle(.blue)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("查看完整帖子")
+                            .accessibilityLabel("展开完整帖子正文")
                         }
                     }
                     .contentShape(Rectangle())
@@ -3332,21 +3393,25 @@ struct NewsCardView: View {
 
                     if let reply = post.xReplyContext,
                        let replyText = reply.displayText {
-                        XReplyContextCard(reply: reply, text: replyText)
+                        XReplyContextCard(reply: reply, text: replyText, isTimeline: true)
                             .contentShape(Rectangle())
                             .onTapGesture { onOpen?() }
                     }
 
                     VStack(alignment: .leading, spacing: 0) {
-                        XFeedMediaView(post: post)
-                        FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false)
+                        XFeedMediaView(post: post, onOpenQuote: onOpen)
+                        FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false, showsTimelineActions: true)
+                            .padding(.top, 6)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
+        // Report the complete intrinsic row height to the lazy stack, including
+        // bounded multiline text, rather than accepting a stale height proposal.
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
@@ -3360,7 +3425,7 @@ struct NewsCardView: View {
                 .lineLimit(1)
                 .layoutPriority(3)
 
-            if post.user?.verified == true {
+            if verificationStore.isVerified(handle: post.authorHandle, reported: post.user?.verified) {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(xVerificationColor)
@@ -3380,51 +3445,18 @@ struct NewsCardView: View {
         .foregroundStyle(.secondary)
     }
 
-    private var xTimelineParagraphs: [String] {
-        var normalized = post.displayContent
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: #"https://\s+"#, with: "https://", options: .regularExpression)
-            .replacingOccurrences(of: #"http://\s+"#, with: "http://", options: .regularExpression)
-            .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        normalized = normalizedXTickerSpacing(normalized)
-        normalized = normalized.replacingOccurrences(
-            of: #"\s+(?=[1-9]\.\s)"#,
-            with: "\n\n",
-            options: .regularExpression
-        )
-
-        let explicitParagraphs = normalized
-            .components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if explicitParagraphs.count > 1 { return explicitParagraphs }
-
-        guard post.hasTranslation else { return [normalized] }
-        let sentences = normalized
-            .replacingOccurrences(of: #"(?<=[。！？])\s*"#, with: "\n", options: .regularExpression)
-            .components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return sentences.count > 1 ? sentences : [normalized]
-    }
-
-    /// Keep ordinary posts complete in the timeline, while giving translated long-form
-    /// posts the same compact handoff to detail that X uses for "Show more".
     private var xTimelineContent: String {
         let key = NSString(string: "\(post.hasTranslation ? 1 : 0)|\(post.displayContent)")
         if let cached = Self.xTimelineCache.object(forKey: key) {
             return cached as String
         }
-        let value = xTimelineParagraphs.joined(separator: "\n\n")
+        let value = XPostTextFormatter.timelineText(post.displayContent)
         Self.xTimelineCache.setObject(value as NSString, forKey: key, cost: value.utf8.count)
         return value
     }
 
     private var isLongXPost: Bool {
-        xTimelineContent.count > 180
+        XTimelineTextLayout.needsExpansion(xTimelineContent, width: UIScreen.main.bounds.width - 78)
     }
 
     private func xRichText(_ value: String) -> Text {
@@ -3451,20 +3483,6 @@ struct NewsCardView: View {
         }
         Self.xAttributedTextCache.setObject(XAttributedTextBox(attributed), forKey: cacheKey)
         return Text(attributed)
-    }
-
-    private func normalizedXTickerSpacing(_ value: String) -> String {
-        let pattern = #"\$\s+([A-Za-z][A-Za-z0-9.]{0,9})"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return value }
-        let source = value as NSString
-        var result = value
-        for match in regex.matches(in: value, range: NSRange(location: 0, length: source.length)).reversed() {
-            guard match.numberOfRanges > 1,
-                  let range = Range(match.range, in: result) else { continue }
-            let ticker = source.substring(with: match.range(at: 1))
-            result.replaceSubrange(range, with: "$\(ticker)")
-        }
-        return result
     }
 
     private var xVerificationColor: Color {

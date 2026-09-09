@@ -16,6 +16,8 @@ enum InvestmentDesign {
 }
 
 struct InvestmentView: View {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     @Binding private var showsDetail: Bool
     @State private var marketStore: MarketStore
     @State private var sentimentStore: RetailSentimentStore
@@ -37,5 +39,13 @@ struct InvestmentView: View {
             sentimentStore: sentimentStore,
             showsDetail: $showsDetail
         )
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await sentimentStore.refreshInvestorMood()
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
+            }
+        }
     }
 }
