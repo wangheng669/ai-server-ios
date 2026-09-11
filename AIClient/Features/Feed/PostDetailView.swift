@@ -252,8 +252,8 @@ struct PostDetailView: View {
                 await loadBilibiliSummary()
             }
         }
-        .task(id: "\(post.xQuotedPost?.id ?? "")-\(post.needsXQuotedTranslation)") {
-            await translateQuotedPostIfNeeded()
+        .task(id: "\(post.id)-\(post.needsXServerContextRefresh)") {
+            await refreshServerContextsIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
             if notification.object as? AVPlayerItem === speechPlayer?.currentItem {
@@ -2183,29 +2183,27 @@ struct PostDetailView: View {
         .foregroundStyle(.secondary)
     }
 
-    private func translateQuotedPostIfNeeded() async {
-        guard post.needsXQuotedTranslation,
-              let quote = post.xQuotedPost,
-              let tweetID = quote.id,
-              let text = quote.originalText else { return }
-        do {
-            let client = APIClient(baseURL: ServerConfiguration.currentURL)
-            var translation: String
+    private func refreshServerContextsIfNeeded() async {
+        guard post.sourceName == "X", !post.isSynthetic else { return }
+        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        var delay = 5
+        while post.needsXServerContextRefresh && !Task.isCancelled {
             do {
-                translation = try await client.fetchXTranslation(tweetID: tweetID).text
+                let fresh = try await client.fetchPost(id: post.id)
+                try Task.checkCancellation()
+                post = post.mergingXServerContexts(from: fresh)
             } catch is CancellationError {
                 return
             } catch {
-                translation = try await PersonArticleTranslationService.shared.translate(text)
+                // Keep reading available content; retry persisted translations while visible.
             }
-            if !translation.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) {
-                translation = try await PersonArticleTranslationService.shared.translate(text)
+            guard post.needsXServerContextRefresh else { return }
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
             }
-            guard !Task.isCancelled,
-                  translation.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) else { return }
-            post = post.replacingXQuotedTranslation(with: translation)
-        } catch {
-            // Preserve the source text when translation is temporarily unavailable.
+            delay = min(delay * 2, 30)
         }
     }
 
@@ -2549,6 +2547,11 @@ struct PostDetailView: View {
     }
 
     private var xResolvedReplyContext: XReplyContext? {
+        if let stored = post.xReplyContext,
+           let translation = stored.textZH,
+           !translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return stored
+        }
         if let live = xLiveReplyContext, live.displayText != nil {
             return live
         }
@@ -2718,11 +2721,13 @@ struct PostDetailView: View {
 
         if loadsStoredDetail, post.sourceName != "X" || post.needsXStoredDetailRefresh,
            let detail = try? await client.fetchPost(id: post.id) {
+            let previous = post
             if detail.hasTranslation || !post.hasTranslation {
                 post = detail
             } else {
                 post = detail.replacingTranslation(with: post.displayContent)
             }
+            post = post.mergingXServerContexts(from: previous)
             if post.sourceName == "X",
                !XPostTextFormatter.shouldWaitForFullText(post.xStoredOriginalContent) {
                 isLoadingXFullText = false
