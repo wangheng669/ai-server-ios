@@ -2,6 +2,31 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testServerReplyTranslationReplacesEnglishContextAndStopsRefresh() throws {
+        let original = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3328298,"source":"x","content_zh":"我以为你不是首席执行官。","meta":{"in_reply_to_status_id":"2098210210523295773","reply_context":{"id":"2098210210523295773","text":"i am hiring a chief of staff"}}}"#.utf8))
+        let fresh = original.replacingXReplyContext(with: XReplyContext(
+            id: "2098210210523295773", authorName: "dax", screenName: "thdxr",
+            avatarURL: nil, text: "i am hiring a chief of staff", textZH: "我正在招聘一位幕僚长。"
+        ))
+        XCTAssertTrue(original.needsXServerContextRefresh)
+        let updated = original.mergingXServerContexts(from: fresh)
+        XCTAssertEqual(updated.xReplyContext?.displayText, "我正在招聘一位幕僚长。")
+        XCTAssertFalse(updated.needsXServerContextRefresh)
+        XCTAssertEqual(updated.displayContent, original.displayContent)
+        XCTAssertEqual(updated.mergingXServerContexts(from: original).xReplyContext?.textZH, "我正在招聘一位幕僚长。")
+    }
+
+    func testServerQuoteTranslationMatchesReferencedPost() throws {
+        let original = try JSONDecoder().decode(Post.self, from: Data(#"{"id":7,"source":"x","meta":{"quoted_tweet":{"id":"99","text":"New release"}}}"#.utf8))
+        let fresh = original.replacingXQuotedTranslation(with: "新版本发布")
+        XCTAssertTrue(original.needsXServerContextRefresh)
+        let updated = original.mergingXServerContexts(from: fresh)
+        XCTAssertEqual(updated.xQuotedPost?.displayText, "新版本发布")
+        XCTAssertFalse(updated.needsXServerContextRefresh)
+        let unrelated = try JSONDecoder().decode(Post.self, from: Data(#"{"id":7,"source":"x","meta":{"quoted_tweet":{"id":"100","text":"Other post","text_zh":"其他帖子"}}}"#.utf8))
+        XCTAssertNil(original.mergingXServerContexts(from: unrelated).xQuotedPost?.textZH)
+    }
+
     func testPeopleSearchRequestRetriggersAndRoutesSourcesReliably() {
         let hidden = PeopleSearchRequest(
             isPresented: false,

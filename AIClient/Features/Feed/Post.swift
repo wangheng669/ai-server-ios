@@ -729,13 +729,13 @@ struct Post: Codable, Identifiable, Hashable {
     var needsXReplyContextRefresh: Bool {
         sourceName == "X"
             && clean(meta?.inReplyToStatusID) != nil
-            && meta?.replyContext?.displayText == nil
+            && xReplyContext?.displayText == nil
     }
 
     var needsXReplyContextTranslation: Bool {
         guard sourceName == "X",
               clean(meta?.inReplyToStatusID) != nil,
-              let reply = meta?.replyContext,
+              let reply = xReplyContext,
               xNonempty(reply.textZH) == nil,
               let original = xNonempty(reply.text) else { return false }
         return !Self.containsHanCharacters(original)
@@ -776,6 +776,27 @@ struct Post: Codable, Identifiable, Hashable {
               let original = quote.originalText,
               (quote.textZH.map(Self.containsHanCharacters) != true) else { return false }
         return !Self.containsHanCharacters(original)
+    }
+
+    var needsXServerContextRefresh: Bool {
+        needsXQuotedTranslation || needsXReplyContextRefresh || needsXReplyContextTranslation
+    }
+
+    func mergingXServerContexts(from fresh: Post) -> Post {
+        guard id == fresh.id else { return self }
+        var result = self
+        if let reply = fresh.xReplyContext,
+           reply.id == meta?.inReplyToStatusID,
+           reply.displayText != nil,
+           xNonempty(reply.textZH) != nil || xNonempty(xReplyContext?.textZH) == nil {
+            result.xReplyContextOverride = reply
+        }
+        if let quote = fresh.xQuotedPost,
+           quote.id == meta?.quotedTweet?.id,
+           let translation = xNonempty(quote.textZH) {
+            result.xQuotedTextZH = translation
+        }
+        return result
     }
 
     func replacingXQuotedTranslation(with translation: String) -> Post {
