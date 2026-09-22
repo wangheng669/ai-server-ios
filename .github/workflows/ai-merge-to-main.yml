@@ -58,6 +58,9 @@ jobs:
           else
             git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           fi
+          # Keep this checkout on its token-authenticated HTTPS transport even
+          # when the runner account has a broad HTTPS-to-SSH URL rewrite.
+          git config --local "url.https://github.com/${GITHUB_REPOSITORY}.git.insteadOf" "https://github.com/${GITHUB_REPOSITORY}.git"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git reset --hard HEAD 2>/dev/null || true
           git clean -ffdx
