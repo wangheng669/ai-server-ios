@@ -18,6 +18,19 @@ final class GoogleSignalTests: XCTestCase {
         XCTAssertEqual(page.items[0].companies["google"], "negative")
         XCTAssertEqual(page.items[0].contentZH, "译文")
     }
+    func testTranslationUsesPersistentJobIdentityAndObserveIntent() throws {
+        let service = GoogleSignalService(baseURL: URL(string: "https://example.com")!)
+        let read = try service.xTranslationRequest(postID: 123)
+        XCTAssertEqual(read.url?.path, "/api/ios/v1/company-news/translations")
+        XCTAssertEqual(read.httpMethod, "POST")
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(read.httpBody)) as! [String: Any]
+        XCTAssertEqual(body["postIds"] as? [Int], [123])
+        XCTAssertEqual(body["intent"] as? String, "read")
+        let observe = try service.xTranslationRequest(postID: 123, observe: true)
+        let observation = try JSONSerialization.jsonObject(with: XCTUnwrap(observe.httpBody)) as! [String: Any]
+        XCTAssertEqual(observation["intent"] as? String, "observe")
+        XCTAssertEqual(observation["retry"] as? Bool, false)
+    }
     func testDateParsing() {
         XCTAssertNotNil(GoogleSignalDateParser.date(from: "2026-08-12T12:18:05.130556+08:00"))
         XCTAssertNotNil(GoogleSignalDateParser.date(from: "2026-08-12T08:18:08Z"))

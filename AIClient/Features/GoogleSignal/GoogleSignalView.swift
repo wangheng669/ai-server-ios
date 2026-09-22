@@ -73,6 +73,30 @@ struct GoogleSignalService {
         struct Catalog: Decodable { let companies: [CompanyNewsCompany] }
         return try await get(baseURL.appending(path: "api/ios/v1/company-news/catalog"), as: Catalog.self).companies
     }
+    func xTranslationRequest(postID: Int64, observe: Bool = false) throws -> URLRequest {
+        var request = URLRequest(url: baseURL.appending(path: "api/ios/v1/company-news/translations"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["postIds": [postID], "intent": observe ? "observe" : "read", "retry": !observe])
+        return request
+    }
+    func translateX(postID: Int64) async throws -> String {
+        struct Part: Decodable { let text: String? }
+        struct Document: Decodable { let postId: Int64; let status: String; let parts: [String: Part] }
+        struct Documents: Decodable { let items: [Document] }
+        for attempt in 0..<20 {
+            try Task.checkCancellation()
+            let request = try xTranslationRequest(postID: postID, observe: attempt > 0)
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw APIError.invalidResponse }
+            let output = try JSONDecoder().decode(CompanyNewsEnvelope<Documents>.self, from: data)
+            guard output.success, let document = output.data.items.first, document.postId == postID else { throw APIError.invalidResponse }
+            if let text = document.parts["body"]?.text, !text.isEmpty { return text }
+            if document.status == "failed" || document.status == "expired" { throw APIError.invalidResponse }
+            try await Task.sleep(for: .seconds(2))
+        }
+        throw APIError.invalidResponse
+    }
     func translateRSS(postID: Int64) async throws -> String {
         struct Document: Decodable { let postId: Int64; let status: String; let text: String? }
         struct Documents: Decodable { let items: [Document] }
@@ -214,8 +238,8 @@ private struct CompanyNewsDetail: View {
     @MainActor private func translate() async {
         translating = true; translationError = nil; defer { translating = false }
         do {
-            if item.source == "x" && !item.articleID.isEmpty {
-                translated = try await APIClient(baseURL: ServerConfiguration.currentURL).fetchXTranslation(tweetID: item.articleID).text
+            if item.source == "x" {
+                translated = try await GoogleSignalService().translateX(postID: item.translationPostID)
             } else { translated = try await GoogleSignalService().translateRSS(postID: item.translationPostID) }
         } catch { if !Task.isCancelled { translationError = "翻译暂不可用，请重试" } }
     }
