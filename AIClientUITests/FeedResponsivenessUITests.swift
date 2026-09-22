@@ -84,8 +84,12 @@ final class FeedResponsivenessUITests: XCTestCase {
     }
 
     private func firstPost(in list: XCUIElement) -> XCUIElement {
-        list.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed-post-")).firstMatch
+        let posts = list.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed-post-"))
+        // Rank labels share the article identifier, and a live delivery banner
+        // can cover the first row. Exercise a visible article headline.
+        return posts.allElementsBoundByIndex.first { $0.isHittable && $0.frame.width > 60 }
+            ?? posts.firstMatch
     }
 
     private func exerciseScrolling(_ app: XCUIApplication, source: String) {
