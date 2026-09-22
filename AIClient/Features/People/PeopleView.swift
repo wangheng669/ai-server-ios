@@ -2927,7 +2927,8 @@ struct PersonDetailSheet: View {
                 group.addTask {
                     await PeopleImagePreheater.preheatDetail(
                         for: adjacentPerson,
-                        baseURL: ServerConfiguration.currentURL
+                        baseURL: ServerConfiguration.currentURL,
+                        includesPhotos: false
                     )
                 }
             }
@@ -2937,14 +2938,15 @@ struct PersonDetailSheet: View {
 
 private enum PeopleImagePreheater {
     @MainActor
-    static func preheatDetail(for person: SpecialPerson, baseURL: URL) async {
+    static func preheatDetail(for person: SpecialPerson, baseURL: URL, includesPhotos: Bool = true) async {
         let avatarURL = person.avatarAssetName == nil ? person.avatarURL(baseURL: baseURL) : nil
         _ = await ImageLoader.load(
             avatarURL,
             targetSize: CGSize(width: 66, height: 66)
         )
 
-        let thumbnailSize = CGSize(width: UIScreen.main.bounds.width, height: 132)
+        guard includesPhotos, !Task.isCancelled else { return }
+        let thumbnailSize = CGSize(width: 154, height: 96)
         let photoURLs = person.photos.prefix(3).compactMap { $0.imageURL(baseURL: baseURL) }
         await withTaskGroup(of: Void.self) { group in
             for url in photoURLs {
@@ -3875,6 +3877,7 @@ private struct CompactPersonPhotoGallery: View {
                                 if let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
                                     RemoteImage(
                                         url: url,
+                                        targetWidth: 154,
                                         height: 96,
                                         cornerRadius: 13,
                                         contentMode: .fill
@@ -3919,6 +3922,7 @@ private struct PersonPhotoCard: View {
                 if let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
                     RemoteImage(
                         url: url,
+                        targetWidth: 210,
                         height: 132,
                         cornerRadius: 14,
                         contentMode: .fit
@@ -4669,7 +4673,7 @@ struct XReplyContextCard: View {
                 .foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 9) {
                 if let avatar = reply.avatarURL.flatMap(MediaURL.image) {
-                    RemoteImage(url: avatar, height: 28, cornerRadius: 14)
+                    RemoteImage(url: avatar, targetWidth: 28, height: 28, cornerRadius: 14)
                         .frame(width: 28, height: 28)
                         .clipped()
                 }
@@ -4921,7 +4925,7 @@ private struct XQuotedPostCard: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 if let avatar = quote.author?.profileImageURL.flatMap(MediaURL.image) {
-                    RemoteImage(url: avatar, height: 24, cornerRadius: 12)
+                    RemoteImage(url: avatar, targetWidth: 24, height: 24, cornerRadius: 12)
                         .frame(width: 24, height: 24).clipped()
                 }
                 Text(quote.author?.name ?? "引用动态").font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -4971,6 +4975,7 @@ private struct XQuotedMediaGrid: View {
                 ForEach(urls, id: \.self) { url in
                     RemoteImage(
                         url: url,
+                        targetWidth: itemWidth,
                         height: itemHeight,
                         cornerRadius: 6,
                         contentMode: urls.count == 1 ? .fit : .fill

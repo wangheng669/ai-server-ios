@@ -420,6 +420,9 @@ private struct EditorialRootView: View {
             }
             .frame(width: 0, height: 0)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            Task { await ImageLoader.shared.removeCachedImages() }
+        }
         .environment(\.rootBottomChromeHeight, rootBottomChromeHeight)
         .environment(\.openURL, OpenURLAction { url in
             guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
@@ -872,6 +875,22 @@ private struct TodayWorldView: View {
     @State private var selectedSectionKey: String?
     @State private var selectedSystem: TodayWorldFinalReportSystem?
     @State private var showsReportDetails = false
+    @State private var featuredIndex: Int? = 0
+    @State private var activeBriefSheet: BriefSheet?
+    @State private var showsWatchItems = false
+
+    private enum BriefSheet: Identifiable {
+        case highlight(TodayWorldFinalReportOverviewItem)
+        case system(TodayWorldFinalReportSystem)
+        case watch
+        var id: String {
+            switch self {
+            case .highlight(let item): return "highlight-" + item.id
+            case .system(let system): return "system-" + system.id
+            case .watch: return "watch"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -888,6 +907,16 @@ private struct TodayWorldView: View {
             }
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: Binding(
+                get: { activeBriefSheet != nil },
+                set: { if !$0 { activeBriefSheet = nil } }
+            )) {
+                if let route = activeBriefSheet {
+                    briefSheet(route)
+                        .toolbar(.visible, for: .navigationBar)
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+            }
         }
         .sheet(isPresented: $showsReportDetails, onDismiss: {
             selectedSystem = nil
@@ -901,9 +930,23 @@ private struct TodayWorldView: View {
                     .presentationCornerRadius(28)
             }
         }
+        .sheet(isPresented: $showsWatchItems) {
+            NavigationStack { briefSheet(.watch) }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .onChange(of: activeBriefSheet?.id) { _, value in
+            showsDetail = value != nil || showsReportDetails || showsWatchItems
+        }
+        .onChange(of: showsWatchItems) { _, value in
+            showsDetail = value || activeBriefSheet != nil || showsReportDetails
+        }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await store.load(force: true)
+        }
+        .task(id: ServerConfiguration.currentURL.absoluteString + "|" + preparationIDs.map(String.init).joined(separator: ",")) {
+            await TodayChinesePreparation.warm(ids: preparationIDs, baseURL: ServerConfiguration.currentURL)
         }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
@@ -914,79 +957,247 @@ private struct TodayWorldView: View {
         }
     }
 
+    private var preparationIDs: [Int] {
+        guard rootTabIsActive, scenePhase == .active, let final = store.report?.report.final else { return [] }
+        let section = final.sections.first { $0.id == selectedSectionKey } ?? final.sections.first
+        return TodayChinesePreparation.prioritizedIDs(
+            highlights: final.overview.highlights.flatMap(\.postIDs),
+            visible: section?.systems.prefix(5).flatMap(\.postIDs) ?? []
+        )
+    }
+
+    private var pageBackground: Color { Color(uiColor: .systemGroupedBackground) }
+    private var accent: Color { InvestmentDesign.accent }
+
     @ViewBuilder
     private func reportView(_ report: TodayWorldYesterdayReportPayload) -> some View {
-        if let final = report.report.final,
-           final.status == "succeeded",
-           !final.sections.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                metadata(report)
-                if !final.overview.headline.isEmpty {
-                    finalOverview(final.overview)
-                }
-                Spacer(minLength: 12)
-                Button {
-                    showsReportDetails = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("查看昨日明细")
-                        Text("\(final.sections.reduce(0) { $0 + $1.systems.count }) 个体系")
-                            .foregroundStyle(.secondary)
+        if let final = report.report.final, final.status == "succeeded", !final.sections.isEmpty {
+            let section = final.sections.first { $0.id == selectedSectionKey } ?? final.sections[0]
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(displayDate(report.date))
+                                .font(.system(size: 25, weight: .semibold))
+                            Text("每日简报 · \(report.sourceCount) 个来源")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
                         Spacer()
-                        Image(systemName: "chevron.up")
+                        Button { showsReportDetails = true } label: {
+                            Label("全文", systemImage: "doc.text")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier("today-full-report")
+                        .padding(.top, 6)
                     }
-                    .font(.system(size: 15, weight: .semibold))
-                    .padding(.horizontal, 18)
-                    .frame(height: 52)
-                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .padding(.horizontal, 20)
+
+                    featuredStories(final)
+
+                    VStack(spacing: 0) {
+                        categoryTabs(final.sections, selectedID: section.id)
+                        ForEach(Array(section.systems.prefix(5).enumerated()), id: \.element.id) { index, system in
+                            if index > 0 { Divider().padding(.leading, 62) }
+                            compactSystemRow(system)
+                        }
+                        if section.systems.isEmpty {
+                            Text("这个领域暂无动态")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity).padding(24)
+                        }
+                        Button { showsReportDetails = true } label: {
+                            HStack(spacing: 8) {
+                                Spacer()
+                                Text("查看全部 \(section.systems.count) 组")
+                                Image(systemName: "arrow.right")
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 14)
+                        }
+                        .accessibilityIdentifier("today-all-groups")
+                    }
+                    .padding(.horizontal, 20)
+
+                    Button { showsWatchItems = true } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "scope").foregroundStyle(accent)
+                            Text("持续观察").fontWeight(.semibold)
+                            Text("\(final.overview.watchItems.count) 项待跟进")
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12)).foregroundStyle(.tertiary)
+                        }
+                        .font(.system(size: 15))
+                        .padding(16)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("today-watch-items")
+                    .padding(.horizontal, 20)
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("弹出人工智能、投资及引用依据")
-                .padding(.horizontal, 18)
-                .padding(.bottom, 84)
+                .padding(.top, 16)
+                .padding(.bottom, 96)
             }
-            .background(Color(uiColor: .systemBackground))
+            .scrollIndicators(.hidden)
+            .background(pageBackground)
+            .refreshable { await store.load(force: true) }
         } else {
             reportStatusView(report)
         }
     }
 
-    private func finalOverview(_ overview: TodayWorldFinalReportOverview) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("昨日主线")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.teal)
-
-            Text(overview.headline)
-                .font(.system(size: 20, weight: .bold))
-                .lineSpacing(3)
-
-            ForEach(Array(overview.highlights.prefix(3).enumerated()), id: \.element.id) { index, item in
-                HStack(alignment: .top, spacing: 10) {
-                    Text(String(format: "%02d", index + 1))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color.teal)
-                    VStack(alignment: .leading, spacing: 3) {
-                        if let title = item.title, !title.isEmpty {
-                            Text(title).font(.system(size: 14, weight: .semibold))
+    private func featuredStories(_ final: TodayWorldFinalReport) -> some View {
+        let highlights = final.overview.highlights
+        return VStack(spacing: 12) {
+            if highlights.isEmpty {
+                Text(final.overview.headline)
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+                    .padding(.horizontal, 20)
+            } else {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 12) {
+                        ForEach(Array(highlights.enumerated()), id: \.element.id) { index, item in
+                            Button { activeBriefSheet = .highlight(item) } label: {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack {
+                                        Text("编辑精选").foregroundStyle(accent)
+                                        Spacer()
+                                        Text(String(format: "%02d / %02d", index + 1, highlights.count))
+                                            .foregroundStyle(.secondary).monospacedDigit()
+                                    }
+                                    .font(.system(size: 12, weight: .medium))
+                                    Text(item.title?.isEmpty == false ? item.title! : final.overview.headline)
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .lineSpacing(2).lineLimit(3)
+                                    Text(item.text)
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.secondary)
+                                        .lineSpacing(3).lineLimit(3)
+                                    Spacer(minLength: 0)
+                                    HStack {
+                                        Text(featuredSource(item, final: final))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "arrow.right")
+                                    }
+                                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                                }
+                                .multilineTextAlignment(.leading)
+                                .padding(18)
+                                .frame(height: 254)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+                            }
+                            .buttonStyle(.plain)
+                            .containerRelativeFrame(.horizontal)
+                            .id(index)
+                            .accessibilityIdentifier("today-highlight-\(index)")
                         }
-                        Text(item.text)
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(2)
-                            .lineLimit(2)
+                    }
+                    .scrollTargetLayout()
+                }
+                .contentMargins(.horizontal, 20, for: .scrollContent)
+                .scrollTargetBehavior(.viewAligned)
+                .scrollPosition(id: $featuredIndex)
+                .scrollIndicators(.hidden)
+                HStack(spacing: 7) {
+                    ForEach(highlights.indices, id: \.self) { index in
+                        Circle().fill(index == (featuredIndex ?? 0) ? accent : Color.secondary.opacity(0.2))
+                            .frame(width: 6, height: 6)
                     }
                 }
+                .accessibilityLabel("精选第 \((featuredIndex ?? 0) + 1) 条，共 \(highlights.count) 条")
             }
-
-            Text("完整分组、观察项和引用依据可在昨日明细中查看")
-                .font(.system(size: 12.5))
-                .foregroundStyle(.tertiary)
         }
-        .padding(18)
-        .background(Color.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .padding(.horizontal, 18)
-        .padding(.bottom, 18)
+    }
+
+    private func featuredSource(_ item: TodayWorldFinalReportOverviewItem, final: TodayWorldFinalReport) -> String {
+        let names = final.systems.filter { item.systemKeys.contains($0.systemKey) }.map(\.systemName)
+        return names.isEmpty ? "查看解读与依据" : names.joined(separator: " · ")
+    }
+
+    private func categoryTabs(_ sections: [TodayWorldFinalReportSection], selectedID: String) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 26) {
+                ForEach(sections) { section in
+                    Button { selectedSectionKey = section.id } label: {
+                        VStack(spacing: 9) {
+                            Text(section.sectionName)
+                                .font(.system(size: 16, weight: section.id == selectedID ? .semibold : .regular))
+                                .foregroundStyle(section.id == selectedID ? Color.primary : .secondary)
+                            Capsule().fill(section.id == selectedID ? accent : .clear)
+                                .frame(width: 25, height: 3)
+                        }
+                        .padding(.top, 4)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("today-category-\(section.id)")
+                    .accessibilityAddTraits(section.id == selectedID ? .isSelected : [])
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .padding(.bottom, 8)
+    }
+
+    private func compactSystemRow(_ system: TodayWorldFinalReportSystem) -> some View {
+        Button { activeBriefSheet = .system(system) } label: {
+            HStack(alignment: .center, spacing: 12) {
+                AvatarView(url: system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL), name: system.systemName, size: 32)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(system.systemName).font(.system(size: 15, weight: .semibold))
+                    Text(system.headline)
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                        .lineSpacing(2).lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+            }
+            .multilineTextAlignment(.leading)
+            .padding(.vertical, 13)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("today-system-\(system.id)")
+    }
+
+    @ViewBuilder
+    private func briefSheet(_ route: BriefSheet) -> some View {
+        if let report = store.report, let final = report.report.final {
+            switch route {
+            case .system(let system):
+                TodayWorldReportSourcesView(system: system, reportDate: report.date, highlights: final.overview.highlights)
+            case .highlight(let item):
+                TodayEventDetailView(event: TodayReadingEvent.highlight(item, systems: final.systems, date: report.date))
+            case .watch:
+                List {
+                    if final.overview.watchItems.isEmpty {
+                        Text("暂无待跟进事项").foregroundStyle(.secondary)
+                    }
+                    ForEach(final.overview.watchItems) { item in
+                        NavigationLink {
+                            TodayEventDetailView(event: TodayReadingEvent.highlight(item, systems: final.systems, date: report.date))
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let title = item.title, !title.isEmpty { Text(title).font(.headline) }
+                                Text(item.text).font(.body).foregroundStyle(.secondary)
+                            }.padding(.vertical, 6)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .navigationTitle("持续观察")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
     }
 
     private func reportDetailsSheet(
@@ -1029,7 +1240,7 @@ private struct TodayWorldView: View {
                 set: { if !$0 { selectedSystem = nil } }
             )) {
                 if let system = selectedSystem {
-                    TodayWorldReportSourcesView(system: system, reportDate: reportDate)
+                    TodayWorldReportSourcesView(system: system, reportDate: reportDate, highlights: final.overview.highlights)
                 }
             }
         }
@@ -1233,557 +1444,408 @@ private func todayWorldSourceAvatarURL(_ key: String) -> URL? {
     return MediaURL.image("/api/ios/v1/today-world/avatars/\(encoded)?v=2")
 }
 
+// Reading content stays tied to explicit report references; facts are not inferred to be separate events.
+struct TodayReadingEvent: Identifiable {
+    let id: String
+    let title: String
+    let summary: String
+    let sourceLabel: String
+    let date: String
+    let details: [String]
+    let watchItems: [String]
+    let postIDs: [Int]
+
+    static func canonical(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .filter { !$0.isWhitespace }
+            .trimmingCharacters(in: CharacterSet(charactersIn: "。！？!?，,；;：:."))
+    }
+
+    static func unique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter {
+            let key = canonical($0)
+            return !key.isEmpty && seen.insert(key).inserted
+        }
+    }
+
+    // Exact sentence matching only: never collapse different numbers, negations or qualifications.
+    static func additionalDetails(_ values: [String], excluding existing: [String]) -> [String] {
+        func sentences(_ text: String) -> [String] {
+            var result: [String] = []
+            var current = ""
+            for character in text {
+                current.append(character)
+                if "。！？\n".contains(character) {
+                    result.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+                    current = ""
+                }
+            }
+            if !current.isEmpty { result.append(current.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            return result
+        }
+        var seen = Set(existing.flatMap { sentences($0).map(canonical) })
+        return values.compactMap { value in
+            let fresh = sentences(value).filter {
+                let key = canonical($0)
+                return !key.isEmpty && seen.insert(key).inserted
+            }.joined()
+            return fresh.isEmpty ? nil : fresh
+        }
+    }
+
+    static func highlight(_ item: TodayWorldFinalReportOverviewItem, systems: [TodayWorldFinalReportSystem], date: String) -> Self {
+        let related = systems.filter {
+            item.systemKeys.contains($0.systemKey) || !Set(item.postIDs).isDisjoint(with: $0.postIDs)
+        }
+        let ids = item.postIDs.isEmpty ? related.flatMap(\.postIDs) : item.postIDs
+        let sourceIDs = Set(ids.filter { $0 > 0 })
+        let title = item.title?.isEmpty == false ? item.title! : "事件详情"
+        let summary = additionalDetails([item.text], excluding: [title]).joined(separator: "\n")
+        let facts = related.flatMap(\.facts).filter {
+            !$0.postIDs.isEmpty && Set($0.postIDs).isSubset(of: sourceIDs)
+        }
+        return Self(id: item.id, title: title,
+                    summary: summary, sourceLabel: unique(related.map(\.systemName)).joined(separator: " · "),
+                    date: date, details: additionalDetails(facts.map(\.text), excluding: [title, summary]),
+                    watchItems: [], postIDs: sourceIDs.sorted())
+    }
+
+    static func system(_ system: TodayWorldFinalReportSystem, date: String) -> Self {
+        let paragraphs = additionalDetails(system.facts.map(\.text), excluding: [system.headline])
+        return Self(id: system.id, title: system.headline, summary: paragraphs.first ?? "",
+                    sourceLabel: system.systemName, date: date, details: Array(paragraphs.dropFirst()),
+                    watchItems: unique([system.watchItem].compactMap { $0 }),
+                    postIDs: Array(Set(system.postIDs.filter { $0 > 0 })).sorted())
+    }
+}
+
 private struct TodayWorldReportSourcesView: View {
     let system: TodayWorldFinalReportSystem
     let reportDate: String
+    var highlights: [TodayWorldFinalReportOverviewItem] = []
 
-    @State private var posts: [Post] = []
-    @State private var translations: [Int: String] = [:]
-    @State private var translationFailures: Set<Int> = []
-    @State private var selectedPost: Post?
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var isShowingPosts = false
+    private var events: [TodayReadingEvent] {
+        let matches = highlights.filter {
+            $0.systemKeys.contains(system.systemKey) || !Set($0.postIDs).isDisjoint(with: system.postIDs)
+        }
+        // A company report may contain additional material beyond the selected highlights.
+        // Only use a directory when multiple explicit events cover all of its cited sources.
+        let covered = Set(matches.flatMap(\.postIDs))
+        guard matches.count > 1, Set(system.postIDs).isSubset(of: covered) else {
+            return [.system(system, date: reportDate)]
+        }
+        return matches.map { .highlight($0, systems: [system], date: reportDate) }
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            sheetHeader
-            summaryPage
+        Group {
+            if events.count == 1, let event = events.first {
+                TodayEventDetailView(event: event)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(system.systemName).font(.title2.weight(.semibold))
+                        Text(reportDate).font(.subheadline).foregroundStyle(.secondary).padding(.top, 6).padding(.bottom, 20)
+                        ForEach(events) { event in
+                            NavigationLink {
+                                TodayEventDetailView(event: event)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(event.title).font(.headline).foregroundStyle(.primary)
+                                        Text(event.summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                                }
+                                .multilineTextAlignment(.leading).padding(.vertical, 18)
+                            }
+                            Divider()
+                        }
+                        if let watch = system.watchItem, !watch.isEmpty {
+                            Text("后续关注").font(.headline).padding(.top, 24)
+                            Text(watch).foregroundStyle(.secondary).padding(.top, 8)
+                        }
+                    }.padding(20)
+                }
+                .navigationTitle("公司动态")
+            }
         }
         .background(Color(uiColor: .systemBackground))
         .toolbar(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $isShowingPosts) {
-            postsPageContent
-                .task(id: system.id) {
-                    guard TodayWorldPostLoadingPolicy.shouldLoad(
-                        isPostsPagePresented: isShowingPosts,
-                        postsAreEmpty: posts.isEmpty
-                    ) else { return }
-                    await load()
+    }
+}
+
+private struct TodayEventDetailView: View {
+    let event: TodayReadingEvent
+    @State private var posts: [Post] = []
+    @State private var isLoading = false
+    @State private var failedIDs: [Int] = []
+    @State private var expandedPostID: Int?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text([event.sourceLabel, event.date].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(event.title).font(.title2.weight(.semibold)).textSelection(.enabled)
+                    if !event.summary.isEmpty {
+                        Text(event.summary).font(.body).lineSpacing(5).textSelection(.enabled)
+                    }
                 }
-        }
-    }
-
-    private var sheetHeader: some View {
-        HStack(spacing: 14) {
-            AvatarView(
-                url: system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL),
-                name: sourceName(at: 0),
-                size: 54,
-                assetName: primaryPersonAvatarAssetName
-            )
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(system.systemName)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                Text("\(system.sourceKeys.count) 个账号 · \(system.postIDs.count) 条依据")
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 8)
-
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 18)
-    }
-
-    private var summaryPage: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    Text("最终结论")
-                        .font(.system(size: 15, weight: .semibold))
-
-                    Text(system.headline)
-                        .font(.system(size: 19, weight: .bold))
-                        .lineSpacing(4)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(system.facts) { fact in
-                            VStack(alignment: .leading, spacing: 7) {
-                                HStack {
-                                    Text(factCategoryLabel(fact.category))
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(Color.teal)
-                                    Spacer()
-                                    Text("\(fact.postIDs.count) 条直接依据")
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                Text(fact.text)
-                                    .font(.system(size: 16))
-                                    .lineSpacing(5)
-                                    .fixedSize(horizontal: false, vertical: true)
+                if !event.details.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("具体进展").font(.headline)
+                        ForEach(event.details, id: \.self) { text in
+                            Text(text).lineSpacing(5).textSelection(.enabled)
+                        }
+                    }
+                }
+                if !event.watchItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("后续关注").font(.headline)
+                        ForEach(event.watchItems, id: \.self) { Text($0).foregroundStyle(.secondary).lineSpacing(4) }
+                    }
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("消息来源").font(.headline).padding(.bottom, 12)
+                    if event.postIDs.isEmpty {
+                        Text("本条简报暂未提供原文引用")
+                            .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 12)
+                    }
+                    ForEach(posts) { post in
+                        TodayInlineSourceView(post: post, isExpanded: expandedPostID == post.id) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                expandedPostID = expandedPostID == post.id ? nil : post.id
                             }
-                            .padding(14)
-                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
+                        Divider()
                     }
-
-                    if let watchItem = system.watchItem, !watchItem.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("继续观察")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.orange)
-                            Text(watchItem)
-                                .font(.system(size: 14.5))
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(3)
-                        }
-                        .padding(14)
-                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    if isLoading {
+                        ProgressView("正在载入来源").font(.caption).padding(.vertical, 16)
+                    }
+                    if !failedIDs.isEmpty && !isLoading {
+                        HStack {
+                            Text(posts.isEmpty ? "暂时无法载入来源" : "部分来源暂未载入").foregroundStyle(.secondary)
+                            Spacer()
+                            Button("重试") { Task { await loadSources() } }
+                        }.font(.subheadline).padding(.vertical, 16)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
             }
-            .scrollIndicators(.hidden)
-            .scrollBounceBehavior(.basedOnSize)
+            .padding(20)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .navigationTitle("事件详情")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .task(id: event.id) { await loadSources() }
+    }
 
-            summaryFooter
+    @MainActor private func loadSources() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        let url = ServerConfiguration.currentURL
+        var loaded = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
+        let cached = await TodayWorldPostMemoryCache.shared.cachedPosts(ids: event.postIDs, baseURL: url)
+        for post in cached { loaded[post.id] = post }
+        posts = event.postIDs.compactMap { loaded[$0] }
+        let missing = event.postIDs.filter { loaded[$0] == nil }
+        for start in stride(from: 0, to: missing.count, by: 50) {
+            guard !Task.isCancelled else { return }
+            let ids = Array(missing[start..<min(start + 50, missing.count)])
+            do {
+                let batch = try await fetchTodayWorldPostBatch(ids: ids, baseURL: url)
+                await TodayWorldPostMemoryCache.shared.store(posts: batch, baseURL: url)
+                for post in batch where event.postIDs.contains(post.id) { loaded[post.id] = post }
+            } catch { /* Individual retries below also support servers without the batch endpoint. */ }
+        }
+        for id in event.postIDs where loaded[id] == nil {
+            guard !Task.isCancelled else { return }
+            if let post = try? await TodayWorldPostMemoryCache.shared.post(id: id, baseURL: url) { loaded[id] = post }
+        }
+        guard !Task.isCancelled else { return }
+        posts = event.postIDs.compactMap { loaded[$0] }
+        failedIDs = event.postIDs.filter { loaded[$0] == nil }
+    }
+}
+
+enum TodayChinesePreparation {
+    static func prioritizedIDs(highlights: [Int], visible: [Int]) -> [Int] {
+        var seen = Set<Int>()
+        return Array((highlights + visible).filter { $0 > 0 && seen.insert($0).inserted }.prefix(12))
+    }
+
+    static func isChinese(_ text: String) -> Bool {
+        text.range(of: "[\\p{Han}]", options: .regularExpression) != nil
+            && !XPostTextFormatter.containsUntranslatedEnglishPassage(text)
+    }
+
+    static func texts(_ post: Post) -> [String] {
+        TodayReadingEvent.unique([
+            post.hasTranslation ? post.displayContent : post.xStoredOriginalContent,
+            post.meta?.replyContext?.displayText, post.meta?.quotedTweet?.displayText
+        ].compactMap { $0 })
+    }
+
+    static func warm(ids: [Int], baseURL: URL) async {
+        guard !ids.isEmpty, !Task.isCancelled else { return }
+        let cached = await TodayWorldPostMemoryCache.shared.cachedPosts(ids: ids, baseURL: baseURL)
+        var posts = Dictionary(uniqueKeysWithValues: cached.map { ($0.id, $0) })
+        let missing = ids.filter { posts[$0] == nil }
+        if !missing.isEmpty, let fetched = try? await fetchTodayWorldPostBatch(ids: missing, baseURL: baseURL) {
+            await TodayWorldPostMemoryCache.shared.store(posts: fetched, baseURL: baseURL)
+            for post in fetched { posts[post.id] = post }
+        }
+        for id in ids {
+            guard !Task.isCancelled else { return }
+            guard let post = posts[id] else { continue }
+            for text in texts(post) where !isChinese(text) {
+                guard !Task.isCancelled else { return }
+                _ = try? await TodayChineseTextCache.shared.text(text, tweetID: text == texts(post).first ? post.xTweetID : nil, baseURL: baseURL)
+            }
         }
     }
+}
 
-    private func factCategoryLabel(_ category: String) -> String {
-        ["release": "发布", "action": "行动", "viewpoint": "观点", "market": "市场", "risk": "风险", "context": "背景"][category] ?? "要点"
+private actor TodayChineseTextCache {
+    static let shared = TodayChineseTextCache()
+    private var values: [String: String] = [:]
+    private var inFlight: [String: Task<String, Error>] = [:]
+    private var insertionOrder: [String] = []
+    private var activeCount = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    private func acquireSlot() async {
+        if activeCount < 2 { activeCount += 1; return }
+        await withCheckedContinuation { waiters.append($0) }
     }
 
-    private var primaryPersonAvatarAssetName: String? {
-        let identity = ([system.systemName] + system.sourceNames).joined(separator: " ").lowercased()
-        let knownPeople: [(aliases: [String], asset: String)] = [
-            (["马斯克", "elon musk", "musk"], "ElonMuskAvatar"),
-            (["董明珠"], "DongMingzhuAvatar"),
-            (["马云", "jack ma"], "JackMaAvatar"),
-            (["雷军", "lei jun"], "LeiJunAvatar"),
-            (["李彦宏", "robin li"], "RobinLiAvatar")
-        ]
-        return knownPeople.first { person in
-            person.aliases.contains { identity.localizedCaseInsensitiveContains($0) }
-        }?.asset
+    private func releaseSlot() {
+        if waiters.isEmpty { activeCount -= 1 } else { waiters.removeFirst().resume() }
     }
 
-    private var summaryFooter: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 12) {
-                HStack(spacing: -10) {
-                    ForEach(Array(system.sourceKeys.prefix(4).enumerated()), id: \.offset) { index, key in
-                        AvatarView(
-                            url: todayWorldSourceAvatarURL(key),
-                            name: sourceName(at: index),
-                            size: 44
-                        )
-                        .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("来源账号")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("共 \(system.sourceKeys.count) 个账号")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
+    func text(_ source: String, tweetID: String?, baseURL: URL) async throws -> String {
+        if TodayChinesePreparation.isChinese(source) { return source }
+        let key = baseURL.absoluteString + "|" + (tweetID ?? "") + "|" + source
+        if let value = values[key] { return value }
+        if let pending = inFlight[key] { return try await pending.value }
+        let task = Task<String, Error> {
+            await acquireSlot()
+            defer { releaseSlot() }
+            let result: String
+            if let tweetID {
+                result = try await APIClient(baseURL: baseURL).fetchXTranslation(tweetID: tweetID).text
+            } else {
+                result = try await PersonArticleTranslationService.shared.translate(source)
             }
+            guard TodayChinesePreparation.isChinese(result) else { throw APIError.invalidResponse }
+            return result
+        }
+        inFlight[key] = task
+        do {
+            let value = try await task.value
+            inFlight[key] = nil
+            values[key] = value
+            insertionOrder.append(key)
+            while insertionOrder.count > 128 { values.removeValue(forKey: insertionOrder.removeFirst()) }
+            return value
+        } catch {
+            inFlight[key] = nil
+            throw error
+        }
+    }
+}
 
-            Button {
-                isShowingPosts = true
-            } label: {
-                HStack(spacing: 6) {
-                    Text("查看 \(system.postIDs.count) 条直接依据")
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+private struct TodayInlineSourceView: View {
+    let post: Post
+    let isExpanded: Bool
+    let toggle: () -> Void
+    @State private var translations: [String: String] = [:]
+    @State private var translating = false
+    @State private var translationFailed = false
+
+    private var sourceText: String { post.hasTranslation ? post.displayContent : post.xStoredOriginalContent }
+    private func chineseText(_ text: String) -> String? {
+        if let translated = translations[text] { return translated }
+        guard text.range(of: "[\\p{Han}]", options: .regularExpression) != nil,
+              !XPostTextFormatter.containsUntranslatedEnglishPassage(text) else { return nil }
+        return text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Button(action: toggle) {
+                HStack(alignment: .top, spacing: 10) {
+                    AvatarView(url: post.avatarURL, name: post.authorName, size: 28)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(post.authorName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        if let time = post.formattedTime { Text(time).font(.caption).foregroundStyle(.secondary) }
+                        if !isExpanded {
+                            Text(chineseText(sourceText) ?? "展开阅读中文内容")
+                                .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(
-                    Color(uiColor: .secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
+                .multilineTextAlignment(.leading).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
-        .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: .top) { Divider() }
-    }
-
-    private var postsPageContent: some View {
-        VStack(spacing: 0) {
-            postsHeader
-
-            Group {
-                if isLoading {
-                    ProgressView("正在载入动态")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorMessage {
-                    ContentUnavailableView {
-                        Label("暂时无法载入", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorMessage)
-                    } actions: {
-                        Button("重新加载") {
-                            Task { await load() }
-                        }
-                    }
-                } else {
-                    postsPage
+            .accessibilityIdentifier("today-source-\(post.id)")
+            .accessibilityValue(isExpanded ? "已展开" : "已收起")
+            if isExpanded {
+                if let text = chineseText(sourceText) {
+                    Text(text).font(.body).lineSpacing(5).textSelection(.enabled)
+                }
+                if let reply = post.meta?.replyContext?.displayText, let text = chineseText(reply) {
+                    Text("回复：\(text)").font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                if let quote = post.meta?.quotedTweet, let original = quote.displayText, let text = chineseText(original) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(quote.author?.name ?? "引用内容").font(.caption.weight(.semibold))
+                        Text(text).font(.subheadline).textSelection(.enabled)
+                    }.padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: 2) }
+                }
+                if post.previewURL != nil || !post.videoURLs.isEmpty { XFeedMediaView(post: post) }
+                if translating { ProgressView("正在载入中文内容").font(.caption) }
+                if translationFailed {
+                    Text("部分中文内容暂不可用，请稍后重新展开")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
-        }
-        .background(Color(uiColor: .systemBackground))
-        .toolbar(.visible, for: .navigationBar)
-        .navigationDestination(isPresented: Binding(
-            get: { selectedPost != nil },
-            set: { if !$0 { selectedPost = nil } }
-        )) {
-            if let post = selectedPost {
-                TodayWorldPostDetailCarousel(posts: posts, initialPost: post)
-            }
-        }
-    }
-
-    private var postsHeader: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(posts.count) 条动态")
-                    .font(.system(size: 20, weight: .bold))
-
-                Text("\(displayDate) · 按时间排序")
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 10)
-        .padding(.bottom, 14)
-        .overlay(alignment: .bottom) { Divider() }
-    }
-
-    private var postsPage: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
-                    if index > 0 {
-                        Divider()
-                            .padding(.leading, 60)
-                    }
-                    postSection(post)
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-        .scrollIndicators(.hidden)
-    }
-
-    private func sourceName(at index: Int) -> String {
-        guard system.sourceNames.indices.contains(index) else { return system.systemName }
-        return system.sourceNames[index]
-    }
-
-    @ViewBuilder
-    private func postSection(_ post: Post) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            AvatarView(url: post.avatarURL, name: post.authorName, size: 48)
-
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(post.authorName)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Text([post.authorHandle, post.formattedTime].compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                if let reply = post.meta?.replyContext,
-                   let replyText = reply.displayText {
-                    TodayWorldReplyContextCard(reply: reply, text: replyText)
-                } else if let replyHandle = replyHandle(for: post) {
-                    Text("回复 \(replyHandle)")
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(.secondary)
-                }
-
-                if let content = displayedContent(for: post) {
-                    Text(content)
-                        .font(.system(size: 16))
-                        .lineSpacing(4)
-                        .lineLimit(8)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(.primary)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("正在翻译")
-                }
-
-                if let quote = post.meta?.quotedTweet {
-                    TodayWorldQuotedPostCard(quote: quote)
-                }
-
-                if post.previewURL != nil || !post.videoURLs.isEmpty {
-                    XFeedMediaView(post: post)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 16)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            selectedPost = post
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityHint("打开动态详情")
-        .accessibilityIdentifier("yesterday-post-row")
-    }
-
-    private func displayedContent(for post: Post) -> String? {
-        if let translation = translations[post.id] {
-            return translation
-        }
-        if post.hasTranslation {
-            return post.displayContent
-        }
-        if translationFailures.contains(post.id) || !post.needsXTranslation {
-            return post.xStoredOriginalContent
-        }
-        return nil
-    }
-
-    private func replyHandle(for post: Post) -> String? {
-        guard let value = post.meta?.inReplyToScreenName?
-            .trimmingCharacters(in: CharacterSet(charactersIn: "@")),
-              !value.isEmpty else { return nil }
-        return "@\(value)"
-    }
-
-    private struct TodayWorldQuotedPostCard: View {
-        let quote: XQuotedPost
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    AvatarView(
-                        url: quote.author?.profileImageURL.flatMap(MediaURL.image),
-                        name: quote.author?.name ?? "引用动态",
-                        size: 24
-                    )
-
-                    Text(quote.author?.name ?? "引用动态")
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(1)
-
-                    if let handle = quote.author?.handle {
-                        Text(handle)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                if let text = quote.displayText {
-                    Text(text)
-                        .font(.system(size: 14.5))
-                        .lineSpacing(3)
-                        .lineLimit(5)
-                        .truncationMode(.tail)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                let media = Array((quote.media ?? []).compactMap(\.displayURL).prefix(4))
-                if let image = media.first, media.count == 1 {
-                    RemoteImage(url: image, height: 180, cornerRadius: 8)
-                        .frame(maxWidth: .infinity)
-                } else if !media.isEmpty {
-                    LazyVGrid(
-                        columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)],
-                        spacing: 3
-                    ) {
-                        ForEach(media, id: \.self) { url in
-                            RemoteImage(url: url, height: 110, cornerRadius: 8)
-                        }
-                    }
-                }
-            }
-            .padding(11)
-            .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-            }
+        .task(id: post.id) { await prepareChinese() }
+        .task(id: isExpanded) {
+            if isExpanded && translationFailed { await prepareChinese() }
         }
     }
 
-    private struct TodayWorldReplyContextCard: View {
-        let reply: XReplyContext
-        let text: String
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("回复 \(reply.handle ?? "这条动态")")
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(.secondary)
-
-                HStack(alignment: .top, spacing: 8) {
-                    AvatarView(
-                        url: reply.avatarURL.flatMap(MediaURL.image),
-                        name: reply.authorName ?? reply.handle ?? "回复",
-                        size: 26
-                    )
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 5) {
-                            if let name = reply.authorName, !name.isEmpty {
-                                Text(name)
-                                    .font(.system(size: 13.5, weight: .semibold))
-                                    .lineLimit(1)
-                            }
-                            if let handle = reply.handle {
-                                Text(handle)
-                                    .font(.system(size: 12.5))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        Text(text)
-                            .font(.system(size: 14))
-                            .lineSpacing(3)
-                            .lineLimit(4)
-                            .truncationMode(.tail)
-                            .foregroundStyle(.primary)
-                    }
-                }
-            }
-            .padding(10)
-            .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-            }
-        }
-    }
-
-    @MainActor
-    private func load() async {
-        errorMessage = nil
-        translationFailures = []
+    @MainActor private func prepareChinese() async {
+        guard !translating else { return }
+        translationFailed = false
+        translating = true
+        defer { translating = false }
         let baseURL = ServerConfiguration.currentURL
-        let cachedPosts = await TodayWorldPostMemoryCache.shared.cachedPosts(
-            ids: system.postIDs,
-            baseURL: baseURL
-        )
-        guard !Task.isCancelled else { return }
-        var loadedByID = Dictionary(uniqueKeysWithValues: cachedPosts.map { ($0.id, $0) })
-        posts = system.postIDs.compactMap { loadedByID[$0] }
-        translations = Dictionary(uniqueKeysWithValues: posts.compactMap { post in
-            guard let tweetID = post.xTweetID,
-                  let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) else { return nil }
-            return (post.id, value)
-        })
-        isLoading = posts.isEmpty
-        defer {
-            if !Task.isCancelled {
-                isLoading = false
-            }
-        }
-
-        var lastError: Error?
-        let batchIDs = system.postIDs.filter { loadedByID[$0] == nil }
-        if !batchIDs.isEmpty {
+        for text in TodayChinesePreparation.texts(post) where chineseText(text) == nil {
+            guard !Task.isCancelled else { return }
             do {
-                let batchPosts = try await fetchTodayWorldPostBatch(ids: batchIDs, baseURL: baseURL)
+                let translated = try await TodayChineseTextCache.shared.text(
+                    text, tweetID: text == sourceText ? post.xTweetID : nil, baseURL: baseURL
+                )
                 guard !Task.isCancelled else { return }
-                await TodayWorldPostMemoryCache.shared.store(posts: batchPosts, baseURL: baseURL)
-                guard !Task.isCancelled else { return }
-                for post in batchPosts {
-                    loadedByID[post.id] = post
-                    if let tweetID = post.xTweetID,
-                       let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
-                        translations[post.id] = value
-                    }
-                }
-                posts = system.postIDs.compactMap { loadedByID[$0] }
-                isLoading = posts.isEmpty
-            } catch is CancellationError {
-                return
+                translations[text] = translated
             } catch {
-                lastError = error
+                if !Task.isCancelled { translationFailed = true }
             }
         }
-
-        await withTaskGroup(of: (Int, Result<Post, Error>).self) { group in
-            for postID in system.postIDs where loadedByID[postID] == nil {
-                group.addTask {
-                    do {
-                        let post = try await TodayWorldPostMemoryCache.shared.post(id: postID, baseURL: baseURL)
-                        return (postID, .success(post))
-                    } catch {
-                        return (postID, .failure(error))
-                    }
-                }
-            }
-
-            for await (postID, result) in group {
-                guard !Task.isCancelled else {
-                    group.cancelAll()
-                    return
-                }
-                switch result {
-                case .success(let post):
-                    loadedByID[postID] = post
-                    posts = system.postIDs.compactMap { loadedByID[$0] }
-                    if let tweetID = post.xTweetID,
-                       let value = PersonDetailStore.cachedXTranslation(tweetID: tweetID) {
-                        translations[post.id] = value
-                    }
-                    isLoading = false
-                case .failure(let error):
-                    lastError = error
-                }
-            }
-        }
-        guard !Task.isCancelled else { return }
-
-        if posts.isEmpty, let lastError {
-            errorMessage = NetworkErrorPresentation.message(for: lastError)
-            isLoading = false
-            return
-        }
-
-    }
-
-    private var displayDate: String {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: reportDate) else { return reportDate }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "M月d日"
-        return formatter.string(from: date)
     }
 }
 

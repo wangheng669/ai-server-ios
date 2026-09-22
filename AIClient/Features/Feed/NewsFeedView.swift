@@ -165,12 +165,6 @@ enum XFeedSelectorAvatarPolicy {
     }
 }
 
-enum EmbeddedWebPresentationPolicy {
-    static func opensImmediately(source: FeedSource) -> Bool {
-        source == .weibo
-    }
-}
-
 private struct WeChatAccount: Identifiable {
     let id: Int
     let name: String
@@ -210,9 +204,6 @@ struct NewsFeedView: View {
     @State private var flashFilter: FlashFilter = .important
     @State private var expandedFlashIDs: Set<Int> = []
     @State private var weiboSection: WeiboSection = .hot
-    @State private var openingWebPostID: Int?
-    @State private var webOpenError: String?
-    @State private var preparedWebViews: [Int: WKWebView] = [:]
     @State private var isSourceSelectorExpanded = false
     @State private var isYouTubePersonSelectorExpanded = false
     @State private var isFeedEntitySelectorExpanded = false
@@ -309,7 +300,6 @@ struct NewsFeedView: View {
                     EmbeddedWebPage(
                         url: link,
                         source: source,
-                        preparedWebView: preparedWebViews[post.id],
                         presentedAsSheet: true
                     )
                 } else {
@@ -360,7 +350,6 @@ struct NewsFeedView: View {
             if post == nil {
                 isFeedChromeHidden = false
                 hidesTabBar = false
-                preparedWebViews.removeAll()
             }
         }
         .task(id: notificationPostID) {
@@ -1125,6 +1114,7 @@ struct NewsFeedView: View {
                 // is settling, which causes abrupt snapping and unreliable jumps when
                 // the user selects a source that is more than one page away.
                 sourcePage(source)
+                    .background(Color(uiColor: .systemBackground))
                     .tag(source)
             }
         }
@@ -1274,166 +1264,226 @@ struct NewsFeedView: View {
         weiboFollowingModel.posts
     }
 
+    // Variable-height Zhihu answers stalled inside LazyVStack placement on iOS 26.
+    // List keeps these rows virtualized without using that lazy-stack layout path.
+    private func zhihuFeedList(posts: [Post]) -> some View {
+        ScrollViewReader { proxy in
+            List {
+                ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                    feedPostCell(source: .zhihu, post: post, index: index, posts: posts)
+                        .id(post.id)
+                        .onGeometryChange(for: CGRect.self) { geometry in
+                            geometry.frame(in: .named("zhihu-feed-viewport"))
+                        } action: { frame in
+                            guard rootTabIsActive, model.source == .zhihu else { return }
+                            scrollPositionStore.recordZhihuRow(post.id, frame: frame)
+                        }
+                        .onDisappear { scrollPositionStore.removeZhihuRow(post.id) }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .task(id: "\(rootTabIsActive)-\(posts.last?.id ?? 0)") {
+                            guard rootTabIsActive, model.source == .zhihu, post.id == posts.last?.id else { return }
+                            await model.loadMoreIfNeeded(current: post)
+                        }
+                }
+                if model.isLoadingMore {
+                    ProgressView().frame(maxWidth: .infinity).listRowSeparator(.hidden)
+                }
+                if model.errorMessage != nil {
+                    Button("加载失败，点按重试") {
+                        if let last = posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                    }
+                    .listRowSeparator(.hidden)
+                }
+                Color.clear.frame(height: 55).listRowSeparator(.hidden)
+            }
+            .coordinateSpace(name: "zhihu-feed-viewport")
+            .onChange(of: model.source) { previous, current in
+                if previous == .zhihu { scrollPositionStore.isRestoringZhihu = true }
+                guard current == .zhihu else { return }
+                let anchor = scrollPositionStore.zhihuAnchor
+                Task { @MainActor in
+                    await Task.yield()
+                    guard model.source == .zhihu else { return }
+                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                    await Task.yield()
+                    if model.source == .zhihu { scrollPositionStore.isRestoringZhihu = false }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .accessibilityIdentifier("feed-list-zhihu")
+            .modifier(FeedChromeScrollModifier(
+                isActive: model.source == .zhihu,
+                isHidden: $isFeedChromeHidden,
+                isAtTop: $isFeedAtTop
+            ))
+        }
+    }
+
+    @ViewBuilder
     private func feedList(
         for source: FeedSource,
         posts: [Post],
         topInset: CGFloat = FeedChromeLayout.headerHeight
     ) -> some View {
-        let visiblePosts = visiblePosts(for: source, posts: posts)
-        let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
-        let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
-        let usesFilteredPagination = source == .flash
-            || (source == .rss && !isSelectedRSSPage)
-        return ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    Color.clear.frame(height: topInset).id("feed-top")
-                    if source == .rss {
-                        if model.isLoadingRSSSelection {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("正在加载该来源")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
+        if source == .zhihu {
+            zhihuFeedList(posts: posts)
+        } else {
+            let visiblePosts = visiblePosts(for: source, posts: posts)
+            let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
+            let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
+            let usesFilteredPagination = source == .flash
+                || (source == .rss && !isSelectedRSSPage)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        Color.clear.frame(height: topInset).id("feed-top")
+                        if source == .rss {
+                            if model.isLoadingRSSSelection {
+                                HStack(spacing: 8) {
+                                    ProgressView().controlSize(.small)
+                                    Text("正在加载该来源")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 22)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 22)
                         }
-                    }
-                    if source == .wechat {
-                        if model.isLoadingWeChatSelection {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("正在加载该来源")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
+                        if source == .wechat {
+                            if model.isLoadingWeChatSelection {
+                                HStack(spacing: 8) {
+                                    ProgressView().controlSize(.small)
+                                    Text("正在加载该来源")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 22)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 22)
                         }
-                    }
-                    if source == .flash {
-                        flashFeedHeader
-                        if visiblePosts.isEmpty, !posts.isEmpty {
-                            ContentUnavailableView(
-                                "暂无\(flashFilter.title)快讯",
-                                systemImage: "line.3.horizontal.decrease.circle"
-                            )
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 36)
+                        if source == .flash {
+                            flashFeedHeader
+                            if visiblePosts.isEmpty, !posts.isEmpty {
+                                ContentUnavailableView(
+                                    "暂无\(flashFilter.title)快讯",
+                                    systemImage: "line.3.horizontal.decrease.circle"
+                                )
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 36)
+                            }
                         }
-                    }
-                    Group {
-                        if source == .youtube {
-                            LazyVGrid(
-                                columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: 2),
-                                alignment: .leading,
-                                spacing: 8
-                            ) {
+                        Group {
+                            if source == .youtube {
+                                // Keep one lazy layout: each pair has a stable row identity.
+                                ForEach(Array(visiblePosts.enumerated()).filter { $0.offset.isMultiple(of: 2) }, id: \.element.id) { index, post in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        feedPostCell(source: source, post: post, index: index, posts: posts)
+                                        if index + 1 < visiblePosts.count {
+                                            feedPostCell(source: source, post: visiblePosts[index + 1], index: index + 1, posts: posts)
+                                        } else {
+                                            Color.clear.frame(height: 0).frame(maxWidth: .infinity)
+                                        }
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.bottom, 8)
+                                }
+                            } else {
                                 ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
-                                    feedPostCell(source: source, post: post, index: index, posts: posts)
-                                }
-                            }
-                            .padding(8)
-                        } else {
-                            ForEach(Array(visiblePosts.enumerated()), id: \.element.id) { index, post in
-                                feedPostCell(source: source, post: post, index: index, posts: posts)
-                                if source == .flash, index == 2, visiblePosts.count > 3 {
-                                    flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
-                                } else if source == .wechat {
-                                    Color.clear.frame(height: 10)
-                                } else {
-                                    Divider().opacity(source == .flash ? 0.42 : 0.6)
-                                        .padding(.leading, source == .flash ? 84 : 0)
+                                    VStack(spacing: 0) {
+                                        feedPostCell(source: source, post: post, index: index, posts: posts)
+                                        if source == .flash, index == 2, visiblePosts.count > 3 {
+                                            flashUnreadDivider(count: min(visiblePosts.count - 3, 3))
+                                        } else if source == .wechat {
+                                            Color.clear.frame(height: 10)
+                                        } else {
+                                            Divider().opacity(source == .flash ? 0.42 : 0.6)
+                                                .padding(.leading, source == .flash ? 84 : 0)
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                    if let tail = visiblePosts.last {
-                        let paginationTaskPostID = FeedPaginationLayout.taskPostID(
-                            visibleTailID: tail.id,
-                            rawTailID: posts.last?.id,
-                            usesFilteredPagination: usesFilteredPagination
-                        )
-                        Color.clear
-                            .frame(height: 1)
-                            .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(paginationTaskPostID)") {
-                                guard rootTabIsActive, source == model.source else { return }
-                                if isSelectedRSSPage {
-                                    await model.loadMoreSelectedRSSIfNeeded(current: tail)
-                                } else if isSelectedWeChatPage {
-                                    await model.loadMoreSelectedWeChatIfNeeded(current: tail)
-                                } else {
-                                    await model.loadMoreIfNeeded(
-                                        current: tail,
-                                        thresholdPostID: usesFilteredPagination ? tail.id : nil
-                                    )
+                        if let tail = visiblePosts.last {
+                            let paginationTaskPostID = FeedPaginationLayout.taskPostID(
+                                visibleTailID: tail.id,
+                                rawTailID: posts.last?.id,
+                                usesFilteredPagination: usesFilteredPagination
+                            )
+                            Color.clear
+                                .frame(height: 1)
+                                .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(paginationTaskPostID)") {
+                                    guard rootTabIsActive, source == model.source else { return }
+                                    if isSelectedRSSPage {
+                                        await model.loadMoreSelectedRSSIfNeeded(current: tail)
+                                    } else if isSelectedWeChatPage {
+                                        await model.loadMoreSelectedWeChatIfNeeded(current: tail)
+                                    } else {
+                                        await model.loadMoreIfNeeded(
+                                            current: tail,
+                                            thresholdPostID: usesFilteredPagination ? tail.id : nil
+                                        )
+                                    }
+                                }
+                        }
+                        if visiblePosts.isEmpty,
+                           !posts.isEmpty,
+                           !isSelectedRSSPage,
+                           let rawTail = posts.last {
+                            Color.clear
+                                .frame(height: 1)
+                                .task(id: "\(rootTabIsActive)-empty-page-\(rawTail.id)") {
+                                    guard rootTabIsActive, source == model.source else { return }
+                                    await model.loadMoreIfNeeded(current: rawTail)
+                                }
+                        }
+                        if model.isLoadingMore
+                            || (isSelectedRSSPage && model.isLoadingMoreRSSSelection)
+                            || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection) {
+                            ProgressView().padding(20)
+                        }
+                        if model.errorMessage != nil {
+                            Button("加载失败，点按重试") {
+                                if source == .rss,
+                                   model.selectedRSSFeedID != nil,
+                                   let last = model.selectedRSSPosts.last {
+                                    Task { await model.loadMoreSelectedRSSIfNeeded(current: last) }
+                                } else if source == .wechat,
+                                          model.selectedWeChatFeedID != nil,
+                                          let last = model.selectedWeChatPosts.last {
+                                    Task { await model.loadMoreSelectedWeChatIfNeeded(current: last) }
+                                } else if let last = model.posts.last {
+                                    Task { await model.loadMoreIfNeeded(current: last) }
                                 }
                             }
-                    }
-                    if visiblePosts.isEmpty,
-                       !posts.isEmpty,
-                       !isSelectedRSSPage,
-                       let rawTail = posts.last {
-                        Color.clear
-                            .frame(height: 1)
-                            .task(id: "\(rootTabIsActive)-empty-page-\(rawTail.id)") {
-                                guard rootTabIsActive, source == model.source else { return }
-                                await model.loadMoreIfNeeded(current: rawTail)
-                            }
-                    }
-                    if model.isLoadingMore
-                        || (isSelectedRSSPage && model.isLoadingMoreRSSSelection)
-                        || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection) {
-                        ProgressView().padding(20)
-                    }
-                    if model.errorMessage != nil {
-                        Button("加载失败，点按重试") {
-                            if source == .rss,
-                               model.selectedRSSFeedID != nil,
-                               let last = model.selectedRSSPosts.last {
-                                Task { await model.loadMoreSelectedRSSIfNeeded(current: last) }
-                            } else if source == .wechat,
-                                      model.selectedWeChatFeedID != nil,
-                                      let last = model.selectedWeChatPosts.last {
-                                Task { await model.loadMoreSelectedWeChatIfNeeded(current: last) }
-                            } else if let last = model.posts.last {
-                                Task { await model.loadMoreIfNeeded(current: last) }
-                            }
+                                .font(.footnote).padding(16)
                         }
-                            .font(.footnote).padding(16)
+                        Color.clear.frame(height: 55)
                     }
-                    Color.clear.frame(height: 55)
+                    .background(SourceScrollOffsetPreserver(source: source, store: scrollPositionStore))
+                    .frame(maxWidth: .infinity)
                 }
-                .background(SourceScrollOffsetPreserver(source: source, store: scrollPositionStore))
-                .frame(maxWidth: .infinity)
-            }
-            .modifier(FeedChromeScrollModifier(
-                isActive: source == model.source,
-                isHidden: $isFeedChromeHidden,
-                isAtTop: $isFeedAtTop
-            ))
-            .allowsHitTesting(openingWebPostID == nil)
-            .overlay(alignment: .top) {
-                if source == .x, model.source == .x, !model.pendingRealtimePosts.isEmpty {
-                    xNewPostsPill {
-                        withAnimation(.snappy(duration: 0.35)) {
-                            model.acceptPendingRealtimePosts()
-                            proxy.scrollTo("feed-top", anchor: .top)
+                .accessibilityIdentifier("feed-list-\(source.rawValue)")
+                .modifier(FeedChromeScrollModifier(
+                    isActive: source == model.source,
+                    isHidden: $isFeedChromeHidden,
+                    isAtTop: $isFeedAtTop
+                ))
+                .overlay(alignment: .top) {
+                    if source == .x, model.source == .x, !model.pendingRealtimePosts.isEmpty {
+                        xNewPostsPill {
+                            withAnimation(.snappy(duration: 0.35)) {
+                                model.acceptPendingRealtimePosts()
+                                proxy.scrollTo("feed-top", anchor: .top)
+                            }
                         }
+                        .padding(.top, isFeedChromeHidden ? 12 : FeedChromeLayout.headerHeight + 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .padding(.top, isFeedChromeHidden ? 12 : FeedChromeLayout.headerHeight + 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
-            }
-            .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
-            .alert("页面加载失败", isPresented: Binding(
-                get: { webOpenError != nil },
-                set: { if !$0 { webOpenError = nil } }
-            )) {
-                Button("知道了", role: .cancel) { webOpenError = nil }
-            } message: {
-                Text(webOpenError ?? "请稍后重试")
+                .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
+
             }
         }
     }
@@ -1454,6 +1504,7 @@ struct NewsFeedView: View {
             onOpen: { openPost(displayPost) }
         )
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("feed-post-\(post.id)")
         .contentShape(Rectangle())
         .modifier(ConditionalTapGestureModifier(
             isEnabled: !(post.sourceName == "X" && !post.videoURLs.isEmpty)
@@ -1470,26 +1521,6 @@ struct NewsFeedView: View {
                 openPost(displayPost)
             }
         })
-        .overlay {
-            if openingWebPostID == post.id {
-                HStack(spacing: 8) {
-                    if let source = FeedSource(rawValue: post.source ?? "") {
-                        Image(source == .weibo ? "WeiboMark" : "TikTokMark")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 18, height: 18)
-                    }
-                    ProgressView().controlSize(.small)
-                    Text("正在准备页面")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.regularMaterial, in: Capsule())
-                .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-                .allowsHitTesting(false)
-            }
-        }
         .task(id: "\(rootTabIsActive)-\(source == model.source)-x-translation-\(post.id)") {
             guard rootTabIsActive, source == .x, source == model.source else { return }
             await model.translateXPostIfNeeded(post)
@@ -1543,36 +1574,8 @@ struct NewsFeedView: View {
 
     private func openPost(_ post: Post) {
         guard selectedPost?.id != post.id else { return }
-        guard let source = FeedSource(rawValue: post.source ?? ""),
-              source == .weibo || source == .douyin,
-              let url = post.linkURL else {
-            selectedPost = post
-            return
-        }
-        if EmbeddedWebPresentationPolicy.opensImmediately(source: source) {
-            selectedPost = post
-            return
-        }
-        if preparedWebViews[post.id] != nil {
-            selectedPost = post
-            return
-        }
-        guard openingWebPostID == nil else { return }
-        openingWebPostID = post.id
-        Task {
-            do {
-                let webView = try await EmbeddedWebPagePreloader().load(url)
-                guard !Task.isCancelled else { return }
-                preparedWebViews[post.id] = webView
-                openingWebPostID = nil
-                selectedPost = post
-            } catch {
-                guard !Task.isCancelled else { return }
-                openingWebPostID = nil
-                let platformName = source == .weibo ? "微博" : "抖音"
-                webOpenError = "暂时无法打开\(platformName)页面，请检查网络后重试。"
-            }
-        }
+        // Present first. Loading belongs to the dismissible detail, never the feed.
+        selectedPost = post
     }
 
     private func visiblePosts(for source: FeedSource, posts: [Post]) -> [Post] {
@@ -1774,12 +1777,11 @@ struct NewsFeedView: View {
 
 private struct FeedTimelineLoadingView: View {
     let topInset: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var shimmerOffset: CGFloat = -1
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            // Three fixed placeholders need neither virtualization nor an infinite animation.
+            VStack(spacing: 0) {
                 Color.clear.frame(height: topInset)
                 ForEach(0..<3, id: \.self) { index in
                     loadingCard(index: index)
@@ -1789,40 +1791,6 @@ private struct FeedTimelineLoadingView: View {
         }
         .scrollDisabled(true)
         .foregroundStyle(Color.secondary.opacity(0.14))
-        .redacted(reason: .placeholder)
-        .overlay {
-            if !reduceMotion {
-                GeometryReader { proxy in
-                    LinearGradient(
-                        colors: [.clear, .white.opacity(0.48), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(width: proxy.size.width * 0.7)
-                    .rotationEffect(.degrees(18))
-                    .offset(x: shimmerOffset * proxy.size.width * 1.7)
-                }
-                .mask {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            Color.clear.frame(height: topInset)
-                            ForEach(0..<3, id: \.self) { index in
-                                loadingCard(index: index)
-                            }
-                        }
-                    }
-                    .scrollDisabled(true)
-                }
-                .allowsHitTesting(false)
-            }
-        }
-        .task {
-            guard !reduceMotion else { return }
-            shimmerOffset = -1
-            withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
-                shimmerOffset = 1
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("正在加载内容")
     }
@@ -1848,121 +1816,47 @@ private struct FeedTimelineLoadingView: View {
     }
 }
 
-@MainActor
-private final class EmbeddedWebPagePreloader: NSObject, WKNavigationDelegate {
-    private var webView: WKWebView?
-    private var continuation: CheckedContinuation<WKWebView, Error>?
-
-    func load(_ url: URL) async throws -> WKWebView {
-        let configuration = EmbeddedWebView.configuration(for: url)
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        if WeiboEmbeddedPagePolicy.shouldRestoreSession(for: url) {
-            await WeiboSessionCookieStore.install(
-                in: configuration.websiteDataStore.httpCookieStore
-            )
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            webView.navigationDelegate = self
-            self.webView = webView
-            webView.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 20))
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
-                self?.finish(.failure(URLError(.timedOut)))
-            }
-        }
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Task { await finishWhenRendered(webView) }
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        finish(.failure(error))
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        finish(.failure(error))
-    }
-
-    private func finishWhenRendered(_ webView: WKWebView) async {
-        let script = #"""
-        (() => {
-          const visible = (element) => {
-            if (!element) return false;
-            const style = getComputedStyle(element);
-            const rect = element.getBoundingClientRect();
-            return style.display !== 'none' && style.visibility !== 'hidden' &&
-              Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0;
-          };
-          const loading = Array.from(document.querySelectorAll(
-            '[aria-busy="true"], [class*="loading"], [class*="spinner"], [class*="skeleton"]'
-          )).some(visible);
-          const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
-          const textLoading = /^(加载中|正在加载)[…\.]*$/.test(bodyText);
-          const hasImage = Array.from(document.images).some((image) =>
-            visible(image) && image.complete && image.naturalWidth > 0
-          );
-          const hasVideo = Array.from(document.querySelectorAll('video')).some((video) =>
-            visible(video) && video.readyState >= 2
-          );
-          const hasContent = bodyText.length >= 80 || hasImage || hasVideo;
-          return `${document.readyState}|${loading || textLoading ? 1 : 0}|${hasContent ? 1 : 0}`;
-        })();
-        """#
-
-        var stableChecks = 0
-        for _ in 0..<40 {
-            guard continuation != nil else { return }
-            if let fingerprint = try? await webView.evaluateJavaScript(script) as? String {
-                let parts = fingerprint.split(separator: "|")
-                let isReady = parts.first == "complete"
-                let isLoading = parts.count > 1 && parts[1] == "1"
-                let hasContent = parts.count > 2 && parts[2] == "1"
-                if isReady && !isLoading && hasContent {
-                    stableChecks += 1
-                    if stableChecks >= 2 {
-                        finish(.success(webView))
-                        return
-                    }
-                } else {
-                    stableChecks = 0
-                }
-            }
-            try? await Task.sleep(for: .milliseconds(150))
-        }
-        finish(.success(webView))
-    }
-
-    private func finish(_ result: Result<WKWebView, Error>) {
-        guard let continuation else { return }
-        self.continuation = nil
-        webView?.navigationDelegate = nil
-        if case .failure = result { webView?.stopLoading() }
-        webView = nil
-        continuation.resume(with: result)
-    }
-}
-
 private struct EmbeddedWebPage: View {
     let url: URL
     let source: FeedSource
-    let preparedWebView: WKWebView?
     let presentedAsSheet: Bool
     @StateObject private var model = EmbeddedWebViewModel()
     @State private var isShowingWeiboAccountMenu = false
     @Environment(\.dismiss) private var dismiss
 
+    private var requestURL: URL {
+        #if DEBUG
+        // A local failing endpoint lets UI tests verify retry/close without changing networking settings.
+        if let value = ProcessInfo.processInfo.environment["AI_EMBEDDED_WEB_TEST_URL"],
+           let override = URL(string: value), override.scheme == "https" {
+            return override
+        }
+        #endif
+        return url
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
-            EmbeddedWebView(url: url, model: model, preparedWebView: preparedWebView)
+            EmbeddedWebView(url: requestURL, model: model)
 
             if model.isLoading {
                 ProgressView(value: model.estimatedProgress)
                     .progressViewStyle(.linear)
                     .tint(source == .weibo ? .red : .blue)
                     .accessibilityLabel("页面加载进度")
+            }
+
+            if let message = model.loadError {
+                ContentUnavailableView {
+                    Label("网页暂时无法加载", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("重新加载") { model.reload() }
+                        .accessibilityIdentifier("embedded-web-retry")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(uiColor: .systemBackground))
             }
 
             if source == .weibo, model.requiresWeiboAuthentication {
@@ -2103,6 +1997,7 @@ private struct EmbeddedWebPage: View {
 private final class EmbeddedWebViewModel: ObservableObject {
     @Published var isLoading = true
     @Published var estimatedProgress = 0.0
+    @Published var loadError: String?
     @Published var isAuthenticating = false
     @Published var isWeiboLoggedIn = false
     @Published var requiresWeiboAuthentication = false
@@ -2112,13 +2007,16 @@ private final class EmbeddedWebViewModel: ObservableObject {
         weiboDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init)?.uppercased()
     }
     weak var webView: WKWebView?
+    var retryLoad: (() -> Void)?
     private var returnURL: URL?
     private var isFetchingAvatar = false
     private var isLoggingOut = false
 
     func reload() {
+        loadError = nil
+        isLoading = true
         requiresWeiboAuthentication = false
-        webView?.reload()
+        if let retryLoad { retryLoad() } else { webView?.reload() }
     }
 
     func rememberReturnURL(_ url: URL) {
@@ -2290,19 +2188,13 @@ private final class EmbeddedWebViewModel: ObservableObject {
 private struct EmbeddedWebView: UIViewRepresentable {
     let url: URL
     @ObservedObject var model: EmbeddedWebViewModel
-    let preparedWebView: WKWebView?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(model: model)
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView: WKWebView
-        if let preparedWebView {
-            webView = preparedWebView
-        } else {
-            webView = WKWebView(frame: .zero, configuration: Self.configuration(for: url))
-        }
+        let webView = WKWebView(frame: .zero, configuration: Self.configuration(for: url))
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         // Weibo's photo viewer uses horizontal swipes to move between images.
@@ -2315,11 +2207,11 @@ private struct EmbeddedWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = Self.isWeiboURL(url) ? .never : .automatic
         context.coordinator.observe(webView, observesWeiboSession: Self.isWeiboURL(url))
         model.webView = webView
-        if preparedWebView != nil {
-            context.coordinator.adoptLoaded(url, in: webView)
-        } else {
-            context.coordinator.load(url, in: webView)
+        model.retryLoad = { [weak coordinator = context.coordinator, weak webView] in
+            guard let webView else { return }
+            coordinator?.retry(in: webView)
         }
+        context.coordinator.load(url, in: webView)
         return webView
     }
 
@@ -2521,6 +2413,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.stopObserving()
+        webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
     }
@@ -2531,6 +2424,10 @@ private struct EmbeddedWebView: UIViewRepresentable {
         private var observedWeiboCookieStore: WKHTTPCookieStore?
         private var pageInspectionTask: Task<Void, Never>?
         private var didBeginLoad = false
+        private var requestedURL: URL?
+        private var activeNavigation: WKNavigation?
+        private var loadTask: Task<Void, Never>?
+        private var timeoutTask: Task<Void, Never>?
 
         init(model: EmbeddedWebViewModel) {
             self.model = model
@@ -2539,8 +2436,8 @@ private struct EmbeddedWebView: UIViewRepresentable {
         func observe(_ webView: WKWebView, observesWeiboSession: Bool) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.initial, .new]) { [weak model] webView, _ in
                 Task { @MainActor in
-                    model?.estimatedProgress = webView.estimatedProgress
-                    model?.isLoading = webView.estimatedProgress < 1
+                    let progress = webView.estimatedProgress
+                    if model?.estimatedProgress != progress { model?.estimatedProgress = progress }
                 }
             }
             if observesWeiboSession {
@@ -2554,36 +2451,30 @@ private struct EmbeddedWebView: UIViewRepresentable {
         func load(_ url: URL, in webView: WKWebView) {
             guard !didBeginLoad else { return }
             didBeginLoad = true
+            requestedURL = url
             model.rememberReturnURL(url)
-            Task { @MainActor in
+            loadTask = Task { @MainActor [weak webView] in
+                guard let webView, !Task.isCancelled else { return }
+                startTimeout(for: webView)
                 if isWeiboHost(url.host) {
                     let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
                     await WeiboSessionCookieStore.install(in: cookieStore)
                     model.refreshWeiboSession(from: cookieStore)
                     model.fetchAccountAvatar(from: cookieStore)
                 }
-                webView.load(URLRequest(url: url))
+                guard !Task.isCancelled else { return }
+                activeNavigation = webView.load(URLRequest(url: url, timeoutInterval: 20))
+                if activeNavigation == nil { finishWithError(URLError(.badURL)) }
             }
-        }
-
-        func adoptLoaded(_ url: URL, in webView: WKWebView) {
-            didBeginLoad = true
-            let loadedURL = webView.url ?? url
-            model.rememberReturnURL(loadedURL)
-            model.estimatedProgress = 1
-            model.isLoading = false
-            if isWeiboHost(loadedURL.host) {
-                let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-                model.refreshWeiboSession(from: cookieStore, persist: true)
-                model.fetchAccountAvatar(from: cookieStore)
-                model.captureAccountAvatar(from: webView)
-            }
-            inspectWeiboPage(webView)
         }
 
         func stopObserving() {
+            loadTask?.cancel()
+            timeoutTask?.cancel()
             if let observedWeiboCookieStore {
-                model.refreshWeiboSession(from: observedWeiboCookieStore, persist: true)
+                Task { @MainActor [weak model] in
+                    model?.refreshWeiboSession(from: observedWeiboCookieStore, persist: true)
+                }
                 observedWeiboCookieStore.remove(self)
                 self.observedWeiboCookieStore = nil
             }
@@ -2599,18 +2490,44 @@ private struct EmbeddedWebView: UIViewRepresentable {
             }
         }
 
+        private func startTimeout(for webView: WKWebView) {
+            timeoutTask?.cancel()
+            timeoutTask = Task { @MainActor [weak self, weak webView] in
+                do { try await Task.sleep(for: .seconds(20)) } catch { return }
+                guard let self, let webView, model.isLoading else { return }
+                model.loadError = "连接超时，请重试或关闭后稍后再试。"
+                model.isLoading = false
+                webView.stopLoading()
+            }
+        }
+
+        func retry(in webView: WKWebView) {
+            guard let requestedURL else { return }
+            loadTask?.cancel()
+            webView.stopLoading()
+            didBeginLoad = false
+            load(requestedURL, in: webView)
+        }
+
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            guard navigation != nil, webView.url?.scheme != "about" else { return }
+            activeNavigation = navigation
+            startTimeout(for: webView)
             pageInspectionTask?.cancel()
             pageInspectionTask = nil
             Task { @MainActor in
                 model.isLoading = true
+                model.loadError = nil
                 model.requiresWeiboAuthentication = false
             }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard navigation != nil, navigation === activeNavigation else { return }
+            timeoutTask?.cancel()
             Task { @MainActor in
                 model.isLoading = false
+                guard isWeiboHost(webView.url?.host) else { return }
                 model.captureAccountAvatar(from: webView)
                 let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
                 model.refreshWeiboSession(from: cookieStore, persist: true)
@@ -2619,7 +2536,29 @@ private struct EmbeddedWebView: UIViewRepresentable {
             }
         }
 
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            finishWithError(error)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            finishWithError(error)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            finishWithError(URLError(.networkConnectionLost))
+        }
+
+        private func finishWithError(_ error: Error) {
+            guard (error as NSError).code != NSURLErrorCancelled else { return }
+            timeoutTask?.cancel()
+            Task { @MainActor [weak model] in
+                model?.isLoading = false
+                model?.loadError = NetworkErrorPresentation.message(for: error)
+            }
+        }
+
         private func inspectWeiboPage(_ webView: WKWebView) {
+            guard isWeiboHost(webView.url?.host) else { return }
             pageInspectionTask?.cancel()
             pageInspectionTask = Task { @MainActor [weak self, weak webView] in
                 guard let self, let webView else { return }
@@ -2637,14 +2576,6 @@ private struct EmbeddedWebView: UIViewRepresentable {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
             }
-        }
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            Task { @MainActor in model.isLoading = false }
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            Task { @MainActor in model.isLoading = false }
         }
 
         func webView(
@@ -2880,6 +2811,20 @@ private func isWeiboLoginURL(_ url: URL?) -> Bool {
 
 private final class FeedScrollPositionStore: ObservableObject {
     private var offsets: [FeedSource: CGPoint] = [:]
+    private var zhihuRowFrames: [Int: CGRect] = [:]
+    private(set) var zhihuAnchor: Int?
+    var isRestoringZhihu = false
+
+    func recordZhihuRow(_ id: Int, frame: CGRect) {
+        guard !isRestoringZhihu else { return }
+        zhihuRowFrames[id] = frame
+        if let first = zhihuRowFrames.filter({ $0.value.maxY > 0 })
+            .min(by: { $0.value.minY < $1.value.minY }) {
+            zhihuAnchor = first.key
+        }
+    }
+
+    func removeZhihuRow(_ id: Int) { zhihuRowFrames[id] = nil }
 
     func offset(for source: FeedSource) -> CGPoint? { offsets[source] }
     func save(_ offset: CGPoint, for source: FeedSource) { offsets[source] = offset }
@@ -2992,10 +2937,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
     let isActive: Bool
     @Binding var isHidden: Bool
     @Binding var isAtTop: Bool
-    @State private var isScrollActive = false
-    @State private var direction: FeedScrollDirection?
-    @State private var directionalTravel: CGFloat = 0
-    @State private var lastGestureTranslation: CGFloat?
+    @State private var tracking = FeedScrollTracking()
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -3003,7 +2945,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
             content
                 .onScrollPhaseChange { _, phase in
                     guard isActive else { return }
-                    isScrollActive = phase.isScrolling
+                    tracking.isScrollActive = phase.isScrolling
                     if !phase.isScrolling { resetDirectionTracking() }
                 }
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -3027,12 +2969,12 @@ private struct FeedChromeScrollModifier: ViewModifier {
                 guard isActive else { return }
                 guard abs(value.translation.height) > abs(value.translation.width) else { return }
                 let translation = value.translation.height
-                defer { lastGestureTranslation = translation }
-                guard let previous = lastGestureTranslation else { return }
+                defer { tracking.lastGestureTranslation = translation }
+                guard let previous = tracking.lastGestureTranslation else { return }
                 handleDirectionalDelta(previous - translation)
             }
             .onEnded { _ in
-                lastGestureTranslation = nil
+                tracking.lastGestureTranslation = nil
                 resetDirectionTracking()
             }
     }
@@ -3044,7 +2986,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
             return
         }
 
-        guard isScrollActive else { return }
+        guard tracking.isScrollActive else { return }
         let delta = newOffset - oldOffset
         guard abs(delta) < 80 else {
             resetDirectionTracking()
@@ -3057,34 +2999,42 @@ private struct FeedChromeScrollModifier: ViewModifier {
         guard abs(delta) >= 0.5 else { return }
         let nextDirection: FeedScrollDirection = delta > 0 ? .towardOlder : .towardNewer
 
-        if direction != nextDirection {
-            direction = nextDirection
-            directionalTravel = 0
+        if tracking.direction != nextDirection {
+            tracking.direction = nextDirection
+            tracking.directionalTravel = 0
         }
-        directionalTravel += abs(delta)
+        tracking.directionalTravel += abs(delta)
 
         switch nextDirection {
-        case .towardOlder where directionalTravel >= 28:
+        case .towardOlder where tracking.directionalTravel >= 28:
             isAtTop = false
             setHidden(true)
-            directionalTravel = 0
-        case .towardNewer where directionalTravel >= 10:
+            tracking.directionalTravel = 0
+        case .towardNewer where tracking.directionalTravel >= 10:
             setHidden(false)
-            directionalTravel = 0
+            tracking.directionalTravel = 0
         default:
             break
         }
     }
 
     private func resetDirectionTracking() {
-        direction = nil
-        directionalTravel = 0
+        tracking.direction = nil
+        tracking.directionalTravel = 0
     }
 
     private func setHidden(_ hidden: Bool) {
         guard isHidden != hidden else { return }
         isHidden = hidden
     }
+}
+
+// Mutations here intentionally do not publish SwiftUI changes while scrolling.
+private final class FeedScrollTracking {
+    var isScrollActive = false
+    var direction: FeedScrollDirection?
+    var directionalTravel: CGFloat = 0
+    var lastGestureTranslation: CGFloat?
 }
 
 private enum FeedScrollDirection {
@@ -4069,7 +4019,7 @@ struct NewsCardView: View {
     private var bilibiliCompactCard: some View {
         HStack(alignment: .top, spacing: 12) {
             if let image = post.previewURL {
-                RemoteImage(url: image, height: 94, cornerRadius: 7)
+                RemoteImage(url: image, targetWidth: 146, height: 94, cornerRadius: 7)
                     .frame(width: 146)
             }
 
@@ -4125,6 +4075,7 @@ struct NewsCardView: View {
             if let cover = post.youtubeCoverURL {
                 RemoteImage(
                     url: cover,
+                    targetWidth: max((UIScreen.main.bounds.width - 24) / 2, 120),
                     height: max((UIScreen.main.bounds.width - 44) / 2, 120) * 9 / 16,
                     cornerRadius: 9,
                     contentMode: .fill

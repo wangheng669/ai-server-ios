@@ -1202,10 +1202,15 @@ actor ImageLoader {
 
     init(imageDataLoader: (@Sendable (URL) async -> Data?)? = nil) {
         self.imageDataLoader = imageDataLoader ?? { await Self.download($0) }
-        cache.totalCostLimit = 96 * 1024 * 1024
-        cache.countLimit = 240
-        dataCache.totalCostLimit = 48 * 1024 * 1024
-        dataCache.countLimit = 180
+        cache.totalCostLimit = 48 * 1024 * 1024
+        cache.countLimit = 120
+        dataCache.totalCostLimit = 12 * 1024 * 1024
+        dataCache.countLimit = 80
+    }
+
+    func removeCachedImages() {
+        cache.removeAllObjects()
+        dataCache.removeAllObjects()
     }
 
     static func load(
@@ -1382,7 +1387,8 @@ actor ImageLoader {
 
         guard let data else { return nil }
 
-        let decodedImage = await Task.detached(priority: .utility) {
+        // Visible cells await this work; do not seed ImageIO's worker queues at Utility QoS.
+        let decodedImage = await Task.detached(priority: .userInitiated) {
             Self.decode(data, pixelLimit: pixelLimit, scale: scale)
         }.value
         guard let decodedImage else {

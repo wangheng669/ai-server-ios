@@ -46,11 +46,11 @@ final class MarketStore {
     init(baseURL: URL = ServerConfiguration.currentURL) {
         service = MarketService(baseURL: baseURL)
         realtime = MarketRealtimeClient(baseURL: baseURL)
-        companyLogoPaths = MarketCompanyLogoPathCache.load()
     }
 
     func runUpdates() async {
-        loadCacheIfNeeded()
+        await loadCacheIfNeeded()
+        guard !Task.isCancelled else { return }
         realtime.onQuote = { [weak self] update in
             self?.enqueueRealtimeUpdate(update)
         }
@@ -105,7 +105,7 @@ final class MarketStore {
             isShowingCachedSnapshot = false
             cacheSavedAt = nil
             errorMessage = marketHealthMessage(for: value)
-            MarketSnapshotCache.save(value, at: Date())
+            await MarketSnapshotCache.shared.save(value, at: Date())
             scheduleMissingTrendBackfill()
         } catch is CancellationError {
             return
@@ -362,11 +362,15 @@ final class MarketStore {
         }
     }
 
-    private func loadCacheIfNeeded() {
+    private func loadCacheIfNeeded() async {
         guard !loadedCache else { return }
         loadedCache = true
+        let paths = await MarketCompanyLogoPathCache.loadOffMain()
+        if companyLogoPaths.isEmpty { companyLogoPaths = paths }
         guard dashboard == nil else { return }
-        guard let snapshot = MarketSnapshotCache.load() else { return }
+        let snapshot = await MarketSnapshotCache.shared.load()
+        guard !Task.isCancelled else { loadedCache = false; return }
+        guard dashboard == nil, let snapshot else { return }
         dashboardQuotesBySymbol = Self.quoteIndex(for: snapshot.dashboard)
         dashboard = snapshot.dashboard
         cacheSavedAt = snapshot.savedAt
@@ -488,6 +492,8 @@ enum MarketCompanyLogoPathCache {
         defaults.set(Date(), forKey: savedAtKey)
     }
 
+    static func loadOffMain() async -> [String: String] { load() }
+
     static func saveOffMain(_ paths: [String: String]) async {
         save(paths)
     }
@@ -564,16 +570,17 @@ struct ChartKey: Hashable {
     let range: MarketRange
 }
 
-private enum MarketSnapshotCache {
-    private static let key = "market.dashboard.cache.v1"
-    private static let maximumDisplayAge: TimeInterval = 24 * 60 * 60
+private actor MarketSnapshotCache {
+    static let shared = MarketSnapshotCache()
+    private let key = "market.dashboard.cache.v1"
+    private let maximumDisplayAge: TimeInterval = 24 * 60 * 60
 
     struct Snapshot: Codable {
         let dashboard: MarketDashboard
         let savedAt: Date
     }
 
-    static func load() -> Snapshot? {
+    func load() -> Snapshot? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
             return Date().timeIntervalSince(snapshot.savedAt) <= maximumDisplayAge ? snapshot : nil
@@ -584,7 +591,7 @@ private enum MarketSnapshotCache {
         return Snapshot(dashboard: dashboard, savedAt: savedAt)
     }
 
-    static func save(_ dashboard: MarketDashboard, at date: Date) {
+    func save(_ dashboard: MarketDashboard, at date: Date) {
         guard let data = try? JSONEncoder().encode(Snapshot(dashboard: dashboard, savedAt: date)) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }

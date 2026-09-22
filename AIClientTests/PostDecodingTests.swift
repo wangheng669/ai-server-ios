@@ -1396,6 +1396,36 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(final.systems.first?.watchItem, "继续观察训练恢复时间。")
     }
 
+    func testTodayReadingDeduplicationPreservesNewFactsAndNumbers() {
+        XCTAssertEqual(TodayReadingEvent.additionalDetails(
+            ["已发布工具。支持离线处理。", "支持离线处理。价格为 1.5 元。", "价格为 15 元。", "尚未支持批量操作。"],
+            excluding: ["已发布工具"]
+        ), ["支持离线处理。", "价格为 1.5 元。", "价格为 15 元。", "尚未支持批量操作。"])
+        XCTAssertEqual(TodayReadingEvent.unique(["收益 -1%", "收益 1%"]), ["收益 -1%", "收益 1%"])
+    }
+
+    func testTodayChineseWarmupIsPrioritizedDeduplicatedAndBounded() {
+        XCTAssertEqual(TodayChinesePreparation.prioritizedIDs(highlights: [3,3,-1,2], visible: [2,4,0]), [3,2,4])
+        XCTAssertEqual(TodayChinesePreparation.prioritizedIDs(highlights: Array(1...20), visible: [21]), Array(1...12))
+        XCTAssertFalse(TodayChinesePreparation.isChinese("English source text."))
+        XCTAssertTrue(TodayChinesePreparation.isChinese("中文摘要，包含 OpenAI 名称。"))
+    }
+
+    func testTodayReadingEventKeepsExplicitSourceScopeAndFullCompanyContent() throws {
+        let data = Data(#"{"system_key":"openai","system_name":"OpenAI","headline":"新工具发布","signal_level":"high","facts":[{"category":"release","text":"新工具发布。","source_keys":[],"post_ids":[42]},{"category":"context","text":"补充背景","source_keys":[],"post_ids":[43]}],"watch_item":"关注开放时间","source_keys":["openai"],"source_names":["OpenAI"],"post_ids":[42,43]}"#.utf8)
+        let system = try JSONDecoder().decode(TodayWorldFinalReportSystem.self, from: data)
+        let item = TodayWorldFinalReportOverviewItem(title: "精选事件", text: "完整摘要", systemKeys: ["openai"], postIDs: [42,42])
+        let event = TodayReadingEvent.highlight(item, systems: [system], date: "2026-09-17")
+        XCTAssertEqual(event.postIDs, [42], "精选只引用自己的来源，不混入同公司的其他帖子")
+        XCTAssertEqual(event.summary, "完整摘要")
+        let company = TodayReadingEvent.system(system, date: "2026-09-17")
+        XCTAssertEqual(company.summary, "补充背景", "过滤与标题重复的要点，同时保留其他事实")
+        XCTAssertEqual(company.watchItems, ["关注开放时间"])
+        XCTAssertEqual(company.postIDs, [42,43])
+        let noSources = TodayWorldFinalReportOverviewItem(title: nil, text: "摘要", systemKeys: ["openai"], postIDs: [])
+        XCTAssertEqual(TodayReadingEvent.highlight(noSources, systems: [system], date: "2026-09-17").postIDs, [42,43])
+    }
+
     func testTodayWorldYesterdayReportRejectsOldAdvancedContract() throws {
         let data = Data(#"{"success":true,"data":{"date":"2026-08-20","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":2,"post_count":4,"report":{"advanced":{"status":"succeeded"}},"model":"qwen3.5-plus","total_tokens":1234,"cost_cny":0.0123}}"#.utf8)
         let response = try JSONDecoder().decode(TodayWorldYesterdayReportResponse.self, from: data)

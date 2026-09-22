@@ -196,6 +196,10 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertTrue(images.allSatisfy { $0 === first })
         let cached = await loader.image(for: url, targetSize: CGSize(width: 45, height: 45), scale: 3)
         XCTAssertTrue(cached === first)
+        await loader.removeCachedImages()
+        let reloaded = await loader.image(for: url, targetSize: CGSize(width: 45, height: 45), scale: 3)
+        XCTAssertNotNil(reloaded)
+        XCTAssertFalse(reloaded === first, "Memory-pressure eviction must release decoded cache entries")
     }
 
     func testRSSCardImmediatelyUsesServerLocalizedSummaryAsTitle() throws {
@@ -374,11 +378,6 @@ final class FeedAdapterTests: XCTestCase {
             FeedSourceTransitionPolicy.fadeOutDuration + FeedSourceTransitionPolicy.fadeInDuration,
             0.4
         )
-    }
-
-    func testWeiboWebPagePresentsBeforeContentFinishesLoading() {
-        XCTAssertTrue(EmbeddedWebPresentationPolicy.opensImmediately(source: .weibo))
-        XCTAssertFalse(EmbeddedWebPresentationPolicy.opensImmediately(source: .douyin))
     }
 
     @MainActor

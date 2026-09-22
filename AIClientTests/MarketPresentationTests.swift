@@ -22,6 +22,49 @@ private actor MarketConcurrencyProbe {
 }
 
 final class MarketPresentationTests: XCTestCase {
+    func testResearchTranslationKeepsOriginalForComparison() throws {
+        let data = Data(#"{"id":"translated","institution":"Goldman Sachs","institutionShortName":"GS","title":"中文标题","originalTitle":"Original title","summary":"中文摘要","originalSummary":"Official original synopsis.","translationStatus":"translated","publishedOn":"2026-09-15","sourceType":"官网摘要 · 机器翻译","categories":[],"metrics":[],"source":{"title":"Original title","url":"https://www.goldmansachs.com/insights/articles/test"},"isSystemSummary":false,"presentation":"snapshot"}"#.utf8)
+        let item = try JSONDecoder().decode(InstitutionResearchItem.self, from: data)
+        XCTAssertEqual(item.title, "中文标题")
+        XCTAssertEqual(item.originalSummary, "Official original synopsis.")
+        XCTAssertEqual(item.translationLabel, "中文译文")
+        var pending = item
+        pending.translationStatus = "failed"
+        XCTAssertEqual(pending.translationLabel, "翻译待重试 · 英文原文")
+    }
+
+    func testResearchFreshnessUsesPublicationDate() {
+        let now = ISO8601DateFormatter().date(from: "2026-09-17T00:00:00Z")!
+        XCTAssertEqual(institutionResearchAgeLabel("2026-09-15", now: now), "近期观点")
+        XCTAssertEqual(institutionResearchAgeLabel("2026-07-22", now: now), "历史观点")
+        XCTAssertEqual(institutionResearchAgeLabel("2027-01-01", now: now), "日期待核验")
+    }
+
+    func testInstitutionResearchDecodesCurrentReportsContractAndFiltersInactive() throws {
+        let data = Data(#"{"data":{"sources":[{"institutionKey":"morgan-stanley"}],"reports":[{"id":"morgan-stanley-more-stocks-join-bull-market","institutionKey":"morgan-stanley","institution":"Morgan Stanley","institutionShortName":"MS","title":"更多股票加入牛市","originalTitle":"More Stocks Join the Bull Market","summary":"市场领导力正从半导体向可选消费品、运输和生物科技等领域扩散；短期波动并不意味着 AI 周期结束。","publishedOn":"2026-07-22","sourceType":"官方播客文字稿","categories":["美股","市场广度"],"metrics":[],"targetRevision":null,"sourceTitle":"More Stocks Join the Bull Market","sourceUrl":"https://www.morganstanley.com/insights/podcasts/thoughts-on-the-market/market-broadening-beyond-semiconductors-mike-wilson","isSystemSummary":true,"presentation":"lead","sortOrder":10,"isActive":true,"createdAt":"2026-08-10T14:57:04.312056+08:00","updatedAt":"2026-08-10T08:00:00+08:00"},{"id":"inactive-report","institutionKey":"morgan-stanley","institution":"Morgan Stanley","institutionShortName":"MS","title":"更多股票加入牛市","originalTitle":"More Stocks Join the Bull Market","summary":"市场领导力正从半导体向可选消费品、运输和生物科技等领域扩散；短期波动并不意味着 AI 周期结束。","publishedOn":"2026-07-22","sourceType":"官方播客文字稿","categories":["美股","市场广度"],"metrics":[],"targetRevision":null,"sourceTitle":"More Stocks Join the Bull Market","sourceUrl":"https://www.morganstanley.com/insights/podcasts/thoughts-on-the-market/market-broadening-beyond-semiconductors-mike-wilson","isSystemSummary":true,"presentation":"lead","sortOrder":10,"isActive":false,"createdAt":"2026-08-10T14:57:04.312056+08:00","updatedAt":"2026-08-10T08:00:00+08:00"}],"updatedAt":"2026-08-10T08:00:00+08:00"},"success":true}"#.utf8)
+        let payload = try JSONDecoder().decode(InstitutionResearchResponse.self, from: data).data
+        XCTAssertEqual(payload.institutionsCount, 1)
+        XCTAssertEqual(payload.items.count, 1)
+        XCTAssertEqual(payload.items.first?.id, "morgan-stanley-more-stocks-join-bull-market")
+        XCTAssertEqual(payload.items.first?.source.url.host, "www.morganstanley.com")
+        XCTAssertEqual(payload.items.first?.publishedOn, "2026-07-22")
+        XCTAssertNotNil(payload.updatedAt)
+    }
+
+
+    func testYieldChangeUsesBasisPointsRatherThanRelativePercent() {
+        XCTAssertEqual(marketYieldChangeText(price: 5, previousClose: 5.02), "−2.0 bp")
+        XCTAssertEqual(marketYieldChangeText(price: 4.35, previousClose: 4.30), "+5.0 bp")
+        XCTAssertEqual(marketYieldChangeText(price: 5, previousClose: nil), "—")
+        XCTAssertEqual(marketYieldChangeText(price: .nan, previousClose: 5), "—")
+    }
+
+    func testProxyCardsAreExplicitlyNamedAsETFs() {
+        XCTAssertEqual(marketCardTitle(symbol: "SPY", name: "标普500实时代理"), "标普500 ETF")
+        XCTAssertEqual(marketCardTitle(symbol: "QQQ", name: "纳斯达克实时代理"), "纳斯达克100 ETF")
+        XCTAssertEqual(marketCardTitle(symbol: "NVDA", name: "英伟达"), "英伟达")
+    }
+
     func testDecodesServerBackedVolatilityResearch() throws {
         let data = Data(#"{"data":{"generatedAt":"2026-08-26T04:00:00Z","lookbackDays":90,"summary":"VIX 与日经波动率均已回落。","isStale":false,"items":[{"id":"nikkei225-vi","market":"日本","name":"日经平均波动率指数","shortName":"Nikkei 225 VI","value":32.0,"previousClose":34.0,"dailyChangePercent":-5.88,"peakValue":40.0,"peakDate":"2026-07-20","drawdownFromPeakPercent":-20.0,"asOf":"2026-08-26","regime":"偏高","interpretation":"较峰值明显回落。","history":[{"date":"2026-08-25","value":34.0},{"date":"2026-08-26","value":32.0}],"source":{"title":"Nikkei Indexes 官方日线","url":"https://indexes.nikkei.co.jp/en/nkave/index/profile?idx=nk225vi"}}]}}"#.utf8)
         let decoder = JSONDecoder()
