@@ -66,31 +66,30 @@ final class KnowledgeCityFlowUITests: XCTestCase {
         XCTAssertTrue(peopleTitle.waitForNonExistence(timeout: 5))
     }
 
-    func testYesterdayDetailsUsesOneNavigationFlow() {
+    func testFullReportExpandsSourcesInlineAndReturnsToList() {
         let app = XCUIApplication()
+        app.launchArguments = ["--today-world-preview"]
         app.launch()
-        let details = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "查看昨日明细")).firstMatch
+        let details = app.buttons["today-full-report"]
         XCTAssertTrue(details.waitForExistence(timeout: 30))
         details.tap()
-        XCTAssertFalse(app.navigationBars["昨日明细"].exists)
-        XCTAssertFalse(app.buttons["完成"].exists)
         let row = app.buttons["yesterday-system-row"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         row.tap()
-        let evidence = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "条直接依据")).firstMatch
-        XCTAssertTrue(evidence.waitForExistence(timeout: 8))
-        evidence.tap()
-        let post = app.descendants(matching: .any)["yesterday-post-row"].firstMatch
-        XCTAssertTrue(post.waitForExistence(timeout: 30))
-        post.tap()
-        // Return through the same navigation stack without dismissing the report.
-        let back = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "返回", "Back")).firstMatch
-        XCTAssertTrue(back.waitForExistence(timeout: 8))
-        back.tap()
-        XCTAssertTrue(post.waitForExistence(timeout: 8))
+        if app.navigationBars["公司动态"].waitForExistence(timeout: 2) {
+            app.scrollViews.buttons.firstMatch.tap()
+        }
+        let source = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "today-source-")).firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !source.isHittable { app.swipeUp() }
+        XCTAssertTrue(source.isHittable)
+        source.tap()
+        XCTAssertEqual(source.value as? String, "已展开")
+        XCTAssertTrue(app.navigationBars["事件详情"].exists)
+        source.tap()
+        XCTAssertEqual(source.value as? String, "已收起")
         app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(evidence.waitForExistence(timeout: 8))
-        app.navigationBars.buttons.firstMatch.tap()
+        if app.navigationBars["公司动态"].exists { app.navigationBars.buttons.firstMatch.tap() }
         XCTAssertTrue(row.waitForExistence(timeout: 8))
     }
 

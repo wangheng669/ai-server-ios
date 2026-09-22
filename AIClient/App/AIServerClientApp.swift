@@ -308,7 +308,6 @@ private struct EditorialRootView: View {
         return nil
         #endif
     }()
-    @State private var signalSection: GoogleSignalSection = .highlights
     @State private var signalSentiment: GoogleSignalSentimentFilter = .all
     @State private var showsSignalFilters = false
     @State private var rootBottomChromeHeight: CGFloat = 0
@@ -381,7 +380,6 @@ private struct EditorialRootView: View {
                 }
                 tabContent(.signal) {
                     GoogleSignalView(
-                        section: $signalSection,
                         sentiment: $signalSentiment
                     )
                 }
@@ -453,7 +451,6 @@ private struct EditorialRootView: View {
             VStack(spacing: 8) {
                 if selectedTab == .signal {
                     GoogleSignalFilterButton(
-                        section: signalSection,
                         sentiment: signalSentiment,
                         showsFilters: $showsSignalFilters
                     )
@@ -488,7 +485,6 @@ private struct EditorialRootView: View {
         .overlay {
             if selectedTab == .signal, showsSignalFilters {
                 GoogleSignalFilterOverlay(
-                    section: $signalSection,
                     sentiment: $signalSentiment,
                     isPresented: $showsSignalFilters
                 )
