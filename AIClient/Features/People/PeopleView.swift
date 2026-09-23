@@ -3395,7 +3395,7 @@ private struct PersonDetailPage: View {
                     Text(isEnabled ? "已开启本机提醒" : "开启本机提醒")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.primary)
-                    Text(pushNotifications.errorMessage ?? "本人动态或新视频访谈发布时通知")
+                    Text(pushNotifications.errorMessage ?? "本人动态或新访谈、圆桌、播客发布时通知")
                         .font(.system(size: 11.5))
                         .foregroundStyle(
                             pushNotifications.errorMessage == nil ? Color.secondary : Color.red
@@ -3459,7 +3459,7 @@ private struct PersonDetailPage: View {
         .accessibilityLabel(
             isEnabled ? "关闭\(person.name)本机提醒" : "开启\(person.name)本机提醒"
         )
-        .accessibilityHint("本人动态或新视频访谈发布时通知")
+        .accessibilityHint("本人动态或新访谈、圆桌、播客发布时通知")
     }
 
     private var sectionPicker: some View {
