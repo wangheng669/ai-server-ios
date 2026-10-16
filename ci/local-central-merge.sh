@@ -67,7 +67,7 @@ for command in curl git gh xcodebuild xcrun jq; do
 done
 
 repository_variable() {
-  local name=$1 fallback=${2:-} value="" attempt
+  local name=$1 value="" attempt
   for attempt in 1 2 3 4 5; do
     if value=$(gh variable get "$name" 2>/dev/null) && [[ -n "$value" ]]; then
       printf '%s\n' "$value"
@@ -76,11 +76,6 @@ repository_variable() {
     echo "GitHub variable $name was unavailable (attempt $attempt/5)." >&2
     sleep "$attempt"
   done
-  if [[ -n "$fallback" ]]; then
-    echo "Using repository fallback for $name." >&2
-    printf '%s\n' "$fallback"
-    return 0
-  fi
   echo "Required GitHub variable is unavailable after retries: $name" >&2
   return 1
 }

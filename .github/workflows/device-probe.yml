@@ -2,11 +2,6 @@ name: Probe central Mac iPhone connection
 
 on:
   workflow_dispatch:
-    inputs:
-      runner_label:
-        description: Central Mac runner label
-        required: false
-        default: ios-hackintosh
 
 permissions:
   contents: read
