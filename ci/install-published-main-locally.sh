@@ -64,7 +64,7 @@ export IOS_DEVICE_ID IOS_DEVICE_NAME
 IOS_DEVICE_ID=$(jq -r '.deviceId' "$IOS_DEVICE_READY_JSON")
 IOS_DEVICE_NAME=$(jq -r '.deviceName' "$IOS_DEVICE_READY_JSON")
 
-export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}
+export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 cache_root=${IOS_BUILD_CACHE_ROOT:-$HOME/Library/Caches/ai-server-ios}
 signing_path="$cache_root/published-main-signing"
 package_root=$(mktemp -d "${RUNNER_TEMP:-/tmp}/ios-published-main.XXXXXX")

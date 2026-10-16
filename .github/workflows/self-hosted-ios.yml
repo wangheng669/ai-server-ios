@@ -1,4 +1,4 @@
-name: Build on Mac mini and install on iPhone
+name: Build on Hackintosh
 
 on:
   workflow_dispatch:
@@ -7,7 +7,12 @@ on:
         description: Branch, tag, or commit SHA to build and install
         required: false
         type: string
-run-name: Install ${{ inputs.git_ref || github.ref_name }}
+      install_on_device:
+        description: Sign and install on the connected iPhone
+        required: true
+        default: false
+        type: boolean
+run-name: Build ${{ inputs.git_ref || github.ref_name }}
 
 concurrency:
   # Manual fallback deployments share one latest-wins queue.
@@ -20,12 +25,12 @@ permissions:
 
 jobs:
   build:
-    name: Build on office Mac mini
+    name: Build and test on Hackintosh
     runs-on:
       - self-hosted
       - macOS
-      - ARM64
-      - office-builder
+      - X64
+      - ios-hackintosh
     timeout-minutes: 30
     steps:
       - name: Check out latest commit
@@ -34,6 +39,7 @@ jobs:
           ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Report build started
+        if: inputs.install_on_device
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -48,7 +54,7 @@ jobs:
       - name: Run tests
         id: ios_tests
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
         run: |
           set -o pipefail
@@ -60,13 +66,14 @@ jobs:
               -- xcodebuild test \
               -project AIServerClient.xcodeproj \
               -scheme AIServerClient \
-              -destination 'platform=iOS Simulator,name=iPhone 16e' \
+              -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
               -collect-test-diagnostics never \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/manual-install-simulator" \
               CODE_SIGNING_ALLOWED=NO \
               COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Report tests completed
+        if: inputs.install_on_device
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -78,7 +85,7 @@ jobs:
       - name: Build unsigned device app
         id: device_build
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
         run: |
           set -o pipefail
@@ -99,6 +106,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
 
       - name: Report signing started
+        if: inputs.install_on_device
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -107,7 +115,8 @@ jobs:
           echo "IOS_BUILD_SECONDS=$IOS_BUILD_SECONDS" >> "$GITHUB_ENV"
           ./ci/report-ios-deployment.sh running 0.82 signing
 
-      - name: Sign and install directly on office Mac mini
+      - name: Sign and install on iPhone
+        if: inputs.install_on_device
         id: local_install
         env:
           APP_ARCHIVE: ${{ runner.temp }}/AIServerClient.app.zip
@@ -115,12 +124,13 @@ jobs:
           BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_SIGNING_DERIVED_DATA_PATH: ${{ runner.tool_cache }}/ai-server-ios/manual-install-signing
         run: ./ci/run-timed-step.sh "Sign and install on iPhone" ./ci/sign-and-install-ios.sh
 
       - name: Report direct installation completed
+        if: inputs.install_on_device
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
@@ -134,7 +144,7 @@ jobs:
         run: ./ci/report-ios-deployment.sh succeeded 1 installed
 
       - name: Report build failure
-        if: ${{ failure() }}
+        if: failure() && inputs.install_on_device
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}

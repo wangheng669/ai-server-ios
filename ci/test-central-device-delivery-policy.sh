@@ -16,7 +16,7 @@ if grep -Fq 'Fail delivery when local installation failed' "$workflow"; then
 fi
 
 grep -Fq 'if [[ "${IOS_REQUIRE_DEVICE_GATE:-false}" == true ]]' "$prepare"
-grep -Fq 'main delivery will continue and installation will be retried after publish' "$prepare"
+grep -Fq 'main delivery will continue; install manually after device setup' "$prepare"
 grep -Fq '+main:refs/remotes/origin/main' "$prepare"
 
 echo 'Central device delivery policy checks passed.'

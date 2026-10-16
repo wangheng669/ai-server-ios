@@ -13,8 +13,8 @@ jobs:
     runs-on:
       - self-hosted
       - macOS
-      - ARM64
-      - office-builder
+      - X64
+      - ios-hackintosh
     steps:
       - name: Check out main with full history
         uses: actions/checkout@v7

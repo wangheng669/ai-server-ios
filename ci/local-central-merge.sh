@@ -101,7 +101,7 @@ report_local_delivery() {
       -f source_branch="$source_branch" \
       -f originating_run_id="$run_id" \
       -f stage="$stage" \
-      -f device_id="${IOS_DEVICE_ID:-$DEVICE_UDID}" \
+      -f device_id="${IOS_DEVICE_ID:-${DEVICE_UDID:-}}" \
       -f device_name="${IOS_DEVICE_NAME:-}"; then
       echo "Queued authenticated deployment-status reconciliation for $source_sha."
       return
@@ -217,19 +217,26 @@ app_changed=$(awk -F= '$1 == "app_changed" { print $2 }' <<<"$scope")
 test_scope=$(awk -F= '$1 == "test_scope" { print $2 }' <<<"$scope")
 
 if [[ "$app_changed" == true ]]; then
-  export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}
+  export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
   export RUNNER_TEMP=${RUNNER_TEMP:-$(mktemp -d /tmp/ai-server-ios-runner.XXXXXX)}
   export IOS_BUILD_CACHE_ROOT=${IOS_BUILD_CACHE_ROOT:-$HOME/Library/Caches/ai-server-ios}
-  export DEVICE_UDID=${DEVICE_UDID:-$(repository_variable IOS_DEVICE_UDID)}
-  export TEAM_ID=${TEAM_ID:-$(repository_variable IOS_TEAM_ID 9M7P4VLHY3)}
-  export BUNDLE_ID=${BUNDLE_ID:-$(repository_variable IOS_BUNDLE_ID com.wangheng.aiserverclient)}
+  IOS_DEVICE_INSTALL_ENABLED=$(repository_variable IOS_DEVICE_INSTALL_ENABLED)
+  export IOS_DEVICE_INSTALL_ENABLED
   export IOS_DELIVERY_MODE=local-fallback
   export IOS_DEVICE_READY_JSON="$RUNNER_TEMP/ios-device-ready.json"
 
-  ./ci/verify-ios-device-stability.sh
-  export IOS_DEVICE_ID IOS_DEVICE_NAME
-  IOS_DEVICE_ID=$(jq -r '.deviceId' "$IOS_DEVICE_READY_JSON")
-  IOS_DEVICE_NAME=$(jq -r '.deviceName' "$IOS_DEVICE_READY_JSON")
+  if [[ "$IOS_DEVICE_INSTALL_ENABLED" == true ]]; then
+    DEVICE_UDID=$(repository_variable IOS_DEVICE_UDID)
+    export DEVICE_UDID
+    TEAM_ID=$(repository_variable IOS_TEAM_ID)
+    export TEAM_ID
+    BUNDLE_ID=$(repository_variable IOS_BUNDLE_ID)
+    export BUNDLE_ID
+    ./ci/verify-ios-device-stability.sh
+    export IOS_DEVICE_ID IOS_DEVICE_NAME
+    IOS_DEVICE_ID=$(jq -r '.deviceId' "$IOS_DEVICE_READY_JSON")
+    IOS_DEVICE_NAME=$(jq -r '.deviceName' "$IOS_DEVICE_READY_JSON")
+  fi
   mkdir -p "$IOS_BUILD_CACHE_ROOT" "$RUNNER_TEMP"
   if [[ "$test_scope" == build ]]; then
     echo "Low-risk App change; skipping shared simulator tests."
@@ -240,7 +247,7 @@ if [[ "$app_changed" == true ]]; then
       -- xcodebuild test \
         -project AIServerClient.xcodeproj \
         -scheme AIServerClient \
-        -destination 'platform=iOS Simulator,name=iPhone 16e' \
+        -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
         -collect-test-diagnostics never \
         -derivedDataPath "$IOS_BUILD_CACHE_ROOT/local-central-simulator" \
         -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
@@ -256,14 +263,11 @@ if [[ "$app_changed" == true ]]; then
     -destination 'generic/platform=iOS' \
     -derivedDataPath "$signing_path" \
     -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-    -allowProvisioningUpdates \
-    -allowProvisioningDeviceRegistration \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_STYLE=Automatic \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
     COMPILER_INDEX_STORE_ENABLE=NO
   app_path="$signing_path/Build/Products/Debug-iphoneos/AIServerClient.app"
   test -d "$app_path"
-  codesign --verify --deep --strict --verbose=2 "$app_path"
   export APP_ARCHIVE="$RUNNER_TEMP/AIServerClient.app.zip"
   export APP_PATH="$RUNNER_TEMP/signed-app/AIServerClient.app"
   export IOS_SIGNING_DERIVED_DATA_PATH="$signing_path"
@@ -280,9 +284,11 @@ git push origin HEAD:main
 git fetch --no-tags origin main:refs/remotes/origin/main
 git merge-base --is-ancestor "$source_sha" origin/main
 
-if [[ "$app_changed" == true ]]; then
+if [[ "$app_changed" == true && "$IOS_DEVICE_INSTALL_ENABLED" == true ]]; then
   ./ci/sign-and-install-ios.sh
   report_local_delivery installed-local-fallback
+elif [[ "$app_changed" == true ]]; then
+  report_local_delivery published-pending-install
 else
   export IOS_DELIVERY_MODE=local-fallback
   report_local_delivery published-local-fallback

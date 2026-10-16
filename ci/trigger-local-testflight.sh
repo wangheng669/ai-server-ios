@@ -12,7 +12,7 @@ state_dir="$support_dir/state"
 last_success_file="$state_dir/last-successful-main-sha"
 work_root="$support_dir/work"
 repo_url="https://github.com/wangheng669/ai-server-ios.git"
-developer_dir="/Applications/Xcode-beta.app/Contents/Developer"
+developer_dir="/Applications/Xcode.app/Contents/Developer"
 expected_xcode_build="27A5228h"
 run_lock="/tmp/ai-server-ios-local-testflight.lock"
 run_lock_owner="$run_lock/pid"
@@ -164,7 +164,7 @@ log "Running tests for TestFlight $TESTFLIGHT_MARKETING_VERSION."
   -- xcodebuild test \
   -project AIServerClient.xcodeproj \
   -scheme AIServerClient \
-  -destination 'platform=iOS Simulator,name=iPhone 16e' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -derivedDataPath "$work_dir/TestDerivedData" \
   CODE_SIGNING_ALLOWED=NO \
   COMPILER_INDEX_STORE_ENABLE=NO

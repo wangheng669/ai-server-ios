@@ -20,14 +20,7 @@ esac
 
 : "${DEVICE_UDID:?DEVICE_UDID is required}"
 computer_name=$(scutil --get ComputerName)
-case "$computer_name" in
-  *"MacBook Air"*) runner_label=home-installer ;;
-  *"Mac mini"*) runner_label=office-builder ;;
-  *)
-    echo "当前电脑名称无法映射到中央 Runner：$computer_name" >&2
-    exit 1
-    ;;
-esac
+runner_label=ios-hackintosh
 
 operations_url=${IOS_DELIVERY_OPERATIONS_URL:-https://api.wanghengai.xin/api/admin/v1/system/ios-delivery-operations}
 operations=$(curl --fail --silent --show-error --max-time 15 "$operations_url")

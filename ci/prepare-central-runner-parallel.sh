@@ -50,7 +50,10 @@ device_warm_started_epoch=$(date +%s)
 device_warm_finished_epoch_file=$(mktemp "${RUNNER_TEMP:-/tmp}/ios-device-warm-finished.XXXXXX")
 (
   status=0
-  if [[ "$app_changed" == true && -n "${DEVICE_UDID:-}" ]]; then
+  if [[ "$app_changed" == true && "${IOS_DEVICE_INSTALL_ENABLED:-false}" != true ]]; then
+    echo "Device installation is disabled; compiling and publishing without an iPhone."
+    status=1
+  elif [[ "$app_changed" == true && -n "${DEVICE_UDID:-}" ]]; then
     ./ci/report-ios-deployment.sh running 0.005 checking-device-stability || true
     if ! ./ci/probe-ios-device.sh; then
       ./ci/report-ios-deployment.sh running 0.01 device-install-deferred || true
@@ -145,5 +148,5 @@ if ((device_warm_status != 0)); then
     echo "Required iPhone stability gate failed with exit code $device_warm_status." >&2
     exit "$device_warm_status"
   fi
-  echo "iPhone is not ready; main delivery will continue and installation will be retried after publish." >&2
+  echo "iPhone is not ready; main delivery will continue; install manually after device setup." >&2
 fi

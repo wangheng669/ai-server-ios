@@ -4,12 +4,7 @@ set -euo pipefail
 cache_root=${IOS_BUILD_CACHE_ROOT:-${RUNNER_TOOL_CACHE:-/tmp}/ai-server-ios}
 mkdir -p "$cache_root"
 
-# LaunchAgent runners do not inherit the interactive user's unlocked keychain
-# state. Unlock before the prewarmed signed build so codesign can access the
-# selected Apple Development identity.
-security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" \
-  "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true
-
+# Compile verification does not require a signing identity or attached phone.
 xcodebuild -version
 dependency_started_epoch=$(date +%s)
 xcodebuild -resolvePackageDependencies \
@@ -30,13 +25,11 @@ device_started_epoch=$(date +%s)
     -destination 'generic/platform=iOS' \
     -derivedDataPath "$cache_root/central-merge-signing" \
     -clonedSourcePackagesDirPath "$cache_root/source-packages" \
-    -allowProvisioningUpdates \
-    -allowProvisioningDeviceRegistration \
-    DEVELOPMENT_TEAM="${TEAM_ID:?TEAM_ID is required}" \
-    CODE_SIGN_STYLE=Automatic \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
     COMPILER_INDEX_STORE_ENABLE=NO
   app_path="$cache_root/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
-  codesign --verify --deep --strict --verbose=2 "$app_path"
+  test -d "$app_path"
   ditto -c -k --sequesterRsrc --keepParent \
     "$app_path" "$prebuilt_dir/AIServerClient.app.zip"
   git rev-parse HEAD > "$prebuilt_dir/source-sha"
@@ -54,15 +47,15 @@ if [[ "${IOS_SKIP_SIMULATOR_WARM:-false}" != true ]]; then
       --wait-seconds 1200 \
       -- bash -c '
         set -euo pipefail
-        xcrun simctl boot "iPhone 16e" 2>/dev/null || true
-        xcrun simctl bootstatus "iPhone 16e" -b
+        xcrun simctl boot "iPhone 17 Pro" 2>/dev/null || true
+        xcrun simctl bootstatus "iPhone 17 Pro" -b
       '
     # Compilation uses isolated DerivedData and does not install or launch the
     # test runner, so it must not extend the shared simulator reservation.
     xcodebuild build-for-testing \
       -project AIServerClient.xcodeproj \
       -scheme AIServerClient \
-      -destination "platform=iOS Simulator,name=iPhone 16e" \
+      -destination "platform=iOS Simulator,name=iPhone 17 Pro" \
       -derivedDataPath "$cache_root/central-merge-simulator" \
       -clonedSourcePackagesDirPath "$cache_root/source-packages" \
       CODE_SIGNING_ALLOWED=NO \

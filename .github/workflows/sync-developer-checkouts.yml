@@ -1,62 +1,23 @@
-name: Sync developer Macs to main
+name: Sync Hackintosh to main
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: sync-developer-macs-${{ github.ref }}
-  # A slow or temporarily disconnected Mac must finish its bounded sync instead
-  # of being cancelled every time another task reaches main.
+  group: sync-hackintosh-main
   cancel-in-progress: false
 
 jobs:
-  sync-mac-x-mirror:
-    name: Sync mac-x governance mirror
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - mac-x-preflight
-    timeout-minutes: 10
-    steps:
-      - name: Check out the latest synchronization guard
-        uses: actions/checkout@v4
-
-      - name: Safely synchronize the governance mirror
-        run: |
-          ./ci/automatic-main-sync.sh \
-            /home/wanngheng/home/ai-server-ios
-
-  sync-office-mac-mini:
-    name: Sync office Mac mini
-    runs-on:
-      - self-hosted
-      - macOS
-      - ARM64
-      - office-builder
+  sync:
+    runs-on: [self-hosted, macOS, X64, ios-hackintosh]
     timeout-minutes: 10
     steps:
       - name: Safely synchronize the primary checkout
         run: |
-          /Users/wangheng/Desktop/ai_server_ios/ci/automatic-main-sync.sh \
-            /Users/wangheng/Desktop/ai_server_ios
-
-  sync-home-macbook-air:
-    name: Sync home MacBook Air
-    runs-on:
-      - self-hosted
-      - macOS
-      - ARM64
-      - home-installer
-    timeout-minutes: 10
-    steps:
-      - name: Safely synchronize the primary checkout
-        run: |
-          /Users/wangheng/Desktop/ai-server-ios/ci/automatic-main-sync.sh \
-            /Users/wangheng/Desktop/ai-server-ios
+          /Users/wang/Desktop/ai-server-ios/ci/automatic-main-sync.sh \
+            /Users/wang/Desktop/ai-server-ios

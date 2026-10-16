@@ -35,6 +35,12 @@ cat >"$plist_path" <<EOF
     <string>-lc</string>
     <string>cd '$automation_repo' &amp;&amp; /bin/bash ./ci/actions-outage-fallback-watch.sh</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>https_proxy</key><string>http://127.0.0.1:7890</string>
+    <key>http_proxy</key><string>http://127.0.0.1:7890</string>
+  </dict>
   <key>StartInterval</key><integer>60</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$log_dir/actions-outage-fallback.log</string>

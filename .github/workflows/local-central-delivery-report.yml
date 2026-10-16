@@ -22,6 +22,7 @@ on:
         options:
           - installed-local-fallback
           - published-local-fallback
+          - published-pending-install
       device_id:
         description: Installed iPhone identifier
         required: false

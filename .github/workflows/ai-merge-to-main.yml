@@ -20,8 +20,10 @@ jobs:
     runs-on:
       - self-hosted
       - macOS
-      - ARM64
-      - ${{ vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder' }}
+      - X64
+      - ios-hackintosh
+    env:
+      IOS_DEVICE_INSTALL_ENABLED: ${{ vars.IOS_DEVICE_INSTALL_ENABLED }}
     timeout-minutes: 60
     steps:
       - name: Reuse local repository and check out task commit
@@ -70,7 +72,7 @@ jobs:
       - name: Run preflight and warm device build cache
         id: central_prepare
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
@@ -158,20 +160,11 @@ jobs:
       - name: Resolve merge conflicts with local Codex
         if: steps.merge.outputs.has_conflicts == 'true' && steps.merge.outputs.already_merged == 'false'
         env:
-          HOME: /Users/wangheng
+          HOME: /Users/wang
         run: |
           set -euo pipefail
-          codex_bin="$(command -v codex 2>/dev/null || true)"
-          if [[ -z "$codex_bin" && -x /opt/homebrew/bin/codex ]]; then
-            codex_bin=/opt/homebrew/bin/codex
-          fi
-          if [[ -z "$codex_bin" ]]; then
-            codex_bin="$(find "$HOME/.nvm/versions/node" -path '*/bin/codex' -type f 2>/dev/null | sort -V | tail -1)"
-          fi
-          if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
-            echo "Local Codex CLI is not installed for $USER." >&2
-            exit 1
-          fi
+          codex_bin=/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
+          test -x "$codex_bin"
           auth_file="$HOME/.codex/auth.json"
           if [[ ! -f "$auth_file" ]]; then
             echo "Local Codex login was not found for $USER." >&2
@@ -225,7 +218,7 @@ jobs:
         id: ios_tests
         if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         env:
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
@@ -244,7 +237,7 @@ jobs:
             test_stage=targeted-testing
             test_arguments=(-only-testing:AIClientTests/FeedAdapterTests)
           elif [[ "$test_scope" == build ]]; then
-            test_label="Signed device build verification"
+            test_label="Unsigned device build verification"
             test_stage=build-verification
           fi
           test_action='test'
@@ -273,7 +266,7 @@ jobs:
               && [[ "$(cat "$prebuilt_sha_file")" == "${{ github.sha }}" ]] \
               && git diff --quiet "${{ github.sha }}" HEAD -- .; then
               cp "$prebuilt_archive" "$RUNNER_TEMP/AIServerClient.app.zip"
-              echo "Reusing signed device app prepared for unchanged tree ${{ github.sha }}." > "$build_log"
+              echo "Reusing unsigned device app prepared for unchanged tree ${{ github.sha }}." > "$build_log"
               build_status=0
               build_duration_seconds='${{ steps.central_prepare.outputs.device_build_warm_duration_seconds }}'
             else
@@ -284,16 +277,13 @@ jobs:
               -destination 'generic/platform=iOS' \
               -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-signing" \
               -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-              -allowProvisioningUpdates \
-              -allowProvisioningDeviceRegistration \
-              DEVELOPMENT_TEAM="$TEAM_ID" \
-              CODE_SIGN_STYLE=Automatic \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
               COMPILER_INDEX_STORE_ENABLE=NO > "$build_log" 2>&1
               build_status=$?
               if ((build_status == 0)); then
                 app_path="$IOS_BUILD_CACHE_ROOT/central-merge-signing/Build/Products/Debug-iphoneos/AIServerClient.app"
                 test -d "$app_path" \
-                  && codesign --verify --deep --strict --verbose=2 "$app_path" \
                   && ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/AIServerClient.app.zip"
                 build_status=$?
               fi
@@ -307,7 +297,7 @@ jobs:
           set +e
           test_status=0
           if [[ "$test_scope" == build ]]; then
-            echo "Low-risk App change; signed build verification replaces shared simulator tests."
+            echo "Low-risk App change; unsigned build verification replaces shared simulator tests."
           else
             ./ci/run-timed-step.sh "$test_label" \
               ./ci/with-ios-simulator-lock.sh \
@@ -316,7 +306,7 @@ jobs:
                 -- xcodebuild "$test_action" \
                 -project AIServerClient.xcodeproj \
                 -scheme AIServerClient \
-                -destination 'platform=iOS Simulator,name=iPhone 16e' \
+                -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
                 -collect-test-diagnostics never \
                 -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
                 -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
@@ -332,7 +322,7 @@ jobs:
           cat "$build_log"
           read -r build_status build_duration_seconds < "$build_result"
           echo "device_build_duration_seconds=$build_duration_seconds" >> "$GITHUB_OUTPUT"
-          echo "Signed device build completed in ${build_duration_seconds}s (exit $build_status)."
+          echo "Unsigned device build completed in ${build_duration_seconds}s (exit $build_status)."
           if ((test_status != 0)); then
             exit "$test_status"
           fi
@@ -381,7 +371,7 @@ jobs:
           BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
           DEVICE_UDID: ${{ vars.IOS_DEVICE_UDID }}
-          DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
           IOS_SIGNING_DERIVED_DATA_PATH: ${{ runner.tool_cache }}/ai-server-ios/central-merge-signing
         run: ./ci/run-timed-step.sh "Sign and install on iPhone" ./ci/sign-and-install-ios.sh
@@ -410,22 +400,6 @@ jobs:
           IOS_BUILD_SECONDS: 0
           IOS_INSTALL_SECONDS: 0
         run: ./ci/report-ios-deployment.sh succeeded 1 published-no-app-change
-
-      - name: Schedule a fresh installation retry on office Mac mini
-        if: always() && steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true' && (steps.central_prepare.outputs.device_gate_failed == 'true' || steps.local_install.outcome == 'failure') && (vars.IOS_CENTRAL_RUNNER_LABEL || 'office-builder') == 'office-builder'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          curl --retry 5 --retry-all-errors --retry-delay 3 \
-            --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/self-hosted-ios.yml/dispatches" \
-            --data '{"ref":"main","inputs":{"git_ref":"main"}}'
 
       - name: Report published App awaiting installation
         if: always() && steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true' && (steps.central_prepare.outputs.device_gate_failed == 'true' || steps.local_install.outcome == 'failure') && !failure()

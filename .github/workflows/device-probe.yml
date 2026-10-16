@@ -6,7 +6,7 @@ on:
       runner_label:
         description: Central Mac runner label
         required: false
-        default: office-builder
+        default: ios-hackintosh
 
 permissions:
   contents: read
@@ -17,8 +17,8 @@ jobs:
     runs-on:
       - self-hosted
       - macOS
-      - ARM64
-      - ${{ inputs.runner_label || 'office-builder' }}
+      - X64
+      - ios-hackintosh
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v7

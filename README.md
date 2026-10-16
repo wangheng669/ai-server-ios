@@ -23,13 +23,16 @@
 
 客户端仅接受 HTTPS 服务器地址，并使用系统默认的 App Transport Security 策略。
 
-## 两台 Mac 协作
+## iOS 开发与自动构建
 
-仓库使用 GitHub `main` 作为 Mac mini 与 MacBook Air 之间的稳定代码源。日常任务默认直接在 `main` 开发，只有大型、实验性或高冲突风险的任务才使用临时分支。
+通过 `ssh hackintosh` 在黑苹果 `/Users/wang/Desktop/ai-server-ios` 开发。Xcode 位于 `/Applications/Xcode.app`，版本为 26.6（17F113），模拟器为 iPhone 17 Pro / iOS 26.5。本机不再构建 iOS。
 
-- 开始新任务时：工作区干净的情况下运行 `./ci/safe-sync.sh main`。
-- 提交并同步：提交改动，安全整合远端的新提交，再推送 `main`。
-- 安装到真机：推送 `main` 后，Mac mini 自动构建，MacBook Air 自动签名并安装；没有新提交时也可以手动重新安装 `main`。
-- 临时测试分支：在 GitHub Actions 手动运行 `Build on Mac mini and install on iPhone`，并填写分支名或提交 SHA。
+GitHub `main` 是稳定代码源。日常任务默认直接在 `main` 开发，开始前运行 `./ci/safe-sync.sh main`。安全同步检测到未提交改动会停止，不会覆盖开发中的代码。
 
-详细的 Codex 自动协作约定见 `AGENTS.md`。安全同步脚本检测到未提交改动时会直接停止，不会覆盖正在开发的代码。
+- GitHub 自托管运行器 `hackintosh-ai-server-ios` 使用 `ios-hackintosh` 标签，负责自动合并、测试和构建。
+- `main` 更新后自动同步主工作区，并每 5 分钟检查一次；GitHub Actions 故障接管每分钟检查一次。
+- 编译验证无需手机或签名证书。仓库变量 `IOS_DEVICE_INSTALL_ENABLED=false` 暂停自动真机安装，代码仍可验证和发布到 `main`。
+- 手动运行 `Build on Hackintosh` 可指定分支或提交，默认仅构建和测试。手机配对、签名配置完成后，才选择 `install_on_device`，并按需开启自动安装变量。
+- TestFlight 仍是需要签名凭据的独立发布任务，迁移不会自动上传。
+
+详细约定见 `AGENTS.md`。

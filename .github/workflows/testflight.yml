@@ -30,8 +30,8 @@ jobs:
     runs-on:
       - self-hosted
       - macOS
-      - ARM64
-      - office-builder
+      - X64
+      - ios-hackintosh
     outputs:
       should_upload: ${{ steps.decision.outputs.should_upload }}
     steps:
@@ -78,12 +78,12 @@ jobs:
     runs-on:
       - self-hosted
       - macOS
-      - ARM64
-      - office-builder
+      - X64
+      - ios-hackintosh
     timeout-minutes: 60
     env:
-      DEVELOPER_DIR: /Applications/Xcode-beta.app/Contents/Developer
-      EXPECTED_XCODE_BUILD: 27A5228h
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      EXPECTED_XCODE_BUILD: 17F113
 
     steps:
       - name: Check out requested version
@@ -151,7 +151,7 @@ jobs:
             -- xcodebuild test \
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \
-            -destination 'platform=iOS Simulator,name=iPhone 16e' \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO

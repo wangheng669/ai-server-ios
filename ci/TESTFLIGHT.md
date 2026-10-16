@@ -6,7 +6,7 @@ Mac 使用本地 `launchd` 每天北京时间 04:30 直接执行发布，不创�
 
 在 Mac 的 `main` 工作区运行 `./ci/install-local-testflight-schedule.sh` 可安装或更新本地任务。安装器会把触发脚本复制到 `~/Library/Application Support/ai-server-ios/`，源码镜像、发布状态和 App Store Connect 凭据也保存在该目录的受限子目录中，避免 macOS 阻止后台任务访问 `Desktop`。任务标识为 `com.wangheng.ai-server-ios.testflight-upload`，日志位于 `~/Library/Logs/ai-server-ios/testflight-upload*.log`。
 
-Mac mini 运行 macOS 27 Beta，Xcode 26.6 正式版不兼容该系统，因此 TestFlight 构建使用 `/Applications/Xcode-beta.app`。工作流会在测试和归档前校验当前允许上传的 Xcode Build Number；Apple 发布新 Beta 并停止接受旧版本时，必须先升级 Mac mini 上的 Xcode，再同步更新工作流中的 `EXPECTED_XCODE_BUILD`。
+iOS 构建机为黑苹果，使用 `/Applications/Xcode.app` 的 Xcode 26.6（17F113）。TestFlight 需要独立配置签名和 App Store Connect 凭据；本次构建、同步迁移不启用上传计划。上传前校验 Apple 当前接受的 Xcode 版本，再同步更新 `EXPECTED_XCODE_BUILD`。
 
 每次准备归档时，工作流会读取 App Store Connect 中已有的最高应用版本并自动递增补丁号，例如 `1.0`、`1.0.1`、`1.0.2`。Xcode 继续自动递增 Build Number。
 
