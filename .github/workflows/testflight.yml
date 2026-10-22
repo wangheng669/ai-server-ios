@@ -1,203 +1,171 @@
 name: Upload iOS app to TestFlight
 
-on:
+'on':
   workflow_dispatch:
     inputs:
-      git_ref:
-        description: Branch, tag, or commit SHA to upload
-        required: false
-        default: main
+      operation:
+        description: Upload the frozen archive, or only verify its exact App Store Connect build
+        required: true
+        default: verify
+        type: choice
+        options: [upload, verify]
+      frozenzip:
+        description: Absolute path of the fixed local release-bundle.zip
+        required: true
         type: string
-      only_if_new:
-        description: Skip when this revision was already uploaded successfully
-        required: false
-        default: false
-        type: boolean
+      sha256:
+        description: Expected SHA256 of release-bundle.zip
+        required: true
+        type: string
+      version:
+        description: Exact marketing version already signed in the archive
+        required: true
+        type: string
+      build:
+        description: Exact build number already signed in the archive
+        required: true
+        type: string
 
-run-name: Upload ${{ inputs.git_ref || 'main' }} to TestFlight
+run-name: TestFlight ${{ inputs.operation }} ${{ inputs.version }} (${{ inputs.build }})
 
 concurrency:
   group: ios-testflight-upload
   cancel-in-progress: false
 
 permissions:
-  actions: read
   contents: read
 
+defaults:
+  run:
+    shell: bash
+    working-directory: /Users/wang/Desktop/ai-server-ios
+
 jobs:
-  check:
-    name: Check for a new main revision
-    runs-on:
-      - self-hosted
-      - macOS
-      - X64
-      - ios-hackintosh
-    outputs:
-      should_upload: ${{ steps.decision.outputs.should_upload }}
-    steps:
-      - name: Decide whether an upload is needed
-        id: decision
-        uses: actions/github-script@v8
-        env:
-          ONLY_IF_NEW: ${{ inputs.only_if_new }}
-        with:
-          script: |
-            if (process.env.ONLY_IF_NEW !== "true") {
-              core.setOutput("should_upload", "true");
-              return;
-            }
-
-            const workflow = await github.rest.actions.getWorkflow({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: "testflight.yml",
-            });
-            const runs = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: workflow.data.id,
-              branch: context.ref.replace("refs/heads/", ""),
-              status: "success",
-              per_page: 10,
-            });
-            const previousUpload = runs.data.workflow_runs.find(
-              (run) => run.id !== context.runId
-            );
-            const shouldUpload = previousUpload?.head_sha !== context.sha;
-            core.info(
-              shouldUpload
-                ? `Uploading new revision ${context.sha}.`
-                : `Skipping ${context.sha}; it was already uploaded successfully.`
-            );
-            core.setOutput("should_upload", String(shouldUpload));
-
   upload:
-    name: Test, archive, and upload
-    needs: check
-    if: needs.check.outputs.should_upload == 'true'
-    runs-on:
-      - self-hosted
-      - macOS
-      - X64
-      - ios-hackintosh
+    name: Upload or verify the frozen local archive
+    runs-on: [self-hosted, macOS, X64, ios-hackintosh]
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-      EXPECTED_XCODE_BUILD: 17F113
-
+      TESTFLIGHT_OPERATION: ${{ inputs.operation }}
+      TESTFLIGHT_FROZEN_ZIP: ${{ inputs.frozenzip }}
+      TESTFLIGHT_EXPECTED_SHA256: ${{ inputs.sha256 }}
+      TESTFLIGHT_EXPECTED_VERSION: ${{ inputs.version }}
+      TESTFLIGHT_EXPECTED_BUILD: ${{ inputs.build }}
     steps:
-      - name: Check out requested version
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.git_ref || 'main' }}
-
-      - name: Verify supported Xcode
-        run: |
-          set -euo pipefail
-          test -x "$DEVELOPER_DIR/usr/bin/xcodebuild"
-          actual_build="$(
-            plutil -extract ProductBuildVersion raw -o - \
-              "$DEVELOPER_DIR/../version.plist"
-          )"
-          if [[ "$actual_build" != "$EXPECTED_XCODE_BUILD" ]]; then
-            echo "Expected Xcode build $EXPECTED_XCODE_BUILD, found $actual_build."
-            exit 1
-          fi
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
-
-      - name: Prepare App Store Connect authentication
+      - name: Validate the frozen archive and upload or verify it
         env:
           APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           set -euo pipefail
+          umask 077
+          private_dir="$(mktemp -d "$RUNNER_TEMP/manual-testflight.XXXXXX")"
+          printf 'MANUAL_TESTFLIGHT_TEMP=%s\n' "$private_dir" >> "$GITHUB_ENV"
+          trap 'rm -rf -- "$private_dir"' EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          export MANUAL_TESTFLIGHT_TEMP="$private_dir"
+
+          ruby <<'RUBY'
+          require "digest"
+          require "fileutils"
+          require "json"
+          require "open3"
+          require "pathname"
+
+          allowed = "/Users/wang/Desktop/ai-server-ios/.artifacts/market-line-only-20261022/testflight/release-bundle.zip"
+          source = ENV.fetch("TESTFLIGHT_FROZEN_ZIP")
+          raise "Only the fixed release-bundle.zip path is permitted" unless source == allowed
+          raise "Frozen ZIP must be a regular file at its canonical path" unless File.file?(source) && !File.symlink?(source) && File.realpath(source) == allowed
+          expected_sha = ENV.fetch("TESTFLIGHT_EXPECTED_SHA256")
+          raise "SHA256 must contain exactly 64 hexadecimal characters" unless expected_sha.match?(/\A[0-9a-fA-F]{64}\z/)
+          version = ENV.fetch("TESTFLIGHT_EXPECTED_VERSION")
+          build = ENV.fetch("TESTFLIGHT_EXPECTED_BUILD")
+          raise "Invalid marketing version" unless version.match?(/\A\d+(?:\.\d+){0,2}\z/)
+          raise "Invalid build number" unless build.match?(/\A\d+(?:\.\d+){0,2}\z/)
+          raise "Invalid operation" unless %w[upload verify].include?(ENV.fetch("TESTFLIGHT_OPERATION"))
+
+          private_dir = ENV.fetch("MANUAL_TESTFLIGHT_TEMP")
+          zip = File.join(private_dir, "release-bundle.zip")
+          FileUtils.cp(source, zip)
+          actual_sha = Digest::SHA256.file(zip).hexdigest
+          raise "Frozen ZIP SHA256 mismatch" unless actual_sha == expected_sha.downcase
+          entries, status = Open3.capture2("/usr/bin/zipinfo", "-1", zip)
+          raise "Could not inspect frozen ZIP" unless status.success?
+          entries.each_line do |line|
+            name = line.chomp
+            path = Pathname.new(name)
+            raise "ZIP contains an unsafe entry path" if path.absolute? || path.each_filename.any? { |component| component == ".." }
+          end
+          unpacked = File.join(private_dir, "unpacked")
+          FileUtils.mkdir(unpacked, mode: 0700)
+          raise "Could not unpack frozen ZIP" unless system("/usr/bin/ditto", "-x", "-k", zip, unpacked)
+
+          archive = File.join(unpacked, "AIServerClient.xcarchive")
+          app = File.join(archive, "Products", "Applications", "AIServerClient.app")
+          helper = File.join(unpacked, "safe-processing.rb")
+          client = File.join(unpacked, "testflight-processing-notify.rb")
+          [archive, app, helper, client].each do |path|
+            raise "Frozen bundle is missing a required archive or helper" unless File.exist?(path)
+            raise "Frozen bundle path resolves outside its private directory" unless File.realpath(path).start_with?(unpacked + "/")
+          end
+          raise "Processing helpers must be regular files" unless [helper, client].all? { |path| File.file?(path) && !File.symlink?(path) }
+          read_plist = lambda do |path|
+            content, _error, result = Open3.capture3("/usr/bin/plutil", "-convert", "json", "-o", "-", path)
+            raise "Could not read archive metadata" unless result.success?
+            JSON.parse(content)
+          end
+          info = read_plist.call(File.join(app, "Info.plist"))
+          raise "Archive bundle ID mismatch" unless info.fetch("CFBundleIdentifier") == "com.wangheng.aiserverclient"
+          raise "Archive marketing version mismatch" unless info.fetch("CFBundleShortVersionString") == version
+          raise "Archive build number mismatch" unless info.fetch("CFBundleVersion") == build
+          _output, signature, signed = Open3.capture3("/usr/bin/codesign", "-d", "--verbose=4", app)
+          raise "Could not inspect the archived app signature" unless signed.success?
+          raise "Archive signing team mismatch" unless signature.lines.any? { |line| line.chomp == "TeamIdentifier=9M7P4VLHY3" }
+          raise "Archived app signature is invalid" unless system("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
+          File.write(File.join(private_dir, "validated-version.json"), JSON.generate(version: version, build: build, sha256: actual_sha))
+          puts "Verified frozen archive #{version} (#{build}), SHA256 #{actual_sha}."
+          RUBY
+
           test -n "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64"
           test -n "$APP_STORE_CONNECT_KEY_ID"
           test -n "$APP_STORE_CONNECT_ISSUER_ID"
-          key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$key_path"
-          chmod 600 "$key_path"
-          echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          export APP_STORE_CONNECT_KEY_PATH="$private_dir/AuthKey.p8"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$APP_STORE_CONNECT_KEY_PATH"
+          chmod 600 "$APP_STORE_CONNECT_KEY_PATH"
+          unset APP_STORE_CONNECT_PRIVATE_KEY_BASE64
 
-      - name: Prepare next TestFlight version
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          TESTFLIGHT_BASE_MARKETING_VERSION="$(
-            plutil -extract CFBundleShortVersionString raw -o - Config/Info.plist
-          )"
-          export TESTFLIGHT_BASE_MARKETING_VERSION
-          ruby ci/testflight-processing-notify.rb \
-            prepare "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
+          if [[ "$TESTFLIGHT_OPERATION" == upload ]]; then
+            cat > "$private_dir/ExportOptions.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>destination</key><string>upload</string>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>9M7P4VLHY3</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+            xcodebuild -exportArchive \
+              -archivePath "$private_dir/unpacked/AIServerClient.xcarchive" \
+              -exportOptionsPlist "$private_dir/ExportOptions.plist" \
+              -exportPath "$private_dir/TestFlightExport" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
+              -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+          fi
 
-      - name: Apply TestFlight version
-        run: |
-          set -euo pipefail
-          plutil -replace CFBundleShortVersionString \
-            -string "$TESTFLIGHT_MARKETING_VERSION" \
-            Config/Info.plist
-          echo "Building TestFlight version $TESTFLIGHT_MARKETING_VERSION."
+          ruby "$private_dir/unpacked/safe-processing.rb"
 
-      - name: Run tests
-        run: |
-          set -o pipefail
-          ./ci/with-ios-simulator-lock.sh \
-            --label "TestFlight tests $GITHUB_RUN_ID" \
-            --wait-seconds 1200 \
-            -- xcodebuild test \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-            -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
-            CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO
-
-      - name: Create App Store archive
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -o pipefail
-          xcodebuild archive \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
-            DEVELOPMENT_TEAM=9M7P4VLHY3 \
-            CODE_SIGN_STYLE=Automatic \
-            COMPILER_INDEX_STORE_ENABLE=NO
-
-      - name: Upload archive to TestFlight
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -o pipefail
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
-            -exportOptionsPlist ci/ExportOptions-TestFlight.plist \
-            -exportPath "$RUNNER_TEMP/TestFlightExport" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
-
-      - name: Wait for App Store Connect processing and notify DingTalk
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ruby ci/testflight-processing-notify.rb wait "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
-
-      - name: Remove authentication key
+      - name: Remove temporary authentication and extracted archive
         if: ${{ always() }}
-        run: rm -f "$APP_STORE_CONNECT_KEY_PATH"
+        run: |
+          set -euo pipefail
+          if [[ -n "${MANUAL_TESTFLIGHT_TEMP:-}" && "$MANUAL_TESTFLIGHT_TEMP" == "$RUNNER_TEMP"/manual-testflight.* ]]; then
+            rm -rf -- "$MANUAL_TESTFLIGHT_TEMP"
+          fi
