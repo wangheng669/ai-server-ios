@@ -71,7 +71,7 @@ struct PostDetailView: View {
     @State private var bilibiliPlaybackStartedAt: Date?
     @State private var bilibiliPlaybackRetryTask: Task<Void, Never>?
     @State private var bilibiliPlaybackRetryCount = 0
-    @State private var bilibiliSubtitleCues: [PersonVideoSubtitleCue] = []
+    @State private var bilibiliSubtitleCues: [VideoSubtitleCue] = []
     @State private var bilibiliSubtitleStatus = "loading"
     @State private var bilibiliSubtitleError: String?
     @State private var bilibiliSummary: BilibiliVideoSummary?
