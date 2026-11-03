@@ -6,17 +6,14 @@ import Observation
 final class PersonDetailStore {
     private(set) var ownPosts: [Post] = []
     private(set) var discussions: [Post] = []
-    private(set) var relatedVideos: [PersonVideo] = []
     private(set) var articles: [PersonArticle] = []
     private(set) var isLoadingOwnPosts = false
     private(set) var isLoadingMoreOwnPosts = false
     private(set) var isLoadingDiscussions = false
-    private(set) var isLoadingRelatedVideos = false
     private(set) var isLoadingArticles = false
     private(set) var ownPostsError: String?
     private(set) var ownPostsLoadMoreError: String?
     private(set) var discussionsError: String?
-    private(set) var relatedVideosError: String?
     private(set) var articlesError: String?
     private(set) var articleSearchResults: [PersonArticle]?
     private(set) var isSearchingArticles = false
@@ -38,9 +35,8 @@ final class PersonDetailStore {
     func load(person: SpecialPerson) async {
         async let ownPostsLoad: Void = loadOwnPosts(for: person)
         async let discussionsLoad: Void = loadDiscussions(for: person)
-        async let videosLoad: Void = loadRelatedVideos(for: person)
         async let articlesLoad: Void = loadArticles(for: person)
-        _ = await (ownPostsLoad, discussionsLoad, videosLoad, articlesLoad)
+        _ = await (ownPostsLoad, discussionsLoad, articlesLoad)
     }
 
     private func loadArticles(for person: SpecialPerson) async {
@@ -244,16 +240,5 @@ final class PersonDetailStore {
         }
     }
 
-    private func loadRelatedVideos(for person: SpecialPerson) async {
-        isLoadingRelatedVideos = true
-        relatedVideosError = nil
-        defer { isLoadingRelatedVideos = false }
-        do {
-            relatedVideos = try await service.relatedVideos(personID: person.id)
-        } catch is CancellationError {
-            return
-        } catch {
-            relatedVideosError = error.localizedDescription
-        }
-    }
+
 }

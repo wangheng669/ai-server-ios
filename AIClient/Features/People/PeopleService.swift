@@ -134,19 +134,7 @@ struct PeopleService {
         return try JSONDecoder().decode(PostListResponse.self, from: data).data
     }
 
-    func relatedVideos(personID: String) async throws -> [PersonVideo] {
-        let url = baseURL
-            .appending(path: "api/ios/v1/people")
-            .appending(path: personID)
-            .appending(path: "videos")
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw PeopleServiceError.invalidResponse
-        }
-        let payload = try JSONDecoder().decode(PeopleVideosResponse.self, from: data)
-        guard payload.success else { throw PeopleServiceError.invalidResponse }
-        return payload.videos
-    }
+
 
     func articles(personID: String, query: String? = nil) async throws -> [PersonArticle] {
         let endpoint = baseURL
@@ -185,21 +173,7 @@ struct PeopleService {
         return payload.article
     }
 
-    func subtitles(videoID: Int64) async throws -> PersonVideoSubtitlesResponse {
-        let url = baseURL
-            .appending(path: "api/ios/v1/people/videos")
-            .appending(path: String(videoID))
-            .appending(path: "subtitles")
-        var request = URLRequest(url: url, timeoutInterval: 90)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw PeopleServiceError.invalidResponse
-        }
-        let payload = try JSONDecoder().decode(PersonVideoSubtitlesResponse.self, from: data)
-        guard payload.success else { throw PeopleServiceError.invalidResponse }
-        return payload
-    }
+
 
     func latestPosts(for people: [SpecialPerson]) async -> [String: Post] {
         await withTaskGroup(of: (String, Post?).self, returning: [String: Post].self) { group in

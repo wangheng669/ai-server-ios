@@ -12,7 +12,6 @@ private let learningImageLogger = Logger(
 struct LearningView: View {
     @Binding private var showsDetail: Bool
     @Binding private var notificationPersonID: String?
-    @Binding private var notificationVideoID: Int64?
     @Environment(\.openURL) private var openURL
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     private let peopleStore: PeopleStore
@@ -73,13 +72,11 @@ struct LearningView: View {
     init(
         peopleStore: PeopleStore,
         showsDetail: Binding<Bool> = .constant(false),
-        notificationPersonID: Binding<String?> = .constant(nil),
-        notificationVideoID: Binding<Int64?> = .constant(nil)
+        notificationPersonID: Binding<String?> = .constant(nil)
     ) {
         self.peopleStore = peopleStore
         _showsDetail = showsDetail
         _notificationPersonID = notificationPersonID
-        _notificationVideoID = notificationVideoID
     }
 
     var body: some View {
@@ -136,8 +133,7 @@ struct LearningView: View {
             PeopleView(
                 store: peopleStore,
                 showsDetail: $peopleShowsDetail,
-                notificationPersonID: $notificationPersonID,
-                notificationVideoID: $notificationVideoID
+                notificationPersonID: $notificationPersonID
             )
             .environment(\.rootBottomChromeHeight, 0)
             .environment(\.rootTabIsActive, true)

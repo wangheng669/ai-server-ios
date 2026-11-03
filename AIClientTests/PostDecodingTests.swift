@@ -179,64 +179,9 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(chunks, ["First paragraph", "Second paragraph"])
     }
 
-    func testDecodesPersonVideoChineseSubtitleTimeline() throws {
-        let data = Data(
-            """
-            {
-              "success": true,
-              "video_id": 42,
-              "language": "zh-Hans",
-              "status": "ready",
-              "cues": [
-                {"start_ms": 1200, "end_ms": 3400, "text": "欢迎来到创业课堂"}
-              ]
-            }
-            """.utf8
-        )
 
-        let payload = try JSONDecoder().decode(PersonVideoSubtitlesResponse.self, from: data)
 
-        XCTAssertEqual(payload.videoID, 42)
-        XCTAssertEqual(payload.status, "ready")
-        XCTAssertEqual(payload.cues.first?.text, "欢迎来到创业课堂")
-        XCTAssertEqual(payload.cues.first?.startMS, 1200)
-    }
 
-    func testDecodesRelatedPersonVideos() throws {
-        let data = Data(
-            """
-            {
-              "success": true,
-              "person_id": "1605",
-              "videos": [{
-                "id": 1,
-                "person_id": "1605",
-                "platform": "youtube",
-                "platform_video_id": "abc123",
-                "title": "Sam Altman Interview",
-                "title_zh": "山姆·奥特曼访谈",
-                "channel_name": "TED",
-                "published_at": "2026-07-26T12:00:00Z",
-                "duration_seconds": 768,
-                "cover_url": "https://i.ytimg.com/vi/abc123/hqdefault.jpg",
-                "canonical_url": "https://www.youtube.com/watch?v=abc123",
-                "relevance_score": 12,
-                "video_type": "interview",
-                "is_featured": true
-              }]
-            }
-            """.utf8
-        )
-
-        let payload = try JSONDecoder().decode(PeopleVideosResponse.self, from: data)
-
-        XCTAssertEqual(payload.personID, "1605")
-        XCTAssertEqual(payload.videos.first?.channelName, "TED")
-        XCTAssertEqual(payload.videos.first?.durationLabel, "12:48")
-        XCTAssertEqual(payload.videos.first?.platformVideoID, "abc123")
-        XCTAssertEqual(payload.videos.first?.displayTitle, "山姆·奥特曼访谈")
-        XCTAssertEqual(payload.videos.first?.publishedDateLabel, "2026年7月26日")
-    }
 
     func testDecodesServerManagedPeopleDirectory() throws {
         let data = Data(
