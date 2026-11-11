@@ -141,6 +141,7 @@ struct PushNotificationDetails: Identifiable, Equatable {
 private struct PushNotificationDetailsView: View {
     let details: PushNotificationDetails
     @State private var browser: InAppBrowserDestination?
+    @State private var gallerySelection: ImageGallerySelection?
 
     var body: some View {
         ScrollView {
@@ -156,7 +157,18 @@ private struct PushNotificationDetailsView: View {
                         .textSelection(.enabled)
                 }
                 if let imageURL = details.imageURL {
-                    RemoteImage(url: imageURL, height: 240, cornerRadius: 12, contentMode: .fit)
+                    Button {
+                        gallerySelection = ImageGallerySelection(urls: [imageURL], initialIndex: 0)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            RemoteImage(url: imageURL, height: 240, cornerRadius: 12, contentMode: .fit)
+                                .accessibilityHidden(true)
+                            Label("查看大图", systemImage: "arrow.up.left.and.arrow.down.right")
+                                .font(.subheadline)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
                 if let url = details.url {
                     Button("打开相关链接", systemImage: "arrow.up.right") {
@@ -168,6 +180,7 @@ private struct PushNotificationDetailsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
         }
+        .imageGallery(item: $gallerySelection)
         .inAppBrowserCover(item: $browser)
     }
 }
