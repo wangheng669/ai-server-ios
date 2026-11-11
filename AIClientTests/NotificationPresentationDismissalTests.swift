@@ -48,36 +48,41 @@ final class NotificationPresentationDismissalTests: XCTestCase {
     func testRepeatedNotificationCreatesNewNavigationRequest() {
         let store = PersonPushNavigationStore()
         let payload = ["kind": "post", "content_id": "123"]
-        store.handle(title: "", body: "", userInfo: payload)
+        store.handle(userInfo: payload)
         let first = store.request
-        store.handle(title: "", body: "", userInfo: payload)
+        store.handle(userInfo: payload)
         XCTAssertNotEqual(first?.id, store.request?.id)
     }
 
-    func testNotificationWithoutLinkRetainsDetailsForTap() throws {
+    func testNotificationUsesServerDetailIDForTap() throws {
         let store = PersonPushNavigationStore()
-        store.handle(title: "监控告警", body: "接口响应延迟已超过阈值。", userInfo: ["kind": "observability"])
+        let id = UUID()
+        store.handle(userInfo: ["kind": "observability", "notification_id": id.uuidString])
         let details = try XCTUnwrap(store.request?.details)
-        XCTAssertEqual(details.title, "监控告警")
-        XCTAssertEqual(details.body, "接口响应延迟已超过阈值。")
-        XCTAssertNil(details.url)
+        XCTAssertEqual(details.id, id)
     }
 
-    func testNotificationDetailsRetainHTTPSLinkAndAttachment() throws {
-        let store = PersonPushNavigationStore()
-        store.handle(title: "TestFlight 构建完成", body: "版本 1.8.0", userInfo: [
-            "kind": "testflight",
-            "url": "https://github.com/example/actions/runs/42",
-            "image_url": "https://example.com/report.png"
-        ])
-        let details = try XCTUnwrap(store.request?.details)
-        XCTAssertEqual(details.url?.absoluteString, "https://github.com/example/actions/runs/42")
+    func testNotificationDetailsDecodeAllLinksAndAttachment() throws {
+        let data = Data("""
+        {
+          "title": "日报",
+          "body": "完整内容",
+          "links": [
+            {"label": "报告", "url": "https://example.com/report"},
+            {"label": "来源", "url": "https://example.com/source"}
+          ],
+          "image_url": "https://example.com/report.png"
+        }
+        """.utf8)
+        let details = try JSONDecoder().decode(PushNotificationDetails.self, from: data)
+        XCTAssertEqual(details.links?.map(\.label), ["报告", "来源"])
+        XCTAssertEqual(details.body, "完整内容")
         XCTAssertEqual(details.imageURL?.absoluteString, "https://example.com/report.png")
     }
 
     func testPostNotificationStillUsesNativeArticleRoute() throws {
         let store = PersonPushNavigationStore()
-        store.handle(title: "文章", body: "摘要", userInfo: ["kind": "post", "content_id": "123"])
+        store.handle(userInfo: ["kind": "post", "content_id": "123"])
         let request = try XCTUnwrap(store.request)
         XCTAssertEqual(request.kind, "post")
         XCTAssertEqual(request.contentID, "123")

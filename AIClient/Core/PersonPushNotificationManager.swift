@@ -36,8 +36,18 @@ final class PersonPushNotificationManager: ObservableObject {
     }
 
     func restoreRegistration() async {
-        guard !enabledPersonIDs.isEmpty else { return }
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            do {
+                if try await center.requestAuthorization(options: [.alert, .badge, .sound]) {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            } catch {
+                errorMessage = "通知权限申请失败，请稍后再试"
+            }
+            return
+        }
         guard settings.authorizationStatus == .authorized ||
                 settings.authorizationStatus == .provisional else {
             let personIDs = enabledPersonIDs
@@ -108,8 +118,12 @@ final class PersonPushNotificationManager: ObservableObject {
     func didRegister(deviceToken: Data) async {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         defaults.set(token, forKey: tokenKey)
-        guard !enabledPersonIDs.isEmpty else { return }
         var failed = false
+        do {
+            try await registerNotificationDevice(token: token)
+        } catch {
+            failed = true
+        }
         for personID in enabledPersonIDs {
             do {
                 try await updateServerSubscription(
@@ -173,6 +187,24 @@ final class PersonPushNotificationManager: ObservableObject {
         }
     }
 
+    private func registerNotificationDevice(token: String) async throws {
+        let url = ServerConfiguration.currentURL.appending(path: "api/ios/v1/ios/push/device")
+        var request = URLRequest(url: url, timeoutInterval: 12)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(
+            NotificationDeviceRequest(
+                token: token,
+                deviceID: deviceIdentifier,
+                environment: Self.apnsEnvironment
+            )
+        )
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 204 else {
+            throw SubscriptionError.invalidResponse
+        }
+    }
+
     private var deviceIdentifier: String {
         if let identifier = UIDevice.current.identifierForVendor?.uuidString {
             return identifier.lowercased()
@@ -192,6 +224,17 @@ final class PersonPushNotificationManager: ObservableObject {
         #else
         "production"
         #endif
+    }
+}
+
+private struct NotificationDeviceRequest: Encodable {
+    let token: String
+    let deviceID: String
+    let environment: String
+
+    enum CodingKeys: String, CodingKey {
+        case token, environment
+        case deviceID = "device_id"
     }
 }
 

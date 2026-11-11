@@ -503,6 +503,14 @@ struct APIClient {
         return response.post
     }
 
+    func fetchPushNotification(id: UUID) async throws -> PushNotificationDetails {
+        try await get(
+            baseURL.appending(path: "api/ios/v1/ios/push/detail"),
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            authorization: "Bearer \(id.uuidString.lowercased())"
+        )
+    }
+
     func fetchBilibiliSubtitles(bvid: String) async throws -> BilibiliSubtitlesResponse {
         var components = URLComponents(
             url: baseURL.appending(path: "api/ios/v1/bilibili/subtitles"),
@@ -744,12 +752,14 @@ struct APIClient {
     private func get<Response: Decodable>(
         _ url: URL,
         retriesTransientFailures: Bool = true,
-        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
+        authorization: String? = nil
     ) async throws -> Response {
         let attempts = retriesTransientFailures ? 2 : 1
         for attempt in 0..<attempts {
             do {
-                let request = URLRequest(url: url, cachePolicy: cachePolicy)
+                var request = URLRequest(url: url, cachePolicy: cachePolicy)
+                request.setValue(authorization, forHTTPHeaderField: "Authorization")
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
                 if [500, 502, 503, 504].contains(http.statusCode), attempt + 1 < attempts {
