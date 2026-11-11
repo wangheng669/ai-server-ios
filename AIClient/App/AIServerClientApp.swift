@@ -54,6 +54,9 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil { return true }
+        #endif
         Task { await PersonPushNotificationManager.shared.restoreRegistration() }
         #if DEBUG
         if let preview = ProcessInfo.processInfo.arguments.first(where: {
@@ -101,10 +104,10 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        let content = response.notification.request.content
         await MainActor.run {
-            PersonPushNavigationStore.shared.handle(
-                userInfo: response.notification.request.content.userInfo
-            )
+            PersonPushNavigationStore.shared.handle(userInfo: content.userInfo)
         }
     }
 
@@ -123,6 +126,112 @@ struct PersonPushNavigationRequest: Equatable {
     let kind: String
     let contentID: String
     let personID: String
+    let details: PushNotificationDestination?
+}
+
+struct PushNotificationDestination: Identifiable, Equatable {
+    let id: UUID
+}
+
+struct PushNotificationDetails: Decodable {
+    struct Link: Decodable, Hashable {
+        let label: String
+        let url: URL
+    }
+
+    let title: String
+    let body: String
+    let links: [Link]?
+    let imageURL: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case title, body, links
+        case imageURL = "image_url"
+    }
+}
+
+private struct PushNotificationDetailsView: View {
+    let destination: PushNotificationDestination
+    @State private var details: PushNotificationDetails?
+    @State private var loadFailed = false
+    @State private var expired = false
+    @State private var attempt = 0
+    @State private var browser: InAppBrowserDestination?
+    @State private var gallerySelection: ImageGallerySelection?
+
+    var body: some View {
+        Group {
+            if let details {
+                content(details)
+            } else if loadFailed {
+                ContentUnavailableView {
+                    Label("无法打开通知", systemImage: "bell.slash")
+                } description: {
+                    Text(expired ? "这条通知的详情已不可用。" : "暂时无法加载详情，请重试。")
+                } actions: {
+                    if !expired {
+                        Button("重试") { attempt += 1 }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+            } else {
+                ProgressView("正在加载通知")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: attempt) {
+            loadFailed = false
+            do {
+                details = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                    .fetchPushNotification(id: destination.id)
+            } catch {
+                guard !Task.isCancelled else { return }
+                if case APIError.httpStatus(404) = error { expired = true }
+                loadFailed = true
+            }
+        }
+        .imageGallery(item: $gallerySelection)
+        .inAppBrowserCover(item: $browser)
+    }
+
+    private func content(_ details: PushNotificationDetails) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if !details.title.isEmpty {
+                    Text(details.title)
+                        .font(.title2.bold())
+                        .accessibilityAddTraits(.isHeader)
+                }
+                if !details.body.isEmpty {
+                    Text(details.body)
+                        .font(.body)
+                        .textSelection(.enabled)
+                }
+                if let imageURL = details.imageURL {
+                    Button {
+                        gallerySelection = ImageGallerySelection(urls: [imageURL], initialIndex: 0)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            RemoteImage(url: imageURL, height: 240, cornerRadius: 12, contentMode: .fit)
+                                .accessibilityHidden(true)
+                            Label("查看大图", systemImage: "arrow.up.left.and.arrow.down.right")
+                                .font(.subheadline)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                ForEach(Array((details.links ?? []).enumerated()), id: \.offset) { _, link in
+                    Button(link.label, systemImage: "arrow.up.right") {
+                        browser = InAppBrowserDestination(url: link.url)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+    }
 }
 
 @MainActor
@@ -189,11 +298,22 @@ final class PersonPushNavigationStore: ObservableObject {
     @Published private(set) var request: PersonPushNavigationRequest?
 
     func handle(userInfo: [AnyHashable: Any]) {
-        request = PersonPushNavigationRequest(
-            kind: (userInfo["kind"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-            contentID: (userInfo["content_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-            personID: (userInfo["person_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        )
+        let kind = userInfo["kind"] as? String ?? ""
+        let contentID = userInfo["content_id"] as? String ?? ""
+        let personID = userInfo["person_id"] as? String ?? ""
+        let details: PushNotificationDestination?
+        switch kind {
+        case "post":
+            guard let id = Int(contentID), id > 0 else { return }
+            details = nil
+        case "video":
+            guard let id = Int64(contentID), id > 0, !personID.isEmpty else { return }
+            details = nil
+        default:
+            guard let value = userInfo["notification_id"] as? String, let id = UUID(uuidString: value) else { return }
+            details = PushNotificationDestination(id: id)
+        }
+        request = PersonPushNavigationRequest(kind: kind, contentID: contentID, personID: personID, details: details)
     }
 
     func clear() {
@@ -296,6 +416,7 @@ private struct EditorialRootView: View {
     @State private var notificationPersonID: String?
     @State private var notificationVideoID: Int64?
     @State private var notificationPresentationAnchor: UIView?
+    @State private var presentedNotificationDetails: PushNotificationDestination?
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var lastResearchTab: EditorialTab = .investment
     @State private var presentedExternalLink: InAppBrowserDestination? = {
@@ -346,7 +467,8 @@ private struct EditorialRootView: View {
 
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
+        if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil ||
+            ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
             ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
             ProcessInfo.processInfo.arguments.contains("--institution-research-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
@@ -430,6 +552,11 @@ private struct EditorialRootView: View {
             return .handled
         })
         .inAppBrowserCover(item: $presentedExternalLink)
+        .sheet(item: $presentedNotificationDetails) { details in
+            PushNotificationDetailsView(destination: details)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .overlay(alignment: .topLeading) {
             if let deploymentStatus {
                 DeploymentStatusTip(
@@ -524,6 +651,7 @@ private struct EditorialRootView: View {
             guard !Task.isCancelled, personPushNavigation.request?.id == request.id else { return }
             presentedExternalLink = nil
             showsSignalFilters = false
+            presentedNotificationDetails = request.details
             switch request.kind {
             case "post":
                 selectedTab = .observation
@@ -533,7 +661,7 @@ private struct EditorialRootView: View {
                 notificationPersonID = request.personID
                 notificationVideoID = Int64(request.contentID)
             default:
-                selectedTab = .observation
+                break
             }
             personPushNavigation.clear()
         }

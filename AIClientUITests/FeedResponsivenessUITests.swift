@@ -1,7 +1,6 @@
 import XCTest
 
-/// Integration regressions against the app's configured feed service.
-/// Require populated feeds so an empty page cannot count as a scrolling pass.
+/// Exercise the real feed views with populated, repeatable feeds.
 final class FeedResponsivenessUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -71,6 +70,7 @@ final class FeedResponsivenessUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--feed-preview"]
         app.launchEnvironment["AI_FEED_SOURCE"] = source
+        app.launchEnvironment["AI_FEED_UI_FIXTURE"] = Self.fixture
         if let webURL { app.launchEnvironment["AI_EMBEDDED_WEB_TEST_URL"] = webURL }
         app.launch()
         let list = feed(app, source: source)
@@ -78,6 +78,24 @@ final class FeedResponsivenessUITests: XCTestCase {
         XCTAssertTrue(firstPost(in: list).waitForExistence(timeout: 20))
         return app
     }
+
+    private static let fixture: String = {
+        let sources = ["zhihu", "xueqiu", "youtube", "douyin-hot"]
+        let posts = Dictionary(uniqueKeysWithValues: sources.enumerated().map { index, source in
+            let rows: [[String: Any]] = (1...40).map { row in
+                [
+                    "id": index * 100 + row,
+                    "source": source,
+                    "title": "测试文章 \(row)",
+                    "summary": "用于验证滚动、切换频道和打开详情的内容。",
+                    "final_score": 8,
+                    "post_link": "https://127.0.0.1:65534/article"
+                ]
+            }
+            return (source, rows)
+        })
+        return String(decoding: try! JSONSerialization.data(withJSONObject: posts), as: UTF8.self)
+    }()
 
     private func feed(_ app: XCUIApplication, source: String) -> XCUIElement {
         app.descendants(matching: .any)["feed-list-\(source)"].firstMatch

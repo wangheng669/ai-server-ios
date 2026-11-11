@@ -194,7 +194,7 @@ xcodebuild -exportArchive \
   -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
   -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
 
-log "Waiting for Apple processing and DingTalk notification."
+log "Waiting for Apple processing and the iOS notification."
 ruby ci/testflight-processing-notify.rb wait "$builds_before"
 printf '%s\n' "$main_sha" > "$last_success_file"
 log "Local TestFlight release completed successfully for $main_sha."

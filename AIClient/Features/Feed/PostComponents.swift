@@ -2999,12 +2999,15 @@ private struct ImageGalleryPresentationBridge: UIViewControllerRepresentable {
             }
 
             isDismissing = true
+            let dismissedSelectionID = presentedSelectionID
             hostingController.dismiss(animated: animated) { [weak self] in
                 guard let self else { return }
                 self.hostingController = nil
                 self.presentedSelectionID = nil
                 self.isDismissing = false
-                if self.selection.wrappedValue != nil {
+                // UIKit can finish synchronously while SwiftUI is dismantling the bridge.
+                Task { @MainActor [weak self] in
+                    guard let self, self.selection.wrappedValue?.id == dismissedSelectionID else { return }
                     self.selection.wrappedValue = nil
                 }
             }

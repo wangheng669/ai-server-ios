@@ -224,11 +224,14 @@ final class NewsFeedViewModel: ObservableObject {
     private let selectedWeChatPageSize = 20
     private let serverURL: URL
     private let diskCache: FeedDiskCache
+    #if DEBUG
+    private let usesFeedUIFixture: Bool
+    #endif
     private var restoredDiskKeys: Set<String> = []
 
     init(
         source initialSource: FeedSource? = nil,
-        fetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
+        fetchPosts injectedFetchPosts: ((Int, Int, FeedSource) async throws -> [Post])? = nil,
         fetchFlashPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchYouTubePosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
@@ -247,18 +250,39 @@ final class NewsFeedViewModel: ObservableObject {
         diskCache: FeedDiskCache = .shared
     ) {
         #if DEBUG
-        let override = ProcessInfo.processInfo.environment["AI_FEED_SOURCE"]
+        let environment = ProcessInfo.processInfo.environment
+        let override = environment["AI_FEED_SOURCE"]
         let usesXFeedPreview = ProcessInfo.processInfo.arguments.contains("--x-feed-preview")
         let usesXueqiuTapPreview = ProcessInfo.processInfo.arguments.contains("--xueqiu-tap-preview")
+        let fixture = environment["AI_FEED_UI_FIXTURE"].map { payload in
+            do {
+                return try JSONDecoder().decode([String: [Post]].self, from: Data(payload.utf8))
+            } catch {
+                preconditionFailure("Invalid feed UI fixture: \(error)")
+            }
+        }
+        usesFeedUIFixture = fixture != nil
+        let fetchPosts = fixture.map { posts in
+            { (page: Int, limit: Int, source: FeedSource) async throws -> [Post] in
+                Array((posts[source.rawValue] ?? []).dropFirst((page - 1) * limit).prefix(limit))
+            }
+        } ?? injectedFetchPosts
         #else
         let override: String? = nil
+        let fetchPosts = injectedFetchPosts
         #endif
         source = initialSource
             ?? FeedSource(rawValue: override ?? UserDefaults.standard.string(forKey: "feed.source") ?? "x")
             ?? .x
         let serverURL = ServerConfiguration.currentURL
         self.serverURL = serverURL
+        #if DEBUG
+        self.diskCache = usesFeedUIFixture
+            ? FeedDiskCache(directory: FileManager.default.temporaryDirectory.appendingPathComponent("feed-ui-fixture-\(UUID())"))
+            : diskCache
+        #else
         self.diskCache = diskCache
+        #endif
         let client = APIClient(baseURL: serverURL)
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
@@ -1046,6 +1070,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func startRealtime() {
+        #if DEBUG
+        guard !usesFeedUIFixture else { return }
+        #endif
         let client = RealtimeFeedClient(baseURL: ServerConfiguration.currentURL)
         client.onEvent = { [weak self] event in self?.handleRealtime(event) }
         realtimeClient?.stop()

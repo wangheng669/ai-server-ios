@@ -54,6 +54,41 @@ final class NotificationPresentationDismissalTests: XCTestCase {
         XCTAssertNotEqual(first?.id, store.request?.id)
     }
 
+    func testNotificationUsesServerDetailIDForTap() throws {
+        let store = PersonPushNavigationStore()
+        let id = UUID()
+        store.handle(userInfo: ["kind": "observability", "notification_id": id.uuidString])
+        let details = try XCTUnwrap(store.request?.details)
+        XCTAssertEqual(details.id, id)
+    }
+
+    func testNotificationDetailsDecodeAllLinksAndAttachment() throws {
+        let data = Data("""
+        {
+          "title": "日报",
+          "body": "完整内容",
+          "links": [
+            {"label": "报告", "url": "https://example.com/report"},
+            {"label": "来源", "url": "https://example.com/source"}
+          ],
+          "image_url": "https://example.com/report.png"
+        }
+        """.utf8)
+        let details = try JSONDecoder().decode(PushNotificationDetails.self, from: data)
+        XCTAssertEqual(details.links?.map(\.label), ["报告", "来源"])
+        XCTAssertEqual(details.body, "完整内容")
+        XCTAssertEqual(details.imageURL?.absoluteString, "https://example.com/report.png")
+    }
+
+    func testPostNotificationStillUsesNativeArticleRoute() throws {
+        let store = PersonPushNavigationStore()
+        store.handle(userInfo: ["kind": "post", "content_id": "123"])
+        let request = try XCTUnwrap(store.request)
+        XCTAssertEqual(request.kind, "post")
+        XCTAssertEqual(request.contentID, "123")
+        XCTAssertNil(request.details)
+    }
+
     private func present(_ controller: UIViewController, from parent: UIViewController) async {
         await withCheckedContinuation { continuation in
             parent.present(controller, animated: false) { continuation.resume() }
