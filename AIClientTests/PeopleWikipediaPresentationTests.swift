@@ -114,7 +114,7 @@ final class PeopleWikipediaPresentationTests: XCTestCase {
         let replacement = String(repeating: "cd", count: 32)
         defaults.set(["1605"], forKey: "personPush.enabledPersonIDs")
         defaults.set(previous, forKey: "personPush.deviceToken")
-        PushSubscriptionURLProtocol.prepare(statusCodes: [503, 503, 200, 200])
+        PushSubscriptionURLProtocol.prepare(statusCodes: [204, 503, 503, 200, 200])
 
         let manager = PersonPushNotificationManager(defaults: defaults, session: session)
         await manager.didRegister(deviceToken: Data(repeating: 0xcd, count: 32))
@@ -129,6 +129,28 @@ final class PeopleWikipediaPresentationTests: XCTestCase {
         let payloads = PushSubscriptionURLProtocol.payloads
         XCTAssertEqual(payloads.map(\.deviceToken), [replacement, previous, replacement, previous])
         XCTAssertEqual(payloads.map(\.enabled), [true, false, false, false])
+        XCTAssertEqual(PushSubscriptionURLProtocol.requests.first?.url?.path, "/api/ios/v1/ios/push/device")
+    }
+
+    @MainActor
+    func testRegistersDeviceWithoutAnyPersonSubscriptions() async throws {
+        let suiteName = "PersonPushNotificationManagerTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PushSubscriptionURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer {
+            session.invalidateAndCancel()
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        PushSubscriptionURLProtocol.prepare(statusCodes: [204])
+
+        let manager = PersonPushNotificationManager(defaults: defaults, session: session)
+        await manager.didRegister(deviceToken: Data(repeating: 0xab, count: 32))
+
+        XCTAssertTrue(manager.enabledPersonIDs.isEmpty)
+        XCTAssertNil(manager.errorMessage)
+        XCTAssertEqual(PushSubscriptionURLProtocol.requests.map { $0.url?.path }, ["/api/ios/v1/ios/push/device"])
     }
 }
 
