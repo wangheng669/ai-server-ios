@@ -223,7 +223,7 @@ module TestFlightProcessing
       last_error = e.message
       sleep 5 if attempt < 2
     end
-    raise "DingTalk notification failed after 3 attempts: #{last_error}"
+    raise "iOS notification failed after 3 attempts: #{last_error}"
   end
 
   def github_run_url
@@ -314,7 +314,7 @@ module TestFlightProcessing
           puts "Expired #{expired_count} previous TestFlight builds."
           notify_server(status: "completed", details: details)
           mark_notified
-          puts "TestFlight processing completed and DingTalk notification was sent."
+          puts "TestFlight processing completed and iOS notification was accepted."
           return
         end
         if %w[FAILED INVALID].include?(state)

@@ -54,6 +54,9 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil { return true }
+        #endif
         Task { await PersonPushNotificationManager.shared.restoreRegistration() }
         #if DEBUG
         if let preview = ProcessInfo.processInfo.arguments.first(where: {
@@ -464,7 +467,8 @@ private struct EditorialRootView: View {
 
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
+        if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil ||
+            ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
             ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
             ProcessInfo.processInfo.arguments.contains("--institution-research-preview") ||
             ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
