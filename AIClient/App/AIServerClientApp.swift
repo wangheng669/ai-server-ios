@@ -62,7 +62,7 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
             let values = preview.split(separator: ":", maxSplits: 1).map(String.init)
             if values.count == 2 {
                 Task { @MainActor in
-                    PersonPushNavigationStore.shared.handle(userInfo: [
+                    PersonPushNavigationStore.shared.handle(title: "", body: "", userInfo: [
                         "kind": "video",
                         "person_id": values[0],
                         "content_id": values[1]
@@ -101,9 +101,13 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        let content = response.notification.request.content
         await MainActor.run {
             PersonPushNavigationStore.shared.handle(
-                userInfo: response.notification.request.content.userInfo
+                title: content.title,
+                body: content.body,
+                userInfo: content.userInfo
             )
         }
     }
@@ -123,6 +127,49 @@ struct PersonPushNavigationRequest: Equatable {
     let kind: String
     let contentID: String
     let personID: String
+    let details: PushNotificationDetails?
+}
+
+struct PushNotificationDetails: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let body: String
+    let url: URL?
+    let imageURL: URL?
+}
+
+private struct PushNotificationDetailsView: View {
+    let details: PushNotificationDetails
+    @State private var browser: InAppBrowserDestination?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if !details.title.isEmpty {
+                    Text(details.title)
+                        .font(.title2.bold())
+                        .accessibilityAddTraits(.isHeader)
+                }
+                if !details.body.isEmpty {
+                    Text(details.body)
+                        .font(.body)
+                        .textSelection(.enabled)
+                }
+                if let imageURL = details.imageURL {
+                    RemoteImage(url: imageURL, height: 240, cornerRadius: 12, contentMode: .fit)
+                }
+                if let url = details.url {
+                    Button("打开相关链接", systemImage: "arrow.up.right") {
+                        browser = InAppBrowserDestination(url: url)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+        .inAppBrowserCover(item: $browser)
+    }
 }
 
 @MainActor
@@ -188,12 +235,35 @@ final class PersonPushNavigationStore: ObservableObject {
 
     @Published private(set) var request: PersonPushNavigationRequest?
 
-    func handle(userInfo: [AnyHashable: Any]) {
-        request = PersonPushNavigationRequest(
-            kind: (userInfo["kind"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-            contentID: (userInfo["content_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-            personID: (userInfo["person_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        )
+    func handle(title: String, body: String, userInfo: [AnyHashable: Any]) {
+        let kind = userInfo["kind"] as? String ?? ""
+        let contentID = userInfo["content_id"] as? String ?? ""
+        let personID = userInfo["person_id"] as? String ?? ""
+        let details: PushNotificationDetails?
+        switch kind {
+        case "post":
+            guard let id = Int(contentID), id > 0 else { return }
+            details = nil
+        case "video":
+            guard let id = Int64(contentID), id > 0, !personID.isEmpty else { return }
+            details = nil
+        default:
+            guard !title.isEmpty || !body.isEmpty else { return }
+            details = PushNotificationDetails(
+                title: title,
+                body: body,
+                url: Self.httpsURL(userInfo["url"]),
+                imageURL: Self.httpsURL(userInfo["image_url"])
+            )
+        }
+        request = PersonPushNavigationRequest(kind: kind, contentID: contentID, personID: personID, details: details)
+    }
+
+    private static func httpsURL(_ value: Any?) -> URL? {
+        guard let value = value as? String, let url = URL(string: value),
+              url.scheme?.lowercased() == "https", let host = url.host, !host.isEmpty,
+              url.user == nil else { return nil }
+        return url
     }
 
     func clear() {
@@ -296,6 +366,7 @@ private struct EditorialRootView: View {
     @State private var notificationPersonID: String?
     @State private var notificationVideoID: Int64?
     @State private var notificationPresentationAnchor: UIView?
+    @State private var presentedNotificationDetails: PushNotificationDetails?
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var lastResearchTab: EditorialTab = .investment
     @State private var presentedExternalLink: InAppBrowserDestination? = {
@@ -430,6 +501,11 @@ private struct EditorialRootView: View {
             return .handled
         })
         .inAppBrowserCover(item: $presentedExternalLink)
+        .sheet(item: $presentedNotificationDetails) { details in
+            PushNotificationDetailsView(details: details)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .overlay(alignment: .topLeading) {
             if let deploymentStatus {
                 DeploymentStatusTip(
@@ -524,6 +600,7 @@ private struct EditorialRootView: View {
             guard !Task.isCancelled, personPushNavigation.request?.id == request.id else { return }
             presentedExternalLink = nil
             showsSignalFilters = false
+            presentedNotificationDetails = request.details
             switch request.kind {
             case "post":
                 selectedTab = .observation
@@ -533,7 +610,7 @@ private struct EditorialRootView: View {
                 notificationPersonID = request.personID
                 notificationVideoID = Int64(request.contentID)
             default:
-                selectedTab = .observation
+                break
             }
             personPushNavigation.clear()
         }

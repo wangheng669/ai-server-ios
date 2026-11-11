@@ -48,10 +48,40 @@ final class NotificationPresentationDismissalTests: XCTestCase {
     func testRepeatedNotificationCreatesNewNavigationRequest() {
         let store = PersonPushNavigationStore()
         let payload = ["kind": "post", "content_id": "123"]
-        store.handle(userInfo: payload)
+        store.handle(title: "", body: "", userInfo: payload)
         let first = store.request
-        store.handle(userInfo: payload)
+        store.handle(title: "", body: "", userInfo: payload)
         XCTAssertNotEqual(first?.id, store.request?.id)
+    }
+
+    func testNotificationWithoutLinkRetainsDetailsForTap() throws {
+        let store = PersonPushNavigationStore()
+        store.handle(title: "监控告警", body: "接口响应延迟已超过阈值。", userInfo: ["kind": "observability"])
+        let details = try XCTUnwrap(store.request?.details)
+        XCTAssertEqual(details.title, "监控告警")
+        XCTAssertEqual(details.body, "接口响应延迟已超过阈值。")
+        XCTAssertNil(details.url)
+    }
+
+    func testNotificationDetailsRetainHTTPSLinkAndAttachment() throws {
+        let store = PersonPushNavigationStore()
+        store.handle(title: "TestFlight 构建完成", body: "版本 1.8.0", userInfo: [
+            "kind": "testflight",
+            "url": "https://github.com/example/actions/runs/42",
+            "image_url": "https://example.com/report.png"
+        ])
+        let details = try XCTUnwrap(store.request?.details)
+        XCTAssertEqual(details.url?.absoluteString, "https://github.com/example/actions/runs/42")
+        XCTAssertEqual(details.imageURL?.absoluteString, "https://example.com/report.png")
+    }
+
+    func testPostNotificationStillUsesNativeArticleRoute() throws {
+        let store = PersonPushNavigationStore()
+        store.handle(title: "文章", body: "摘要", userInfo: ["kind": "post", "content_id": "123"])
+        let request = try XCTUnwrap(store.request)
+        XCTAssertEqual(request.kind, "post")
+        XCTAssertEqual(request.contentID, "123")
+        XCTAssertNil(request.details)
     }
 
     private func present(_ controller: UIViewController, from parent: UIViewController) async {
