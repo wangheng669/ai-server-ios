@@ -15,13 +15,13 @@ struct YouTubeVideoDetailModel: Identifiable {
 
 struct YouTubeSubtitleResult {
     let status: String
-    let cues: [PersonVideoSubtitleCue]
+    let cues: [VideoSubtitleCue]
 }
 
 struct YouTubeSubtitlesResponse: Decodable {
     let success: Bool
     let status: String
-    let cues: [PersonVideoSubtitleCue]
+    let cues: [VideoSubtitleCue]
 }
 
 actor YouTubePlaybackSourceCache {
@@ -75,7 +75,7 @@ struct YouTubeVideoDetailView: View {
     var presentedAsSheet = true
     var startsAutomatically = false
 
-    @State private var cues: [PersonVideoSubtitleCue] = []
+    @State private var cues: [VideoSubtitleCue] = []
     @State private var subtitleStatus = "loading"
     @State private var subtitleError: String?
     @State private var currentMS: Int64 = 0
@@ -345,7 +345,7 @@ struct YouTubeVideoDetailView: View {
         .onDisappear { AppOrientationController.shared.setVideoFullscreen(false) }
     }
 
-    @ViewBuilder private func subtitleRows(excluding cueID: PersonVideoSubtitleCue.ID?) -> some View {
+    @ViewBuilder private func subtitleRows(excluding cueID: VideoSubtitleCue.ID?) -> some View {
         ForEach(cues.filter { $0.id != cueID }) { cue in
             Button { seek(to: cue) } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -367,7 +367,7 @@ struct YouTubeVideoDetailView: View {
         }
     }
 
-    private func currentSubtitleCard(_ cue: PersonVideoSubtitleCue) -> some View {
+    private func currentSubtitleCard(_ cue: VideoSubtitleCue) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("正在播放 · \(timeLabel(for: cue.startMS))")
                 .font(.caption.monospacedDigit().weight(.semibold))
@@ -381,14 +381,14 @@ struct YouTubeVideoDetailView: View {
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var activeCue: PersonVideoSubtitleCue? { cue(at: currentMS) }
+    private var activeCue: VideoSubtitleCue? { cue(at: currentMS) }
     private var isSubtitlePending: Bool { ["loading", "pending", "processing", "extracting", "queued"].contains(subtitleStatus) }
     private var normalizedDescription: String? {
         guard let value = video.description?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty, value != video.title else { return nil }
         return value
     }
 
-    private func cue(at timestamp: Int64) -> PersonVideoSubtitleCue? {
+    private func cue(at timestamp: Int64) -> VideoSubtitleCue? {
         guard !cues.isEmpty else { return nil }
         var lower = 0
         var upper = cues.count
@@ -407,7 +407,7 @@ struct YouTubeVideoDetailView: View {
         currentMS = nextMS
     }
 
-    private func seek(to cue: PersonVideoSubtitleCue) {
+    private func seek(to cue: VideoSubtitleCue) {
         currentMS = cue.startMS
         playbackGeneration += 1
     }

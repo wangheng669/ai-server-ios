@@ -418,110 +418,15 @@ struct PersonArticle: Decodable, Identifiable, Hashable {
     }
 }
 
-struct PeopleVideosResponse: Decodable {
-    let success: Bool
-    let personID: String
-    let videos: [PersonVideo]
 
-    enum CodingKeys: String, CodingKey {
-        case success, videos
-        case personID = "person_id"
-    }
-}
 
-struct PersonVideo: Decodable, Identifiable, Hashable {
-    let id: Int64
-    let personID: String
-    let platform: String
-    let platformVideoID: String
-    let title: String
-    let titleZH: String
-    let description: String?
-    let channelName: String
-    let publishedAt: String?
-    let durationSeconds: Int
-    let coverURLValue: String
-    let canonicalURLValue: String
-    let relevanceScore: Double
-    let videoType: String
-    let isFeatured: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case id, platform, title, description
-        case titleZH = "title_zh"
-        case personID = "person_id"
-        case platformVideoID = "platform_video_id"
-        case channelName = "channel_name"
-        case publishedAt = "published_at"
-        case durationSeconds = "duration_seconds"
-        case coverURLValue = "cover_url"
-        case canonicalURLValue = "canonical_url"
-        case relevanceScore = "relevance_score"
-        case videoType = "video_type"
-        case isFeatured = "is_featured"
-    }
-
-    var coverURL: URL? { MediaURL.image(coverURLValue) ?? URL(string: coverURLValue) }
-    var canonicalURL: URL? { URL(string: canonicalURLValue) }
-    var displayTitle: String {
-        nonempty(titleZH) ?? title
-    }
-    var publishedDateLabel: String? {
-        guard let publishedAt,
-              let date = ISO8601DateFormatter().date(from: publishedAt) else { return nil }
-        return date.formatted(
-            .dateTime
-                .year()
-                .month()
-                .day()
-                .locale(Locale(identifier: "zh_CN"))
-        )
-    }
-    var durationLabel: String {
-        guard durationSeconds > 0 else { return "" }
-        let hours = durationSeconds / 3_600
-        let minutes = (durationSeconds % 3_600) / 60
-        let seconds = durationSeconds % 60
-        return hours > 0
-            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
-            : String(format: "%d:%02d", minutes, seconds)
-    }
-
-    var youtubeDetailModel: YouTubeVideoDetailModel {
-        YouTubeVideoDetailModel(
-            id: "person-video-\(id)",
-            videoID: platformVideoID,
-            title: displayTitle,
-            channelName: channelName,
-            publishedLabel: publishedDateLabel,
-            durationLabel: durationLabel,
-            description: description,
-            coverURL: coverURL,
-            avatarURL: nil,
-            originalURL: canonicalURL
-        )
-    }
-}
-
-struct PersonVideoSubtitlesResponse: Decodable {
-    let success: Bool
-    let videoID: Int64
-    let language: String
-    let status: String
-    let cues: [PersonVideoSubtitleCue]
-
-    enum CodingKeys: String, CodingKey {
-        case success, language, status, cues
-        case videoID = "video_id"
-    }
-}
 
 struct BilibiliSubtitlesResponse: Decodable {
     let success: Bool
     let bvid: String
     let language: String
     let status: String
-    let cues: [PersonVideoSubtitleCue]
+    let cues: [VideoSubtitleCue]
 }
 
 struct BilibiliSummaryResponse: Decodable {
@@ -608,7 +513,7 @@ struct BilibiliInterpretationEvent: Decodable, Hashable {
     let detail: String
 }
 
-struct PersonVideoSubtitleCue: Decodable, Identifiable, Hashable {
+struct VideoSubtitleCue: Decodable, Identifiable, Hashable {
     let startMS: Int64
     let endMS: Int64
     let text: String

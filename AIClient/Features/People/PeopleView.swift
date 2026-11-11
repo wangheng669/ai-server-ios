@@ -4,7 +4,6 @@ import UIKit
 struct PeopleView: View {
     @Binding private var showsDetail: Bool
     @Binding private var notificationPersonID: String?
-    @Binding private var notificationVideoID: Int64?
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -12,13 +11,11 @@ struct PeopleView: View {
     init(
         store: PeopleStore,
         showsDetail: Binding<Bool> = .constant(false),
-        notificationPersonID: Binding<String?> = .constant(nil),
-        notificationVideoID: Binding<Int64?> = .constant(nil)
+        notificationPersonID: Binding<String?> = .constant(nil)
     ) {
         self.store = store
         _showsDetail = showsDetail
         _notificationPersonID = notificationPersonID
-        _notificationVideoID = notificationVideoID
     }
 
     var body: some View {
@@ -73,7 +70,6 @@ struct PeopleView: View {
             PersonDetailSheet(
                 selectedPerson: $selectedPerson,
                 people: store.people,
-                notificationVideoID: $notificationVideoID,
                 onClose: { selectedPerson = nil }
             )
             .presentationDetents([.large])
@@ -87,8 +83,7 @@ struct PeopleView: View {
             openNotificationPersonIfNeeded()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
-                ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
-                ProcessInfo.processInfo.arguments.contains("--video-detail-preview") {
+                ProcessInfo.processInfo.arguments.contains("--article-detail-preview") {
                 selectedPerson = store.people.first { $0.name == "Sam Altman" }
             }
             #endif
@@ -2805,7 +2800,6 @@ private struct PeopleLoadingTimeline: View {
 struct PersonDetailSheet: View {
     @Binding var selectedPerson: SpecialPerson?
     let people: [SpecialPerson]
-    @Binding var notificationVideoID: Int64?
     let onClose: () -> Void
     @GestureState private var isHorizontalDragging = false
     @State private var incomingEdge: Edge = .trailing
@@ -2813,12 +2807,10 @@ struct PersonDetailSheet: View {
     init(
         selectedPerson: Binding<SpecialPerson?>,
         people: [SpecialPerson],
-        notificationVideoID: Binding<Int64?> = .constant(nil),
         onClose: @escaping () -> Void
     ) {
         _selectedPerson = selectedPerson
         self.people = people
-        _notificationVideoID = notificationVideoID
         self.onClose = onClose
     }
 
@@ -2832,9 +2824,7 @@ struct PersonDetailSheet: View {
                     PersonDetailPage(
                         person: person,
                         showsNavigationChrome: false,
-                        usesSheetLayout: true,
-                        notificationVideoID: notificationVideoID,
-                        onNotificationVideoOpened: { notificationVideoID = nil }
+                        usesSheetLayout: true
                     )
                     .id(person.id)
                     .transition(personTransition)
@@ -2984,15 +2974,11 @@ private struct PersonDetailPage: View {
     let person: SpecialPerson
     let showsNavigationChrome: Bool
     let usesSheetLayout: Bool
-    let notificationVideoID: Int64?
-    let onNotificationVideoOpened: () -> Void
     @ObservedObject private var pushNotifications = PersonPushNotificationManager.shared
     @State private var store = PersonDetailStore()
     @State private var section: PersonDetailSection
     @State private var ownContentSection = PersonOwnContentSection.posts
-    @State private var relatedSection = PersonRelatedSection.videos
     @State private var selectedPost: Post?
-    @State private var selectedVideo: PersonVideo?
     @State private var selectedArticle: PersonArticle?
     @State private var articleSearchText = ""
     @State private var articleSheetDetent: PresentationDetent = .large
@@ -3003,15 +2989,11 @@ private struct PersonDetailPage: View {
     init(
         person: SpecialPerson,
         showsNavigationChrome: Bool = true,
-        usesSheetLayout: Bool = false,
-        notificationVideoID: Int64? = nil,
-        onNotificationVideoOpened: @escaping () -> Void = {}
+        usesSheetLayout: Bool = false
     ) {
         self.person = person
         self.showsNavigationChrome = showsNavigationChrome
         self.usesSheetLayout = usesSheetLayout
-        self.notificationVideoID = notificationVideoID
-        self.onNotificationVideoOpened = onNotificationVideoOpened
         _section = State(initialValue: person.topic == .history ? .profile : .posts)
     }
 
@@ -3089,29 +3071,7 @@ private struct PersonDetailPage: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
-        .sheet(item: $selectedVideo) { video in
-            NavigationStack {
-                YouTubeVideoDetailView(
-                    video: video.youtubeDetailModel,
-                    subtitleLoader: {
-                        let payload = try await PeopleService().subtitles(videoID: video.id)
-                        return YouTubeSubtitleResult(status: payload.status, cues: payload.cues)
-                    },
-                    playbackLoader: {
-                        guard let url = video.canonicalURL else { throw APIError.invalidURL }
-                        return try await YouTubePlaybackSourceCache.shared.source(
-                            url: url,
-                            title: video.displayTitle,
-                            baseURL: ServerConfiguration.currentURL
-                        )
-                    }
-                )
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationContentInteraction(.scrolls)
-        }
+
         .sheet(item: $selectedArticle) { article in
             NavigationStack {
                 PersonArticleDetailView(
@@ -3147,23 +3107,16 @@ private struct PersonDetailPage: View {
         }
         .task(id: person.id) {
             await store.load(person: person)
-            openNotificationVideoIfNeeded()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--article-detail-preview"),
                let article = store.articles.dropFirst().first ?? store.articles.first {
                 ownContentSection = .articles
                 selectedArticle = article
             }
-            if ProcessInfo.processInfo.arguments.contains("--video-detail-preview"),
-               let video = store.relatedVideos.first {
-                section = .discussions
-                selectedVideo = video
-            }
+
             #endif
         }
-        .onChange(of: notificationVideoID) { _, _ in
-            openNotificationVideoIfNeeded()
-        }
+
         .task(id: articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)) {
             let query = articleSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !query.isEmpty {
@@ -3174,16 +3127,7 @@ private struct PersonDetailPage: View {
         }
     }
 
-    private func openNotificationVideoIfNeeded() {
-        guard let notificationVideoID,
-              let video = store.relatedVideos.first(where: { $0.id == notificationVideoID }) else {
-            return
-        }
-        section = .discussions
-        relatedSection = .videos
-        selectedVideo = video
-        onNotificationVideoOpened()
-    }
+
 
     @ViewBuilder
     private var personHeader: some View {
@@ -3687,39 +3631,8 @@ private struct PersonDetailPage: View {
         return "找到 \(filteredArticles.count) 篇"
     }
 
+    @ViewBuilder
     private var relatedContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            relatedSectionPicker
-                .zIndex(1)
-
-            Group {
-                switch relatedSection {
-                case .videos:
-                    if store.isLoadingRelatedVideos {
-                        ProgressView("正在载入相关视频…")
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 54)
-                    } else if let error = store.relatedVideosError, store.relatedVideos.isEmpty {
-                        ContentUnavailableView(
-                            "载入失败",
-                            systemImage: "wifi.exclamationmark",
-                            description: Text(error)
-                        )
-                        .padding(.top, 30)
-                    } else if store.relatedVideos.isEmpty {
-                        ContentUnavailableView(
-                            "暂无相关视频",
-                            systemImage: "video",
-                            description: Text("内容库里暂时没有收录这位人物的相关视频")
-                        )
-                        .padding(.top, 30)
-                    } else {
-                        ForEach(store.relatedVideos) { video in
-                            PersonVideoCard(video: video) { selectedVideo = video }
-                            Divider().padding(.leading, 20)
-                        }
-                    }
-                case .posts:
                     if store.isLoadingDiscussions {
                         ProgressView("正在查找相关动态…")
                             .frame(maxWidth: .infinity)
@@ -3741,29 +3654,9 @@ private struct PersonDetailPage: View {
                     } else {
                         discussionContent(store.discussions)
                     }
-                }
-            }
-            .padding(.top, 24)
-            .zIndex(0)
-        }
     }
 
-    private var relatedSectionPicker: some View {
-        Picker("相关内容", selection: $relatedSection) {
-            ForEach(PersonRelatedSection.allCases) { item in
-                Text(item.title).tag(item)
-            }
-        }
-        .pickerStyle(.segmented)
-        .onChange(of: relatedSection) { _, newValue in
-            if newValue == .posts {
-                selectedVideo = nil
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .background(Color(uiColor: .systemBackground))
-    }
+
 
     @ViewBuilder
     private var ownPostsPaginationStatus: some View {
@@ -4114,72 +4007,6 @@ private struct PersonRelatedPostRow: View {
     }
 }
 
-private struct PersonVideoCard: View {
-    let video: PersonVideo
-    let onOpen: () -> Void
-
-    var body: some View {
-        Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 9) {
-            ZStack {
-                if let coverURL = video.coverURL {
-                    RemoteImage(url: coverURL, height: 190, cornerRadius: 12)
-                }
-                Image(systemName: "play.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 58, height: 58)
-                    .background(.black.opacity(0.68), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 190)
-            .background(Color.black)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(alignment: .bottomLeading) {
-                if !video.durationLabel.isEmpty {
-                    Text(video.durationLabel)
-                        .font(.caption.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 5))
-                        .padding(8)
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                Text(video.channelName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 5))
-                    .padding(8)
-            }
-
-            Text(video.displayTitle)
-                .font(.system(size: 16, weight: .semibold))
-                .lineLimit(2)
-                .lineSpacing(2)
-
-            HStack(spacing: 8) {
-                Text(video.videoType == "speech" ? "演讲" : video.videoType == "podcast" ? "播客" : "访谈")
-                Text("·")
-                Text(video.channelName)
-                if let date = video.publishedDateLabel {
-                    Text("·")
-                    Text(date)
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            }
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 16)
-    }
-}
 
 private enum PersonDetailSection: String, CaseIterable, Identifiable {
     case posts
@@ -4208,18 +4035,6 @@ private enum PersonOwnContentSection: String, CaseIterable, Identifiable {
     }
 }
 
-private enum PersonRelatedSection: String, CaseIterable, Identifiable {
-    case videos
-    case posts
-
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .videos: "视频"
-        case .posts: "动态"
-        }
-    }
-}
 
 private struct PersonArticleRow: View {
     let article: PersonArticle

@@ -414,7 +414,6 @@ private struct EditorialRootView: View {
     @State private var feedHidesTabBar = false
     @State private var notificationPostID: Int?
     @State private var notificationPersonID: String?
-    @State private var notificationVideoID: Int64?
     @State private var notificationPresentationAnchor: UIView?
     @State private var presentedNotificationDetails: PushNotificationDestination?
     @State private var lastDynamicTab: EditorialTab = .observation
@@ -526,8 +525,7 @@ private struct EditorialRootView: View {
                     LearningView(
                         peopleStore: peopleStore,
                         showsDetail: $learningShowsDetail,
-                        notificationPersonID: $notificationPersonID,
-                        notificationVideoID: $notificationVideoID
+                        notificationPersonID: $notificationPersonID
                     )
                 }
             }
@@ -656,10 +654,6 @@ private struct EditorialRootView: View {
             case "post":
                 selectedTab = .observation
                 notificationPostID = Int(request.contentID)
-            case "video":
-                selectedTab = .learning
-                notificationPersonID = request.personID
-                notificationVideoID = Int64(request.contentID)
             default:
                 break
             }
