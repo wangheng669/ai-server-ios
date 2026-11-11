@@ -25,25 +25,16 @@ struct APIClient {
         return response.data
     }
 
-    func generateTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
-        var request = URLRequest(
-            url: baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
+    func fetchAliyunBalance(refresh: Bool = false) async throws -> AliyunAccountBalance {
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/settings/aliyun-balance"), resolvingAgainstBaseURL: false)
+        if refresh { components?.queryItems = [URLQueryItem(name: "refresh", value: "1")] }
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: AliyunBalanceResponse = try await get(
+            url,
             cachePolicy: .reloadIgnoringLocalCacheData
         )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
-        do {
-            let payload = try JSONDecoder().decode(TodayWorldYesterdayReportGenerationResponse.self, from: data)
-            guard payload.success else { throw APIError.invalidResponse }
-            return payload.data.report
-        } catch let error as APIError {
-            throw error
-        } catch {
-            throw APIError.decoding(error)
-        }
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data
     }
 
     func fetchPosts(
@@ -1093,14 +1084,43 @@ struct TodayWorldYesterdayReportResponse: Decodable {
     let data: TodayWorldYesterdayReportPayload
 }
 
-struct TodayWorldYesterdayReportGenerationResponse: Decodable {
+private struct AliyunBalanceResponse: Decodable {
     let success: Bool
-    let data: TodayWorldYesterdayReportGenerationPayload
+    let data: AliyunAccountBalance
 }
 
-struct TodayWorldYesterdayReportGenerationPayload: Decodable {
-    let queued: Bool
-    let report: TodayWorldYesterdayReportPayload
+struct AliyunAccountBalance: Decodable, Equatable {
+    let ok: Bool
+    let currency: String
+    let availableAmount: String?
+    let usage: AIUsageDailyCosts
+
+    var formattedAmount: String? {
+        guard ok, let availableAmount,
+              let amount = Decimal(string: availableAmount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
+        return amount.formatted(.currency(code: currency).locale(Locale(identifier: "zh_CN")))
+    }
+}
+
+struct AIUsageDailyCosts: Decodable, Equatable {
+    let date: String
+    let yesterdayDate: String
+    let timezone: String
+    let todayCostCNY: Double?
+    let yesterdayCostCNY: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case date, yesterdayDate, timezone
+        case todayCostCNY = "todayCostCny"
+        case yesterdayCostCNY = "yesterdayCostCny"
+    }
+
+    static func formattedCost(_ amount: Double?) -> String? {
+        guard let amount, amount.isFinite else { return nil }
+        return amount.formatted(.currency(code: "CNY")
+            .precision(.fractionLength(2...6))
+            .locale(Locale(identifier: "zh_CN")))
+    }
 }
 
 struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
@@ -1126,16 +1146,6 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
         case completedAt = "completed_at"
     }
 
-    var isGenerating: Bool {
-        status == "running" || status == "queued"
-            || report.final?.status == "running" || report.final?.status == "queued"
-    }
-
-    var shouldPollForFinalReport: Bool {
-        guard status != "failed" else { return false }
-        guard let finalStatus = report.final?.status else { return true }
-        return finalStatus != "succeeded" && finalStatus != "failed"
-    }
 }
 
 struct TodayWorldYesterdayReportContent: Decodable, Equatable {
@@ -1296,12 +1306,21 @@ struct TodayWorldFinalReportOverview: Decodable, Equatable {
 struct TodayWorldFinalReportOverviewItem: Decodable, Equatable, Identifiable {
     let title: String?
     let text: String
+    let context: String?
     let systemKeys: [String]
     let postIDs: [Int]
     var id: String { ([title, text].compactMap { $0 } + postIDs.map(String.init)).joined(separator: "|") }
 
+    init(title: String?, text: String, systemKeys: [String], postIDs: [Int], context: String? = nil) {
+        self.title = title
+        self.text = text
+        self.systemKeys = systemKeys
+        self.postIDs = postIDs
+        self.context = context
+    }
+
     enum CodingKeys: String, CodingKey {
-        case title, text
+        case title, text, context
         case systemKeys = "system_keys"
         case postIDs = "post_ids"
     }

@@ -1618,27 +1618,6 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertFalse(FeedDetailChromePolicy.hidesRootChrome(isPresented: false, isXueqiu: false))
     }
 
-    func testTodayWorldPostLoadingStartsOnlyAfterOpeningPostsPage() {
-        XCTAssertFalse(
-            TodayWorldPostLoadingPolicy.shouldLoad(
-                isPostsPagePresented: false,
-                postsAreEmpty: true
-            )
-        )
-        XCTAssertTrue(
-            TodayWorldPostLoadingPolicy.shouldLoad(
-                isPostsPagePresented: true,
-                postsAreEmpty: true
-            )
-        )
-        XCTAssertFalse(
-            TodayWorldPostLoadingPolicy.shouldLoad(
-                isPostsPagePresented: true,
-                postsAreEmpty: false
-            )
-        )
-    }
-
     func testFilteredPaginationTaskAdvancesWithRawTail() {
         XCTAssertEqual(
             FeedPaginationLayout.taskPostID(

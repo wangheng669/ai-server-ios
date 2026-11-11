@@ -7,7 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A4B801000000000000000001 /* TodayWorldView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B801000000000000000002 /* TodayWorldView.swift */; };
+		AE5900000000000000000001 /* LobeIcons-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = AE5900000000000000000002 /* LobeIcons-LICENSE.txt */; };
+		AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5800000000000000000002 /* TodayBriefOverviewView.swift */; };
 		9348729849C84883BE34E3C6 /* FeedResponsivenessUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08060FA0B53C474B9BD85B35 /* FeedResponsivenessUITests.swift */; };
+		E71AD0000000000000000001 /* TodayPageUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71AD0000000000000000002 /* TodayPageUITests.swift */; };
 		E90000000000000000000001 /* NotificationPresentationDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* NotificationPresentationDismissalTests.swift */; };
 		B23D04D5AA0940CD901A8871 /* RetailSentimentRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB43659990474DFA932089A0 /* RetailSentimentRefreshTests.swift */; };
 		D30000000000000000000001 /* KnowledgeCityFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */; };
@@ -122,7 +126,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A4B801000000000000000002 /* TodayWorldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWorldView.swift; sourceTree = "<group>"; };
+		AE5900000000000000000002 /* LobeIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "BrandAssets/LobeIcons-LICENSE.txt"; sourceTree = "<group>"; };
+		AE5800000000000000000002 /* TodayBriefOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayBriefOverviewView.swift; sourceTree = "<group>"; };
 		08060FA0B53C474B9BD85B35 /* FeedResponsivenessUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedResponsivenessUITests.swift; sourceTree = "<group>"; };
+		E71AD0000000000000000002 /* TodayPageUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayPageUITests.swift; sourceTree = "<group>"; };
 		E90000000000000000000002 /* NotificationPresentationDismissalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPresentationDismissalTests.swift; sourceTree = "<group>"; };
 		AB43659990474DFA932089A0 /* RetailSentimentRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetailSentimentRefreshTests.swift; sourceTree = "<group>"; };
 		D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeCityFlowUITests.swift; sourceTree = "<group>"; };
@@ -196,11 +204,21 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		AE5800000000000000000003 /* Today */ = {
+			isa = PBXGroup;
+			children = (
+				AE5800000000000000000002 /* TodayBriefOverviewView.swift */,
+				A4B801000000000000000002 /* TodayWorldView.swift */,
+			);
+			path = Today;
+			sourceTree = "<group>";
+		};
 		D30000000000000000000005 /* AIClientUITests */ = {
 			isa = PBXGroup;
 			children = (
 				D30000000000000000000002 /* KnowledgeCityFlowUITests.swift */,
 				08060FA0B53C474B9BD85B35 /* FeedResponsivenessUITests.swift */,
+				E71AD0000000000000000002 /* TodayPageUITests.swift */,
 			);
 			path = AIClientUITests;
 			sourceTree = "<group>";
@@ -248,6 +266,7 @@
 		4C77D9B7D5B483311723A99E /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				AE5900000000000000000002 /* LobeIcons-LICENSE.txt */,
 				137FDCB7037445C35ED02C74 /* Assets.xcassets */,
 				C17A00000000000000000007 /* CityMapRegions.geojson */,
 			);
@@ -357,6 +376,7 @@
 		B1367CAD56FB51F5D9592501 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				AE5800000000000000000003 /* Today */,
 				C17A00000000000000000003 /* CityNews */,
 				2F30415263748596A7B8C9D0 /* Company */,
 				660608BC8DE73C89ED510152 /* Feed */,
@@ -578,6 +598,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D861C048F423A45336AE551F /* Assets.xcassets in Resources */,
+				AE5900000000000000000001 /* LobeIcons-LICENSE.txt in Resources */,
 				C17A00000000000000000006 /* CityMapRegions.geojson in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -591,6 +612,7 @@
 			files = (
 				D30000000000000000000001 /* KnowledgeCityFlowUITests.swift in Sources */,
 				9348729849C84883BE34E3C6 /* FeedResponsivenessUITests.swift in Sources */,
+				E71AD0000000000000000001 /* TodayPageUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -640,6 +662,8 @@
 				0E1F2A3B4C5D6E7F8091A2B3 /* InstitutionResearchView.swift in Sources */,
 				0D1E2F30415263748596A7B8 /* CompanyResearchView.swift in Sources */,
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
+				A4B801000000000000000001 /* TodayWorldView.swift in Sources */,
+				AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
 				2A3C6E7F8091A2B3C4D5E6F7 /* PersonPushNotificationManager.swift in Sources */,
 				233ACCCB8DEA01858D633D98 /* CountryGDPDetailView.swift in Sources */,
