@@ -189,6 +189,11 @@ private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
 }
 
 struct NewsFeedView: View {
+    private struct NotificationPostFailure {
+        let postID: Int
+        let notFound: Bool
+    }
+
     @Binding private var showsDetail: Bool
     @Binding private var hidesTabBar: Bool
     @Binding private var notificationPostID: Int?
@@ -196,6 +201,7 @@ struct NewsFeedView: View {
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
     @State private var searchedXAuthor: XAuthorDestination?
     @State private var selectedPost: Post?
+    @State private var notificationPostFailure: NotificationPostFailure?
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
@@ -354,16 +360,37 @@ struct NewsFeedView: View {
         }
         .task(id: notificationPostID) {
             guard let postID = notificationPostID else { return }
+            notificationPostFailure = nil
             defer {
                 if !Task.isCancelled, notificationPostID == postID {
                     notificationPostID = nil
                 }
             }
-            guard let post = try? await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: postID) else {
-                return
+            do {
+                let post = try await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: postID)
+                guard !Task.isCancelled, notificationPostID == postID else { return }
+                selectedPost = post
+            } catch {
+                guard !Task.isCancelled, notificationPostID == postID else { return }
+                let notFound: Bool
+                if case APIError.httpStatus(404) = error {
+                    notFound = true
+                } else {
+                    notFound = false
+                }
+                notificationPostFailure = NotificationPostFailure(postID: postID, notFound: notFound)
             }
-            guard !Task.isCancelled, notificationPostID == postID else { return }
-            selectedPost = post
+        }
+        .alert("无法打开文章", isPresented: Binding(
+            get: { notificationPostFailure != nil },
+            set: { if !$0 { notificationPostFailure = nil } }
+        ), presenting: notificationPostFailure) { failure in
+            if !failure.notFound {
+                Button("重试") { notificationPostID = failure.postID }
+            }
+            Button("关闭", role: .cancel) {}
+        } message: { failure in
+            Text(failure.notFound ? "这篇文章已不可用。" : "暂时无法加载文章，请重试。")
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
             guard count > 0, isFeedAtTop else { return }
