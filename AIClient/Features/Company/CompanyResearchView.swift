@@ -289,6 +289,7 @@ struct CompanyResearchView: View {
             Group {
                 if store.isLoading && store.companies.isEmpty {
                     companyLoadingState
+                        .accessibilityIdentifier("company-home-loading")
                 } else if !store.companies.isEmpty {
                     companyHub
                 } else if let errorMessage = store.errorMessage {
@@ -299,11 +300,10 @@ struct CompanyResearchView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(item: $presentedCompany) { company in
+            .appSheet(item: $presentedCompany) { company in
                 companyPage(company)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.hidden)
-                    .presentationCornerRadius(28)
+                    .appPresentationDetents([.large])
+                    .appPresentationCornerRadius(28)
             }
         }
         .task(id: rootTabIsActive) {
@@ -330,7 +330,8 @@ struct CompanyResearchView: View {
         .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemGroupedBackground))
         .background(CompanyScrollBounceConfigurator())
-        .sheet(item: hubValuationBinding) { route in
+        .accessibilityIdentifier("company-home")
+        .appSheet(item: hubValuationBinding) { route in
             valuationHistorySheet(route)
         }
     }
@@ -438,7 +439,7 @@ struct CompanyResearchView: View {
             )
             .padding(16)
         }
-        .sheet(item: $presentedValuation) { route in
+        .appSheet(item: $presentedValuation) { route in
             valuationHistorySheet(route)
         }
     }
@@ -515,19 +516,6 @@ struct CompanyResearchView: View {
         .padding(.bottom, 10)
     }
 
-    private func pageIndicator(_ company: CompanyResearchProfile) -> some View {
-        HStack(spacing: 5) {
-            ForEach(store.companies) { item in
-                Capsule()
-                    .fill(item.id == company.id ? Color.white : Color.white.opacity(0.28))
-                    .frame(width: item.id == company.id ? 18 : 5, height: 5)
-                    .animation(.easeInOut(duration: 0.2), value: company.id)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityLabel("第 \((store.companies.firstIndex(of: company) ?? 0) + 1) 页，共 \(store.companies.count) 页")
-    }
-
     private func sectionTabs(_ company: CompanyResearchProfile) -> some View {
         HStack(spacing: 0) {
             ForEach(Section.allCases, id: \.self) { section in
@@ -570,10 +558,6 @@ struct CompanyResearchView: View {
     }
 
     private func overviewSection(_ company: CompanyResearchProfile) -> some View {
-        nativeOverview(company)
-    }
-
-    private func nativeOverview(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             nativeFinancialTrend(company)
             nativeOperatingSignals(company)
@@ -581,63 +565,6 @@ struct CompanyResearchView: View {
         }
         .padding(.top, 12)
         .padding(.bottom, 8)
-    }
-
-    private func nativeMetricStrip(_ company: CompanyResearchProfile) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 10) {
-                nativeMetricCard("最新价", marketPrice(company.market), note: marketChange(company.market), icon: "chart.line.uptrend.xyaxis", color: companyAccent(company))
-                nativeMetricCard("总市值", marketCap(company.market), note: "当前市值", icon: "circle.grid.2x2", color: .indigo)
-                nativeValuationCard(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
-                nativeValuationCard(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
-                nativeMetricCard("ROE (TTM)", latestROE(company), note: company.financials.years.last?.year ?? "最新", icon: "gauge.with.dots.needle.50percent", color: .orange)
-            }
-        }
-        .scrollIndicators(.hidden)
-        .contentMargins(.horizontal, 0, for: .scrollContent)
-    }
-
-    private func nativeMetricCard(_ label: String, _ value: String, note: String, icon: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 30, height: 30)
-                .background(color.opacity(0.1), in: Circle())
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
-            Text(note).font(.caption2).foregroundStyle(note.hasPrefix("-") ? Color.green : color)
-        }
-        .padding(13)
-        .frame(width: 136, height: 138, alignment: .topLeading)
-        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
-        }
-    }
-
-    private func nativeValuationCard(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
-        Button { presentValuation(company, kind: kind) } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: "chart.xyaxis.line")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(kind.color)
-                    .frame(width: 30, height: 30)
-                    .background(kind.color.opacity(0.1), in: Circle())
-                Text(kind.metricTitle).font(.caption).foregroundStyle(.secondary)
-                Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
-                Text("点击查看历史曲线").font(.caption2).foregroundStyle(kind.color)
-            }
-            .padding(13)
-            .frame(width: 136, height: 138, alignment: .topLeading)
-            .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(kind.color.opacity(0.14), lineWidth: 0.7)
-            }
-        }
-        .buttonStyle(.plain)
     }
 
     private func nativeFinancialTrend(_ company: CompanyResearchProfile) -> some View {
@@ -718,7 +645,7 @@ struct CompanyResearchView: View {
                         Text(indicator.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
-                    Text(dashboardStatus(indicator.status, value: indicator.value))
+                    Text(indicatorStatus(indicator.status, value: indicator.value))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(nativeSignalColor(indicator.status))
                 }
@@ -792,229 +719,11 @@ struct CompanyResearchView: View {
         .buttonStyle(.plain)
     }
 
-    private func dashboardOverview(_ company: CompanyResearchProfile) -> some View {
-        VStack(spacing: 8) {
-            VStack(spacing: 0) {
-                Text("公司仪表盘")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                Divider()
-                HStack(spacing: 0) {
-                    dashboardQuote(company)
-                    Divider()
-                    dashboardTrend(company)
-                }
-                .frame(height: 141)
-                Divider()
-                HStack(spacing: 0) {
-                    dashboardQuality(company)
-                    Divider()
-                    dashboardVariables(company)
-                }
-                .frame(height: 120)
-                Divider()
-                HStack(spacing: 0) {
-                    dashboardPeers()
-                    Divider()
-                    dashboardValuation(company)
-                }
-                .frame(height: 106)
-            }
-            .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 5))
-            .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.24), lineWidth: 0.7) }
-
-            dashboardFinancialSummary(company)
-            dashboardNextReport(company)
-        }
-        .padding(.top, 9)
-    }
-
-    private func dashboardQuote(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("行情快照").font(.system(size: 13, weight: .semibold))
-            dashboardValueRow("最新价", marketPrice(company.market), accent: true)
-            dashboardValueRow("涨跌幅", marketChange(company.market), accent: true)
-            dashboardValueRow("总市值", marketCap(company.market))
-            dashboardValuationValueRow(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
-            dashboardValuationValueRow(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
-            dashboardValueRow("ROE (TTM)", latestROE(company))
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func dashboardValueRow(_ label: String, _ value: String, accent: Bool = false) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-            Spacer(minLength: 4)
-            Text(value).monospacedDigit().foregroundStyle(accent ? Color.red : Color.primary)
-        }
-        .font(.system(size: 11))
-    }
-
-    private func dashboardValuationValueRow(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
-        Button { presentValuation(company, kind: kind) } label: {
-            HStack(spacing: 6) {
-                Text(kind.metricTitle)
-                Spacer(minLength: 4)
-                Text(value).monospacedDigit()
-                Image(systemName: "chart.xyaxis.line").font(.system(size: 9, weight: .semibold))
-            }
-            .font(.system(size: 11))
-            .foregroundStyle(kind.color)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func dashboardTrend(_ company: CompanyResearchProfile) -> some View {
-        let years = Array(company.financials.years.suffix(3))
-        return VStack(alignment: .leading, spacing: 5) {
-            Text("财务趋势").font(.system(size: 13, weight: .semibold))
-            HStack(spacing: 13) {
-                Label("营收 (亿元)", systemImage: "minus").foregroundStyle(Color.red)
-                Label("净利润 (亿元)", systemImage: "minus").foregroundStyle(Color.secondary)
-            }
-            .font(.system(size: 9))
-            Chart {
-                ForEach(years) { item in
-                    LineMark(x: .value("年度", item.year), y: .value("营收", item.revenue), series: .value("指标", "营收"))
-                        .foregroundStyle(Color.red)
-                        .symbol(Circle())
-                    PointMark(x: .value("年度", item.year), y: .value("营收", item.revenue))
-                        .foregroundStyle(Color.red)
-                        .annotation(position: .top, spacing: 2) {
-                            Text(String(format: "%.2f", item.revenue)).font(.system(size: 7)).foregroundStyle(.primary)
-                        }
-                    LineMark(x: .value("年度", item.year), y: .value("净利润", item.netProfit), series: .value("指标", "净利润"))
-                        .foregroundStyle(Color.secondary)
-                        .symbol(Circle())
-                    PointMark(x: .value("年度", item.year), y: .value("净利润", item.netProfit))
-                        .foregroundStyle(Color.secondary)
-                        .annotation(position: .top, spacing: 2) {
-                            Text(String(format: "%.2f", item.netProfit)).font(.system(size: 7)).foregroundStyle(.primary)
-                        }
-                }
-            }
-            .chartXAxis { AxisMarks(values: years.map(\.year)) { _ in AxisValueLabel().font(.system(size: 8)); AxisGridLine().foregroundStyle(.clear) } }
-            .chartYAxis(.hidden)
-            .chartLegend(.hidden)
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func dashboardQuality(_ company: CompanyResearchProfile) -> some View {
-        let latest = company.financials.years.last
-        let previous = company.financials.years.dropLast().last
-        let revenueStatus = (latest?.revenue ?? 0) >= (previous?.revenue ?? 0) ? "改善" : "中性"
-        let profitStatus = (latest?.netProfit ?? 0) >= (previous?.netProfit ?? 0) ? "改善" : "中性"
-        return dashboardStatusGroup("财务质量（\(latest?.year ?? "最新")）", rows: [
-            ("增长", revenueStatus), ("盈利", profitStatus), ("现金", "待验证"), ("负债", "关注")
-        ])
-    }
-
-    private func dashboardVariables(_ company: CompanyResearchProfile) -> some View {
-        let indicators = company.indicators ?? []
-        let rows = indicators.prefix(4).map { ($0.label, dashboardStatus($0.status, value: $0.value)) }
-        return dashboardStatusGroup("经营变量（最新）", rows: rows)
-    }
-
-    private func dashboardPeers() -> some View {
-        dashboardStatusGroup("同行坐标（白酒）", rows: [
-            ("品牌力", "待补充"), ("渠道", "待补充"), ("增长", "待补充"), ("资本效率", "待补充")
-        ])
-    }
-
-    private func dashboardValuation(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 17) {
-            Text("估值带（PE）").font(.system(size: 13, weight: .semibold))
-            dashboardValuationValueRow(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
-            dashboardValuationValueRow(company, kind: .ttm, value: formattedMultiple(company.market?.pe))
-            HStack { Text("历史分位（近10年）"); Spacer(); dashboardBadge("待补充") }
-        }
-        .font(.system(size: 11))
-        .padding(11)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func dashboardStatusGroup(_ title: String, rows: [(String, String)]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .semibold))
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack { Text(row.0); Spacer(); dashboardBadge(row.1) }
-                    .font(.system(size: 11))
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func dashboardBadge(_ value: String) -> some View {
-        let color: Color = value.contains("上升") || value.contains("改善") ? .red : value.contains("关注") || value.contains("观察") ? .orange : .secondary
-        return Text(value)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(color)
-            .frame(minWidth: 43)
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
-            .overlay { RoundedRectangle(cornerRadius: 4).stroke(color.opacity(0.22), lineWidth: 0.6) }
-    }
-
-    private func dashboardStatus(_ status: String, value: String) -> String {
+    private func indicatorStatus(_ status: String, value: String) -> String {
         if value.contains("待补充") { return "待补充" }
         if status.contains("改善") || status.contains("上升") { return "上升" }
         if status.contains("关注") || status.contains("观察") { return status }
         return "待验证"
-    }
-
-    private func dashboardFinancialSummary(_ company: CompanyResearchProfile) -> some View {
-        let years = Array(company.financials.years.suffix(3))
-        return VStack(spacing: 0) {
-            HStack { Text("财务摘要（合并报表）").fontWeight(.semibold); Spacer(); Text("单位：\(company.financials.unit)").foregroundStyle(.secondary) }
-                .padding(.horizontal, 11).frame(height: 25)
-            Divider()
-            HStack(spacing: 0) {
-                Text("").frame(maxWidth: .infinity)
-                ForEach(years) { Text($0.year).frame(maxWidth: .infinity) }
-            }.frame(height: 22)
-            Divider()
-            dashboardFinancialRow("营收", values: years.map { compactNumber($0.revenue) })
-            dashboardFinancialRow("净利润", values: years.map { compactNumber($0.netProfit) })
-            dashboardFinancialRow("ROE", values: years.map { String(format: "%.2f%%", $0.roe) })
-            Divider()
-            Text("现金流与利润质量 →").foregroundStyle(.red).fontWeight(.semibold).frame(height: 22)
-        }
-        .font(.system(size: 10))
-        .clipShape(RoundedRectangle(cornerRadius: 5))
-        .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.24), lineWidth: 0.7) }
-    }
-
-    private func dashboardFinancialRow(_ label: String, values: [String]) -> some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 0) {
-                Text(label).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 11)
-                ForEach(Array(values.enumerated()), id: \.offset) { _, value in Text(value).monospacedDigit().frame(maxWidth: .infinity) }
-            }.frame(height: 19)
-        }
-    }
-
-    private func dashboardNextReport(_ company: CompanyResearchProfile) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "calendar").font(.system(size: 18)).foregroundStyle(.red)
-            Text("下次财报").fontWeight(.semibold)
-            Text(reportDate(company.nextReport.expectedDate)).fontWeight(.semibold)
-            Text("·")
-            Text("\(max(company.questions.count, 1))项待验证").fontWeight(.semibold)
-            Spacer()
-            Image(systemName: "chevron.right").foregroundStyle(.secondary)
-        }
-        .font(.system(size: 11))
-        .padding(.horizontal, 13).frame(height: 32)
-        .background(Color.red.opacity(0.035), in: RoundedRectangle(cornerRadius: 5))
-        .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.red.opacity(0.14), lineWidth: 0.7) }
     }
 
     private func researchBlock<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -1043,147 +752,10 @@ struct CompanyResearchView: View {
         }
     }
 
-    private func indicatorGrid(_ indicators: [CompanyResearchIndicator], color: Color) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 14) {
-            ForEach(indicators) { indicator in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(indicator.label).font(.caption).foregroundStyle(.secondary)
-                    Text(indicator.value.isEmpty ? indicator.status : indicator.value)
-                        .font(.subheadline.bold())
-                        .foregroundStyle(statusColor(indicator.status, accent: color))
-                    Text(indicator.note).font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
-                }
-            }
-        }
-    }
-
-    private func compactFinancialTable(_ company: CompanyResearchProfile) -> some View {
-        let years = Array(company.financials.years.suffix(3))
-        return Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-            GridRow {
-                Text("").frame(maxWidth: .infinity)
-                ForEach(years) { Text($0.year).font(.caption.bold()).frame(maxWidth: .infinity, alignment: .trailing) }
-            }
-            GridRow {
-                Text("营收").font(.caption).foregroundStyle(.secondary)
-                ForEach(years) { Text(compactNumber($0.revenue)).font(.caption.monospacedDigit()).frame(maxWidth: .infinity, alignment: .trailing) }
-            }
-            GridRow {
-                Text("净利润").font(.caption).foregroundStyle(.secondary)
-                ForEach(years) { Text(compactNumber($0.netProfit)).font(.caption.monospacedDigit()).frame(maxWidth: .infinity, alignment: .trailing) }
-            }
-            GridRow {
-                Text("ROE").font(.caption).foregroundStyle(.secondary)
-                ForEach(years) { Text(percent($0.roe)).font(.caption.monospacedDigit()).frame(maxWidth: .infinity, alignment: .trailing) }
-            }
-        }
-    }
-
     private func statusColor(_ status: String, accent: Color) -> Color {
         if status.contains("改善") || status.contains("增长") || status.contains("上升") || status.contains("完成") { return accent }
         if status.contains("承压") || status.contains("风险") { return .orange }
         return .secondary
-    }
-
-    private func researchThesis(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            researchHeader("核心判断", subtitle: "这家公司最重要的研究主线", icon: "quote.opening", color: companyAccent(company))
-            Text(company.thesis)
-                .font(.system(.headline, design: .rounded, weight: .semibold))
-                .lineSpacing(5)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .researchCard(tint: companyAccent(company))
-    }
-
-    private func researchHeader(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 11) {
-            Image(systemName: icon)
-                .font(.subheadline.bold())
-                .foregroundStyle(color)
-                .frame(width: 32, height: 32)
-                .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func researchMetric(_ metric: CompanyResearchMetric, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(metric.label).font(.caption2).foregroundStyle(.secondary)
-            Text(metric.value).font(.subheadline.bold()).lineLimit(2).minimumScaleFactor(0.72)
-            Text(metric.note).font(.caption2).foregroundStyle(color).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(color.opacity(0.065), in: RoundedRectangle(cornerRadius: 13))
-    }
-
-    private func researchListCard(title: String, subtitle: String, icon: String, items: [String], color: Color, numbered: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
-            researchHeader(title, subtitle: subtitle, icon: icon, color: color)
-            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                researchPoint(item, marker: numbered ? "\(index + 1)" : nil, color: color)
-            }
-        }
-        .researchCard()
-    }
-
-    private func researchCompactCard(title: String, icon: String, items: [String], color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.bold())
-                .foregroundStyle(color)
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .top, spacing: 6) {
-                    Circle().fill(color).frame(width: 5, height: 5).padding(.top, 6)
-                    Text(item).font(.caption).foregroundStyle(.primary).lineSpacing(2)
-                }
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
-        .overlay { RoundedRectangle(cornerRadius: 18).stroke(color.opacity(0.12), lineWidth: 0.8) }
-    }
-
-    private func researchPoint(_ text: String, marker: String?, color: Color) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Group {
-                if let marker { Text(marker).font(.caption2.bold()) }
-                else { Image(systemName: "checkmark").font(.caption2.bold()) }
-            }
-            .foregroundStyle(color)
-            .frame(width: 23, height: 23)
-            .background(color.opacity(0.1), in: Circle())
-            Text(text).font(.subheadline).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func companyFacts(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            researchHeader("公司资料", subtitle: company.name, icon: "building.2", color: companyAccent(company))
-            factRow("上市市场", "\(company.ticker) · \(company.exchange)", icon: "building.columns")
-            Divider()
-            factRow("行业与地区", "\(company.industry) · \(company.location)", icon: "mappin.and.ellipse")
-            Divider()
-            factRow("更新时间", company.updatedAt.formatted(
-                .dateTime.locale(Locale(identifier: "zh_CN")).month().day().hour().minute()
-            ), icon: "clock")
-        }
-        .researchCard()
-    }
-
-    private func factRow(_ label: String, _ value: String, icon: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 22)
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).font(.subheadline.weight(.semibold)).multilineTextAlignment(.trailing)
-        }
     }
 
     private func emptySection(_ title: String, icon: String, detail: String) -> some View {
@@ -1565,116 +1137,6 @@ struct CompanyResearchView: View {
 
     private func signedPercentPoint(_ value: Double) -> String { String(format: "%+.1fpp", value) }
 
-    private func eventSection(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("重要事件").font(.title3.bold())
-                Spacer()
-                Image(systemName: "bell.badge")
-                    .foregroundStyle(companyAccent(company))
-            }
-            eventRow(
-                color: companyAccent(company), icon: "arrow.triangle.2.circlepath",
-                eyebrow: "股份回购 · \(company.buyback.status)",
-                title: company.buyback.amount,
-                detail: "\(company.buyback.shares) · \(company.buyback.priceRange)"
-            )
-            Divider().padding(.leading, 50)
-            eventRow(
-                color: .purple, icon: "calendar",
-                eyebrow: "下一财报 · \(company.nextReport.dateStatus)",
-                title: reportDate(company.nextReport.expectedDate),
-                detail: company.nextReport.reportType
-            )
-            HStack {
-                Text("回购数据截至 \(company.buyback.asOfDate)")
-                    .font(.caption2).foregroundStyle(.tertiary)
-                Spacer()
-                Link("查看公告 ↗", destination: company.buyback.source.url)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(companyAccent(company))
-            }
-        }
-        .padding(20)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
-        .shadow(color: .black.opacity(0.045), radius: 12, y: 5)
-    }
-
-    private func consensusSection(_ consensus: CompanyResearchConsensus, company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("市场一致预期", systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.title3.bold())
-                    .foregroundStyle(companyAccent(company))
-                Spacer()
-                Text(consensus.status)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(companyAccent(company))
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(companyAccent(company).opacity(0.09), in: Capsule())
-            }
-
-            Text(consensus.period)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            ForEach(Array(consensus.metrics.enumerated()), id: \.element.label) { index, metric in
-                HStack(spacing: 12) {
-                    Text("\(index + 1)")
-                        .font(.caption.bold())
-                        .foregroundStyle(companyAccent(company))
-                        .frame(width: 28, height: 28)
-                        .background(companyAccent(company).opacity(0.1), in: Circle())
-                    VStack(alignment: .leading, spacing: 3) {
-                    Text(metric.value)
-                        .font(.headline.monospacedDigit())
-                    Text("\(metric.label) · \(metric.note)")
-                        .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                }
-            }
-
-            Divider()
-            Text(consensus.note)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineSpacing(3)
-            HStack {
-                Text("截至 \(consensus.asOfDate)")
-                    .font(.caption2).foregroundStyle(.tertiary)
-                Spacer()
-                Link("数据来源 ↗", destination: consensus.source.url)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(companyAccent(company))
-            }
-        }
-        .padding(20)
-        .background {
-            RoundedRectangle(cornerRadius: 22)
-                .fill(Color(uiColor: .secondarySystemBackground))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22)
-                        .fill(LinearGradient(colors: [companyAccent(company).opacity(0.07), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
-        }
-        .overlay { RoundedRectangle(cornerRadius: 22).stroke(companyAccent(company).opacity(0.14), lineWidth: 0.8) }
-    }
-
-    private func eventRow(color: Color, icon: String, eyebrow: String, title: String, detail: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.headline.bold()).foregroundStyle(color)
-                .frame(width: 36, height: 36)
-                .background(color.opacity(0.1), in: Circle())
-            VStack(alignment: .leading, spacing: 4) {
-                Text(eyebrow).font(.caption).foregroundStyle(.secondary)
-                Text(title).font(.headline)
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
-        }
-    }
-
     private func sourcesSection(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -1698,13 +1160,6 @@ struct CompanyResearchView: View {
         }
         .padding(20)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
-    }
-
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.bold))
-            .tracking(1.5)
-            .foregroundStyle(.secondary)
     }
 
     private func companyLogo(_ company: CompanyResearchProfile) -> some View {
@@ -1756,16 +1211,6 @@ struct CompanyResearchView: View {
         }
     }
 
-    private func heroMetric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.62))
-            Text(value).font(.subheadline.bold()).lineLimit(1).minimumScaleFactor(0.7)
-        }
-        .padding(.horizontal, 11).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-    }
-
     private func summaryMetric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption2).foregroundStyle(.secondary)
@@ -1812,9 +1257,8 @@ struct CompanyResearchView: View {
 
     private func valuationHistorySheet(_ route: CompanyValuationHistoryRoute) -> some View {
         CompanyValuationHistorySheet(route: route)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
+            .appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
     }
 
     private func marketPrice(_ market: CompanyResearchMarket?) -> String {
@@ -1892,30 +1336,5 @@ private struct CompanyScrollBounceConfigurator: UIViewRepresentable {
                 ancestor = current.superview
             }
         }
-    }
-}
-
-private extension View {
-    func researchCard(tint: Color? = nil) -> some View {
-        padding(18)
-            .background {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
-                    .overlay(alignment: .topLeading) {
-                        if let tint {
-                            LinearGradient(
-                                colors: [tint.opacity(0.1), .clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        }
-                    }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke((tint ?? .secondary).opacity(tint == nil ? 0.08 : 0.16), lineWidth: 0.8)
-            }
-            .shadow(color: .black.opacity(0.035), radius: 10, y: 4)
     }
 }

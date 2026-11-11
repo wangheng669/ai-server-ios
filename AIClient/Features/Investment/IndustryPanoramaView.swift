@@ -16,6 +16,12 @@ struct IndustryPayload: Decodable, Identifiable {
         struct Source: Decodable {
             let name: String
             let url: URL?
+            let publishedAt: String?
+
+            enum CodingKeys: String, CodingKey {
+                case name, url
+                case publishedAt = "published_at"
+            }
         }
 
         let value: String
@@ -132,9 +138,8 @@ private struct IndustryPanoramaService {
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
         let payload = try JSONDecoder().decode(IndustryPanoramaResponse.self, from: data)
         guard payload.success, !payload.data.industries.isEmpty else {
             throw URLError(.cannotParseResponse)
@@ -143,739 +148,668 @@ private struct IndustryPanoramaService {
     }
 }
 
+struct IndustryMetricParts: Equatable {
+    let qualifier: String
+    let value: String
+    let unit: String
+
+    init(_ raw: String) {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = text.range(of: #"[0-9][0-9,.]*"#, options: .regularExpression) {
+            qualifier = String(text[..<range.lowerBound])
+            value = String(text[range])
+            unit = String(text[range.upperBound...])
+        } else {
+            qualifier = ""
+            value = text
+            unit = ""
+        }
+    }
+}
+
+enum IndustryDataPresentation {
+    static func monthLabel(_ period: String) -> String {
+        let pieces = period.split(separator: "-")
+        guard pieces.count == 2, let month = Int(pieces[1]), (1...12).contains(month) else { return period }
+        return "\(pieces[0])年\(month)月"
+    }
+
+    static func monthlyChange(_ months: [IndustryPayload.AutoSales.Month], isNEV: Bool) -> Double? {
+        let ordered = months.sorted { $0.period < $1.period }
+        guard let latest = ordered.last, let previous = ordered.dropLast().last,
+              let end = monthIndex(latest.period), let start = monthIndex(previous.period), end - start == 1 else { return nil }
+        let currentValue = isNEV ? latest.nevSales : latest.totalSales
+        let previousValue = isNEV ? previous.nevSales : previous.totalSales
+        guard currentValue.isFinite, previousValue.isFinite, currentValue >= 0, previousValue > 0 else { return nil }
+        return (currentValue / previousValue - 1) * 100
+    }
+
+    static func signedPercent(_ value: Double) -> String {
+        (value >= 0 ? "+" : "") + value.formatted(.number.precision(.fractionLength(1))) + "%"
+    }
+
+    private static func monthIndex(_ period: String) -> Int? {
+        let pieces = period.split(separator: "-")
+        guard pieces.count == 2, let year = Int(pieces[0]), let month = Int(pieces[1]), (1...12).contains(month) else { return nil }
+        return year * 12 + month
+    }
+}
+
+private enum IndustryPalette {
+    static let canvas = Color(uiColor: .systemBackground)
+    static let panel = Color(uiColor: .secondarySystemBackground)
+    static let line = Color(uiColor: .separator).opacity(0.22)
+    static let accent = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.38, green: 0.84, blue: 0.73, alpha: 1)
+            : UIColor(red: 0.04, green: 0.42, blue: 0.35, alpha: 1)
+    })
+    static let negative = Color.orange
+}
+
+private enum IndustryPane: String, CaseIterable {
+    case overview = "总览", chain = "产业链", companies = "企业", research = "研究"
+}
+
 struct IndustryPanoramaView: View {
+    var onClose: (() -> Void)?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var industries: [IndustryPayload] = []
     @State private var selectedID: String?
+    @State private var pane: IndustryPane = .overview
     @State private var selectedStageID: String?
     @State private var isLoading = true
-    @State private var loadError = false
-    @State private var autoSalesMetric: AutoSalesMetric = .nev
+    @State private var errorMessage: String?
 
     private var selectedIndustry: IndustryPayload? {
         industries.first(where: { $0.id == selectedID }) ?? industries.first
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                if !industries.isEmpty {
-                    industryPicker
-                }
-
-                if let industry = selectedIndustry {
-                    panorama(industry)
-                } else if isLoading {
-                    loadingState
-                } else {
-                    errorState
-                }
+        VStack(spacing: 0) {
+            if !industries.isEmpty {
+                industryPicker
+                panePicker
             }
-            .padding(.bottom, 28)
+            if let industry = selectedIndustry {
+                TabView(selection: $pane) {
+                    ForEach(IndustryPane.allCases, id: \.self) { page in
+                        industryPage(industry, page: page)
+                            .tag(page)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .id(industry.id)
+                .accessibilityIdentifier("industry-panorama-content")
+            } else {
+                ScrollView {
+                    if isLoading {
+                        ContentLoadingPlaceholder(title: "正在准备行业全景", rowCount: 4)
+                            .padding(.horizontal, 22)
+                    } else {
+                        ContentUnavailableView {
+                            Label("行业数据暂时不可用", systemImage: "chart.bar.xaxis")
+                        } description: {
+                            Text(errorMessage ?? "暂时没有可展示的行业数据")
+                        } actions: {
+                            Button("重新加载") { Task { await load() } }
+                        }
+                        .frame(minHeight: 360)
+                    }
+                }
+                .refreshable { await load() }
+            }
         }
-        .scrollIndicators(.hidden)
-        .background(InvestmentDesign.canvas)
+        .overlay(alignment: .bottomTrailing) {
+            if industries.isEmpty, let onClose {
+                DetailSheetControls(closeLabel: "关闭行业全景", onClose: onClose)
+                    .padding(12)
+            }
+        }
+        .background(IndustryPalette.canvas)
+        .tint(IndustryPalette.accent)
+        .onChange(of: selectedID) { _, _ in selectedStageID = nil }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive, industries.isEmpty else { return }
             await load()
         }
-        .onChange(of: selectedID) { _, _ in
-            selectedStageID = nil
-        }
     }
 
     private var industryPicker: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("重点产业")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let selectedIndex = industries.firstIndex(where: { $0.id == selectedIndustry?.id }) {
-                    Text("\(selectedIndex + 1) / \(industries.count)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
-
+        HStack(spacing: 6) {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
-                    HStack(spacing: 26) {
+                    HStack(spacing: 8) {
                         ForEach(industries) { industry in
                             let selected = industry.id == selectedIndustry?.id
                             Button {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    selectedID = industry.id
-                                    proxy.scrollTo(industry.id, anchor: .center)
-                                }
+                                selectedID = industry.id
                             } label: {
-                                VStack(spacing: 9) {
-                                    Text(industry.title)
-                                        .font(.system(size: 14, weight: selected ? .semibold : .regular))
-                                        .lineLimit(1)
-                                    Capsule()
-                                        .fill(selected ? InvestmentDesign.accent : .clear)
-                                        .frame(width: 18, height: 2)
-                                }
-                                .foregroundStyle(selected ? Color.primary : Color.secondary)
-                                .contentShape(Rectangle())
+                                Text(industry.title)
+                                    .font(.subheadline.weight(selected ? .semibold : .medium))
+                                    .foregroundStyle(selected ? IndustryPalette.canvas : .primary)
+                                    .padding(.horizontal, 15)
+                                    .frame(minHeight: 42)
+                                    .background(selected ? IndustryPalette.accent : IndustryPalette.panel, in: Capsule())
                             }
                             .id(industry.id)
                             .buttonStyle(.plain)
                             .accessibilityAddTraits(selected ? .isSelected : [])
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 4)
-                    .padding(.bottom, 10)
+                    .padding(.leading, 20)
+                    .padding(.vertical, 10)
                 }
                 .scrollIndicators(.hidden)
+                .accessibilityIdentifier("industry-category-picker")
+                .onChange(of: selectedID) { _, id in
+                    if let id { withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) } }
+                }
+            }
+            Menu {
+                ForEach(industries) { industry in
+                    Button { selectedID = industry.id } label: {
+                        if industry.id == selectedIndustry?.id {
+                            Label(industry.title, systemImage: "checkmark")
+                        } else {
+                            Text(industry.title)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("全部行业")
+            .accessibilityIdentifier("industry-directory")
+            if let onClose {
+                DetailSheetCloseButton(action: onClose, accessibilityLabel: "关闭行业全景")
             }
         }
-        .background(InvestmentDesign.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(HoldingsPalette.line)
-                .frame(height: 1)
-        }
+        .padding(.trailing, 12)
     }
 
-    private func panorama(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
-            industryIntroduction(industry)
-            scaleSection(industry)
-            if let sales = industry.autoSales, !sales.monthly.isEmpty {
-                autoSalesSection(sales)
+    private var panePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(IndustryPane.allCases, id: \.self) { item in
+                Button { withAnimation(.easeOut(duration: 0.22)) { pane = item } } label: {
+                    VStack(spacing: 9) {
+                        Text(item.rawValue)
+                            .font(.subheadline.weight(pane == item ? .semibold : .regular))
+                            .foregroundStyle(pane == item ? .primary : .secondary)
+                        Capsule().fill(pane == item ? IndustryPalette.accent : .clear)
+                            .frame(width: 26, height: 3)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("industry-pane-\(item.rawValue)")
+                .accessibilityAddTraits(pane == item ? .isSelected : [])
             }
-            chainSection(industry)
-            companySection(industry)
-            if !industry.insights.isEmpty {
-                insightSection(industry)
-            }
-            provenanceSection(industry)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 22)
-        .animation(.easeOut(duration: 0.18), value: industry.id)
+        .overlay(alignment: .bottom) { IndustryPalette.line.frame(height: 0.5) }
     }
 
-    private func industryIntroduction(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(industry.scale.period)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(InvestmentDesign.accent)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(InvestmentDesign.accentSoft, in: Capsule())
-
-            Text(industry.subtitle)
-                .font(.system(size: 14))
-                .foregroundStyle(HoldingsPalette.ink.opacity(0.68))
-                .lineSpacing(4)
-
-            if !industry.anchors.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(industry.anchors.enumerated()), id: \.offset) { index, anchor in
-                            Label(anchor, systemImage: anchorIcon(index))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(HoldingsPalette.ink.opacity(0.8))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(InvestmentDesign.surface, in: Capsule())
-                                .overlay(Capsule().stroke(HoldingsPalette.line))
-                        }
-                    }
-                }
-                .scrollIndicators(.hidden)
+    private func industryHeading(_ industry: IndustryPayload) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(industry.title)
+                    .font(.largeTitle.weight(.bold))
+                    .tracking(-0.8)
+                    .accessibilityIdentifier("industry-selected-title")
+                Text(industry.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
+            Image(systemName: industry.icon)
+                .font(.system(size: 25, weight: .medium))
+                .foregroundStyle(IndustryPalette.accent)
+                .frame(width: 56, height: 56)
+                .background(IndustryPalette.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
-    private func scaleSection(_ industry: IndustryPayload) -> some View {
-        let parts = scaleValueParts(industry.scale.value)
-        let history = industry.history ?? []
-
-        return sectionContainer(number: "01", title: "规模与趋势") {
+    private func industryPage(_ industry: IndustryPayload, page: IndustryPane) -> some View {
+        ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(industry.scale.metric)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(HoldingsPalette.ink.opacity(0.72))
-                        Spacer()
-                        sourceLink(industry.scale.source)
-                    }
-
-                    HStack(alignment: .lastTextBaseline, spacing: 8) {
-                        Text(parts.value)
-                            .font(.system(size: 42, weight: .semibold, design: .rounded))
-                            .foregroundStyle(InvestmentDesign.accent)
-                            .minimumScaleFactor(0.62)
-                            .lineLimit(1)
-                        if !parts.unit.isEmpty {
-                            Text(parts.unit)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(HoldingsPalette.ink)
-                                .padding(.bottom, 5)
-                        }
-                        Spacer(minLength: 4)
-                        if let growth = industry.scale.growth {
-                            Label(growth, systemImage: growth.contains("-") ? "arrow.down.right" : "arrow.up.right")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(growth.contains("-") ? Color.red : HoldingsPalette.green)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 6)
-                                .background(
-                                    (growth.contains("-") ? Color.red : HoldingsPalette.green).opacity(0.07),
-                                    in: Capsule()
-                                )
-                        }
-                    }
+                industryHeading(industry)
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.circle")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
-
-                if history.count >= 2 {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("历史变化")
-                                .font(.system(size: 12, weight: .semibold))
-                            Spacer()
-                            Text("\(String(history.first?.year ?? 0))–\(String(history.last?.year ?? 0))")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                        historyChart(history)
-                            .frame(height: 176)
-                    }
-                    .padding(.top, 2)
-                } else {
-                    HStack(spacing: 9) {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .foregroundStyle(InvestmentDesign.accent)
-                        Text("该指标暂无连续可比历史序列，当前仅展示权威机构已发布的最新值。")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(3)
-                    }
-                    .padding(12)
-                    .background(InvestmentDesign.accentSoft, in: RoundedRectangle(cornerRadius: 10))
-                }
+                paneContent(industry, page: page)
             }
-            .padding(16)
-            .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius).stroke(HoldingsPalette.line))
+            .padding(.horizontal, 22)
+            .padding(.bottom, 32)
         }
-    }
-
-    private func historyChart(_ history: [IndustryPayload.HistoryPoint]) -> some View {
-        Chart(history) { point in
-            AreaMark(
-                x: .value("年份", String(point.year)),
-                y: .value("规模", point.value)
-            )
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [InvestmentDesign.accent.opacity(0.2), InvestmentDesign.accent.opacity(0.015)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-
-            LineMark(
-                x: .value("年份", String(point.year)),
-                y: .value("规模", point.value)
-            )
-            .foregroundStyle(InvestmentDesign.accent)
-            .lineStyle(StrokeStyle(lineWidth: 2))
-
-            PointMark(
-                x: .value("年份", String(point.year)),
-                y: .value("规模", point.value)
-            )
-            .foregroundStyle(InvestmentDesign.accent)
-            .symbolSize(34)
-            .annotation(position: .top, spacing: 5) {
-                Text(point.value.formatted(.number.precision(.fractionLength(0...1))))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(HoldingsPalette.ink)
-            }
-        }
-        .chartXAxis {
-            AxisMarks(values: history.map { String($0.year) }) {
-                AxisGridLine().foregroundStyle(HoldingsPalette.line)
-                AxisValueLabel()
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) {
-                AxisGridLine().foregroundStyle(HoldingsPalette.line)
-                AxisValueLabel()
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func autoSalesSection(_ sales: IndustryPayload.AutoSales) -> some View {
-        let latest = sales.monthly.last
-        let previous = sales.monthly.dropLast().last
-        let latestValue = latest.map { autoSalesMetric == .nev ? $0.nevSales : $0.totalSales } ?? 0
-        let previousValue = previous.map { autoSalesMetric == .nev ? $0.nevSales : $0.totalSales }
-        let yoy = latest.map { autoSalesMetric == .nev ? $0.nevYoY : $0.totalYoY } ?? 0
-        let mom = previousValue.map { latestValue / $0 * 100 - 100 }
-
-        return sectionContainer(number: "02", title: "汽车市场月报") {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(sales.period)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    sourceLink(sales.source)
-                }
-
-                Picker("销量口径", selection: $autoSalesMetric) {
-                    ForEach(AutoSalesMetric.allCases) { metric in
-                        Text(metric.rawValue).tag(metric)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                HStack(spacing: 8) {
-                    autoSalesStat(title: "最新月销量", value: "\(latestValue.formatted(.number.precision(.fractionLength(1))))\(sales.unit)", tint: InvestmentDesign.accent)
-                    autoSalesStat(title: "同比", value: signedPercent(yoy), tint: yoy >= 0 ? HoldingsPalette.green : .red)
-                    autoSalesStat(title: "环比", value: mom.map(signedPercent) ?? "—", tint: (mom ?? 0) >= 0 ? HoldingsPalette.green : .red)
-                }
-
-                Chart(sales.monthly) { point in
-                    let value = autoSalesMetric == .nev ? point.nevSales : point.totalSales
-                    AreaMark(
-                        x: .value("月份", point.period),
-                        y: .value("销量", value)
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [InvestmentDesign.accent.opacity(0.2), InvestmentDesign.accent.opacity(0.01)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    LineMark(
-                        x: .value("月份", point.period),
-                        y: .value("销量", value)
-                    )
-                    .foregroundStyle(InvestmentDesign.accent)
-                    .lineStyle(StrokeStyle(lineWidth: 2.2))
-                }
-                .chartXAxis {
-                    AxisMarks(values: sales.monthly.enumerated().compactMap { index, item in
-                        index.isMultiple(of: 2) ? item.period : nil
-                    }) { value in
-                        AxisGridLine().foregroundStyle(HoldingsPalette.line)
-                        AxisValueLabel {
-                            if let period = value.as(String.self) {
-                                Text(String(period.suffix(2)) + "月")
-                            }
-                        }
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) {
-                        AxisGridLine().foregroundStyle(HoldingsPalette.line)
-                        AxisValueLabel().font(.system(size: 9)).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(height: 190)
-
-                if let latest {
-                    HStack {
-                        Label("新能源渗透率", systemImage: "bolt.car.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(HoldingsPalette.ink.opacity(0.72))
-                        Spacer()
-                        Text("\(latest.nevPenetrationRate.formatted(.number.precision(.fractionLength(1))))%")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(InvestmentDesign.accent)
-                    }
-                    .padding(12)
-                    .background(InvestmentDesign.accentSoft, in: RoundedRectangle(cornerRadius: 10))
-                }
-            }
-            .padding(16)
-            .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius).stroke(HoldingsPalette.line))
-        }
-    }
-
-    private func autoSalesStat(title: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-        .background(tint.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func signedPercent(_ value: Double) -> String {
-        String(format: "%@%.1f%%", value >= 0 ? "+" : "", value)
-    }
-
-    private func chainSection(_ industry: IndustryPayload) -> some View {
-        sectionContainer(number: "03", title: "产业链全景") {
-            VStack(spacing: 12) {
-                ForEach(Array(industry.chain.enumerated()), id: \.element.id) { index, group in
-                    chainStage(group, companyCount: industry.companies.filter { $0.stageID == group.id }.count, index: index)
-                }
-            }
-        }
-    }
-
-    private func chainStage(
-        _ group: IndustryPayload.ChainGroup,
-        companyCount: Int,
-        index: Int
-    ) -> some View {
-        let color = chainColor(index)
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                Text(group.level)
-                    .font(.system(size: 16, weight: .bold, design: .serif))
-                    .foregroundStyle(.white)
-                    .frame(width: 54, height: 34)
-                    .background(color, in: Capsule())
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(group.title)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(HoldingsPalette.ink)
-                    Text("\(group.items.count) 个关键环节 · \(companyCount) 家代表企业")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(String(format: "%02d", index + 1))
-                    .font(.system(size: 18, weight: .medium, design: .serif))
-                    .foregroundStyle(color.opacity(0.45))
-            }
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 94), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(Array(group.items.enumerated()), id: \.offset) { itemIndex, item in
-                    HStack(spacing: 7) {
-                        Image(systemName: chainItemIcon(index: index, itemIndex: itemIndex))
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(color)
-                            .frame(width: 22, height: 22)
-                            .background(color.opacity(0.09), in: Circle())
-                        Text(item)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(HoldingsPalette.ink.opacity(0.82))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 8)
-                    .frame(height: 36)
-                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(HoldingsPalette.line))
-                }
-            }
-        }
-        .padding(15)
-        .background(color.opacity(0.035), in: RoundedRectangle(cornerRadius: 15))
-        .overlay(RoundedRectangle(cornerRadius: 15).stroke(color.opacity(0.16)))
-    }
-
-    private func companySection(_ industry: IndustryPayload) -> some View {
-        let filteredCompanies = selectedStageID.map { stageID in
-            industry.companies.filter { $0.stageID == stageID }
-        } ?? industry.companies
-
-        return sectionContainer(number: "04", title: "代表企业") {
-            VStack(alignment: .leading, spacing: 14) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 18) {
-                        stageFilterButton(title: "全部", id: nil, count: industry.companies.count)
-                        ForEach(industry.chain) { group in
-                            stageFilterButton(
-                                title: group.level,
-                                id: group.id,
-                                count: industry.companies.filter { $0.stageID == group.id }.count
-                            )
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .scrollIndicators(.hidden)
-
-                LazyVStack(spacing: 10) {
-                    ForEach(filteredCompanies) { company in
-                        companyRow(company, industry: industry)
-                    }
-                }
-            }
-        }
-    }
-
-    private func stageFilterButton(title: String, id: String?, count: Int) -> some View {
-        let selected = selectedStageID == id
-        return Button {
-            withAnimation(.easeOut(duration: 0.18)) {
-                selectedStageID = id
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Text(title)
-                Text("\(count)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(selected ? InvestmentDesign.accent.opacity(0.75) : Color.secondary.opacity(0.55))
-            }
-            .font(.system(size: 13, weight: selected ? .semibold : .regular))
-            .foregroundStyle(selected ? InvestmentDesign.accent : HoldingsPalette.ink.opacity(0.7))
-            .padding(.bottom, 7)
-            .overlay(alignment: .bottom) {
-                Capsule()
-                    .fill(selected ? InvestmentDesign.accent : .clear)
-                    .frame(height: 2)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
-    private func companyRow(_ company: IndustryPayload.Company, industry: IndustryPayload) -> some View {
-        let stageIndex = industry.chain.firstIndex(where: { $0.id == company.stageID }) ?? 0
-        let stage = industry.chain.first(where: { $0.id == company.stageID })
-        let color = chainColor(stageIndex)
-
-        return HStack(spacing: 12) {
-            Text(company.monogram ?? String(company.name.prefix(2)))
-                .font(.system(size: 13, weight: .bold, design: .serif))
-                .foregroundStyle(color)
-                .frame(width: 46, height: 46)
-                .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 11))
-                .overlay(RoundedRectangle(cornerRadius: 11).stroke(color.opacity(0.2)))
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(company.name)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(HoldingsPalette.ink)
-                    if let ticker = company.ticker {
-                        Text(ticker)
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(HoldingsPalette.line, in: Capsule())
-                    }
-                }
-                Text(company.role)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 8)
-
-            if let stage {
-                Text(stage.level)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(color)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(color.opacity(0.07), in: Capsule())
-            }
-        }
-        .padding(13)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(HoldingsPalette.line))
-    }
-
-    private func insightSection(_ industry: IndustryPayload) -> some View {
-        sectionContainer(number: "05", title: "研究观察") {
-            VStack(spacing: 10) {
-                ForEach(Array(industry.insights.enumerated()), id: \.element.id) { index, insight in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: insightIcon(index))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(chainColor(index))
-                            .frame(width: 34, height: 34)
-                            .background(chainColor(index).opacity(0.08), in: Circle())
-
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(insight.title)
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(HoldingsPalette.ink)
-                            Text(insight.detail)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(3)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(14)
-                    .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 13))
-                    .overlay(RoundedRectangle(cornerRadius: 13).stroke(HoldingsPalette.line))
-                }
-            }
-        }
-    }
-
-    private func provenanceSection(_ industry: IndustryPayload) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("数据口径与来源", systemImage: "checkmark.shield")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(HoldingsPalette.ink)
-
-            ForEach(Array(industry.provenance.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .top, spacing: 8) {
-                    Circle()
-                        .fill(InvestmentDesign.accent)
-                        .frame(width: 4, height: 4)
-                        .padding(.top, 6)
-                    Text(item)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(3)
-                }
-            }
-        }
-        .padding(15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 13))
-    }
-
-    private func sectionContainer<Content: View>(
-        number: String,
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 9) {
-                Text(number)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(InvestmentDesign.accent)
-                Text(title)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(HoldingsPalette.ink)
-            }
-            content()
-        }
+        .scrollIndicators(.hidden)
+        .refreshable { await load() }
+        .accessibilityIdentifier("industry-page-\(page.rawValue)")
     }
 
     @ViewBuilder
-    private func sourceLink(_ source: IndustryPayload.Scale.Source) -> some View {
-        if let url = source.url {
-            Link(destination: url) {
-                Label(source.name, systemImage: "arrow.up.right")
-                    .labelStyle(.titleAndIcon)
+    private func paneContent(_ industry: IndustryPayload, page: IndustryPane) -> some View {
+        switch page {
+        case .overview:
+            IndustryOverview(industry: industry)
+        case .chain:
+            IndustryChain(industry: industry) { stage in
+                selectedStageID = stage
+                withAnimation(.easeOut(duration: 0.22)) { pane = .companies }
             }
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.secondary)
-        } else {
-            Text(source.name)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+        case .companies:
+            IndustryCompanies(industry: industry, selectedStageID: $selectedStageID)
+        case .research:
+            IndustryResearch(industry: industry)
         }
     }
 
-    private var loadingState: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("正在加载产业数据")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 360)
-    }
-
-    private var errorState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text("产业数据暂时不可用")
-                .font(.system(size: 15, weight: .semibold))
-            Button("重新加载") { Task { await load() } }
-                .buttonStyle(.bordered)
-        }
-        .frame(maxWidth: .infinity, minHeight: 360)
-        .accessibilityLabel(loadError ? "产业数据加载失败" : "产业数据为空")
-    }
-
-    @MainActor
-    private func load() async {
+    @MainActor private func load() async {
         isLoading = true
         defer { isLoading = false }
         do {
             let loaded = try await IndustryPanoramaService().industries()
+            guard !Task.isCancelled else { return }
             industries = loaded
-            if selectedID == nil || !loaded.contains(where: { $0.id == selectedID }) {
-                selectedID = loaded.first?.id
-            }
-            loadError = false
-        } catch is CancellationError {
-            return
+            if selectedID == nil || !loaded.contains(where: { $0.id == selectedID }) { selectedID = loaded.first?.id }
+            errorMessage = nil
         } catch {
-            industries = []
-            loadError = true
-#if DEBUG
-            print("[IndustryPanorama] load failed: \(error)")
-#endif
+            guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
+            errorMessage = NetworkErrorPresentation.message(for: error)
+        }
+    }
+}
+
+private struct IndustryOverview: View {
+    let industry: IndustryPayload
+    @State private var showsMonthly = true
+    @State private var salesMetric: AutoSalesMetric = .nev
+    private var months: [IndustryPayload.AutoSales.Month] { (industry.autoSales?.monthly ?? []).sorted { $0.period < $1.period } }
+    private var history: [IndustryPayload.HistoryPoint] { (industry.history ?? []).sorted { $0.year < $1.year } }
+    private var isNEV: Bool { salesMetric == .nev }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            if showsMonthly, let sales = industry.autoSales, let latest = months.last {
+                monthlyHeadline(sales, latest: latest)
+            } else {
+                IndustryHeadline(
+                    label: industry.scale.metric, period: industry.scale.period,
+                    parts: IndustryMetricParts(industry.scale.value), growth: industry.scale.growth
+                )
+            }
+            if !months.isEmpty || history.count > 1 {
+                trendSection
+            }
+            if months.isEmpty || !showsMonthly {
+                IndustrySourceNote(source: industry.scale.source, period: industry.scale.period)
+            }
+            if !industry.anchors.isEmpty {
+                VStack(alignment: .leading, spacing: 13) {
+                    IndustrySectionHeading(title: "关注环节", subtitle: "从业务理解这个行业")
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                        ForEach(industry.anchors, id: \.self) { anchor in
+                            HStack(alignment: .top, spacing: 8) {
+                                Circle().fill(IndustryPalette.accent).frame(width: 5, height: 5).padding(.top, 7)
+                                Text(anchor).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+            if months.isEmpty && history.count < 2 {
+                Label("当前提供该统计期的规模数据，暂无连续历史序列。", systemImage: "info.circle")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 16))
+            }
         }
     }
 
-    private func scaleValueParts(_ value: String) -> (value: String, unit: String) {
-        for unit in ["万亿元", "亿元", "亿块", "万辆", "万家", "万架", "万台", "万颗", "次", "家"]
-        where value.hasSuffix(unit) {
-            return (String(value.dropLast(unit.count)), unit)
+    private func monthlyHeadline(_ sales: IndustryPayload.AutoSales, latest: IndustryPayload.AutoSales.Month) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            IndustryHeadline(
+                label: isNEV ? "新能源汽车月销量" : "汽车月销量",
+                period: IndustryDataPresentation.monthLabel(latest.period),
+                parts: IndustryMetricParts((isNEV ? latest.nevSales : latest.totalSales).formatted(.number.precision(.fractionLength(1))) + sales.unit),
+                growth: IndustryDataPresentation.signedPercent(isNEV ? latest.nevYoY : latest.totalYoY) + " 同比"
+            )
+            HStack(spacing: 0) {
+                IndustrySecondaryMetric(
+                    title: "销量环比",
+                    value: IndustryDataPresentation.monthlyChange(months, isNEV: isNEV).map(IndustryDataPresentation.signedPercent) ?? "—"
+                )
+                IndustryPalette.line.frame(width: 1, height: 38).padding(.horizontal, 18)
+                IndustrySecondaryMetric(title: "新能源渗透率", value: latest.nevPenetrationRate.formatted(.number.precision(.fractionLength(1))) + "%")
+            }
+            .padding(14)
+            .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 18))
         }
-        return (value, "")
     }
 
-    private func anchorIcon(_ index: Int) -> String {
-        ["scope", "point.3.connected.trianglepath.dotted", "building.2", "chart.line.uptrend.xyaxis"][index % 4]
-    }
-
-    private func insightIcon(_ index: Int) -> String {
-        ["chart.bar.xaxis", "scope", "shield.checkered"][index % 3]
-    }
-
-    private func chainItemIcon(index: Int, itemIndex: Int) -> String {
-        let icons = [
-            ["cube.fill", "circle.grid.2x2.fill", "shippingbox.fill", "drop.fill", "square.stack.3d.up.fill", "bolt.fill"],
-            ["gearshape.2.fill", "cpu.fill", "square.3.layers.3d", "wrench.and.screwdriver.fill", "building.2.fill"],
-            ["network", "antenna.radiowaves.left.and.right", "server.rack", "chart.xyaxis.line", "person.2.fill"]
-        ]
-        let group = icons[index % icons.count]
-        return group[itemIndex % group.count]
-    }
-
-    private func chainColor(_ index: Int) -> Color {
-        [Color(red: 0.72, green: 0.34, blue: 0.08), HoldingsPalette.green, HoldingsPalette.blue][index % 3]
+    private var trendSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("规模趋势").font(.title3.weight(.semibold))
+                Spacer()
+                if !months.isEmpty && history.count > 1 {
+                    Picker("统计周期", selection: $showsMonthly) {
+                        Text("月度").tag(true)
+                        Text("年度").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 142)
+                    .accessibilityIdentifier("industry-trend-period")
+                }
+            }
+            if showsMonthly && !months.isEmpty, let sales = industry.autoSales {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(sales.period).font(.subheadline.weight(.medium))
+                        Text("单位：\(sales.unit)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("销量口径", selection: $salesMetric) {
+                        ForEach(AutoSalesMetric.allCases) { item in Text(item.rawValue).tag(item) }
+                    }
+                    .pickerStyle(.menu)
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityIdentifier("industry-sales-metric")
+                }
+                IndustryTrendChart(points: months.map {
+                    IndustryTrendPoint(id: $0.period, label: String($0.period.suffix(2)) + "月", value: isNEV ? $0.nevSales : $0.totalSales)
+                }, unit: sales.unit)
+                IndustrySourceNote(source: sales.source, period: sales.period)
+            } else if history.count > 1 {
+                let parts = IndustryMetricParts(industry.scale.value)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(history.first!.year.description)—\(history.last!.year.description)")
+                    Spacer()
+                    Text("单位：\(parts.unit)")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                IndustryTrendChart(points: history.map {
+                    IndustryTrendPoint(id: String($0.year), label: String($0.year), value: $0.value)
+                }, unit: parts.unit)
+            }
+        }
     }
 }
 
-private extension HoldingsPalette {
-    static let paper = InvestmentDesign.canvas
-    static let ink = Color.primary
-    static let line = InvestmentDesign.divider
+private struct IndustryHeadline: View {
+    let label: String
+    let period: String
+    let parts: IndustryMetricParts
+    let growth: String?
+    @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 52
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .top) {
+                Text(label).font(.subheadline).foregroundStyle(.secondary)
+                Spacer(minLength: 12)
+                Text(period).font(.caption.weight(.medium)).foregroundStyle(IndustryPalette.accent)
+                    .multilineTextAlignment(.trailing)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if !parts.qualifier.isEmpty { Text(parts.qualifier).font(.title3).foregroundStyle(.secondary) }
+                Text(parts.value)
+                    .font(.system(size: numberSize, weight: .semibold, design: .rounded))
+                    .tracking(-1.6).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                    .accessibilityIdentifier("industry-primary-value")
+                if !parts.unit.isEmpty {
+                    Text(parts.unit).font(.title3.weight(.medium)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if let growth {
+                    HStack(spacing: 4) {
+                        Image(systemName: growth.contains("-") || growth.contains("−") ? "arrow.down.right" : "arrow.up.right")
+                        Text(growth)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(growth.contains("-") || growth.contains("−") ? IndustryPalette.negative : IndustryPalette.accent)
+                    .multilineTextAlignment(.trailing)
+                }
+            }
+        }
+        .padding(.vertical, 3)
+    }
 }
 
-#Preview {
-    IndustryPanoramaView()
+private struct IndustrySecondaryMetric: View {
+    let title: String
+    let value: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title2.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
+
+private struct IndustryTrendPoint: Identifiable {
+    let id: String
+    let label: String
+    let value: Double
+}
+
+private struct IndustryTrendChart: View {
+    let points: [IndustryTrendPoint]
+    let unit: String
+    private var ceiling: Double { max(1, (points.map(\.value).max() ?? 1) * 1.25) }
+
+    var body: some View {
+        Chart(points) { point in
+            BarMark(x: .value("时期", point.label), y: .value("规模", point.value), width: .ratio(0.48))
+                .cornerRadius(5)
+                .foregroundStyle(point.id == points.last?.id ? IndustryPalette.accent : IndustryPalette.accent.opacity(0.28))
+                .annotation(position: .top, spacing: 7) {
+                    Text(point.value.formatted(.number.precision(.fractionLength(0...1))))
+                        .font(.caption.weight(.medium)).monospacedDigit()
+                        .foregroundStyle(point.id == points.last?.id ? IndustryPalette.accent : .secondary)
+                }
+                .accessibilityLabel(point.label)
+                .accessibilityValue(point.value.formatted() + unit)
+        }
+        .chartYScale(domain: 0...ceiling)
+        .chartXAxis {
+            AxisMarks { _ in
+                AxisValueLabel().font(.caption).foregroundStyle(Color.secondary)
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 4])).foregroundStyle(IndustryPalette.line)
+                AxisValueLabel().font(.caption2).foregroundStyle(Color.secondary)
+            }
+        }
+        .frame(height: 186)
+        .accessibilityIdentifier("industry-trend-chart")
+    }
+}
+
+private struct IndustrySectionHeading: View {
+    let title: String
+    let subtitle: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.title3.weight(.semibold))
+            Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct IndustrySourceNote: View {
+    let source: IndustryPayload.Scale.Source
+    let period: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text("来源")
+                if let url = source.url {
+                    Link(destination: url) {
+                        Text(source.name) + Text(" ↗")
+                    }
+                } else { Text(source.name) }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            Text("统计期：\(period)" + (source.publishedAt.map { "  ·  发布：" + String($0.prefix(10)) } ?? ""))
+                .font(.caption2).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct IndustryChain: View {
+    let industry: IndustryPayload
+    let onShowCompanies: (String) -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            IndustrySectionHeading(title: "产业链结构", subtitle: "从供给到应用，共 \(industry.chain.count) 个环节。")
+            ForEach(Array(industry.chain.enumerated()), id: \.element.id) { index, group in
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(spacing: 10) {
+                        Text(String(format: "%02d", index + 1))
+                            .font(.subheadline.weight(.semibold).monospaced())
+                            .foregroundStyle(IndustryPalette.accent)
+                            .frame(width: 34, height: 34)
+                            .background(IndustryPalette.accent.opacity(0.1), in: Circle())
+                        Rectangle().fill(IndustryPalette.line).frame(width: 1)
+                    }
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(group.level).font(.caption.weight(.semibold)).foregroundStyle(IndustryPalette.accent)
+                            Text(group.title).font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                        }
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                            ForEach(Array(group.items.enumerated()), id: \.offset) { _, item in
+                                Text(item).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        let count = industry.companies.filter { $0.stageID == group.id }.count
+                        if count > 0 {
+                            Button { onShowCompanies(group.id) } label: {
+                                HStack {
+                                    Text("查看本环节企业 · \(count)")
+                                    Image(systemName: "arrow.right")
+                                }
+                                .font(.subheadline.weight(.medium))
+                                .frame(minHeight: 40)
+                            }
+                            .buttonStyle(.plain).foregroundStyle(IndustryPalette.accent)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 10)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct IndustryCompanies: View {
+    let industry: IndustryPayload
+    @Binding var selectedStageID: String?
+    private var companies: [IndustryPayload.Company] {
+        guard let selectedStageID else { return industry.companies }
+        return industry.companies.filter { $0.stageID == selectedStageID }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            IndustrySectionHeading(title: "代表企业", subtitle: "按产业链环节查看，共收录 \(industry.companies.count) 家。")
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    stageButton("全部", id: nil)
+                    ForEach(industry.chain) { group in stageButton(group.level, id: group.id) }
+                }
+            }
+            .scrollIndicators(.hidden)
+            LazyVStack(spacing: 0) {
+                ForEach(companies) { company in
+                    HStack(alignment: .top, spacing: 13) {
+                        Text(company.monogram ?? String(company.name.prefix(2)))
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .foregroundStyle(IndustryPalette.accent)
+                            .frame(width: 48, height: 48)
+                            .background(IndustryPalette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(company.name).font(.headline).fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                if let stage = industry.chain.first(where: { $0.id == company.stageID }) {
+                                    Text(stage.level).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            if let ticker = company.ticker {
+                                Text(ticker).font(.caption.monospaced()).foregroundStyle(IndustryPalette.accent)
+                            }
+                            Text(company.role).font(.subheadline).foregroundStyle(.secondary)
+                                .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 18)
+                    .overlay(alignment: .bottom) { IndustryPalette.line.frame(height: 0.5) }
+                }
+            }
+            if companies.isEmpty {
+                Text("这个环节暂未收录代表企业。")
+                    .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 20)
+            }
+        }
+    }
+
+    private func stageButton(_ title: String, id: String?) -> some View {
+        Button { selectedStageID = id } label: {
+            Text(title).font(.subheadline.weight(selectedStageID == id ? .semibold : .regular))
+                .foregroundStyle(selectedStageID == id ? IndustryPalette.canvas : .primary)
+                .padding(.horizontal, 17).frame(minHeight: 40)
+                .background(selectedStageID == id ? IndustryPalette.accent : IndustryPalette.panel, in: Capsule())
+        }
+        .buttonStyle(.plain).accessibilityAddTraits(selectedStageID == id ? .isSelected : [])
+    }
+}
+
+private struct IndustryResearch: View {
+    let industry: IndustryPayload
+    var body: some View {
+        VStack(alignment: .leading, spacing: 26) {
+            IndustrySectionHeading(title: "研究观察", subtitle: "建立理解行业的线索")
+            ForEach(industry.insights) { insight in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(insight.title).font(.title3.weight(.semibold))
+                    Text(insight.detail).font(.body).foregroundStyle(.secondary)
+                        .lineSpacing(6).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 16)
+                .overlay(alignment: .leading) { IndustryPalette.accent.opacity(0.35).frame(width: 3) }
+            }
+            Divider().padding(.vertical, 2)
+            VStack(alignment: .leading, spacing: 15) {
+                IndustrySectionHeading(title: "数据来源与口径", subtitle: "原始发布机构与参考资料")
+                IndustrySourceNote(source: industry.scale.source, period: industry.scale.period)
+                if let sales = industry.autoSales { IndustrySourceNote(source: sales.source, period: sales.period) }
+                ForEach(Array(industry.provenance.enumerated()), id: \.offset) { _, item in
+                    Label(item, systemImage: "checkmark.circle")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+#Preview { IndustryPanoramaView() }

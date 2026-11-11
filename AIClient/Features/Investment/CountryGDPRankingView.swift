@@ -1,10 +1,6 @@
 import SwiftUI
 import Observation
 
-enum GDPDesign {
-    static let porcelain = InvestmentDesign.surface
-}
-
 struct CountryGDPRankingResponse: Decodable {
     let success: Bool
     let data: CountryGDPRanking
@@ -141,7 +137,7 @@ struct GlobalAsset: Decodable, Identifiable {
     let priceUSD: Double
     let change24HPercent: Double
     let change7DPercent: Double
-    let iconURL: URL?
+    let iconURL: String
 
     var id: String { symbol }
 
@@ -198,12 +194,6 @@ final class GlobalRankingStore {
         globalAssetsService = GlobalAssetsService(baseURL: baseURL, session: session)
     }
 
-    func loadSummary() async {
-        async let countryGDP: Void = loadCountryGDP()
-        async let globalAssets: Void = loadGlobalAssets()
-        _ = await (countryGDP, globalAssets)
-    }
-
     func loadCountryGDP() async {
         guard !isLoadingCountryGDP else { return }
         isLoadingCountryGDP = true
@@ -239,16 +229,16 @@ struct CountryGDPRankingView: View {
     @State private var category: GlobalRankingCategory
     @State private var selectedCountry: CountryGDPRoute?
 
-    init(store: GlobalRankingStore) {
+    init(store: GlobalRankingStore, initialCategory: GlobalRankingCategory = .countryGDP) {
         self.store = store
         #if DEBUG
         _category = State(
             initialValue: ProcessInfo.processInfo.arguments.contains("--global-assets-preview")
                 ? .globalAssets
-                : .countryGDP
+                : initialCategory
         )
         #else
-        _category = State(initialValue: .countryGDP)
+        _category = State(initialValue: initialCategory)
         #endif
     }
 
@@ -266,7 +256,7 @@ struct CountryGDPRankingView: View {
                                 rankingSection(ranking)
                                 sourceFooter(ranking)
                             }
-                            .padding(.bottom, 28)
+                            .padding(.bottom, 88)
                         }
                         .background(InvestmentDesign.surface)
                         .scrollIndicators(.hidden)
@@ -282,12 +272,11 @@ struct CountryGDPRankingView: View {
             }
         }
         .background(InvestmentDesign.surface)
-        .sheet(item: $selectedCountry) { route in
+        .appSheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
-                .presentationBackground(InvestmentDesign.surface)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationBackground(InvestmentDesign.surface)
         }
         .task(id: "\(rootTabIsActive):\(category.rawValue)") {
             if rootTabIsActive, category == .countryGDP, store.countryGDP == nil {
@@ -510,7 +499,7 @@ struct CountryGDPRankingView: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "checkmark.shield.fill")
                     .foregroundStyle(InvestmentDesign.accent)
-                Text("数据来自世界银行 GDP 总量与人均 GDP 指标，按数据库中的 \(ranking.year) 年现价美元总量排序。点击查看原始口径。")
+                Text("数据来自世界银行，按 \(ranking.year) 年现价美元 GDP 总量排序。点按查看原始口径。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
@@ -529,21 +518,14 @@ struct CountryGDPRankingView: View {
     }
 
     private var loadingState: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("正在读取 GDP 排名")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 320)
+        ContentLoadingPlaceholder(title: "正在读取 GDP 排名")
     }
 
     private var errorState: some View {
         ContentUnavailableView {
             Label("GDP 排名暂不可用", systemImage: "chart.bar.xaxis")
         } description: {
-            Text("服务器未返回可用的排名数据")
+            Text("排名数据暂不可用，请稍后重试")
         } actions: {
             Button("重新加载") {
                 Task { await store.loadCountryGDP() }

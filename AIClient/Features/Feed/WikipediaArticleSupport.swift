@@ -89,6 +89,14 @@ actor WikipediaEntityResolver {
 
     private enum CacheEntry { case found(WikipediaEntity), missing }
     private var cache: [String: CacheEntry] = [:]
+    private let fetchPages: @Sendable ([String], String) async throws -> [WikipediaRelayEntity]
+
+    init(fetchPages: @escaping @Sendable ([String], String) async throws -> [WikipediaRelayEntity] = { titles, language in
+        try await APIClient(baseURL: ServerConfiguration.currentURL)
+            .fetchWikipediaEntities(titles: titles, language: language)
+    }) {
+        self.fetchPages = fetchPages
+    }
 
     func resolve(paragraphs: [String]) async -> [Int: [WikipediaEntity]] {
         let candidates = WikipediaEntityCandidateExtractor.candidates(in: paragraphs)
@@ -105,18 +113,19 @@ actor WikipediaEntityResolver {
             }
         }
 
-        if !uncached.isEmpty {
-            var fetched: [String: WikipediaEntity] = [:]
-            for start in stride(from: 0, to: uncached.count, by: 40) {
-                let end = min(start + 40, uncached.count)
-                let batch = Array(uncached[start..<end])
-                let batchResult = (try? await fetch(titles: batch, language: "zh")) ?? [:]
-                fetched.merge(batchResult) { _, latest in latest }
-            }
-            for candidate in uncached {
+        for start in stride(from: 0, to: uncached.count, by: 40) {
+            guard !Task.isCancelled else { return [:] }
+            let end = min(start + 40, uncached.count)
+            let batch = Array(uncached[start..<end])
+            // Only a successful relay response can establish a missing entity.
+            guard let fetched = try? await fetch(titles: batch, language: "zh") else { continue }
+            guard !Task.isCancelled else { return [:] }
+            for candidate in batch {
                 let key = cacheKey(candidate, language: "zh")
                 if let entity = fetched[candidate] {
                     cache[key] = .found(entity)
+                    resolved[candidate] = entity
+                } else if case .found(let entity) = cache[key] {
                     resolved[candidate] = entity
                 } else {
                     cache[key] = .missing
@@ -136,8 +145,7 @@ actor WikipediaEntityResolver {
     }
 
     private func fetch(titles: [String], language: String) async throws -> [String: WikipediaEntity] {
-        let pages = try await APIClient(baseURL: ServerConfiguration.currentURL)
-            .fetchWikipediaEntities(titles: titles, language: language)
+        let pages = try await fetchPages(titles, language)
         var result: [String: WikipediaEntity] = [:]
         for page in pages {
             let trimmedSummary = page.extract?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -155,25 +163,6 @@ actor WikipediaEntityResolver {
 
     private func cacheKey(_ title: String, language: String) -> String {
         "\(language):\(title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current))"
-    }
-}
-
-private struct WikipediaQueryResponse: Decodable {
-    let query: Query?
-
-    struct Query: Decodable {
-        let normalized: [Alias]?
-        let redirects: [Alias]?
-        let pages: [Page]?
-    }
-
-    struct Alias: Decodable { let from: String; let to: String }
-    struct Page: Decodable {
-        let pageid: Int?
-        let title: String
-        let extract: String?
-        let fullurl: String?
-        let missing: Bool?
     }
 }
 
@@ -291,6 +280,7 @@ struct WikipediaReaderView: View {
     let entity: WikipediaEntity
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var browser = WikipediaBrowserModel()
     @State private var presentedLink: WikipediaEntity?
     @State private var article: WikipediaRelayArticle?
@@ -300,62 +290,44 @@ struct WikipediaReaderView: View {
         VStack(spacing: 0) {
             readerHeader
 
-            GeometryReader { proxy in
-                ZStack(alignment: .bottom) {
-                    if let article {
-                        WikipediaWebView(
-                            url: article.articleURL,
-                            html: WikipediaRelayedHTML.document(
-                                article.html,
-                                title: article.title,
-                                baseURL: article.articleURL
-                            ),
-                            model: browser
-                        ) {
-                            presentedLink = $0
-                        }
-                        .id(article.pageID)
-                    } else if let loadError {
-                        ContentUnavailableView {
-                            Label("百科内容载入失败", systemImage: "wifi.exclamationmark")
-                        } description: {
-                            Text(loadError)
-                        } actions: {
-                            Button("重试") { Task { await loadArticle() } }
-                        }
-                    } else {
-                        ProgressView("正在通过服务器载入百科…")
+            Group {
+                if let article {
+                    WikipediaWebView(
+                        url: article.articleURL,
+                        html: WikipediaRelayedHTML.document(article.html, title: article.title, baseURL: article.articleURL),
+                        model: browser
+                    ) { presentedLink = $0 }
+                    .id(article.pageID)
+                } else if let loadError {
+                    ContentUnavailableView {
+                        Label("百科内容载入失败", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(loadError)
+                    } actions: {
+                        Button("重试") { Task { await loadArticle() } }
                     }
-
-                    readerToolbar
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, max(12, proxy.safeAreaInsets.bottom))
+                } else {
+                    ContentLoadingPlaceholder(title: "正在载入百科", layout: .article, rowCount: 4)
+                        .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            readerToolbar
         }
-        .background(archivePaper.ignoresSafeArea())
-        .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(
-                action: dismiss.callAsFunction,
-                accessibilityLabel: entity.url.isWikipediaURL ? "关闭维基百科" : "关闭网页"
-            )
-            .padding(.trailing, 16)
-            .padding(.bottom, 76)
-        }
+        .background(Color(uiColor: .systemBackground))
         .task(id: entity.url) { await loadArticle() }
-        .sheet(item: $presentedLink) { linkedEntity in
+        .appSheet(item: $presentedLink) { linkedEntity in
             if linkedEntity.url.isWikipediaURL {
                 WikipediaReaderView(entity: linkedEntity)
                     .wikipediaReaderPresentation()
             } else {
                 ServerArticleReaderView(url: linkedEntity.url)
                     .overlay(alignment: .bottomTrailing) {
-                        DetailSheetCloseButton(
-                            action: { presentedLink = nil },
-                            accessibilityLabel: "关闭网页详情"
-                        )
-                        .padding(16)
+                        DetailSheetControls(closeLabel: "关闭网页详情", onClose: { presentedLink = nil })
+                            .padding(12)
                     }
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(24)
             }
         }
     }
@@ -373,42 +345,12 @@ struct WikipediaReaderView: View {
     }
 
     private var readerHeader: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Text(browser.currentTitle ?? entity.title)
-                    .font(.system(size: 18, weight: .semibold, design: .serif))
-                    .foregroundStyle(archiveAccent)
-                    .lineLimit(1)
-                    .padding(.horizontal, 112)
-
-                HStack {
-                    Text(entity.url.isWikipediaURL ? "WIKIPEDIA · 中文" : (entity.url.host ?? "网页"))
-                        .font(.system(size: 11, weight: .semibold, design: .serif))
-                        .tracking(0.8)
-                        .foregroundStyle(.primary.opacity(0.72))
-                    Spacer()
-                    if !browser.isOriginalMode, browser.pageCount > 1 {
-                        Text(String(format: "%02d / %02d", browser.pageIndex + 1, browser.pageCount))
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.trailing, 8)
-                    }
-                }
-            }
-            .padding(.horizontal, 18)
-            .frame(height: 62)
-
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(Color.primary.opacity(0.10))
-                    Rectangle()
-                        .fill(archiveAccent)
-                        .frame(width: proxy.size.width * CGFloat(displayedProgress))
-                }
-            }
-            .frame(height: 2)
-            .padding(.horizontal, 18)
+        GeometryReader { proxy in
+            Rectangle()
+                .fill(archiveAccent)
+                .frame(width: proxy.size.width * CGFloat(displayedProgress))
         }
+        .frame(height: 2)
     }
 
     private var readerToolbar: some View {
@@ -423,7 +365,7 @@ struct WikipediaReaderView: View {
             readerToolbarButton("目录", systemImage: "list.bullet") {
                 browser.toggleTableOfContents()
             }
-            .disabled(!entity.url.isWikipediaURL)
+            .disabled(!entity.url.isWikipediaURL || !browser.isReaderReady)
 
             Divider().frame(height: 24)
 
@@ -433,17 +375,23 @@ struct WikipediaReaderView: View {
             ) {
                 browser.toggleOriginalMode()
             }
+            .disabled(!browser.isReaderReady)
 
             Divider().frame(height: 24)
 
             readerToolbarButton("原站", systemImage: "arrow.up.right.square") {
                 openURL(browser.currentURL ?? entity.url)
             }
+            DetailSheetCloseButton(
+                action: dismiss.callAsFunction,
+                accessibilityLabel: entity.url.isWikipediaURL ? "关闭维基百科" : "关闭网页"
+            )
+            .padding(.trailing, 8)
         }
-        .frame(height: 58)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(Color.primary.opacity(0.10), lineWidth: 0.7))
-        .shadow(color: .black.opacity(0.08), radius: 18, y: 8)
+        .accessibilityValue("第 \(browser.pageIndex + 1) 页，共 \(browser.pageCount) 页")
+        .frame(height: 52)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .top) { Divider() }
     }
 
     private func readerToolbarButton(
@@ -467,15 +415,11 @@ struct WikipediaReaderView: View {
         return min(1, max(0.02, Double(browser.pageIndex + 1) / Double(max(1, browser.pageCount))))
     }
 
-    private var archivePaper: Color {
-        Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.11, green: 0.105, blue: 0.095, alpha: 1)
-                : UIColor(red: 0.985, green: 0.969, blue: 0.925, alpha: 1)
-        })
+    private var archiveAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 0.87, green: 0.60, blue: 0.47)
+            : Color(red: 0.55, green: 0.25, blue: 0.16)
     }
-
-    private var archiveAccent: Color { Color(red: 0.55, green: 0.25, blue: 0.16) }
 }
 
 @MainActor
@@ -489,6 +433,7 @@ final class WikipediaBrowserModel: ObservableObject {
     @Published var pageIndex = 0
     @Published var pageCount = 1
     @Published var isOriginalMode = false
+    @Published private(set) var isReaderReady = false
     fileprivate weak var webView: WKWebView?
 
     func attach(_ webView: WKWebView) {
@@ -527,6 +472,7 @@ final class WikipediaBrowserModel: ObservableObject {
     }
 
     func updateDeckState(pageIndex: Int, pageCount: Int, isOriginalMode: Bool) {
+        isReaderReady = true
         self.pageIndex = min(max(0, pageIndex), max(0, pageCount - 1))
         self.pageCount = max(1, pageCount)
         self.isOriginalMode = isOriginalMode
@@ -545,9 +491,9 @@ final class WikipediaBrowserModel: ObservableObject {
 
 extension View {
     func wikipediaReaderPresentation() -> some View {
-        presentationDetents([.fraction(0.82), .large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
+        appPresentationDetents([.large])
+
+            .appPresentationCornerRadius(24)
     }
 }
 
@@ -568,14 +514,26 @@ enum WikipediaReaderStyle {
         style.id = styleID;
         style.textContent = `
           :root {
-            color-scheme: light !important;
-            --aiserver-paper: #fbf7ed;
-            --aiserver-card: #f3ecdf;
+            color-scheme: light dark !important;
+            --aiserver-paper: #ffffff;
+            --aiserver-card: #f2f2f7;
             --aiserver-ink: #27231f;
             --aiserver-muted: #746d64;
             --aiserver-accent: #8c4029;
             --aiserver-link: #745344;
             --aiserver-rule: rgba(109, 72, 52, 0.22);
+          }
+
+          @media (prefers-color-scheme: dark) {
+            :root {
+              --aiserver-paper: #000000;
+              --aiserver-card: #1c1c1e;
+              --aiserver-ink: #f2f2f7;
+              --aiserver-muted: #aeaeb2;
+              --aiserver-accent: #de9979;
+              --aiserver-link: #de9979;
+              --aiserver-rule: rgba(255, 255, 255, 0.18);
+            }
           }
 
           html, body {
@@ -902,53 +860,11 @@ enum WikipediaReaderStyle {
             flex: 0 0 100vw;
             height: 100vh;
             overflow: hidden;
-            padding: 25px 22px 112px;
+            padding: 24px 20px 40px;
             position: relative;
             scroll-snap-align: start;
             scroll-snap-stop: always;
             width: 100vw;
-          }
-
-          .aiserver-deck-slide::after {
-            bottom: 86px;
-            color: var(--aiserver-muted);
-            content: attr(data-page-label);
-            font-family: -apple-system, BlinkMacSystemFont, "SF Mono", monospace;
-            font-size: 0.62rem;
-            letter-spacing: 0.08em;
-            position: absolute;
-            right: 22px;
-          }
-
-          .aiserver-deck-cover {
-            align-items: flex-end;
-            background: #181512;
-            color: #fff;
-            display: flex;
-            padding: 0 0 112px;
-          }
-
-          .aiserver-deck-cover-image {
-            height: 100%;
-            inset: 0;
-            object-fit: cover;
-            object-position: center top;
-            opacity: 0.72;
-            position: absolute;
-            width: 100%;
-          }
-
-          .aiserver-deck-cover-shade {
-            background: linear-gradient(180deg, rgba(10, 8, 6, 0.05) 22%, rgba(10, 8, 6, 0.94) 100%);
-            inset: 0;
-            position: absolute;
-          }
-
-          .aiserver-deck-cover-copy {
-            padding: 26px 24px;
-            position: relative;
-            width: 100%;
-            z-index: 1;
           }
 
           .aiserver-deck-kicker {
@@ -961,32 +877,12 @@ enum WikipediaReaderStyle {
             text-transform: uppercase;
           }
 
-          .aiserver-deck-cover .aiserver-deck-kicker { color: #e3c1ad; }
-
-          .aiserver-deck-cover-title {
-            color: inherit;
-            font-family: "Songti SC", Georgia, serif;
-            font-size: clamp(2.65rem, 12vw, 4.4rem);
-            font-weight: 700;
-            letter-spacing: -0.035em;
-            line-height: 1.02;
-            margin: 0;
-          }
-
-          .aiserver-deck-cover-description {
-            color: rgba(255, 255, 255, 0.74);
-            font-size: 0.82rem;
-            line-height: 1.55;
-            margin: 16px 0 0;
-            max-width: 92%;
-          }
-
           .aiserver-deck-section {
             align-items: flex-end;
             background: var(--aiserver-accent);
             color: #fff8ed;
             display: flex;
-            padding-bottom: 134px;
+            padding-bottom: 40px;
           }
 
           .aiserver-deck-section-number {
@@ -1216,7 +1112,6 @@ enum WikipediaReaderStyle {
           Array.from(heading.childNodes).find((node) => node.nodeType === Node.TEXT_NODE)?.textContent ||
           heading.textContent
         ).replace(/\s*编辑\s*$/, "").trim();
-        const description = document.querySelector("meta[name='description']")?.content?.trim() || "";
         let slides = [];
         let sectionEntries = [];
         let currentSection = titleText;
@@ -1259,13 +1154,17 @@ enum WikipediaReaderStyle {
           return slide;
         };
         const appendHeader = (slide, kicker, slideTitle) => {
-          const kickerNode = document.createElement("div");
-          kickerNode.className = "aiserver-deck-kicker";
-          kickerNode.textContent = kicker;
+          if (slideTitle === titleText && kicker === "WIKIPEDIA · 中文") return;
+          if (kicker !== "WIKIPEDIA · 中文") {
+            const kickerNode = document.createElement("div");
+            kickerNode.className = "aiserver-deck-kicker";
+            kickerNode.textContent = kicker;
+            slide.appendChild(kickerNode);
+          }
           const titleNode = document.createElement("h2");
           titleNode.className = "aiserver-deck-slide-title";
           titleNode.textContent = slideTitle;
-          slide.append(kickerNode, titleNode);
+          slide.appendChild(titleNode);
         };
         const flushParagraphs = () => {
           if (!paragraphBuffer.length) return;
@@ -1286,51 +1185,6 @@ enum WikipediaReaderStyle {
           paragraphLength += length;
           if (paragraphLength >= 560) flushParagraphs();
         };
-        const firstUsefulImage = () => {
-          const candidates = Array.from(article.querySelectorAll(".infobox img, figure img, .thumb img, img.mw-file-element"));
-          return candidates.find((image) => {
-            const width = Number(image.getAttribute("width") || image.naturalWidth || 0);
-            const height = Number(image.getAttribute("height") || image.naturalHeight || 0);
-            return width >= 180 && height >= 160 && !/icon|logo|symbol|question_book/i.test(image.src);
-          }) || candidates[0];
-        };
-
-        const cover = makeSlide("aiserver-deck-cover", titleText);
-        const coverImage = firstUsefulImage();
-        if (coverImage) {
-          const image = coverImage.cloneNode(true);
-          image.className = "aiserver-deck-cover-image";
-          const largestSource = (coverImage.getAttribute("srcset") || "")
-            .split(",")
-            .map((candidate) => candidate.trim().split(/\s+/)[0])
-            .filter(Boolean)
-            .pop();
-          image.src = largestSource || coverImage.currentSrc || coverImage.src;
-          image.removeAttribute("srcset");
-          image.removeAttribute("width");
-          image.removeAttribute("height");
-          cover.appendChild(image);
-        }
-        const coverShade = document.createElement("div");
-        coverShade.className = "aiserver-deck-cover-shade";
-        const coverCopy = document.createElement("div");
-        coverCopy.className = "aiserver-deck-cover-copy";
-        const coverKicker = document.createElement("div");
-        coverKicker.className = "aiserver-deck-kicker";
-        coverKicker.textContent = "WIKIPEDIA · 中文";
-        const coverTitle = document.createElement("h1");
-        coverTitle.className = "aiserver-deck-cover-title";
-        coverTitle.textContent = titleText;
-        coverCopy.append(coverKicker, coverTitle);
-        if (description) {
-          const coverDescription = document.createElement("p");
-          coverDescription.className = "aiserver-deck-cover-description";
-          coverDescription.textContent = description;
-          coverCopy.appendChild(coverDescription);
-        }
-        cover.append(coverShade, coverCopy);
-        sectionEntries.push({ title: "封面", slideIndex: 0 });
-
         const infobox = article.querySelector(".infobox, table.infobox");
 
         const skipNode = (node) => {
@@ -1516,6 +1370,7 @@ enum WikipediaReaderStyle {
         let currentIndex = 0;
         let scrollTimer;
         const postState = () => {
+          slides.forEach((slide, index) => slide.setAttribute("aria-hidden", index === currentIndex ? "false" : "true"));
           window.webkit?.messageHandlers?.wikipediaDeck?.postMessage({
             pageIndex: currentIndex,
             pageCount: slides.length,

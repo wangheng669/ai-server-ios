@@ -1,9 +1,304 @@
+import AVFoundation
 import XCTest
 import UIKit
 import SwiftUI
 @testable import AIServerClient
 
 final class FeedAdapterTests: XCTestCase {
+    func testBilibiliDisplayDeduplicatesVideosAcrossPagesAndPreservesDistinctParts() throws {
+        func post(_ id: Int, _ link: String) throws -> Post {
+            try JSONDecoder().decode(Post.self, from: JSONSerialization.data(withJSONObject: [
+                "id": id, "source": "bilibili", "post_link": link, "text": "同标题的视频"
+            ]))
+        }
+        let first = try post(10, "https://www.bilibili.com/video/BV1Qcpq62Eak")
+        let next = try [
+            post(9, "https://www.bilibili.com/video/BV1Qcpq62Eak?spm_id_from=333.337&p=1"),
+            post(8, "https://www.bilibili.com/video/BV1Qcpq62Eak?p=2"),
+            post(7, "https://www.bilibili.com/video/BV1sgpq66EZt")
+        ]
+        XCTAssertEqual(BilibiliFeedDisplay.uniquePosts([first] + next).map(\.id), [10, 8, 7])
+    }
+
+    func testBilibiliDirectoryDoesNotApplyNewsScoreThreshold() {
+        let query = Dictionary(uniqueKeysWithValues: APIClient.regularPostQueryItems(page: 1, limit: 20, source: .bilibili).compactMap { item in item.value.map { (item.name, $0) } })
+        XCTAssertEqual(query["include_zero_score"], "true")
+        XCTAssertNil(query["final_score"])
+    }
+
+    func testZhihuReadsCurrentHotSnapshotAndPreservesAnswer() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [IntelligenceURLProtocol.self]
+        let api = APIClient(baseURL: URL(string: "https://intelligence.test")!, session: URLSession(configuration: config))
+        let posts = try await api.fetchPosts(page: 1, limit: 5, source: .zhihu)
+        XCTAssertEqual(posts.count, 1)
+        XCTAssertEqual(posts[0].id, 42)
+        XCTAssertEqual(posts[0].meta?.zhihuRank, 1)
+        XCTAssertEqual(posts[0].meta?.zhihuAnswerContent, "完整回答")
+        XCTAssertEqual(posts[0].postLink, "https://www.zhihu.com/question/123")
+    }
+
+    func testZhihuAuthenticationFailureRetainsActionableReason() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [IntelligenceURLProtocol.self]
+        let api = APIClient(baseURL: URL(string: "https://intelligence.test")!, session: URLSession(configuration: config))
+        do {
+            _ = try await api.fetchPosts(page: 2, limit: 5, source: .zhihu)
+            XCTFail("authentication failure was hidden")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "知乎登录已失效，采集已暂停")
+        }
+    }
+
+    @MainActor
+    func testUnavailableSourceInvalidatesCachedCardsAndKeepsServerReason() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = FeedDiskCache(directory: directory)
+        let stale = try JSONDecoder().decode(Post.self, from: Data(#"{"id":42,"source":"zhihu","text":"旧缓存"}"#.utf8))
+        var unavailable = false
+        let model = NewsFeedViewModel(source: .zhihu, fetchPosts: { _, _, _ in
+            if unavailable { throw APIError.sourceUnavailable("知乎登录已失效，采集已暂停") }
+            return [stale]
+        }, diskCache: cache)
+        await model.refresh()
+        XCTAssertEqual(model.posts.map(\.id), [42])
+        unavailable = true
+        await model.refresh()
+        XCTAssertTrue(model.posts.isEmpty)
+        XCTAssertFalse(model.canLoadMore)
+        XCTAssertEqual(model.errorMessage, "知乎登录已失效，采集已暂停")
+        let snapshot = await cache.load(source: .zhihu, flashCategory: nil, serverURL: ServerConfiguration.currentURL)
+        XCTAssertNil(snapshot)
+    }
+
+    func testSignalDisplayMergesScriptEditionsAcrossPagesAndPreservesDifferentFacts() throws {
+        func item(_ id: Int, _ body: String, quote: String = "") throws -> CompanyNewsItem {
+            let value: [String: Any] = ["id": id, "translation_post_id": id, "article_id": String(id), "source": "x", "source_url": "https://x.com/i/status/\(id)", "title": body, "original_content": body, "content_zh": body, "author_name": "日经中文网", "author_handle": "nikkei", "published_at": "2026-10-22T08:00:00Z", "companies": ["openai": "neutral"], "sentiment": "neutral", "quote_content": quote, "reply_content": ""]
+            return try JSONDecoder().decode(CompanyNewsItem.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        let simple = "【日经中文网今日热点】中国AI股也出现异变cn.nikkei.com/news… 日本的能源补贴加大日元贬值压力，营业额增长10%。"
+        let traditional = "【日經中文網今日熱點】中國AI股也出現異變zh.cn.nikkei.com/news… 日本的能源補貼加大日元貶值壓力，營業額增長10%。"
+        let first = try item(10, simple)
+        let nextPage = try [item(9, traditional), item(8, simple.replacingOccurrences(of: "10%", with: "11%")), item(7, simple, quote: "引用了另一条消息")]
+        var displayList = CompanyNewsDisplayList()
+        displayList.append([first])
+        displayList.append(nextPage)
+        XCTAssertEqual(displayList.items.map(\.id), [10, 8, 7])
+    }
+
+    @MainActor
+    func testTodayTabRevisitUsesRecentReportButExplicitRefreshFetchesAgain() async throws {
+        let report = try todayStatusPayload()
+        var count = 0
+        var balanceRefreshes: [Bool] = []
+        let store = TodayWorldStore(fetchBalance: { refresh in
+            balanceRefreshes.append(refresh)
+            return AliyunAccountBalance(ok: true, currency: "CNY", availableAmount: "123.45", usage: AIUsageDailyCosts(date: "2026-11-02", yesterdayDate: "2026-11-01", timezone: "Asia/Shanghai", todayCostCNY: 0.52, yesterdayCostCNY: 0.65))
+        }) { count += 1; return report }
+        await store.load()
+        await store.load()
+        XCTAssertEqual(count, 1)
+        await store.load(force: true)
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(balanceRefreshes, [false, true])
+    }
+
+    func testSignalFirstPagePreloadAndTabOpeningShareOneRequest() async throws {
+        let cache = CompanyNewsRequestCache()
+        let counter = TabRequestCounter()
+        let url = URL(string: "https://example.test/company-news?company=google")!
+        let fetch: @Sendable () async throws -> CompanyNewsPage = {
+            await counter.increment()
+            try await Task.sleep(for: .milliseconds(50))
+            return CompanyNewsPage(items: [], hasMore: false, nextCursor: "")
+        }
+        async let warm = cache.page(url: url, refresh: false, fetch: fetch)
+        async let visible = cache.page(url: url, refresh: false, fetch: fetch)
+        _ = try await (warm, visible)
+        _ = try await cache.page(url: url, refresh: false, fetch: fetch)
+        let cachedRequests = await counter.count
+        XCTAssertEqual(cachedRequests, 1)
+        _ = try await cache.page(url: url, refresh: true, fetch: fetch)
+        let refreshedRequests = await counter.count
+        XCTAssertEqual(refreshedRequests, 2)
+    }
+
+    func testSignalFiltersDoNotReuseAnotherCompanyOrSentimentPage() async throws {
+        let cache = CompanyNewsRequestCache()
+        let counter = TabRequestCounter()
+        for filter in ["company=google", "company=apple", "company=google&sentiment=negative"] {
+            let url = URL(string: "https://example.test/company-news?" + filter)!
+            _ = try await cache.page(url: url, refresh: false) {
+                await counter.increment()
+                return CompanyNewsPage(items: [], hasMore: false, nextCursor: filter)
+            }
+        }
+        let requests = await counter.count
+        XCTAssertEqual(requests, 3)
+    }
+
+    func testTodayReportDoesNotRenderAnEditorialFailureAfterSuccessfulCollection() throws {
+        let report = try todayStatusPayload()
+        XCTAssertEqual(report.report.final?.status, "failed")
+        XCTAssertEqual(report.report.final?.error, "本次没有通过原文与语义审核的事实")
+        XCTAssertNil(TodayBriefProjection(payload: report))
+    }
+
+    @MainActor
+    func testTodayReportRefreshFailurePreservesAnExistingUnreadableReport() async throws {
+        let report = try todayStatusPayload()
+        var requests = 0
+        let store = TodayWorldStore(fetchBalance: { _ in AliyunAccountBalance(ok: true, currency: "CNY", availableAmount: "123.45", usage: AIUsageDailyCosts(date: "2026-11-02", yesterdayDate: "2026-11-01", timezone: "Asia/Shanghai", todayCostCNY: 0.52, yesterdayCostCNY: 0.65)) }) {
+            requests += 1
+            if requests == 1 { return report }
+            throw APIError.httpStatus(503)
+        }
+        await store.load()
+        await store.load(force: true)
+        XCTAssertEqual(store.report, report)
+        XCTAssertEqual(store.errorMessage, "服务器返回错误（503）")
+        XCTAssertNil(store.brief)
+        XCTAssertFalse(store.isLoading)
+    }
+
+    @MainActor
+    func testTodayReportRetryClearsNetworkFailureAndPreservesServerReason() async throws {
+        let report = try todayStatusPayload()
+        var requests = 0
+        let store = TodayWorldStore(fetchBalance: { _ in AliyunAccountBalance(ok: true, currency: "CNY", availableAmount: "123.45", usage: AIUsageDailyCosts(date: "2026-11-02", yesterdayDate: "2026-11-01", timezone: "Asia/Shanghai", todayCostCNY: 0.52, yesterdayCostCNY: 0.65)) }) {
+            requests += 1
+            if requests == 1 { throw URLError(.notConnectedToInternet) }
+            return report
+        }
+        await store.load()
+        XCTAssertNil(store.report)
+        XCTAssertEqual(store.errorMessage, "网络连接已断开，请检查网络后重试")
+        await store.load(force: true)
+        XCTAssertNil(store.errorMessage)
+        XCTAssertEqual(store.report?.report.final?.error, "本次没有通过原文与语义审核的事实")
+        XCTAssertNil(store.brief)
+        XCTAssertNotNil(store.checkedAt)
+    }
+
+    private func todayStatusPayload() throws -> TodayWorldYesterdayReportPayload {
+        let json = #"{"date":"2026-10-21","timezone":"Asia/Shanghai","status":"succeeded","stage":"done","progress":100,"source_count":52,"post_count":370,"report":{"final":{"status":"failed","stage":"curating","error":"本次没有通过原文与语义审核的事实"}},"total_tokens":0,"cost_cny":0}"#
+        return try JSONDecoder().decode(TodayWorldYesterdayReportPayload.self, from: Data(json.utf8))
+    }
+
+    func testTodaySupplementaryEventsKeepUnrepresentedTitlesAndWatchEvents() throws {
+        let systems = try todaySystems([
+            ("featured", "精选事件", [1]),
+            ("watch", "观察事件", [2]),
+            ("other-source", "同一事件的其他标题", [1]),
+            ("new", "新增事件", [3])
+        ])
+        let section = TodayWorldFinalReportSection(sectionKey: "ai", sectionName: "人工智能", groups: [
+            TodayWorldFinalReportGroup(groupKey: "all", groupName: "全部", systems: systems)
+        ])
+        let overview = TodayWorldFinalReportOverview(headline: "", highlights: [
+            TodayWorldFinalReportOverviewItem(title: "精选事件", text: "摘要", systemKeys: ["featured"], postIDs: [1])
+        ], watchItems: [
+            TodayWorldFinalReportOverviewItem(title: "观察事件", text: "待确认", systemKeys: ["watch"], postIDs: [2])
+        ])
+        XCTAssertEqual(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.systemKey), ["watch", "other-source", "new"])
+    }
+
+    func testTodaySupplementaryEventsKeepDistinctSourcesAndFacts() throws {
+        let systems = try todaySystems([
+            ("same-company", "另一件事", [20]),
+            ("duplicate-title", " 精选事件。", [21]),
+            ("duplicate-source", "另一来源报道", [20]),
+            ("different-number", "新增投资 50 亿", [22]),
+            ("different-number-2", "新增投资 60 亿", [23])
+        ])
+        let section = TodayWorldFinalReportSection(sectionKey: "ai", sectionName: "人工智能", groups: [
+            TodayWorldFinalReportGroup(groupKey: "all", groupName: "全部", systems: systems)
+        ])
+        let overview = TodayWorldFinalReportOverview(headline: "", highlights: [
+            TodayWorldFinalReportOverviewItem(title: "精选事件", text: "摘要", systemKeys: ["same-company"], postIDs: [1])
+        ], watchItems: [])
+        XCTAssertEqual(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.systemKey),
+                       ["same-company", "duplicate-title", "duplicate-source", "different-number", "different-number-2"])
+    }
+
+    func testTodaySupplementaryEventsKeepPartiallyCoveredCompanyReport() throws {
+        let data = Data(#"[{"system_key":"company","system_name":"Company","headline":"精选事件","signal_level":"high","facts":[{"category":"action","text":"还有一项未在精选展示的发布。","source_keys":[],"post_ids":[2]}],"watch_item":"关注开放时间","source_keys":[],"source_names":[],"post_ids":[1,2]}]"#.utf8)
+        let systems = try JSONDecoder().decode([TodayWorldFinalReportSystem].self, from: data)
+        let section = TodayWorldFinalReportSection(sectionKey: "ai", sectionName: "人工智能", groups: [
+            TodayWorldFinalReportGroup(groupKey: "all", groupName: "全部", systems: systems)
+        ])
+        let overview = TodayWorldFinalReportOverview(headline: "精选事件", highlights: [
+            TodayWorldFinalReportOverviewItem(title: "精选事件", text: "摘要", systemKeys: ["company"], postIDs: [1])
+        ], watchItems: [])
+        XCTAssertEqual(TodayOverviewSelection.supplementarySystems(in: section, overview: overview), systems)
+    }
+
+    func testTodayCategorySelectionIncludesRelatedHighlightsAndAllIncludesEverything() throws {
+        let systems = try todaySystems([("company", "动态", [2])])
+        let section = TodayWorldFinalReportSection(sectionKey: "ai", sectionName: "人工智能", groups: [
+            TodayWorldFinalReportGroup(groupKey: "all", groupName: "全部", systems: systems)
+        ])
+        let items = [
+            TodayWorldFinalReportOverviewItem(title: "同公司", text: "摘要", systemKeys: ["company"], postIDs: [1]),
+            TodayWorldFinalReportOverviewItem(title: "同来源", text: "摘要", systemKeys: [], postIDs: [2]),
+            TodayWorldFinalReportOverviewItem(title: "另一领域", text: "摘要", systemKeys: ["other"], postIDs: [3])
+        ]
+        let overview = TodayWorldFinalReportOverview(headline: "", highlights: items, watchItems: [])
+        XCTAssertEqual(TodayOverviewSelection.highlights(in: section, overview: overview), Array(items.prefix(2)))
+        XCTAssertEqual(TodayOverviewSelection.highlights(in: nil, overview: overview), items)
+    }
+
+    func testTodayWatchContextIsDecodedAndAvailableInEventDetail() throws {
+        let data = Data(#"{"title":"协议传闻","text":"关注正式签署情况","context":"消息来自渠道检查，具体条款尚未确认。","system_keys":[],"post_ids":[1]}"#.utf8)
+        let item = try JSONDecoder().decode(TodayWorldFinalReportOverviewItem.self, from: data)
+        XCTAssertEqual(item.context, "消息来自渠道检查，具体条款尚未确认。")
+        let event = TodayReadingEvent.highlight(item, systems: [], date: "2026-10-16")
+        XCTAssertTrue(event.summary.contains("具体条款尚未确认"))
+        XCTAssertTrue(event.summary.contains("关注正式签署情况"))
+    }
+
+    private func todaySystems(_ values: [(String, String, [Int])]) throws -> [TodayWorldFinalReportSystem] {
+        let objects: [[String: Any]] = values.map { key, title, ids in
+            ["system_key": key, "system_name": key, "headline": title, "signal_level": "normal",
+             "facts": [], "source_keys": [], "source_names": [], "post_ids": ids]
+        }
+        return try JSONDecoder().decode([TodayWorldFinalReportSystem].self, from: JSONSerialization.data(withJSONObject: objects))
+    }
+
+    @MainActor
+    func testNativeVideoReportsFailureAfterBecomingReadyOnlyOnce() {
+        var readyCount = 0
+        var failureCount = 0
+        let coordinator = NativeVideoPlayer.Coordinator(
+            onReady: { readyCount += 1 },
+            onFailed: { failureCount += 1 },
+            onTime: { _ in }
+        )
+        coordinator.handleStatus(.readyToPlay)
+        coordinator.handleStatus(.readyToPlay)
+        coordinator.handleStatus(.failed)
+        coordinator.handleStatus(.failed)
+        coordinator.handleStatus(.readyToPlay)
+        XCTAssertEqual(readyCount, 1)
+        XCTAssertEqual(failureCount, 1)
+        coordinator.stopObserving()
+    }
+
+    @MainActor
+    func testNativeVideoIgnoresQueuedStatusAfterDismissal() {
+        var callbackCount = 0
+        let coordinator = NativeVideoPlayer.Coordinator(
+            onReady: { callbackCount += 1 },
+            onFailed: { callbackCount += 1 },
+            onTime: { _ in }
+        )
+        coordinator.stopObserving()
+        coordinator.handleStatus(.readyToPlay)
+        coordinator.handleStatus(.failed)
+        XCTAssertEqual(callbackCount, 0)
+    }
+
     @MainActor
     func testTimelineTranslatesCNBCMainTextWithoutQuoteOrLanguageMetadata() async throws {
         let post = try JSONDecoder().decode(Post.self, from: Data(#"{"id":201,"source":"x","content":"Google to invest $15 billion in AI infrastructure in Finland in biggest-ever Europe investment","post_link":"https://x.com/CNBC/status/201","user":{"user_name":"CNBC","user_screen_name":"CNBC"}}"#.utf8))
@@ -169,6 +464,24 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(ImageLoader.cachePixelLimit(targetSize: CGSize(width: 320, height: 220), scale: 3), 1024)
         XCTAssertEqual(ImageLoader.cachePixelLimit(targetSize: CGSize(width: 400, height: 220), scale: 3), 1280)
         XCTAssertNil(ImageLoader.cachePixelLimit(targetSize: nil, scale: 3))
+    }
+
+    @MainActor
+    func testWarmAvatarIsImmediatelyAvailableAtCommentAndDetailSizes() async throws {
+        let url = URL(string: "https://example.invalid/\(UUID()).png")!
+        let comment = try XCTUnwrap(ImageLoader.avatarRequest(url, size: 28))
+        let detail = try XCTUnwrap(ImageLoader.avatarRequest(url, size: 46))
+        XCTAssertEqual(comment, detail)
+
+        let data = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 200)).pngData { context in
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+        }
+        let loader = ImageLoader(imageDataLoader: { _ in data })
+        XCTAssertNil(loader.cachedImage(for: detail))
+        let loaded = await loader.image(for: comment)
+        let image = try XCTUnwrap(loaded)
+        XCTAssertTrue(loader.cachedImage(for: detail) === image)
     }
 
     func testConcurrentImageRequestsShareDecodedImageAndWarmCache() async throws {
@@ -618,7 +931,7 @@ final class FeedAdapterTests: XCTestCase {
             from: Data(#"{"id":2,"source":"rss:2373","article_post_at":"2026-08-03T14:08:00Z"}"#.utf8)
         )
 
-        let result = APIClient.mergeWeChatPosts([older, newer, older])
+        let result = APIClient.mergeChronologicalRSSPosts([older, newer, older])
 
         XCTAssertEqual(result.map(\.id), [2, 1])
     }
@@ -1344,30 +1657,58 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testXueqiuSelectionUsesDedicatedServerFeedAndPaginatesWithinIt() async throws {
-        var requests: [(page: Int, feedID: Int?)] = []
-        let first = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"rss:14"}"#.utf8))
-        let other = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"rss:16"}"#.utf8))
-        let next = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3,"source":"rss:14"}"#.utf8))
+    func testXueqiuDirectoryAndPaginationKeepAuthorOutsideFirstPage() async throws {
+        let feeds = try JSONDecoder().decode([RSSFeedSource].self, from: Data(#"""
+        [
+          {"id":31,"name":"雪球-低频账号","is_enabled":true},
+          {"id":32,"name":"雪球-活跃账号","is_enabled":true},
+          {"id":33,"name":"雪球-暂无动态","is_enabled":true}
+        ]
+        """#.utf8))
+        func makePosts(_ ids: [Int], feedID: Int) throws -> [Post] {
+            try ids.map { id in
+                let time = String(format: "2026-11-11T10:%02d:00+08:00", id)
+                let data = try JSONSerialization.data(withJSONObject: [
+                    "id": id, "source": "rss:\(feedID)", "article_post_at": time
+                ])
+                return try JSONDecoder().decode(Post.self, from: data)
+            }
+        }
+        let feedPosts = [
+            31: try makePosts([15, 14, 11, 10, 9, 8], feedID: 31),
+            32: try makePosts([20, 19, 18, 17, 16, 13, 12], feedID: 32)
+        ]
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
         let model = NewsFeedViewModel(
             source: .xueqiu,
-            fetchPosts: { _, _, _ in [] },
-            fetchXueqiuPosts: { page, _, feedID in
-                requests.append((page, feedID))
-                if feedID == nil { return [first, other] }
-                return page == 1 ? [first] : [next]
-            }
+            fetchXueqiuFeeds: { feeds },
+            fetchRSSFeedPosts: { feedID, page, limit in
+                Array((feedPosts[feedID] ?? []).dropFirst((page - 1) * limit).prefix(limit))
+            },
+            diskCache: FeedDiskCache(directory: directory)
         )
 
         await model.refresh()
-        await model.selectXueqiuFeed(14)
-        await model.loadMoreIfNeeded(current: first)
+        XCTAssertEqual(model.posts.map(\.id), [20, 19, 18, 17, 16])
+        XCTAssertEqual(model.xueqiuFeeds.map(\.id), [31, 32, 33])
 
-        XCTAssertEqual(requests.map(\.page), [1, 1, 2])
-        XCTAssertEqual(requests.map(\.feedID), [nil, 14, 14])
-        XCTAssertEqual(model.posts.map(\.id), [1, 3])
-        XCTAssertEqual(model.xueqiuDirectoryPosts.map(\.id), [1, 2])
-        XCTAssertEqual(model.selectedXueqiuFeedID, 14)
+        await model.loadMoreIfNeeded(current: try XCTUnwrap(model.posts.last))
+        XCTAssertEqual(model.posts.map(\.id), [20, 19, 18, 17, 16, 15, 14, 13, 12, 11])
+        await model.loadMoreIfNeeded(current: try XCTUnwrap(model.posts.last))
+        XCTAssertEqual(model.posts.suffix(3).map(\.id), [10, 9, 8])
+        XCTAssertFalse(model.canLoadMore)
+
+        await model.selectXueqiuFeed(33)
+        XCTAssertEqual(model.selectedXueqiuFeedID, 33)
+        XCTAssertTrue(model.posts.isEmpty)
+        XCTAssertEqual(model.xueqiuFeeds.map(\.id), [31, 32, 33])
+
+        await model.selectXueqiuFeed(31)
+        XCTAssertEqual(model.posts.map(\.id), [15, 14, 11, 10, 9])
+        await model.loadMoreIfNeeded(current: try XCTUnwrap(model.posts.last))
+        XCTAssertEqual(model.posts.map(\.id), [15, 14, 11, 10, 9, 8])
+        XCTAssertFalse(model.canLoadMore)
     }
 
     @MainActor
@@ -1481,48 +1822,86 @@ final class FeedAdapterTests: XCTestCase {
     }
 
     @MainActor
-    func testConcurrentInitialLoadsReuseTheActiveRequest() async {
+    func testConcurrentInitialLoadsReuseTheRequestAfterOneCallerCancels() async throws {
+        let post = try JSONDecoder().decode(Post.self, from: Data(#"{"id":43,"source":"flash"}"#.utf8))
         var requestCount = 0
         let firstRequestStarted = expectation(description: "first request started")
+        let (releaseRequest, continuation) = AsyncStream<Void>.makeStream()
         let model = NewsFeedViewModel(source: .flash) { _, _, _ in
             requestCount += 1
-            firstRequestStarted.fulfill()
-            try await Task.sleep(for: .milliseconds(100))
-            return []
+            if requestCount == 1 { firstRequestStarted.fulfill() }
+            for await _ in releaseRequest {}
+            try Task.checkCancellation()
+            return [post]
         }
 
         let backgroundLoad = Task { await model.loadInitial() }
         await fulfillment(of: [firstRequestStarted], timeout: 1)
-        await model.loadInitial()
+        backgroundLoad.cancel()
+        let returningLoad = Task { await model.loadInitial() }
+        continuation.finish()
+        await returningLoad.value
         await backgroundLoad.value
 
         XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(model.posts.map(\.id), [post.id])
+        XCTAssertFalse(model.isLoading)
     }
 
     @MainActor
     func testSwitchingSourceStartsNewestLoadBeforeCancelledLoadFinishes() async throws {
         let firstRequestStarted = expectation(description: "first request started")
+        let newPost = try JSONDecoder().decode(Post.self, from: Data(#"{"id":77,"source":"zhihu"}"#.utf8))
         let model = NewsFeedViewModel(source: .x) { _, _, source in
             if source == .x {
                 firstRequestStarted.fulfill()
                 try await Task.sleep(for: .seconds(5))
+                return []
             }
-            return []
+            return [newPost]
         }
 
-        let firstLoad = Task { await model.refresh() }
+        let firstLoad = Task { await model.loadInitial() }
         await fulfillment(of: [firstRequestStarted], timeout: 1)
         model.select(.zhihu)
-        let newestLoad = Task { await model.refresh() }
+        await model.loadInitial()
         firstLoad.cancel()
-
-        await newestLoad.value
         await firstLoad.value
 
         XCTAssertEqual(model.source, .zhihu)
+        XCTAssertEqual(model.posts.map(\.id), [newPost.id])
         XCTAssertFalse(model.isLoading)
         XCTAssertFalse(model.isSwitchingSource)
         XCTAssertNil(model.errorMessage)
+    }
+
+    @MainActor
+    func testRefreshDiscardsPageFromPreviousSnapshot() async throws {
+        let oldFirst = try JSONDecoder().decode(Post.self, from: Data(#"{"id":1,"source":"zhihu"}"#.utf8))
+        let oldSecond = try JSONDecoder().decode(Post.self, from: Data(#"{"id":2,"source":"zhihu"}"#.utf8))
+        let newFirst = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3,"source":"zhihu"}"#.utf8))
+        let paginationStarted = expectation(description: "old pagination started")
+        let (releasePage, continuation) = AsyncStream<Void>.makeStream()
+        var firstPageRequests = 0
+        let model = NewsFeedViewModel(source: .zhihu) { page, _, _ in
+            if page == 1 {
+                firstPageRequests += 1
+                return [firstPageRequests == 1 ? oldFirst : newFirst]
+            }
+            paginationStarted.fulfill()
+            for await _ in releasePage {}
+            return [oldSecond]
+        }
+
+        await model.refresh()
+        let pagination = Task { await model.loadMoreIfNeeded(current: oldFirst) }
+        await fulfillment(of: [paginationStarted], timeout: 1)
+        await model.refresh()
+        continuation.finish()
+        await pagination.value
+
+        XCTAssertEqual(model.posts.map(\.id), [newFirst.id])
+        XCTAssertFalse(model.isLoadingMore)
     }
 
     func testDecodesAndMapsWeiboHotTopic() throws {
@@ -1546,15 +1925,6 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertEqual(post.formattedTime, "第 1 名 · 热度 7654321")
         XCTAssertEqual(post.source, "baidu")
         XCTAssertTrue(post.isSynthetic)
-    }
-
-    func testHotTopicEmbeddedPageBrandingMatchesSource() {
-        XCTAssertEqual(FeedSource.weibo.hotTopicPageTitle, "微博热搜")
-        XCTAssertEqual(FeedSource.weibo.hotTopicMarkAssetName, "WeiboMark")
-        XCTAssertEqual(FeedSource.douyin.hotTopicPageTitle, "抖音热榜")
-        XCTAssertEqual(FeedSource.douyin.hotTopicMarkAssetName, "TikTokMark")
-        XCTAssertEqual(FeedSource.baidu.hotTopicPageTitle, "百度热搜")
-        XCTAssertEqual(FeedSource.baidu.hotTopicMarkAssetName, "BaiduMark")
     }
 
     func testHotTopicDisplayRepairsDuplicateRanksAndTieOrdering() throws {
@@ -1612,12 +1982,6 @@ final class FeedAdapterTests: XCTestCase {
         )
     }
 
-    func testXueqiuDetailKeepsRootChromeVisible() {
-        XCTAssertFalse(FeedDetailChromePolicy.hidesRootChrome(isPresented: true, isXueqiu: true))
-        XCTAssertTrue(FeedDetailChromePolicy.hidesRootChrome(isPresented: true, isXueqiu: false))
-        XCTAssertFalse(FeedDetailChromePolicy.hidesRootChrome(isPresented: false, isXueqiu: false))
-    }
-
     func testFilteredPaginationTaskAdvancesWithRawTail() {
         XCTAssertEqual(
             FeedPaginationLayout.taskPostID(
@@ -1671,6 +2035,68 @@ final class FeedAdapterTests: XCTestCase {
 
         XCTAssertEqual(requestCount, 2)
         XCTAssertEqual(model.rssFeeds.first?.avatar, "https://wx.qlogo.cn/avatar.jpg")
+    }
+
+    @MainActor
+    func testRSSAndWeChatDirectoryLoadsShareOneRequest() async throws {
+        let feed = try JSONDecoder().decode(
+            RSSFeedSource.self,
+            from: Data(#"{"id":2373,"name":"小互AI","is_enabled":true}"#.utf8)
+        )
+        let fetchStarted = expectation(description: "catalog request started")
+        let weChatStarted = expectation(description: "WeChat started waiting for the catalog")
+        let (releaseFetch, continuation) = AsyncStream<Void>.makeStream()
+        var requestCount = 0
+        let model = NewsFeedViewModel(source: .rss, fetchRSSFeeds: {
+            requestCount += 1
+            if requestCount == 1 { fetchStarted.fulfill() }
+            for await _ in releaseFetch {}
+            return [feed]
+        })
+
+        let rssLoad = Task { await model.loadRSSFeedsIfNeeded() }
+        await fulfillment(of: [fetchStarted], timeout: 1)
+        let weChatLoad = Task {
+            weChatStarted.fulfill()
+            await model.loadRSSFeedsIfNeeded(forceRefresh: true)
+        }
+        await fulfillment(of: [weChatStarted], timeout: 1)
+        continuation.finish()
+        await rssLoad.value
+        await weChatLoad.value
+
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(model.rssFeeds.map(\.id), [feed.id])
+    }
+
+    func testWikipediaRelayFailureDoesNotCacheMissingEntities() async throws {
+        let url = try XCTUnwrap(URL(string: "https://zh.wikipedia.org/wiki/Microsoft"))
+        let entity = WikipediaRelayEntity(
+            query: "微软",
+            id: "zh-1",
+            pageID: 1,
+            language: "zh",
+            title: "微软",
+            extract: nil,
+            articleURL: url
+        )
+        let counter = TabRequestCounter()
+        let resolver = WikipediaEntityResolver { _, _ in
+            await counter.increment()
+            if await counter.count == 1 { throw URLError(.timedOut) }
+            return [entity]
+        }
+        let paragraphs = ["微软与英伟达发布合作消息"]
+
+        let first = await resolver.resolve(paragraphs: paragraphs)
+        let second = await resolver.resolve(paragraphs: paragraphs)
+        let cached = await resolver.resolve(paragraphs: paragraphs)
+        let requestCount = await counter.count
+
+        XCTAssertTrue(first.isEmpty)
+        XCTAssertEqual(second[0]?.map(\.term), ["微软"])
+        XCTAssertEqual(cached, second)
+        XCTAssertEqual(requestCount, 2)
     }
 
     @MainActor
@@ -2187,4 +2613,26 @@ final class FeedAdapterTests: XCTestCase {
         XCTAssertNotNil(middle)
         XCTAssertNotNil(newest)
     }
+}
+
+private actor TabRequestCounter {
+    private(set) var count = 0
+    func increment() { count += 1 }
+}
+
+private final class IntelligenceURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "intelligence.test" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        guard url.path == "/api/ios/v1/zhihu/hot/topics" else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL)); return
+        }
+        let failed = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(.init(name: "page", value: "2")) == true
+        let body = failed ? #"{"success":false,"message":"知乎登录已失效，采集已暂停"}"# : #"{"success":true,"data":{"topics":[{"rank":1,"title":"当前问题","url":"https://www.zhihu.com/question/123","post_id":42,"answer_count":10,"zhihu_answer_excerpt":"回答摘要","zhihu_answer_content":"完整回答"}]}}"#
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: failed ? 503 : 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

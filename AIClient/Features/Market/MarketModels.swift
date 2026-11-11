@@ -5,20 +5,6 @@ struct MarketDashboardResponse: Decodable {
     let data: MarketDashboard
 }
 
-struct MarketBootstrapResponse: Decodable {
-    let success: Bool
-    let data: MarketBootstrap
-}
-
-struct MarketBootstrap: Decodable {
-    let dataContract: String
-    let generatedAt: String
-    let dashboard: MarketDashboard
-    let temperature: MarketAShareTemperature?
-    let sentimentSnapshots: [String: MarketSentimentSnapshot]
-    let errors: [String: String]?
-}
-
 enum CommodityLogoKind: String, CaseIterable {
     case gold
     case crudeOil
@@ -740,23 +726,6 @@ struct InvestorMoodBoard: Decodable {
     let items: [InvestorMoodItem]
 }
 
-struct InvestorVideoInterpretationResponse: Decodable {
-    let success: Bool
-    let sourceID: String
-    let status: String
-    let interpretation: BilibiliVideoInterpretation?
-    let provider: String
-    let model: String
-    let cached: Bool
-    let estimatedCostCNY: Double
-
-    enum CodingKeys: String, CodingKey {
-        case success, status, interpretation, provider, model, cached
-        case sourceID = "source_id"
-        case estimatedCostCNY = "estimated_cost_cny"
-    }
-}
-
 struct InvestorMoodItem: Decodable, Identifiable {
     var id: String { awemeId }
     let nickname: String
@@ -964,167 +933,6 @@ struct MarketSentiment: Codable {
     let stale: Bool?
 }
 
-struct MarketAShareTemperatureResponse: Decodable {
-    let success: Bool
-    let data: MarketAShareTemperature
-}
-
-struct MarketKoreaLeverageResponse: Decodable {
-    let success: Bool
-    let data: MarketKoreaLeverage
-}
-
-struct MarketKoreaLeverage: Decodable {
-    let dataContract: String
-    let asOf: String
-    let generatedAt: String
-    let fetchedAt: String
-    let leverageThermometer: MarketKoreaLeverageThermometer
-    let r2FinancingRatio: MarketKoreaFinancingRatio
-    let forcedLiquidation: MarketKoreaForcedLiquidation
-    let indices: MarketKoreaIndices
-    let alert: MarketKoreaLeverageAlert
-    let freshness: MarketKoreaLeverageFreshness
-    let source: MarketKoreaLeverageSource
-    let disclaimer: String
-}
-
-struct MarketKoreaLeverageThermometer: Decodable {
-    let value: Double
-    let weighted: Double
-    let unit: String
-    let anchor: String
-    let note: String
-}
-
-struct MarketKoreaFinancingRatio: Decodable {
-    let value: Double
-    let percentile10Y: Double
-    let unit: String
-    let note: String
-}
-
-struct MarketKoreaForcedLiquidation: Decodable {
-    let unsettledBillionKRW: Double
-    let fiveDayAverageBillionKRW: Double
-    let percentile10Y: Double
-}
-
-struct MarketKoreaIndices: Decodable {
-    let kospi: Double
-    let spx: Double
-}
-
-struct MarketKoreaLeverageAlert: Decodable {
-    let level: String
-    let value: Double
-    let message: String
-    let thresholds: MarketKoreaLeverageThresholds
-}
-
-struct MarketKoreaLeverageThresholds: Decodable {
-    let warning: Double
-    let critical: Double
-}
-
-struct MarketKoreaLeverageFreshness: Decodable {
-    let staleDays: Int
-    let dailyFullRefreshBeijing: String
-    let recommendedPoll: String
-}
-
-struct MarketKoreaLeverageSource: Decodable {
-    let name: String
-    let url: String
-    let docs: String
-}
-
-struct MarketAShareTemperature: Decodable {
-    let dataContract: String
-    let days: Int
-    let latest: MarketAShareTemperatureLatest
-}
-
-struct MarketAShareTemperatureLatest: Decodable {
-    let aiServer: MarketAShareTemperatureMetrics?
-
-    enum CodingKeys: String, CodingKey {
-        case aiServer = "ai_server"
-    }
-}
-
-struct MarketAShareTemperatureMetrics: Decodable {
-    let compositeTemperature: MarketTemperatureMetric?
-    let valuationPercentile: MarketTemperatureMetric?
-    let sentimentPercentile: MarketTemperatureMetric?
-    let advancerShare: MarketTemperatureMetric?
-
-    enum CodingKeys: String, CodingKey {
-        case compositeTemperature = "composite_temperature"
-        case valuationPercentile = "valuation_percentile"
-        case sentimentPercentile = "sentiment_percentile"
-        case advancerShare = "advancer_share"
-    }
-}
-
-struct MarketTemperatureMetric: Decodable {
-    let value: Double
-    let label: String
-    let tradeDate: String
-    let fetchedAt: String
-}
-
-struct MarketHKValuationHistory: Decodable {
-    let date: [String]
-    let pe: [Double]
-}
-
-struct MarketUSValuationHistory {
-    let pe: [Double]
-}
-
-struct MarketSentimentSnapshotResponse: Decodable {
-    let success: Bool
-    let data: MarketSentimentSnapshot
-}
-
-struct MarketSentimentSnapshot: Decodable {
-    let dataContract: String
-    let market: String
-    let score: Double
-    let label: String
-    let valuationPercentile: Double?
-    let sentimentPercentile: Double?
-    let advancerShare: Double?
-    let breadth: MarketSentimentBreadth?
-    let koreaLeverage: MarketKoreaLeverage?
-    let fetchedAt: String
-    let cached: Bool
-    let stale: Bool
-}
-
-struct MarketSentimentBreadth: Decodable {
-    let up: Int
-    let down: Int
-    let flat: Int
-}
-
-struct MarketValuationHistoryResponse: Decodable {
-    let success: Bool
-    let data: MarketValuationHistory
-}
-
-struct MarketValuationHistory: Decodable {
-    let dataContract: String
-    let market: String
-    let date: [String]
-    let pe: [Double]
-    let source: String
-    let fetchedAt: String
-    let cached: Bool
-    let stale: Bool
-}
-
 struct MarketCompanyValuationHistoryResponse: Decodable {
     let success: Bool
     let data: MarketCompanyValuationHistory
@@ -1152,6 +960,87 @@ struct MarketCompanyPEPoint: Decodable, Hashable, Identifiable {
     var id: String { date }
 }
 
+struct CompanyPEChartPoint: Identifiable {
+    let date: Date
+    let value: Double
+
+    var id: Date { date }
+}
+
+func marketCompanyPEDisplayPoints(
+    _ points: [CompanyPEChartPoint],
+    maxCount: Int = 480
+) -> [CompanyPEChartPoint] {
+    guard maxCount >= 4, points.count > maxCount else { return points }
+    let interiorCount = points.count - 2
+    let bucketCount = max(1, (maxCount - 2) / 2)
+    let bucketSize = max(1, Int(ceil(Double(interiorCount) / Double(bucketCount))))
+    var result = [points[0]]
+    result.reserveCapacity(maxCount)
+
+    for start in stride(from: 1, to: points.count - 1, by: bucketSize) {
+        let end = min(start + bucketSize, points.count - 1)
+        guard start < end else { continue }
+        let bucket = points[start..<end]
+        guard let minimum = bucket.min(by: { $0.value < $1.value }),
+              let maximum = bucket.max(by: { $0.value < $1.value }) else { continue }
+        if minimum.id == maximum.id {
+            result.append(minimum)
+        } else if minimum.date < maximum.date {
+            result.append(contentsOf: [minimum, maximum])
+        } else {
+            result.append(contentsOf: [maximum, minimum])
+        }
+    }
+    result.append(points[points.count - 1])
+    return result
+}
+
+struct CompanyPEChartProjection {
+    let points: [CompanyPEChartPoint]
+    let displayPoints: [CompanyPEChartPoint]
+    let median: Double?
+    let percentile: Double?
+    let previousChange: Double?
+    let minimum: CompanyPEChartPoint?
+    let maximum: CompanyPEChartPoint?
+    let yDomain: ClosedRange<Double>
+
+    init(sortedPoints: [CompanyPEChartPoint], years: Int? = nil) {
+        if let years, let lastDate = sortedPoints.last?.date,
+           let cutoff = Calendar(identifier: .gregorian).date(byAdding: .year, value: -years, to: lastDate) {
+            points = sortedPoints.filter { $0.date >= cutoff }
+        } else {
+            points = sortedPoints
+        }
+        displayPoints = marketCompanyPEDisplayPoints(points)
+        minimum = points.min { $0.value < $1.value }
+        maximum = points.max { $0.value < $1.value }
+        if let low = minimum?.value, let high = maximum?.value, let latest = points.last?.value {
+            let sorted = points.map(\.value).sorted()
+            let midpoint = sorted.count / 2
+            median = sorted.count.isMultiple(of: 2) ? (sorted[midpoint - 1] + sorted[midpoint]) / 2 : sorted[midpoint]
+            percentile = Double(points.count { $0.value <= latest }) / Double(points.count) * 100
+            let padding = max((high - low) * 0.12, max(high * 0.04, 1))
+            yDomain = max(0, low - padding)...(high + padding)
+        } else {
+            median = nil
+            percentile = nil
+            yDomain = 0...1
+        }
+        if let latest = points.last?.value, let previous = points.dropLast().last?.value, previous != 0 {
+            previousChange = (latest / previous - 1) * 100
+        } else {
+            previousChange = nil
+        }
+    }
+
+    func point(closestTo date: Date?) -> CompanyPEChartPoint? {
+        guard let date else { return points.last }
+        return points.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+    }
+}
+
 struct MarketChartResponse: Decodable {
     let success: Bool
     let data: MarketChart
@@ -1169,6 +1058,53 @@ struct MarketChart: Decodable, Sendable {
     let quality: MarketChartQuality
     let quote: MarketChartQuote
     let candles: [MarketChartPoint]
+    let analysis: MarketChartAnalysis
+
+    init(
+        symbol: String, market: String, tradingDate: String, timezone: String, session: String,
+        interval: String, periodReturn: MarketChartPeriodReturn?, periodVolatility: MarketChartPeriodVolatility?,
+        quality: MarketChartQuality, quote: MarketChartQuote, candles: [MarketChartPoint], analysis: MarketChartAnalysis
+    ) {
+        self.symbol = symbol
+        self.market = market
+        self.tradingDate = tradingDate
+        self.timezone = timezone
+        self.session = session
+        self.interval = interval
+        self.periodReturn = periodReturn
+        self.periodVolatility = periodVolatility
+        self.quality = quality
+        self.quote = quote
+        self.candles = candles
+        self.analysis = analysis
+    }
+}
+
+enum MarketChartTimestampConvention: String, Decodable, Sendable {
+    case intervalEnd = "interval-end"
+    case intervalStart = "interval-start"
+    case tradingDate = "trading-date"
+}
+
+struct MarketChartSessionWindow: Decodable, Equatable, Sendable {
+    let startTimestamp: Int64
+    let endTimestamp: Int64
+    let tradingDate: String
+    let session: String
+
+    func contains(_ timestamp: Int64, convention: MarketChartTimestampConvention) -> Bool {
+        switch convention {
+        case .intervalEnd: timestamp > startTimestamp && timestamp <= endTimestamp
+        case .intervalStart: timestamp >= startTimestamp && timestamp < endTimestamp
+        case .tradingDate: false
+        }
+    }
+}
+
+struct MarketChartAnalysis: Decodable, Sendable {
+    let aggregation: String
+    let candleTimestamp: MarketChartTimestampConvention
+    let sessionWindows: [MarketChartSessionWindow]
 }
 
 struct MarketChartPeriodReturn: Decodable, Sendable {
@@ -1229,19 +1165,41 @@ struct MarketChartPoint: Decodable, Identifiable, Equatable, Sendable {
     let state: String
     let source: String
     let session: String?
+    let tradingDate: String?
+
+    init(
+        timestamp: Int64, open: Double, high: Double, low: Double, close: Double,
+        volume: Double?, state: String, source: String, session: String?, tradingDate: String? = nil
+    ) {
+        self.timestamp = timestamp
+        self.open = open
+        self.high = high
+        self.low = low
+        self.close = close
+        self.volume = volume
+        self.state = state
+        self.source = source
+        self.session = session
+        self.tradingDate = tradingDate
+    }
 
     var displayValue: Double? { close }
 }
 
-func marketChartDisplayPoints(_ points: [MarketChartPoint]) -> [MarketChartPoint] {
-    points.filter { point in
+func marketChartDisplayPoints(_ points: [MarketChartPoint], interval: String) -> [MarketChartPoint] {
+    let isRawIntraday = interval == "1m" || interval == "15m"
+    return points.filter { point in
         guard point.state != "invalid" else { return false }
         let session = point.session ?? "regular"
         let isExtended = session != "regular" && session != "closed"
-        if isExtended && point.state == "provisional" {
+        if isRawIntraday && isExtended && point.state == "provisional" {
             return false
         }
-        if point.state == "provisional" && point.source.localizedCaseInsensitiveContains("tradingview") {
+        // Raw browser quote snapshots are not completed intraday bars. A daily
+        // live candle and an already-derived aggregate have their own interval contract.
+        let providers = point.source.split(separator: ",")
+        if isRawIntraday, point.state == "provisional", !providers.isEmpty,
+           providers.allSatisfy({ String($0).localizedCaseInsensitiveContains("tradingview") }) {
             return false
         }
         return true
@@ -1252,6 +1210,7 @@ struct MarketChartPresentation: Sendable {
     let points: [MarketChartPoint]
     let values: [Double]
     let xFractions: [CGFloat]
+    let lineSegments: [MarketChartLineSegment]
     let low: Double?
     let high: Double?
     let axisDigits: Int
@@ -1262,7 +1221,7 @@ struct MarketChartPresentation: Sendable {
     let sessionBreak: MarketChartSessionBreak?
 
     init(chart: MarketChart) {
-        let points = marketChartDisplayPoints(chart.candles)
+        let points = marketChartDisplayPoints(chart.candles, interval: chart.interval)
             .sorted { $0.timestamp < $1.timestamp }
         let values = points.compactMap(\.displayValue)
         self.points = points
@@ -1272,8 +1231,17 @@ struct MarketChartPresentation: Sendable {
             interval: chart.interval
         )
         self.xFractions = xFractions
-        low = points.map(\.low).filter(\.isFinite).min()
-        high = points.map(\.high).filter(\.isFinite).max()
+        lineSegments = marketChartLineSegments(points: points, chart: chart)
+        let rawLow = points.map(\.low).filter(\.isFinite).min()
+        let rawHigh = points.map(\.high).filter(\.isFinite).max()
+        if let rawLow, let rawHigh, rawLow == rawHigh {
+            let padding = max(abs(rawLow) * 0.001, 0.000_001)
+            low = rawLow - padding
+            high = rawHigh + padding
+        } else {
+            low = rawLow
+            high = rawHigh
+        }
         axisDigits = marketAxisDigits(values: [low, high].compactMap { $0 })
         hasVolume = points.contains { ($0.volume ?? 0) > 0 }
         volumeCeiling = marketChartVolumeCeiling(points)
@@ -1281,13 +1249,8 @@ struct MarketChartPresentation: Sendable {
             .map { $1 - $0 }
             .filter { $0 > 0 }
             .min() ?? 1
-        extendedSessionLabel = chart.interval == "1m" ? marketChartExtendedSessionLabel(points) : nil
-        sessionBreak = marketChartLunchBreak(
-            points: points,
-            market: chart.market,
-            interval: chart.interval,
-            timezone: chart.timezone
-        )
+        extendedSessionLabel = marketChartIntervalMinutes(chart.interval) != nil ? marketChartExtendedSessionLabel(points) : nil
+        sessionBreak = marketChartSessionBreak(points: points, chart: chart)
     }
 }
 
@@ -1306,9 +1269,40 @@ func marketChartArtifacts(for chart: MarketChart) async throws -> MarketChartArt
     )
 }
 
-func marketSampledChartTrend(_ points: [MarketChartPoint], limit: Int = 120) -> [Double] {
+struct MarketMovingAverageSeries: Sendable {
+    let period: Int
+    let values: [Double?]
+}
+
+struct MarketChartDisplayArtifacts: Sendable {
+    let chart: MarketChart
+    let presentation: MarketChartPresentation
+    let movingAverages: [MarketMovingAverageSeries]
+    let drawnPointCount: Int
+}
+
+func marketChartDisplayArtifacts(
+    for source: MarketChart, period: MarketChartPeriod
+) async throws -> MarketChartDisplayArtifacts? {
+    try Task.checkCancellation()
+    guard let chart = marketChartForDisplay(source, period: period) else { return nil }
+    try Task.checkCancellation()
+    let presentation = MarketChartPresentation(chart: chart)
+    let points = presentation.points
+    let movingAverages = [5, 10, 20, 60].filter { $0 <= points.count }.map { period in
+        MarketMovingAverageSeries(period: period, values: marketMovingAverageValues(points, period: period))
+    }
+    let drawnPointCount = Set(presentation.lineSegments.flatMap(\.indices)).count
+    try Task.checkCancellation()
+    return MarketChartDisplayArtifacts(
+        chart: chart, presentation: presentation,
+        movingAverages: movingAverages, drawnPointCount: drawnPointCount
+    )
+}
+
+func marketSampledChartTrend(_ points: [MarketChartPoint], interval: String, limit: Int = 120) -> [Double] {
     marketSampledChartTrend(
-        displayPoints: marketChartDisplayPoints(points).sorted { $0.timestamp < $1.timestamp },
+        displayPoints: marketChartDisplayPoints(points, interval: interval).sorted { $0.timestamp < $1.timestamp },
         limit: limit
     )
 }
@@ -1329,12 +1323,12 @@ private func marketSampledChartTrend(displayPoints: [MarketChartPoint], limit: I
     }
 }
 
-func marketShouldUseFallbackChart(
-    primaryPoints: [MarketChartPoint],
-    fallbackPoints: [MarketChartPoint]
-) -> Bool {
-    marketChartDisplayPoints(primaryPoints).count < 2
-        && marketChartDisplayPoints(fallbackPoints).count >= 2
+func market52WeekHigh(_ chart: MarketChart?, symbol: String) -> Double? {
+    guard let chart, chart.symbol == symbol, chart.quality.status == .complete else { return nil }
+    return chart.candles
+        .filter { $0.state != "invalid" && $0.high.isFinite && $0.high > 0 }
+        .map(\.high)
+        .max()
 }
 
 func market52WeekLow(_ chart: MarketChart?) -> Double? {
@@ -1363,10 +1357,83 @@ func marketChartExtendedSessionLabel(_ points: [MarketChartPoint]) -> String? {
     return nil
 }
 
-func marketChartShouldSplitSegment(previous: MarketChartPoint, current: MarketChartPoint, interval: String?) -> Bool {
-    let changedSession = (previous.session ?? "regular") != (current.session ?? "regular")
-    let hasIntradayGap = interval == "1m" && current.timestamp - previous.timestamp > 15 * 60 * 1000
-    return changedSession || hasIntradayGap
+struct MarketChartLineSegment: Equatable, Sendable {
+    let indices: [Int]
+    let isRegular: Bool
+    let isMissing: Bool
+}
+
+private func marketChartLineSegments(points: [MarketChartPoint], chart: MarketChart) -> [MarketChartLineSegment] {
+    guard let first = points.first else { return [] }
+    guard points.count > 1 else {
+        return [MarketChartLineSegment(indices: [0], isRegular: marketChartLineSession(first) == "regular", isMissing: false)]
+    }
+    let intervalMilliseconds = marketChartIntervalMinutes(chart.interval).map { Int64($0) * 60 * 1_000 }
+    let canInferMissing = chart.quality.status == .repairing || chart.quality.status == .partial
+    var segments: [MarketChartLineSegment] = []
+    var indices: [Int] = []
+    var isRegular = false
+    var isMissing = false
+    for index in 1..<points.count {
+        let previous = points[index - 1]
+        let current = points[index]
+        let edgeIsRegular = marketChartLineSession(current) == "regular"
+        let explicitMissing = chart.quality.missing.contains { gap in
+            gap.startTimestamp <= current.timestamp && gap.endTimestamp >= previous.timestamp
+        }
+        let inferredMissing = canInferMissing && intervalMilliseconds.map { interval in
+            current.timestamp - previous.timestamp > interval * 3 / 2
+                && marketChartPointsShareOpenSession(previous, current, analysis: chart.analysis)
+        } == true
+        let edgeIsMissing = explicitMissing || inferredMissing
+        if !indices.isEmpty && edgeIsRegular == isRegular && edgeIsMissing == isMissing {
+            indices.append(index)
+        } else {
+            if !indices.isEmpty {
+                segments.append(MarketChartLineSegment(indices: indices, isRegular: isRegular, isMissing: isMissing))
+            }
+            // Share the boundary point so a style change never drops a real price edge.
+            indices = [index - 1, index]
+            isRegular = edgeIsRegular
+            isMissing = edgeIsMissing
+        }
+    }
+    segments.append(MarketChartLineSegment(indices: indices, isRegular: isRegular, isMissing: isMissing))
+    return segments
+}
+
+private func marketChartLineSession(_ point: MarketChartPoint) -> String {
+    switch point.session {
+    case nil, "regular", "closed": "regular"
+    case let session?: session
+    }
+}
+
+private func marketChartPointsShareOpenSession(
+    _ previous: MarketChartPoint, _ current: MarketChartPoint, analysis: MarketChartAnalysis
+) -> Bool {
+    guard marketChartLineSession(previous) == marketChartLineSession(current),
+          let first = analysis.sessionWindows.first(where: { $0.contains(previous.timestamp, convention: analysis.candleTimestamp) }),
+          let last = analysis.sessionWindows.first(where: { $0.contains(current.timestamp, convention: analysis.candleTimestamp) }) else { return false }
+    if first == last { return true }
+    var end = first.endTimestamp
+    for window in analysis.sessionWindows where window.startTimestamp >= end && window.startTimestamp < last.endTimestamp {
+        guard window.startTimestamp == end, window.session == first.session else { return false }
+        end = window.endTimestamp
+        if end == last.endTimestamp { return true }
+    }
+    return false
+}
+
+private func marketChartIntervalMinutes(_ interval: String?) -> Int? {
+    switch interval {
+    case "1m": 1
+    case "5m": 5
+    case "15m": 15
+    case "30m": 30
+    case "60m": 60
+    default: nil
+    }
 }
 
 struct MarketChartSessionBreak: Equatable, Sendable {
@@ -1375,29 +1442,21 @@ struct MarketChartSessionBreak: Equatable, Sendable {
     let label: String
 }
 
-func marketChartLunchBreak(
-    points: [MarketChartPoint],
-    market: String?,
-    interval: String?,
-    timezone: String?
-) -> MarketChartSessionBreak? {
-    guard interval == "1m", market?.uppercased() == "CN", points.count > 1 else { return nil }
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: timezone ?? "Asia/Shanghai") ?? TimeZone(identifier: "Asia/Shanghai")!
-    let sorted = points.sorted { $0.timestamp < $1.timestamp }
-
-    for (previous, current) in zip(sorted, sorted.dropFirst()) {
-        guard current.timestamp - previous.timestamp >= 60 * 60 * 1_000 else { continue }
-        let previousDate = Date(timeIntervalSince1970: Double(previous.timestamp) / 1_000)
-        let currentDate = Date(timeIntervalSince1970: Double(current.timestamp) / 1_000)
-        let previousMinute = calendar.component(.hour, from: previousDate) * 60 + calendar.component(.minute, from: previousDate)
-        let currentMinute = calendar.component(.hour, from: currentDate) * 60 + calendar.component(.minute, from: currentDate)
-        guard (11 * 60 + 15)...(11 * 60 + 45) ~= previousMinute,
-              (12 * 60 + 45)...(13 * 60 + 15) ~= currentMinute else { continue }
+func marketChartSessionBreak(points: [MarketChartPoint], chart: MarketChart) -> MarketChartSessionBreak? {
+    guard let minutes = marketChartIntervalMinutes(chart.interval), points.count > 1 else { return nil }
+    let duration = Int64(minutes) * 60_000
+    let convention = chart.analysis.candleTimestamp
+    for (previous, current) in zip(points, points.dropFirst()) {
+        guard let first = chart.analysis.sessionWindows.first(where: { $0.contains(previous.timestamp, convention: convention) }),
+              let last = chart.analysis.sessionWindows.first(where: { $0.contains(current.timestamp, convention: convention) }),
+              first.tradingDate == last.tradingDate, first.endTimestamp < last.startTimestamp,
+              first.session == "regular", last.session == "regular" else { continue }
+        let previousEnd = convention == .intervalEnd ? previous.timestamp : min(previous.timestamp + duration, first.endTimestamp)
+        let currentStart = convention == .intervalEnd ? current.timestamp - 60_000 : current.timestamp
+        guard previousEnd == first.endTimestamp, currentStart == last.startTimestamp else { continue }
         return MarketChartSessionBreak(
-            previousTimestamp: previous.timestamp,
-            currentTimestamp: current.timestamp,
-            label: "午间休市"
+            previousTimestamp: previous.timestamp, currentTimestamp: current.timestamp,
+            label: ["CN", "HK", "JP"].contains(chart.market) ? "午间休市" : "日间休市"
         )
     }
     return nil
@@ -1409,12 +1468,12 @@ func marketChartXFraction(timestamp: Int64, firstTimestamp: Int64, lastTimestamp
 }
 
 func marketChartXFractions(timestamps: [Int64], interval: String?) -> [CGFloat] {
-    guard timestamps.count > 1 else { return timestamps.map { _ in 0 } }
-    let maximumIntradayGap = Int64(5 * 60 * 1_000)
+    guard timestamps.count > 1 else { return timestamps.map { _ in 0.5 } }
+    let maximumIntradayGap = marketChartIntervalMinutes(interval).map { Int64(max($0, 5)) * 60 * 1_000 }
     var positions = [Double](repeating: 0, count: timestamps.count)
     for index in 1..<timestamps.count {
         let elapsed = max(timestamps[index] - timestamps[index - 1], 0)
-        let displayedElapsed = interval == "1m" ? min(elapsed, maximumIntradayGap) : elapsed
+        let displayedElapsed = maximumIntradayGap.map { min(elapsed, $0) } ?? elapsed
         positions[index] = positions[index - 1] + Double(displayedElapsed)
     }
     guard let total = positions.last, total > 0 else { return positions.map { _ in 0 } }
@@ -1423,7 +1482,7 @@ func marketChartXFractions(timestamps: [Int64], interval: String?) -> [CGFloat] 
 
 func marketVolumeBarX(fraction: CGFloat, width: CGFloat, barWidth: CGFloat) -> CGFloat {
     let inset = min(max(barWidth / 2, 0), max(width / 2, 0))
-    return inset + min(max(fraction, 0), 1) * max(width - inset * 2, 0)
+    return min(max(width * fraction, inset), max(width - inset, inset))
 }
 
 enum MarketRange: String, CaseIterable, Identifiable {
@@ -1457,20 +1516,307 @@ enum MarketRange: String, CaseIterable, Identifiable {
         case .month: 64
         case .quarter: 128
         case .year: 400
-        case .fiveYears, .maximum: 600
+        case .fiveYears: 2_000
+        case .maximum: 50_000
         }
     }
 
 }
 
-struct MarketCandleSample: Identifiable, Equatable {
-    var id: Int64 { timestamp }
+enum MarketChartPeriod: String, CaseIterable, Identifiable, Sendable {
+    case intraday = "分时"
+    case fiveDays = "5日"
+    case minute1 = "1分"
+    case minute5 = "5分"
+    case minute15 = "15分"
+    case minute30 = "30分"
+    case minute60 = "60分"
+    case daily = "日线"
+    case weekly = "周线"
+    case monthly = "月线"
+
+    var id: Self { self }
+
+    var sourceRange: MarketRange {
+        switch self {
+        case .intraday, .minute1, .minute5, .minute30, .minute60: .day
+        case .fiveDays, .minute15: .week
+        case .daily: .year
+        case .weekly: .fiveYears
+        case .monthly: .maximum
+        }
+    }
+
+    var displayInterval: String {
+        switch self {
+        case .intraday, .minute1: "1m"
+        case .fiveDays, .minute15: "15m"
+        case .minute5: "5m"
+        case .minute30: "30m"
+        case .minute60: "60m"
+        case .daily: "1d"
+        case .weekly: "1wk"
+        case .monthly: "1mo"
+        }
+    }
+
+    var isIntraday: Bool {
+        switch self {
+        case .daily, .weekly, .monthly: false
+        default: true
+        }
+    }
+
+    var isMinute: Bool {
+        switch self {
+        case .minute1, .minute5, .minute15, .minute30, .minute60: true
+        default: false
+        }
+    }
+
+    var chartTitle: String {
+        switch self {
+        case .intraday: "分时走势"
+        case .fiveDays: "5日走势"
+        case .minute1: "1分钟走势"
+        case .minute5: "5分钟走势"
+        case .minute15: "15分钟走势"
+        case .minute30: "30分钟走势"
+        case .minute60: "60分钟走势"
+        case .daily: "日线走势"
+        case .weekly: "周线走势"
+        case .monthly: "月线走势"
+        }
+    }
+
+    var dateFormat: String {
+        switch self {
+        case .intraday, .minute1, .minute5, .minute30, .minute60: "HH:mm"
+        case .fiveDays, .minute15: "MM-dd HH:mm"
+        case .daily: "MM-dd"
+        case .weekly: "yyyy-MM-dd"
+        case .monthly: "yyyy-MM"
+        }
+    }
+}
+
+func marketChartForDisplay(
+    _ chart: MarketChart, period: MarketChartPeriod, now: Date = Date()
+) -> MarketChart? {
+    guard chart.interval == period.sourceRange.apiInterval,
+          let timeZone = TimeZone(identifier: chart.timezone) else { return nil }
+    let expectedConvention: MarketChartTimestampConvention = chart.interval == "1m" ? .intervalEnd : chart.interval == "1d" ? .tradingDate : .intervalStart
+    guard chart.analysis.candleTimestamp == expectedConvention else { return nil }
+    if chart.interval == "1d", chart.analysis.aggregation != "none" {
+        return nil
+    }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    calendar.firstWeekday = 2
+    calendar.minimumDaysInFirstWeek = 4
+    let visiblePoints = marketChartDisplayPoints(chart.candles, interval: chart.interval)
+        .sorted { $0.timestamp < $1.timestamp }
+    let sourcePoints: [MarketChartPoint]
+    let invalidDateCount: Int
+    if chart.interval == "1m" {
+        guard chart.analysis.candleTimestamp == .intervalEnd,
+              visiblePoints.allSatisfy({ $0.timestamp % 60_000 == 0 }),
+              Set(visiblePoints.map(\.timestamp)).count == visiblePoints.count else { return nil }
+        guard visiblePoints.allSatisfy({ point in
+            chart.analysis.sessionWindows.contains { $0.contains(point.timestamp, convention: .intervalEnd) }
+        }) else { return nil }
+        sourcePoints = visiblePoints
+        invalidDateCount = 0
+    } else if chart.interval == "1d" {
+        sourcePoints = marketNormalizedDailyChartPoints(visiblePoints, calendar: calendar)
+        invalidDateCount = visiblePoints.count - sourcePoints.count
+    } else {
+        sourcePoints = visiblePoints
+        invalidDateCount = 0
+    }
+    let candles: [MarketChartPoint]
+    let includedDailyPoints: [MarketChartPoint]
+    switch period {
+    case .minute5, .minute30, .minute60:
+        let minutes = marketChartIntervalMinutes(period.displayInterval)!
+        candles = marketMinuteChartBuckets(sourcePoints, minutes: minutes, windows: chart.analysis.sessionWindows)
+            .map { marketAggregatedChartPoint($0) }
+        includedDailyPoints = []
+    case .weekly, .monthly:
+        let buckets = marketCalendarChartBuckets(sourcePoints, period: period, calendar: calendar)
+        candles = buckets.map { marketAggregatedChartPoint($0) }
+        includedDailyPoints = buckets.flatMap(\.points)
+    case .daily:
+        candles = sourcePoints
+        includedDailyPoints = sourcePoints
+    default:
+        candles = sourcePoints
+        includedDailyPoints = []
+    }
+    let hasProvisionalPoint = candles.contains { $0.state == "provisional" }
+    let isCalendarAggregation = period == .weekly || period == .monthly
+    let currentCalendarPeriod = isCalendarAggregation
+        ? calendar.dateInterval(of: period == .weekly ? .weekOfYear : .month, for: now)?.start
+        : nil
+    let isCurrentCalendarPeriod = currentCalendarPeriod.map {
+        candles.last?.timestamp == Int64(($0.timeIntervalSince1970 * 1_000).rounded())
+    } ?? false
+    let hasOpenMinuteBucket = marketChartIntervalMinutes(period.displayInterval).map { minutes in
+        candles.last.map { Double($0.timestamp) / 1_000 + Double(minutes * 60) > now.timeIntervalSince1970 } ?? false
+    } ?? false
+    let hasInvalidData = chart.candles.contains { $0.state == "invalid" } || invalidDateCount > 0
+    let hasSourceGaps = !chart.quality.missing.isEmpty
+    let status: MarketChartQualityStatus = (hasInvalidData || hasSourceGaps) && chart.quality.status == .complete
+        ? .partial : chart.quality.status
+    // Coverage describes the real source samples, not the number of display buckets.
+    let quality = MarketChartQuality(
+        status: status,
+        expected: chart.quality.expected,
+        actual: chart.quality.actual,
+        missing: chart.quality.missing,
+        freshnessSeconds: chart.quality.freshnessSeconds,
+        isFinal: chart.quality.isFinal && !hasProvisionalPoint && !isCurrentCalendarPeriod && !hasOpenMinuteBucket
+    )
+    let displayedTradingDate: String
+    if chart.interval == "1d" {
+        displayedTradingDate = includedDailyPoints.last?.tradingDate ?? ""
+    } else {
+        displayedTradingDate = chart.tradingDate
+    }
+    let periodReturn: MarketChartPeriodReturn?
+    if period == .fiveDays || chart.interval == "1d" {
+        periodReturn = marketDisplayedChartPeriodReturn(
+            chart.interval == "1d" ? includedDailyPoints : sourcePoints,
+            range: period.sourceRange.apiRange
+        )
+    } else {
+        periodReturn = chart.periodReturn
+    }
+    return MarketChart(
+        symbol: chart.symbol,
+        market: chart.market,
+        tradingDate: displayedTradingDate,
+        timezone: chart.timezone,
+        session: chart.session,
+        interval: period.displayInterval,
+        periodReturn: periodReturn,
+        periodVolatility: chart.periodVolatility,
+        quality: quality,
+        quote: chart.quote,
+        candles: candles,
+        analysis: MarketChartAnalysis(
+            aggregation: chart.analysis.aggregation,
+            candleTimestamp: period.displayInterval == "1m" ? .intervalEnd : chart.interval == "1d" ? .tradingDate : .intervalStart,
+            sessionWindows: chart.analysis.sessionWindows
+        )
+    )
+}
+
+private func marketDisplayedChartPeriodReturn(
+    _ points: [MarketChartPoint], range: String
+) -> MarketChartPeriodReturn? {
+    guard let first = points.first, let last = points.last,
+          first.close.isFinite, last.close.isFinite else { return nil }
+    let change = last.close - first.close
+    return MarketChartPeriodReturn(
+        range: range,
+        basis: "displayed-close-to-close",
+        startPrice: first.close,
+        endPrice: last.close,
+        change: change,
+        percent: first.close == 0 ? nil : change / first.close * 100,
+        startTimestamp: first.timestamp,
+        endTimestamp: last.timestamp
+    )
+}
+
+private struct MarketChartAggregationBucket {
     let timestamp: Int64
-    let open: Double
-    let high: Double
-    let low: Double
-    let close: Double
-    let volume: Double?
+    var points: [MarketChartPoint]
+}
+
+private func marketNormalizedDailyChartPoints(
+    _ points: [MarketChartPoint], calendar: Calendar
+) -> [MarketChartPoint] {
+    let formatter = marketTradingDateFormatter(calendar: calendar)
+    return points.compactMap { point in
+        let sourceDate = Date(timeIntervalSince1970: Double(point.timestamp) / 1_000)
+        let tradingDate = point.tradingDate ?? formatter.string(from: sourceDate)
+        guard let date = formatter.date(from: tradingDate) else { return nil }
+        return MarketChartPoint(
+            timestamp: Int64((date.timeIntervalSince1970 * 1_000).rounded()),
+            open: point.open, high: point.high, low: point.low, close: point.close,
+            volume: point.volume, state: point.state, source: point.source,
+            session: point.session, tradingDate: tradingDate
+        )
+    }
+    .sorted { $0.timestamp < $1.timestamp }
+}
+
+private func marketMinuteChartBuckets(
+    _ points: [MarketChartPoint], minutes: Int, windows: [MarketChartSessionWindow]
+) -> [MarketChartAggregationBucket] {
+    let duration = Int64(minutes) * 60_000
+    var buckets: [MarketChartAggregationBucket] = []
+    for point in points {
+        guard let window = windows.first(where: { $0.contains(point.timestamp, convention: .intervalEnd) }) else { continue }
+        let timestamp = window.startTimestamp + (point.timestamp - 1 - window.startTimestamp) / duration * duration
+        if buckets.last?.timestamp == timestamp {
+            buckets[buckets.count - 1].points.append(point)
+        } else {
+            buckets.append(MarketChartAggregationBucket(timestamp: timestamp, points: [point]))
+        }
+    }
+    return buckets
+}
+
+private func marketCalendarChartBuckets(
+    _ points: [MarketChartPoint], period: MarketChartPeriod, calendar: Calendar
+) -> [MarketChartAggregationBucket] {
+    let component: Calendar.Component = period == .weekly ? .weekOfYear : .month
+    var buckets: [MarketChartAggregationBucket] = []
+    for point in points {
+        let date = Date(timeIntervalSince1970: Double(point.timestamp) / 1_000)
+        guard let start = calendar.dateInterval(of: component, for: date)?.start else { continue }
+        let timestamp = Int64((start.timeIntervalSince1970 * 1_000).rounded())
+        if buckets.last?.timestamp == timestamp {
+            buckets[buckets.count - 1].points.append(point)
+        } else {
+            buckets.append(MarketChartAggregationBucket(timestamp: timestamp, points: [point]))
+        }
+    }
+    return buckets
+}
+
+private func marketTradingDateFormatter(calendar: Calendar) -> DateFormatter {
+    let formatter = DateFormatter()
+    formatter.calendar = calendar
+    formatter.timeZone = calendar.timeZone
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.isLenient = false
+    return formatter
+}
+
+private func marketAggregatedChartPoint(
+    _ bucket: MarketChartAggregationBucket
+) -> MarketChartPoint {
+    let first = bucket.points[0]
+    let last = bucket.points[bucket.points.count - 1]
+    let volumes = bucket.points.compactMap(\.volume)
+    let sources = Set(bucket.points.map(\.source)).sorted()
+    let sessions = Set(bucket.points.map(\.session))
+    return MarketChartPoint(
+        timestamp: bucket.timestamp,
+        open: first.open,
+        high: bucket.points.map(\.high).max()!,
+        low: bucket.points.map(\.low).min()!,
+        close: last.close,
+        volume: volumes.isEmpty ? nil : volumes.reduce(0, +),
+        state: bucket.points.contains { $0.state == "provisional" } ? "provisional" : last.state,
+        source: sources.joined(separator: ","),
+        session: sessions.count == 1 ? first.session : nil
+    )
 }
 
 func marketAxisDigits(values: [Double]) -> Int {
@@ -1478,41 +1824,8 @@ func marketAxisDigits(values: [Double]) -> Int {
     let step = (high - low) / 4
     if step >= 10 { return 0 }
     if step >= 1 { return 1 }
-    return 2
-}
-
-func marketCandleSamples(_ points: [MarketChartPoint], maxCount: Int) -> [MarketCandleSample] {
-    let candles = points.compactMap { point -> MarketCandleSample? in
-        let close = point.close
-        let open = point.open
-        return MarketCandleSample(
-            timestamp: point.timestamp,
-            open: open,
-            high: max(point.high, max(open, close)),
-            low: min(point.low, min(open, close)),
-            close: close,
-            volume: point.volume
-        )
-    }
-    guard maxCount > 0, candles.count > maxCount else { return candles }
-
-    let bucketSize = Int(ceil(Double(candles.count) / Double(maxCount)))
-    return stride(from: 0, to: candles.count, by: bucketSize).compactMap { start in
-        let bucket = candles[start..<min(start + bucketSize, candles.count)]
-        let volumes = bucket.compactMap(\.volume)
-        guard let first = bucket.first,
-              let last = bucket.last,
-              let high = bucket.map(\.high).max(),
-              let low = bucket.map(\.low).min() else { return nil }
-        return MarketCandleSample(
-            timestamp: last.timestamp,
-            open: first.open,
-            high: high,
-            low: low,
-            close: last.close,
-            volume: volumes.isEmpty ? nil : volumes.reduce(0, +)
-        )
-    }
+    guard step > 0 else { return 10 }
+    return min(max(Int(ceil(-log10(step))), 2), 10)
 }
 
 func marketMovingAverageValues(_ points: [MarketChartPoint], period: Int) -> [Double?] {
@@ -1535,7 +1848,32 @@ func marketEvenChartFractions(count: Int) -> [CGFloat] {
 func marketNearestChartIndex(fraction: CGFloat, fractions: [CGFloat]) -> Int? {
     guard !fractions.isEmpty else { return nil }
     let target = min(max(fraction, 0), 1)
-    return fractions.indices.min { abs(fractions[$0] - target) < abs(fractions[$1] - target) }
+    guard !target.isNaN else { return 0 }
+
+    // Chart fractions are ordered by timestamp. Only the neighbors can be closest.
+    func firstIndex(before end: Int, matching predicate: (CGFloat) -> Bool) -> Int {
+        var lower = 0
+        var upper = end
+        while lower < upper {
+            let mid = lower + (upper - lower) / 2
+            if predicate(fractions[mid]) {
+                upper = mid
+            } else {
+                lower = mid + 1
+            }
+        }
+        return lower
+    }
+
+    let right = firstIndex(before: fractions.count) { $0 >= target }
+    guard right > 0 else { return right }
+    let leftDistance = target - fractions[right - 1]
+    if right < fractions.count, fractions[right] - target < leftDistance {
+        return right
+    }
+
+    // Return the first equally close point when positions or distances tie.
+    return firstIndex(before: right) { target - $0 <= leftDistance }
 }
 
 func marketTrendIsUp(values: [Double], fallbackIsUp: Bool) -> Bool {

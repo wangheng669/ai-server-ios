@@ -368,8 +368,7 @@ struct ChinaMacroView: View {
                 header
                 sectionPicker
                 if store.isLoading && store.years.isEmpty {
-                    ProgressView("正在读取中国宏观数据")
-                        .frame(maxWidth: .infinity, minHeight: 260)
+                    ContentLoadingPlaceholder(title: "正在读取宏观数据", layout: .chart)
                 } else if store.loadError && store.years.isEmpty {
                     unavailable
                 } else if section == .overview {
@@ -382,7 +381,8 @@ struct ChinaMacroView: View {
                 }
             }
             .padding(.horizontal, InvestmentDesign.pageInset)
-            .padding(.vertical, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 80)
         }
         .background(InvestmentDesign.canvas)
         .task(id: rootTabIsActive) {
@@ -406,15 +406,15 @@ struct ChinaMacroView: View {
             selectedYear = nil
         }
         .onChange(of: metric) { _, _ in selectedYear = nil }
-        .sheet(item: $presentation) { item in
+        .appSheet(item: $presentation) { item in
             ChinaMacroMetricSheet(
                 metric: item.metric,
                 years: store.years,
                 initialYear: item.year,
                 updatedAt: store.lastUpdatedAt
             )
-                .presentationDetents([.fraction(0.72), .large])
-                .presentationDragIndicator(.hidden)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(24)
         }
     }
 
@@ -452,12 +452,14 @@ struct ChinaMacroView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 11))
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
         }
         .padding(4)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         }
+        .accessibilityIdentifier("macro-category-picker")
     }
 
     private var snapshotBar: some View {
@@ -912,7 +914,11 @@ private struct InteractiveMacroChart: View {
                 .symbolSize(70)
             }
         }
-        .chartXScale(domain: (points.first?.year ?? 2000)...(points.last?.year ?? 2026))
+        .chartXScale(
+            domain: (points.first?.year ?? 2000)...(points.last?.year ?? 2026),
+            range: .plotDimension(startPadding: 8, endPadding: 8)
+        )
+        .chartYScale(range: .plotDimension(padding: 6))
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 5)) {
                 AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
@@ -929,8 +935,7 @@ private struct InteractiveMacroChart: View {
         .chartXSelection(value: $selectedYear)
         .chartPlotStyle { plot in
             plot
-                .background(metric.color.opacity(0.025))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .background(metric.color.opacity(0.025), in: RoundedRectangle(cornerRadius: 8))
         }
         .frame(height: height)
         .onChange(of: selectedYear) { _, candidate in
@@ -985,33 +990,34 @@ private struct ChinaMacroMetricSheet: View {
     private var maximum: Double? { points.compactMap { metric.value(in: $0) }.max() }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 24) {
                     metricIntro
                     selectedValueCard
+                    Divider()
                     chartCard
                     statistics
                     historyList
                     sourceNote
                 }
-                .padding(16)
+                .padding(20)
+                .padding(.bottom, 68)
             }
-            .background(InvestmentDesign.canvas)
-            .navigationTitle(metric.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .overlay(alignment: .bottomTrailing) {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭宏观指标详情")
-                    .padding(16)
-            }
+            .accessibilityIdentifier("macro-metric-scroll")
         }
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetControls(closeLabel: "关闭宏观指标详情", onClose: dismiss.callAsFunction)
+                .padding(12)
+        }
+        .background(Color(uiColor: .systemBackground))
         .onAppear { selectedYear = initialYear ?? points.last?.year }
     }
 
     private var metricIntro: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(metric.longTitle)
-                .font(.title3.weight(.bold))
+                .font(.title2.bold())
             Text(metric.shortDescription)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1055,9 +1061,7 @@ private struct ChinaMacroMetricSheet: View {
                 .clipShape(Capsule())
             }
         }
-        .padding(16)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+
     }
 
     private var chartCard: some View {
@@ -1073,12 +1077,10 @@ private struct ChinaMacroMetricSheet: View {
                 metric: metric,
                 years: years,
                 selectedYear: $selectedYear,
-                height: 260
+                height: 220
             )
         }
-        .padding(16)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+
     }
 
     private var statistics: some View {
@@ -1099,9 +1101,7 @@ private struct ChinaMacroMetricSheet: View {
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 12)
     }
 
     private var historyList: some View {
@@ -1137,8 +1137,7 @@ private struct ChinaMacroMetricSheet: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var sourceNote: some View {

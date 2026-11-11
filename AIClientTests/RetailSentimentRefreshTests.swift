@@ -16,7 +16,7 @@ final class RetailSentimentRefreshTests: XCTestCase {
         for previous in [try board(), try board(stale: true)] {
             let fresh = try board(stale: false)
             var requests = 0
-            let store = RetailSentimentStore(investorMoodLoader: {
+            let store = InvestorMoodStore(investorMoodLoader: {
                 requests += 1
                 return requests == 1 ? previous : fresh
             })
@@ -31,7 +31,7 @@ final class RetailSentimentRefreshTests: XCTestCase {
     func testFreshResultsAreThrottledButManualRefreshIsAllowed() async throws {
         let fresh = try board(stale: false)
         var requests = 0
-        let store = RetailSentimentStore(investorMoodLoader: { requests += 1; return fresh })
+        let store = InvestorMoodStore(investorMoodLoader: { requests += 1; return fresh })
         await store.refreshInvestorMood()
         await store.refreshInvestorMood()
         XCTAssertEqual(requests, 1)
@@ -43,7 +43,7 @@ final class RetailSentimentRefreshTests: XCTestCase {
     func testRequestFailureDoesNotPermanentlyCacheAnEmptyState() async throws {
         let fresh = try board(stale: false)
         var requests = 0
-        let store = RetailSentimentStore(investorMoodLoader: {
+        let store = InvestorMoodStore(investorMoodLoader: {
             requests += 1
             if requests == 1 { throw URLError(.notConnectedToInternet) }
             return fresh
@@ -60,7 +60,7 @@ final class RetailSentimentRefreshTests: XCTestCase {
     func testFailedRefreshPreservesPreviouslyLoadedSamples() async throws {
         let fresh = try board(stale: false)
         var requests = 0
-        let store = RetailSentimentStore(investorMoodLoader: {
+        let store = InvestorMoodStore(investorMoodLoader: {
             requests += 1
             if requests > 1 { throw URLError(.timedOut) }
             return fresh

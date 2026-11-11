@@ -5,6 +5,7 @@ final class TodayWorldStore: ObservableObject {
     @Published private(set) var report: TodayWorldYesterdayReportPayload?
     @Published private(set) var balance: AliyunAccountBalance?
     @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
     @Published private(set) var checkedAt: Date?
     private(set) var brief: TodayBriefProjection?
     private let fetchReport: () async throws -> TodayWorldYesterdayReportPayload
@@ -45,6 +46,7 @@ final class TodayWorldStore: ObservableObject {
         do {
             let loadedReport = try await fetchReport()
             guard !Task.isCancelled else { return }
+            errorMessage = nil
             brief = TodayBriefProjection(payload: loadedReport)
             report = loadedReport
             checkedAt = Date()
@@ -52,6 +54,7 @@ final class TodayWorldStore: ObservableObject {
             return
         } catch {
             guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
+            errorMessage = NetworkErrorPresentation.message(for: error)
             checkedAt = Date()
         }
         await balanceRequest
@@ -226,7 +229,13 @@ struct TodayWorldView: View {
 
     private var emptyReportView: some View {
         ScrollView {
-            Color.clear.frame(height: 1)
+            if let reason = store.report?.report.final?.error, !reason.isEmpty {
+                ContentUnavailableView("暂无可读日报", systemImage: "doc.text", description: Text(reason))
+            } else if let error = store.errorMessage {
+                ContentUnavailableView("日报加载失败", systemImage: "wifi.exclamationmark", description: Text(error))
+            } else if store.isLoading {
+                ProgressView("正在加载日报").padding(.top, 28)
+            }
         }
         .refreshable { await store.load(force: true) }
         .accessibilityIdentifier("today-status-scroll")

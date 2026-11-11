@@ -7,10 +7,8 @@ final class MarketStore {
     private static let realtimeUIFlushInterval = Duration.milliseconds(750)
 
     private(set) var dashboard: MarketDashboard?
-    private(set) var charts: [ChartKey: MarketChart] = [:]
-    private(set) var chartPresentations: [ChartKey: MarketChartPresentation] = [:]
-    private(set) var listTrendPresentations: [ChartKey: [Double]] = [:]
-    private(set) var loadingCharts: Set<ChartKey> = []
+    private var chartSnapshots: [ChartKey: MarketChartSnapshot] = [:]
+    private var chartLoadTasks: [ChartKey: Task<Void, Never>] = [:]
     private(set) var chartErrors: [ChartKey: String] = [:]
     private(set) var indexConstituents: [String: MarketIndexConstituents] = [:]
     private(set) var constituentErrors: [String: String] = [:]
@@ -42,9 +40,8 @@ final class MarketStore {
     private var trendBackfillTask: Task<Void, Never>?
     @ObservationIgnored private var dashboardQuotesBySymbol: [String: MarketQuote] = [:]
     @ObservationIgnored private var constituentsBySymbol: [String: MarketIndexConstituent] = [:]
-
-    init(baseURL: URL = ServerConfiguration.currentURL) {
-        service = MarketService(baseURL: baseURL)
+    init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession? = nil) {
+        service = MarketService(baseURL: baseURL, session: session)
         realtime = MarketRealtimeClient(baseURL: baseURL)
     }
 
@@ -114,45 +111,50 @@ final class MarketStore {
         }
     }
 
-    func applyBootstrap(_ value: MarketDashboard, receivedAt: Date = Date()) {
-        var value = value
-        for update in latestRealtimeUpdates.values {
-            value.merge(update)
-        }
-        dashboardQuotesBySymbol = Self.quoteIndex(for: value)
-        dashboard = value
-        lastSnapshotRefreshAt = receivedAt
-        isShowingCachedSnapshot = false
-        cacheSavedAt = nil
-        errorMessage = marketHealthMessage(for: value)
-        scheduleMissingTrendBackfill()
+    func preloadDashboard() async {
+        await loadCacheIfNeeded()
+        guard !Task.isCancelled else { return }
+        await refresh(force: false)
     }
 
     func preloadListCharts(symbols: [String]) async {
         var seen = Set<String>()
         let uniqueSymbols = symbols.filter { seen.insert($0).inserted }
-        await marketRunWithLimitedConcurrency(uniqueSymbols) { symbol in
-            // loadChart shares completed and in-flight requests with the sheet.
+        await runWithLimitedConcurrency(uniqueSymbols, maximumConcurrentRequests: 6) { symbol in
             await self.loadChart(symbol: symbol, range: .day)
         }
     }
 
     func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
+        guard !Task.isCancelled else { return }
         let key = ChartKey(symbol: symbol, range: range)
-        if !force, let cached = charts[key], marketChartCanUseCache(cached) { return }
-        guard !loadingCharts.contains(key) else { return }
-        loadingCharts.insert(key)
+        if !force, let snapshot = chartSnapshots[key],
+           marketChartCanUseCache(snapshot.chart, loadedAt: snapshot.loadedAt) { return }
+        if let task = chartLoadTasks[key] {
+            await task.value
+            return
+        }
+
+        // Keep the request alive when navigation cancels the view that started it.
+        let task = Task { await fetchChart(for: key, force: force) }
+        chartLoadTasks[key] = task
+        await task.value
+    }
+
+    func isLoadingChart(symbol: String, range: MarketRange) -> Bool {
+        chartLoadTasks[ChartKey(symbol: symbol, range: range)] != nil
+    }
+
+    private func fetchChart(for key: ChartKey, force: Bool) async {
         chartErrors[key] = nil
-        defer { loadingCharts.remove(key) }
+        defer { chartLoadTasks[key] = nil }
         do {
-            let value = try await service.chart(symbol: symbol, range: range, refresh: force)
+            let value = try await service.chart(symbol: key.symbol, range: key.range, refresh: force)
             let artifacts = try await marketChartArtifacts(for: value)
             guard !Task.isCancelled else { return }
-            charts[key] = value
-            chartPresentations[key] = artifacts.presentation
-            listTrendPresentations[key] = artifacts.listTrend
+            chartSnapshots[key] = MarketChartSnapshot(chart: value, artifacts: artifacts, loadedAt: Date())
             if marketChartNeedsRetry(value) {
-                scheduleChartRetry(symbol: symbol, range: range, key: key)
+                scheduleChartRetry(symbol: key.symbol, range: key.range, key: key)
             } else {
                 chartRetryTasks[key]?.cancel()
                 chartRetryTasks[key] = nil
@@ -186,12 +188,16 @@ final class MarketStore {
         }
     }
 
+    func chartSnapshot(symbol: String, range: MarketRange) -> MarketChartSnapshot? {
+        chartSnapshots[ChartKey(symbol: symbol, range: range)]
+    }
+
     func chart(symbol: String, range: MarketRange) -> MarketChart? {
-        charts[ChartKey(symbol: symbol, range: range)]
+        chartSnapshot(symbol: symbol, range: range)?.chart
     }
 
     func chartPresentation(symbol: String, range: MarketRange) -> MarketChartPresentation? {
-        chartPresentations[ChartKey(symbol: symbol, range: range)]
+        chartSnapshot(symbol: symbol, range: range)?.artifacts.presentation
     }
 
     func chartError(symbol: String, range: MarketRange) -> String? {
@@ -265,7 +271,7 @@ final class MarketStore {
     func listTrendValues(for quote: MarketQuote?) -> [Double] {
         guard let quote else { return [] }
         return marketListChartTrend(
-            chartValues: listTrendPresentations[ChartKey(symbol: quote.symbol, range: .day)]
+            chartValues: chartSnapshot(symbol: quote.symbol, range: .day)?.artifacts.listTrend
         )
     }
 
@@ -524,11 +530,22 @@ func marketTrendBackfillSymbols(for dashboard: MarketDashboard, limit: Int = 24)
 }
 
 func marketChartNeedsRetry(_ chart: MarketChart) -> Bool {
-    chart.candles.isEmpty && chart.quality.status != .complete
+    let quality = chart.quality
+    return quality.status == .repairing
+        || quality.status == .partial
+        || !quality.missing.isEmpty
+        || (chart.candles.isEmpty && quality.status != .complete)
 }
 
-func marketChartCanUseCache(_ chart: MarketChart) -> Bool {
-    !marketChartNeedsRetry(chart)
+func marketChartCanUseCache(_ chart: MarketChart, loadedAt: Date, now: Date = Date()) -> Bool {
+    guard !marketChartNeedsRetry(chart) else { return false }
+    let maximumAge: TimeInterval
+    switch chart.interval {
+    case "1m", "15m": maximumAge = 30
+    case "1d": maximumAge = 5 * 60
+    default: return false
+    }
+    return now.timeIntervalSince(loadedAt) < maximumAge
 }
 
 private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {
@@ -570,6 +587,13 @@ struct ChartKey: Hashable {
     let range: MarketRange
 }
 
+struct MarketChartSnapshot {
+    let id = UUID()
+    let chart: MarketChart
+    let artifacts: MarketChartArtifacts
+    let loadedAt: Date
+}
+
 private actor MarketSnapshotCache {
     static let shared = MarketSnapshotCache()
     private let key = "market.dashboard.cache.v1"
@@ -581,14 +605,10 @@ private actor MarketSnapshotCache {
     }
 
     func load() -> Snapshot? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
-            return Date().timeIntervalSince(snapshot.savedAt) <= maximumDisplayAge ? snapshot : nil
-        }
-        guard let dashboard = try? JSONDecoder().decode(MarketDashboard.self, from: data) else { return nil }
-        let savedAt = marketISODate(dashboard.generatedAt) ?? .distantPast
-        guard Date().timeIntervalSince(savedAt) <= maximumDisplayAge else { return nil }
-        return Snapshot(dashboard: dashboard, savedAt: savedAt)
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
+              Date().timeIntervalSince(snapshot.savedAt) <= maximumDisplayAge else { return nil }
+        return snapshot
     }
 
     func save(_ dashboard: MarketDashboard, at date: Date) {

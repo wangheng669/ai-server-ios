@@ -11,17 +11,14 @@ private let learningImageLogger = Logger(
 
 struct LearningView: View {
     @Binding private var showsDetail: Bool
-    @Binding private var notificationPersonID: String?
-    @Binding private var notificationVideoID: Int64?
     @Environment(\.openURL) private var openURL
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     private let peopleStore: PeopleStore
-    @State private var store = LearningStore()
+    @State private var store: LearningStore
     @State private var repository = LearningContentRepository()
     @State private var progressStore = LearningProgressStore()
     @State private var selectedRoute: LearningRoute?
     @State private var selectedIdeologyPerson: SpecialPerson?
-    @State private var peopleShowsDetail = false
     @State private var ideologyCampFilter: IdeologyCampFilter = .all
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
@@ -42,8 +39,7 @@ struct LearningView: View {
         let arguments = ProcessInfo.processInfo.arguments
         return arguments.contains("--people-preview") ||
             arguments.contains("--person-detail-preview") ||
-            arguments.contains("--article-detail-preview") ||
-            arguments.contains("--video-detail-preview")
+            arguments.contains("--article-detail-preview")
         #else
         return false
         #endif
@@ -70,115 +66,102 @@ struct LearningView: View {
     }()
     @State private var readingReminder = ReadingReminderManager()
 
+    @MainActor
     init(
         peopleStore: PeopleStore,
-        showsDetail: Binding<Bool> = .constant(false),
-        notificationPersonID: Binding<String?> = .constant(nil),
-        notificationVideoID: Binding<Int64?> = .constant(nil)
+        store: LearningStore,
+        showsDetail: Binding<Bool>
     ) {
         self.peopleStore = peopleStore
+        _store = State(initialValue: store)
         _showsDetail = showsDetail
-        _notificationPersonID = notificationPersonID
-        _notificationVideoID = notificationVideoID
     }
 
     var body: some View {
         NavigationStack {
-            knowledgeHome
+            Group {
+                if store.hasLoadedOverview || store.hasOverviewContent {
+                    knowledgeHome
+                } else {
+                    ContentLoadingPlaceholder(title: "正在准备知识内容", rowCount: 5)
+                        .accessibilityIdentifier("knowledge-home-loading")
+                }
+            }
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $selectedRoute, onDismiss: {
-            showsDetail = presentedSection != nil || selectedIdeologyPerson != nil
-        }) { route in
+        .appSheet(item: $selectedRoute) { route in
             NavigationStack {
                 switch route {
-                case let .topic(topic, lessonTitle, lessonNumber, lessonCount):
+                case let .topic(topic, position):
                     LearningDetailView(
                         topic: topic,
                         repository: repository,
                         progressStore: progressStore,
-                        lessonTitle: lessonTitle,
-                        lessonNumber: lessonNumber,
-                        lessonCount: lessonCount
+                        position: position
                     )
                 case let .videoLesson(lesson):
                     LearningVideoLessonDetailView(seed: lesson)
                 }
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationContentInteraction(.scrolls)
+            .appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
+            .appPresentationScrollsWithoutExpanding()
         }
-        .sheet(isPresented: ideologyPersonIsPresented, onDismiss: {
-            updateShowsDetail()
-        }) {
+        .appSheet(isPresented: ideologyPersonIsPresented) {
             PersonDetailSheet(
                 selectedPerson: $selectedIdeologyPerson,
                 people: ideologyPeople,
                 onClose: { selectedIdeologyPerson = nil }
             )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationContentInteraction(.scrolls)
+            .appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
+            .appPresentationScrollsWithoutExpanding()
         }
-        .sheet(isPresented: $showsCity, onDismiss: updateShowsDetail) {
+        .appSheet(isPresented: $showsCity) {
             CityNewsView()
                 .environment(\.rootBottomChromeHeight, 0)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
-                .presentationContentInteraction(.scrolls)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationScrollsWithoutExpanding()
         }
-        .sheet(isPresented: $showsPeople, onDismiss: updateShowsDetail) {
-            PeopleView(
-                store: peopleStore,
-                showsDetail: $peopleShowsDetail,
-                notificationPersonID: $notificationPersonID,
-                notificationVideoID: $notificationVideoID
-            )
+        .appSheet(isPresented: $showsPeople) {
+            PeopleView(store: peopleStore)
             .environment(\.rootBottomChromeHeight, 0)
             .environment(\.rootTabIsActive, true)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(28)
-            .presentationContentInteraction(.scrolls)
+            .appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
+            .appPresentationScrollsWithoutExpanding()
         }
-        .task {
-            async let catalog: Void = store.load()
-            async let bookshelf: Void = store.loadBookshelf()
-            async let conceptLibrary: Void = store.loadConceptLibrary()
-            async let videoLibrary: Void = store.loadVideoLibrary()
-            _ = await (catalog, bookshelf, conceptLibrary, videoLibrary)
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.loadOverview()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview"),
-               selectedConcept == nil,
-               let concepts = store.conceptLibrary?.concepts,
-               !concepts.isEmpty {
-                let previewIndex = conceptCardPreviewIndex ?? 0
-                selectedConcept = concepts[
-                    concepts.indices.contains(previewIndex) ? previewIndex : 0
-                ]
-            }
             if (ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-video-preview")),
                selectedRoute == nil,
                let topic = store.catalog?.sections
                 .flatMap(\.topics)
                 .first(where: { $0.title.contains("市盈率") }) {
-                let topics = store.catalog.map { stockTopics(in: $0) } ?? []
-                let milestones = learningMilestones(from: topics)
+                let milestones = LearningMilestone.plan(from: store.catalog?.stockTopics ?? [])
                 if let index = milestones.firstIndex(where: { $0.topic.id == topic.id }) {
                     selectedRoute = route(for: milestones[index], at: index, total: milestones.count)
                 } else {
-                    selectedRoute = .topic(topic, nil, nil, nil)
+                    selectedRoute = .topic(topic)
                 }
             }
             #endif
         }
-        .sheet(item: $selectedConcept) { concept in
+        #if DEBUG
+        .onChange(of: store.conceptLibrary?.concepts, initial: true) { _, concepts in
+            guard rootTabIsActive,
+                  ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview"),
+                  selectedConcept == nil, let concepts, !concepts.isEmpty else { return }
+            let index = conceptCardPreviewIndex ?? 0
+            selectedConcept = concepts[concepts.indices.contains(index) ? index : 0]
+        }
+        #endif
+        .appSheet(item: $selectedConcept) { concept in
             if let url = concept.wikipediaURL {
                 WikipediaReaderView(
                     entity: WikipediaEntity(
@@ -192,37 +175,9 @@ struct LearningView: View {
                 .wikipediaReaderPresentation()
             }
         }
-        .onChange(of: selectedRoute, initial: true) { _, route in
-            updateShowsDetail()
-        }
-        .onChange(of: selectedIdeologyPerson) { _, person in
-            updateShowsDetail()
-        }
-        .onChange(of: presentedSection) { _, section in
-            updateShowsDetail()
-        }
-        .onChange(of: showsCity) { _, _ in
-            updateShowsDetail()
-        }
-        .onChange(of: showsPeople, initial: true) { _, _ in
-            updateShowsDetail()
-        }
-        .onChange(of: peopleShowsDetail) { _, _ in
-            updateShowsDetail()
-        }
-        .onChange(of: notificationPersonID, initial: true) { _, personID in
-            guard let personID, !personID.isEmpty else { return }
-            showsPeople = true
-            updateShowsDetail()
-        }
-        .task(id: "\(rootTabIsActive)-\(prefetchKey)") {
-            guard rootTabIsActive,
-                  let catalog = store.catalog,
-                  let section = catalog.sections.first(where: { $0.name == "股票" }) ??
-                    catalog.sections.first else {
-                return
-            }
-            await repository.prefetch(section.topics.prefix(10))
+        .onChange(of: presentedSection, initial: true) { _, section in
+            // The in-page overlay controls root chrome. Native sheets cover it themselves.
+            showsDetail = section != nil
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -230,7 +185,6 @@ struct LearningView: View {
         }
         .task(id: "books-\(rootTabIsActive)") {
             guard rootTabIsActive else { return }
-            await store.loadBookshelf()
             await readingReminder.restore()
         }
         .task(id: conceptImagePrefetchKey) {
@@ -238,17 +192,13 @@ struct LearningView: View {
                   let concepts = store.conceptLibrary?.concepts else {
                 return
             }
-            await KnowledgeConceptImageLoading.prefetch(concepts)
+            await KnowledgeConceptImageLoading.prefetch(Array(concepts.prefix(3)))
         }
         .onDisappear { showsDetail = false }
     }
 
-    private var prefetchKey: String {
-        "\(store.catalog?.fetchedAt.timeIntervalSince1970 ?? 0)"
-    }
-
     private var conceptImagePrefetchKey: String {
-        let imageURLs = store.conceptLibrary?.concepts.compactMap {
+        let imageURLs = store.conceptLibrary?.concepts.prefix(3).compactMap {
             $0.coverURL?.absoluteString
         } ?? []
         return "\(rootTabIsActive)-\(imageURLs.joined(separator: "|"))"
@@ -262,15 +212,9 @@ struct LearningView: View {
                 knowledgeEditorialFeed
                 .padding(.bottom, 118)
             }
+            .refreshable { await store.loadOverview(force: true) }
+            .accessibilityIdentifier("knowledge-home")
             .scrollIndicators(.hidden)
-            .refreshable {
-                async let catalog: Void = store.load(force: true)
-                async let bookshelf: Void = store.loadBookshelf(force: true)
-                async let concepts: Void = store.loadConceptLibrary(force: true)
-                async let videos: Void = store.loadVideoLibrary(force: true)
-                async let people: Void = peopleStore.load(force: true)
-                _ = await (catalog, bookshelf, concepts, videos, people)
-            }
             .allowsHitTesting(presentedSection == nil)
             .accessibilityHidden(presentedSection != nil)
 
@@ -285,12 +229,12 @@ struct LearningView: View {
                     .zIndex(1)
             }
         }
-        .animation(.smooth(duration: 0.28), value: presentedSection)
+        .animation(AppModalMotion.animation, value: presentedSection)
         .sensoryFeedback(.impact(weight: .light), trigger: presentedSection)
     }
 
     private var knowledgeEditorialFeed: some View {
-        VStack(spacing: 14) {
+        LazyVStack(spacing: 14) {
             knowledgeInvestmentFeature
             knowledgeBooksRow
             knowledgeConceptRow
@@ -305,13 +249,17 @@ struct LearningView: View {
     private func knowledgeSectionCount(_ section: KnowledgeSection) -> String {
         switch section {
         case .investment:
-            "\(store.videoLibrary?.lessons.count ?? 0) 节"
+            store.videoLibrary.map { "\($0.lessons.count) 节" }
+                ?? (store.videoLibraryErrorMessage == nil ? "载入中" : "载入失败")
         case .books:
-            "\(store.bookshelf?.books.count ?? 0) 本"
+            store.bookshelf.map { "\($0.books.count) 本" }
+                ?? (store.bookshelfErrorMessage == nil ? "载入中" : "载入失败")
         case .concepts:
-            "\(store.conceptLibrary?.concepts.count ?? 0) 张"
+            store.conceptLibrary.map { "\($0.concepts.count) 张" }
+                ?? (store.conceptLibraryErrorMessage == nil ? "载入中" : "载入失败")
         case .ideology:
-            "\(ideologyPeople.count) 人"
+            peopleStore.hasLoadedDirectory ? "\(ideologyPeople.count) 人"
+                : (peopleStore.errorMessage == nil ? "载入中" : "载入失败")
         }
     }
 
@@ -325,8 +273,8 @@ struct LearningView: View {
                 presentedSection = .investment
             } label: {
                 HStack(spacing: 13) {
-                    AsyncImage(url: lesson?.coverURL) { phase in
-                        if case let .success(image) = phase {
+                    KnowledgeHomeImage(url: lesson?.coverURL, size: CGSize(width: 112, height: 74)) { image in
+                        if let image {
                             image
                                 .resizable()
                                 .scaledToFill()
@@ -369,6 +317,7 @@ struct LearningView: View {
             }
             .buttonStyle(LearningPressStyle())
             .accessibilityHint("以弹窗展示投资学习")
+            .accessibilityIdentifier("knowledge-investment-entry")
 
             knowledgeSectionDivider
         }
@@ -378,7 +327,7 @@ struct LearningView: View {
     @ViewBuilder
     private var knowledgeInvestmentResume: some View {
         if let catalog = store.catalog {
-            let milestones = learningMilestones(from: stockTopics(in: catalog))
+            let milestones = LearningMilestone.plan(from: catalog.stockTopics)
             let completed = progressStore.completedCount(in: milestones.map(\.topic))
             let currentIndex = milestones.firstIndex {
                 !progressStore.isCompleted($0.topic.id)
@@ -426,8 +375,9 @@ struct LearningView: View {
             }
         } else {
             HStack(spacing: 10) {
-                ProgressView()
-                Text("正在准备学习内容")
+                Image(systemName: "book.closed")
+                    .foregroundStyle(.tertiary)
+                Text(store.errorMessage == nil ? "正在准备学习内容" : "投资知识载入失败")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Color.primary.opacity(0.56))
             }
@@ -450,8 +400,8 @@ struct LearningView: View {
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(books) { book in
                         VStack(alignment: .leading, spacing: 6) {
-                            AsyncImage(url: book.coverURL) { phase in
-                                if case let .success(image) = phase {
+                            KnowledgeHomeImage(url: book.coverURL, size: CGSize(width: 120, height: 128)) { image in
+                                if let image {
                                     image.resizable().scaledToFit()
                                 } else {
                                     Color(white: 0.93)
@@ -484,6 +434,7 @@ struct LearningView: View {
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityHint("以弹窗展示书籍")
+        .accessibilityIdentifier("knowledge-books-entry")
     }
 
     private var knowledgeConceptRow: some View {
@@ -512,8 +463,8 @@ struct LearningView: View {
 
                     Spacer(minLength: 0)
 
-                    AsyncImage(url: concept?.coverURL) { phase in
-                        if case let .success(image) = phase {
+                    KnowledgeHomeImage(url: concept?.coverURL, size: CGSize(width: 68, height: 68)) { image in
+                        if let image {
                             image.resizable().scaledToFill()
                         } else {
                             Color.primary.opacity(0.045)
@@ -535,6 +486,7 @@ struct LearningView: View {
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityHint("以弹窗展示概念卡片")
+        .accessibilityIdentifier("knowledge-concepts-entry")
     }
 
     private var knowledgeIdeologyRow: some View {
@@ -583,6 +535,7 @@ struct LearningView: View {
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityHint("以弹窗展示思想图谱")
+        .accessibilityIdentifier("knowledge-ideology-entry")
     }
 
     private var knowledgePeopleRow: some View {
@@ -719,39 +672,6 @@ struct LearningView: View {
     private func knowledgePopup(_ section: KnowledgeSection) -> some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Image(systemName: section.icon)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(KnowledgePagePalette.accent)
-                        .frame(width: 38, height: 38)
-                        .background(KnowledgePagePalette.accent.opacity(0.09), in: Circle())
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(section.title)
-                            .font(.system(size: 22, weight: .bold, design: .serif))
-                        Text(section.subtitle)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(KnowledgePagePalette.supportingText)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Button(action: dismissSection) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 36, height: 36)
-                            .background(Color.primary.opacity(0.06), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("关闭\(section.title)")
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
-
-                Divider()
-
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         switch section {
@@ -770,7 +690,7 @@ struct LearningView: View {
                         }
                     }
                     .padding(.top, section == .concepts ? 0 : 16)
-                    .padding(.bottom, 34)
+                    .padding(.bottom, 86)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -784,6 +704,10 @@ struct LearningView: View {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .stroke(Color.white.opacity(0.42), lineWidth: 0.8)
             }
+            .overlay(alignment: .bottomTrailing) {
+                DetailSheetControls(closeLabel: "关闭\(section.title)", onClose: dismissSection)
+                    .padding(12)
+            }
             .shadow(color: .black.opacity(0.2), radius: 26, y: 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -791,29 +715,20 @@ struct LearningView: View {
     }
 
     private func dismissSection() {
-        withAnimation(.smooth(duration: 0.24)) {
+        withAnimation(AppModalMotion.animation) {
             presentedSection = nil
         }
     }
 
-    private func updateShowsDetail() {
-        showsDetail = selectedRoute != nil ||
-            selectedIdeologyPerson != nil ||
-            presentedSection != nil ||
-            showsCity ||
-            showsPeople ||
-            peopleShowsDetail
-    }
-
     @ViewBuilder
     private var investmentContent: some View {
+        videoLessons
         if let catalog = store.catalog {
-            let topics = stockTopics(in: catalog)
-            videoLessons
+            let milestones = LearningMilestone.plan(from: catalog.stockTopics)
             WeeklyStudyCard(studiedDays: progressStore.studyDays())
                 .padding(.horizontal, 20)
-            learningPath(topics)
-            savedTopics(in: catalog, excluding: Set(topics.prefix(4).map(\.id)))
+            learningPath(milestones)
+            savedTopics(in: catalog, excluding: Set(milestones.map(\.topic.id)))
         } else if store.isLoading {
             InvestmentContentLoadingView()
         } else {
@@ -857,6 +772,7 @@ struct LearningView: View {
                                 LearningVideoLessonCard(lesson: lesson)
                             }
                             .buttonStyle(LearningPressStyle())
+                            .accessibilityIdentifier("knowledge-video-\(lesson.id)")
                         }
                     }
                     .padding(.horizontal, 20)
@@ -865,30 +781,35 @@ struct LearningView: View {
                 .padding(.bottom, 18)
             }
         } else if store.isVideoLibraryLoading {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding(.top, 24)
+            ContentLoadingPlaceholder(title: "正在载入课程视频", layout: .cards)
+        } else if let error = store.videoLibraryErrorMessage {
+            ContentUnavailableView {
+                Label("投资视频课载入失败", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("重试") { Task { await store.loadVideoLibrary(force: true) } }
+            }
         }
     }
 
     @ViewBuilder
-    private func learningPath(_ topics: [LearningTopic]) -> some View {
+    private func learningPath(_ milestones: [LearningMilestone]) -> some View {
         Text("股票入门路径")
             .font(.system(size: 24, weight: .bold, design: .serif))
             .padding(.horizontal, 20)
             .padding(.top, 26)
             .padding(.bottom, 13)
 
-        if topics.isEmpty {
+        if milestones.isEmpty {
             ContentUnavailableView(
                 "暂无学习内容",
                 systemImage: "point.topleft.down.to.point.bottomright.curvepath",
-                description: Text("下拉刷新后重试")
+                description: Text("稍后重新进入页面查看")
             )
             .frame(maxWidth: .infinity)
             .padding(.top, 24)
         } else {
-            let milestones = learningMilestones(from: topics)
             let completedCount = progressStore.completedCount(in: milestones.map(\.topic))
             let currentIndex = milestones.firstIndex {
                 !progressStore.isCompleted($0.topic.id)
@@ -910,6 +831,7 @@ struct LearningView: View {
                         )
                     }
                     .buttonStyle(LearningPressStyle())
+                    .accessibilityIdentifier("knowledge-lesson-\(milestone.topic.id)")
                 }
             }
             .padding(.horizontal, 20)
@@ -940,7 +862,7 @@ struct LearningView: View {
             VStack(spacing: 0) {
                 ForEach(topics) { topic in
                     Button {
-                        selectedRoute = .topic(topic, nil, nil, nil)
+                        selectedRoute = .topic(topic)
                     } label: {
                         LearningTopicRow(topic: topic)
                     }
@@ -971,14 +893,12 @@ struct LearningView: View {
         .padding(.bottom, 14)
 
         if store.isBookshelfLoading && store.bookshelf == nil {
-            ProgressView("正在载入书架")
-                .frame(maxWidth: .infinity)
-                .padding(.top, 44)
+            ContentLoadingPlaceholder(title: "正在载入书架", layout: .cards)
         } else if store.bookshelfErrorMessage != nil && store.bookshelf == nil {
             ContentUnavailableView {
                 Label("书架载入失败", systemImage: "wifi.exclamationmark")
             } description: {
-                Text("稍后再试，或下拉刷新")
+                Text("请稍后重试")
             } actions: {
                 Button("重新载入") {
                     Task { await store.loadBookshelf(force: true) }
@@ -990,7 +910,7 @@ struct LearningView: View {
             ContentUnavailableView(
                 "暂无可展示书籍",
                 systemImage: "books.vertical",
-                description: Text("下拉刷新后重试")
+                description: Text("稍后重新进入页面查看")
             )
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
@@ -1056,7 +976,7 @@ struct LearningView: View {
                     ContentUnavailableView(
                         "暂无概念",
                         systemImage: "rectangle.stack",
-                        description: Text("下拉刷新后重试")
+                        description: Text("稍后重新进入页面查看")
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.top, 36)
@@ -1112,9 +1032,7 @@ struct LearningView: View {
                 self.selectedConceptID = IDs.first
             }
         } else if store.isConceptLibraryLoading {
-            ProgressView("正在载入概念卡片")
-                .frame(maxWidth: .infinity)
-                .padding(.top, 44)
+            ContentLoadingPlaceholder(title: "正在载入概念卡片", layout: .cards)
         } else if store.conceptLibraryErrorMessage != nil {
             ContentUnavailableView {
                 Label("概念载入失败", systemImage: "wifi.exclamationmark")
@@ -1131,7 +1049,7 @@ struct LearningView: View {
             ContentUnavailableView(
                 "暂无概念",
                 systemImage: "rectangle.stack",
-                description: Text("下拉刷新后重试")
+                description: Text("稍后重新进入页面查看")
             )
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
@@ -1273,6 +1191,7 @@ struct LearningView: View {
                         )
                     }
                     .buttonStyle(LearningPressStyle())
+                    .accessibilityIdentifier("ideology-person-\(person.id)")
                 }
             }
         }
@@ -1308,40 +1227,12 @@ struct LearningView: View {
         )
     }
 
-    private func stockTopics(in catalog: LearningCatalog) -> [LearningTopic] {
-        catalog.sections.first(where: { $0.name == "股票" })?.topics ??
-            catalog.sections.first?.topics ??
-            []
-    }
-
-    private func learningMilestones(from topics: [LearningTopic]) -> [LearningMilestone] {
-        let definitions: [(String, [String])] = [
-            ("基础概念", ["净收入", "净资产"]),
-            ("读懂财报", ["资产负债", "现金流", "财报"]),
-            ("估值方法", ["市盈率", "估值"]),
-            ("风险管理", ["风险", "安全边际"])
-        ]
-
-        var usedIDs = Set<String>()
-        return definitions.enumerated().compactMap { index, definition in
-            let matched = topics.first { topic in
-                !usedIDs.contains(topic.id) &&
-                    definition.1.contains(where: { keyword in topic.title.contains(keyword) })
-            }
-            let fallback = topics.first { !usedIDs.contains($0.id) } ??
-                (topics.indices.contains(index) ? topics[index] : nil)
-            guard let topic = matched ?? fallback else { return nil }
-            usedIDs.insert(topic.id)
-            return LearningMilestone(title: definition.0, topic: topic)
-        }
-    }
-
     private func route(
         for milestone: LearningMilestone,
         at index: Int,
         total: Int
     ) -> LearningRoute {
-        .topic(milestone.topic, milestone.title, index + 1, total)
+        .topic(milestone.topic, position: LearningLessonPosition(title: milestone.title, number: index + 1, count: total))
     }
 }
 
@@ -1383,12 +1274,12 @@ private enum KnowledgeSection: String, CaseIterable, Identifiable {
 }
 
 private enum LearningRoute: Hashable, Identifiable {
-    case topic(LearningTopic, String?, Int?, Int?)
+    case topic(LearningTopic, position: LearningLessonPosition? = nil)
     case videoLesson(LearningVideoLesson)
 
     var id: String {
         switch self {
-        case let .topic(topic, _, _, _): "topic-\(topic.id)"
+        case let .topic(topic, _): "topic-\(topic.id)"
         case let .videoLesson(lesson): "video-\(lesson.id)"
         }
     }
@@ -1445,13 +1336,6 @@ private enum IdeologyCampFilter: String, CaseIterable, Identifiable {
         case .rebel: "反方"
         }
     }
-}
-
-private struct LearningMilestone: Identifiable {
-    let title: String
-    let topic: LearningTopic
-
-    var id: String { "\(title)-\(topic.id)" }
 }
 
 private struct IdeologyPersonGridCell: View {
@@ -1643,28 +1527,29 @@ private struct LearningVideoLessonDetailView: View {
         }
         .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)
-        .fullScreenCover(isPresented: $showsFullscreenPlayer) {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                if let player {
-                    LearningInlineVideoPlayer(
-                        player: player,
-                        posterURL: lesson.coverURL,
-                        posterImage: posterImage,
-                        isPlaying: $isPlaying,
-                        currentTime: $currentPlaybackTime,
-                        duration: $playbackDuration,
-                        isFullscreen: true
-                    ) {
-                        dismissFullscreenPlayer()
+        .appFullScreenCover(isPresented: $showsFullscreenPlayer) {
+            GeometryReader { geometry in
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    if let player {
+                        LearningInlineVideoPlayer(
+                            player: player,
+                            posterURL: lesson.coverURL,
+                            posterImage: posterImage,
+                            isPlaying: $isPlaying,
+                            currentTime: $currentPlaybackTime,
+                            duration: $playbackDuration,
+                            isFullscreen: true
+                        ) {
+                            dismissFullscreenPlayer()
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
                     }
-                    .ignoresSafeArea()
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .persistentSystemOverlays(.hidden)
-            .onAppear {
-                AppOrientationController.shared.setVideoFullscreen(true)
-            }
             .onDisappear {
                 AppOrientationController.shared.setVideoFullscreen(false)
             }
@@ -1802,6 +1687,7 @@ private struct LearningVideoLessonDetailView: View {
     }
 
     private func presentFullscreenPlayer() {
+        AppOrientationController.shared.setVideoFullscreen(true)
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
@@ -2176,23 +2062,6 @@ private struct LearningInlineVideoPlayer: View {
 
                         Text(timeText(duration))
                             .frame(width: 38, alignment: .trailing)
-
-                        Button {
-                            controlsTask?.cancel()
-                            onFullscreen()
-                        } label: {
-                            Image(
-                                systemName: isFullscreen
-                                    ? "arrow.down.right.and.arrow.up.left"
-                                    : "arrow.up.left.and.arrow.down.right"
-                            )
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(isFullscreen ? "退出全屏" : "全屏播放")
                     }
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
@@ -2201,6 +2070,22 @@ private struct LearningInlineVideoPlayer: View {
                     .padding(.bottom, 10)
                 }
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                controlsTask?.cancel()
+                onFullscreen()
+            } label: {
+                Image(systemName: isFullscreen ? "xmark" : "arrow.up.left.and.arrow.down.right")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isFullscreen ? "关闭全屏视频" : "全屏播放")
+            .padding(16)
         }
         .onAppear {
             if isPlaying { scheduleControlsDismissal() }
@@ -2216,6 +2101,8 @@ private struct LearningInlineVideoPlayer: View {
             controlsTask?.cancel()
         }
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(isFullscreen ? "learning-fullscreen-player" : "learning-inline-player")
+        .accessibilityValue("\(Int(currentTime))")
     }
 
     private func seekButton(seconds: Double, symbol: String) -> some View {
@@ -2711,16 +2598,19 @@ private final class ReadingReminderManager {
     private(set) var errorMessage: String?
 
     func restore() async {
-        guard isEnabled else { return }
-        await schedule(requestPermission: true)
+        guard isEnabled, !isUpdating else { return }
+        isUpdating = true
+        defer { isUpdating = false }
+        await schedule()
     }
 
     func setEnabled(_ enabled: Bool) async {
+        guard !isUpdating else { return }
         isUpdating = true
         errorMessage = nil
         defer { isUpdating = false }
         if enabled {
-            await schedule(requestPermission: true)
+            await schedule()
         } else {
             UNUserNotificationCenter.current().removePendingNotificationRequests(
                 withIdentifiers: [Self.notificationID]
@@ -2730,10 +2620,10 @@ private final class ReadingReminderManager {
         }
     }
 
-    private func schedule(requestPermission: Bool) async {
+    private func schedule() async {
         let center = UNUserNotificationCenter.current()
         var settings = await center.notificationSettings()
-        if requestPermission, settings.authorizationStatus == .notDetermined {
+        if settings.authorizationStatus == .notDetermined {
             do {
                 _ = try await center.requestAuthorization(options: [.alert, .sound])
                 settings = await center.notificationSettings()
@@ -2746,7 +2636,7 @@ private final class ReadingReminderManager {
                 settings.authorizationStatus == .provisional else {
             isEnabled = false
             UserDefaults.standard.set(false, forKey: Self.enabledKey)
-            if requestPermission { errorMessage = "请先在系统设置中允许通知" }
+            errorMessage = "请先在系统设置中允许通知"
             return
         }
 
@@ -3032,8 +2922,25 @@ private struct IdeologyContentLoadingView: View {
 private struct LearningPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .opacity(configuration.isPressed ? 0.82 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct KnowledgeHomeImage<Content: View>: View {
+    let url: URL?
+    let size: CGSize
+    @ViewBuilder let content: (Image?) -> Content
+    @State private var image: UIImage?
+
+    var body: some View {
+        content(image.map { Image(uiImage: $0) })
+            .task(id: url) {
+                let loaded = await ImageLoader.load(url, targetSize: size)
+                guard !Task.isCancelled else { return }
+                image = loaded
+            }
     }
 }

@@ -224,12 +224,10 @@ final class FamousHoldingsTests: XCTestCase {
 final class DeploymentStatusTests: XCTestCase {
     func testCreatesVisibleRunningSnapshot() throws {
         let message = DeploymentStatusMessage(
-            type: "deployment-status",
             phase: "running",
             stage: "signing",
             progress: 0.82,
             commit: "1234567890",
-            runId: "42",
             updatedAt: "2026-07-19T08:00:00Z"
         )
         let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
@@ -240,12 +238,10 @@ final class DeploymentStatusTests: XCTestCase {
 
     func testHidesStaleCompletedSnapshot() throws {
         let message = DeploymentStatusMessage(
-            type: "deployment-status",
             phase: "succeeded",
             stage: "installed",
             progress: 1,
             commit: "1234567",
-            runId: nil,
             updatedAt: "2026-07-19T08:00:00Z"
         )
         let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
@@ -254,18 +250,47 @@ final class DeploymentStatusTests: XCTestCase {
 
     func testCompletedSnapshotHasStablePerDeploymentIdentity() throws {
         let message = DeploymentStatusMessage(
-            type: "deployment-status",
             phase: "succeeded",
             stage: "installed",
             progress: 1,
             commit: "1234567890",
-            runId: "42",
             updatedAt: "2026-07-19T08:00:00Z"
         )
 
         let snapshot = try XCTUnwrap(DeploymentStatusSnapshot(message: message))
 
         XCTAssertEqual(snapshot.completionIdentity, "1234567-installed")
+    }
+
+    func testSnapshotRejectsMalformedTimestamp() {
+        let message = DeploymentStatusMessage(
+            phase: "running", stage: "signing",
+            progress: 0.5, commit: "1234567", updatedAt: "invalid"
+        )
+
+        XCTAssertNil(DeploymentStatusSnapshot(message: message))
+    }
+
+    @MainActor
+    func testDuplicateAndOlderSnapshotsDoNotHideSuccess() throws {
+        let suiteName = "DeploymentStatusTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = DeploymentStatusStore(defaults: defaults)
+        let completed = DeploymentStatusSnapshot(phase: .succeeded, commit: "1234567", stage: "installed")
+        let older = DeploymentStatusSnapshot(
+            phase: .running(progress: 0.9), commit: completed.commit,
+            updatedAt: completed.updatedAt.addingTimeInterval(-1), stage: "installing"
+        )
+
+        store.apply(completed)
+        store.apply(completed)
+        store.apply(older)
+
+        XCTAssertEqual(store.snapshot, completed)
+        store.stop()
+        store.apply(older)
+        XCTAssertNil(store.snapshot)
     }
 
     @MainActor

@@ -12,6 +12,56 @@ struct FeedDiskSnapshot: Codable {
     let canLoadMore: Bool
 }
 
+private struct XueqiuPagination {
+    private struct FeedPage {
+        var nextPage: Int? = 1
+        var remaining: [Post] = []
+    }
+
+    private var feeds: [Int: FeedPage]
+
+    init(feedIDs: [Int]) {
+        feeds = Dictionary(uniqueKeysWithValues: feedIDs.map { ($0, FeedPage()) })
+    }
+
+    var hasMore: Bool {
+        feeds.values.contains { $0.nextPage != nil || !$0.remaining.isEmpty }
+    }
+
+    mutating func takePage(
+        limit: Int,
+        fetch: @escaping (Int, Int, Int) async throws -> [Post]
+    ) async throws -> [Post] {
+        // A feed can fill the next mixed page on its own. Keep enough candidates
+        // from each feed and carry every undisplayed post into the following page.
+        let pending = feeds.compactMap { id, feed -> (id: Int, page: Int)? in
+            guard feed.remaining.count < limit, let page = feed.nextPage else { return nil }
+            return (id, page)
+        }
+        try await withThrowingTaskGroup(of: (Int, Int, [Post]).self) { group in
+            for (id, page) in pending {
+                group.addTask { (id, page, try await fetch(id, page, limit)) }
+            }
+            for try await (id, page, posts) in group {
+                feeds[id]?.remaining += posts
+                feeds[id]?.nextPage = posts.count == limit ? page + 1 : nil
+            }
+        }
+        let posts = feeds.values.flatMap(\.remaining).sorted {
+            let lhs = $0.articlePostAt ?? ""
+            let rhs = $1.articlePostAt ?? ""
+            return lhs == rhs ? $0.id > $1.id : lhs > rhs
+        }
+        var ids = Set<Int>()
+        let result = Array(posts.filter { ids.insert($0.id).inserted }.prefix(limit))
+        let displayedIDs = Set(result.map(\.id))
+        for id in feeds.keys {
+            feeds[id]?.remaining.removeAll { displayedIDs.contains($0.id) }
+        }
+        return result
+    }
+}
+
 struct RSSCardTranslation: Equatable {
     let title: String
     let excerpt: String?
@@ -89,6 +139,10 @@ actor FeedDiskCache {
         } catch {
             try? FileManager.default.removeItem(at: fileURL)
         }
+    }
+
+    func remove(source: FeedSource, flashCategory: String?, serverURL: URL) {
+        try? FileManager.default.removeItem(at: snapshotURL(source: source, flashCategory: flashCategory, serverURL: serverURL))
     }
 
     func trim() {
@@ -180,14 +234,19 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var selectedXUserID: String?
     @Published private(set) var selectedXAuthor: String?
     @Published private(set) var selectedXueqiuFeedID: Int?
-    @Published private(set) var xueqiuDirectoryPosts: [Post] = []
+    @Published private(set) var xueqiuFeeds: [RSSFeedSource] = []
     @Published var errorMessage: String?
-    @Published var source: FeedSource {
+    @Published private(set) var source: FeedSource {
         didSet { UserDefaults.standard.set(source.rawValue, forKey: "feed.source") }
     }
 
     private struct Snapshot { var posts: [Post]; var page: Int; var canLoadMore: Bool }
+    private struct FetchedPage {
+        let posts: [Post]
+        var xueqiuPagination: XueqiuPagination?
+    }
     private var cache: [FeedSource: Snapshot] = [:]
+    private var xueqiuPagination: XueqiuPagination?
     private var pendingXTranslations: [Int: String] = [:]
     private var xTranslationPublishTask: Task<Void, Never>?
     private var pendingRSSCardTranslations: [Int: RSSCardTranslation] = [:]
@@ -195,13 +254,15 @@ final class NewsFeedViewModel: ObservableObject {
     private var page = 1
     private let defaultPageSize = 5
     private var realtimeClient: RealtimeFeedClient?
-    private var activeRefreshID: UUID?
+    private var requestGeneration = UUID()
+    private var firstPageTask: Task<Void, Never>?
+    private var rssDirectoryTask: Task<Void, Never>?
     private let fetchPosts: (Int, Int, FeedSource) async throws -> [Post]
     private let fetchFlashPosts: (Int, Int, String?) async throws -> [Post]
     private let fetchYouTubePosts: (Int, Int, String?) async throws -> [Post]
     private let fetchXPosts: (Int, Int, String?, Bool) async throws -> [Post]
     private let fetchXFeedUsers: () async throws -> [XFeedUser]
-    private let fetchXueqiuPosts: (Int, Int, Int?) async throws -> [Post]
+    private let fetchXueqiuFeeds: () async throws -> [RSSFeedSource]
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let translateXFallback: (String) async throws -> String
     private let fetchXTweetDetail: (String) async throws -> XTweetDetailItem
@@ -218,6 +279,8 @@ final class NewsFeedViewModel: ObservableObject {
     private var loadingRSSTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
     private var newYorkTimesPrefetchTask: Task<Void, Never>?
+    private var rssSelectionGeneration = UUID()
+    private var weChatSelectionGeneration = UUID()
     private var selectedRSSPage = 1
     private let selectedRSSPageSize = 20
     private var selectedWeChatPage = 1
@@ -227,7 +290,6 @@ final class NewsFeedViewModel: ObservableObject {
     #if DEBUG
     private let usesFeedUIFixture: Bool
     #endif
-    private var restoredDiskKeys: Set<String> = []
 
     init(
         source initialSource: FeedSource? = nil,
@@ -237,7 +299,7 @@ final class NewsFeedViewModel: ObservableObject {
         fetchXPosts: ((Int, Int, String?) async throws -> [Post])? = nil,
         fetchXPostsWithCachePolicy: ((Int, Int, String?, Bool) async throws -> [Post])? = nil,
         fetchXFeedUsers: (() async throws -> [XFeedUser])? = nil,
-        fetchXueqiuPosts: ((Int, Int, Int?) async throws -> [Post])? = nil,
+        fetchXueqiuFeeds: (() async throws -> [RSSFeedSource])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
         translateXFallback: ((String) async throws -> String)? = nil,
         fetchXTweetDetail: ((String) async throws -> XTweetDetailItem)? = nil,
@@ -294,15 +356,7 @@ final class NewsFeedViewModel: ObservableObject {
             try await client.fetchXTweetDetail(tweetID: tweetID)
         }
         self.fetchXFeedUsers = fetchXFeedUsers ?? { try await client.fetchXFeedUsers() }
-        if let fetchXueqiuPosts {
-            self.fetchXueqiuPosts = fetchXueqiuPosts
-        } else if let fetchPosts {
-            self.fetchXueqiuPosts = { page, limit, _ in try await fetchPosts(page, limit, .xueqiu) }
-        } else {
-            self.fetchXueqiuPosts = { page, limit, feedID in
-                try await client.fetchXueqiuPosts(page: page, limit: limit, feedID: feedID)
-            }
-        }
+        self.fetchXueqiuFeeds = fetchXueqiuFeeds ?? { try await client.fetchXueqiuFeeds() }
         if let fetchXPostsWithCachePolicy {
             self.fetchXPosts = fetchXPostsWithCachePolicy
         } else if let fetchXPosts {
@@ -313,7 +367,10 @@ final class NewsFeedViewModel: ObservableObject {
             self.fetchXPosts = { page, limit, _, _ in try await fetchPosts(page, limit, .x) }
         } else {
             self.fetchXPosts = { page, limit, author, bypassCache in
-                try await client.fetchPosts(
+                #if DEBUG
+                if usesXFeedPreview { return page == 1 ? Self.xFeedPreviewPosts : [] }
+                #endif
+                return try await client.fetchPosts(
                     page: page,
                     limit: limit,
                     source: .x,
@@ -381,8 +438,6 @@ final class NewsFeedViewModel: ObservableObject {
         #if DEBUG
         if usesXueqiuTapPreview {
             self.fetchPosts = { _, _, _ in Self.xueqiuTapPreviewPosts }
-        } else if usesXFeedPreview {
-            self.fetchPosts = { _, _, _ in Self.xFeedPreviewPosts }
         } else if let fetchPosts {
             self.fetchPosts = fetchPosts
         } else {
@@ -402,17 +457,26 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func loadRSSFeedsIfNeeded(forceRefresh: Bool = false) async {
-        guard forceRefresh || rssFeeds.isEmpty else { return }
-        do {
-            rssFeeds = try await fetchRSSFeeds()
-        } catch is CancellationError {
+        guard !Task.isCancelled else { return }
+        if let rssDirectoryTask {
+            await rssDirectoryTask.value
             return
-        } catch {
-            // The normal RSS feed remains usable if the source directory is unavailable.
         }
+        guard forceRefresh || rssFeeds.isEmpty else { return }
+        let task = Task {
+            defer { rssDirectoryTask = nil }
+            if let feeds = try? await fetchRSSFeeds() {
+                rssFeeds = feeds
+            }
+        }
+        rssDirectoryTask = task
+        await task.value
     }
 
     func selectRSSFeed(_ feedID: Int?) async {
+        let generation = UUID()
+        rssSelectionGeneration = generation
+        isLoadingMoreRSSSelection = false
         selectedRSSFeedID = feedID
         selectedRSSPosts = []
         selectedRSSPage = 1
@@ -422,10 +486,10 @@ final class NewsFeedViewModel: ObservableObject {
             return
         }
         isLoadingRSSSelection = true
-        defer { if selectedRSSFeedID == feedID { isLoadingRSSSelection = false } }
+        defer { if rssSelectionGeneration == generation { isLoadingRSSSelection = false } }
         do {
             let result = try await fetchRSSFeedPosts(feedID, 1, selectedRSSPageSize)
-            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
+            guard !Task.isCancelled, rssSelectionGeneration == generation else { return }
             selectedRSSPosts = result
             canLoadMoreRSSSelection = !result.isEmpty
             errorMessage = nil
@@ -435,7 +499,7 @@ final class NewsFeedViewModel: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            guard selectedRSSFeedID == feedID else { return }
+            guard !Task.isCancelled, rssSelectionGeneration == generation else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
@@ -447,11 +511,12 @@ final class NewsFeedViewModel: ObservableObject {
               !isLoadingRSSSelection,
               !isLoadingMoreRSSSelection else { return }
         let nextPage = selectedRSSPage + 1
+        let generation = rssSelectionGeneration
         isLoadingMoreRSSSelection = true
-        defer { isLoadingMoreRSSSelection = false }
+        defer { if rssSelectionGeneration == generation { isLoadingMoreRSSSelection = false } }
         do {
             let result = try await fetchRSSFeedPosts(feedID, nextPage, selectedRSSPageSize)
-            guard !Task.isCancelled, selectedRSSFeedID == feedID else { return }
+            guard !Task.isCancelled, rssSelectionGeneration == generation else { return }
             var existingIDs = Set(selectedRSSPosts.map(\.id))
             selectedRSSPosts += result.filter { existingIDs.insert($0.id).inserted }
             selectedRSSPage = nextPage
@@ -463,12 +528,15 @@ final class NewsFeedViewModel: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            guard selectedRSSFeedID == feedID else { return }
+            guard !Task.isCancelled, rssSelectionGeneration == generation else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 
     func selectWeChatFeed(_ feedID: Int?) async {
+        let generation = UUID()
+        weChatSelectionGeneration = generation
+        isLoadingMoreWeChatSelection = false
         selectedWeChatFeedID = feedID
         selectedWeChatPosts = []
         selectedWeChatPage = 1
@@ -478,17 +546,17 @@ final class NewsFeedViewModel: ObservableObject {
             return
         }
         isLoadingWeChatSelection = true
-        defer { if selectedWeChatFeedID == feedID { isLoadingWeChatSelection = false } }
+        defer { if weChatSelectionGeneration == generation { isLoadingWeChatSelection = false } }
         do {
             let result = try await fetchWeChatFeedPosts(feedID, 1, selectedWeChatPageSize)
-            guard !Task.isCancelled, selectedWeChatFeedID == feedID else { return }
+            guard !Task.isCancelled, weChatSelectionGeneration == generation else { return }
             selectedWeChatPosts = result
             canLoadMoreWeChatSelection = !result.isEmpty
             errorMessage = nil
         } catch is CancellationError {
             return
         } catch {
-            guard selectedWeChatFeedID == feedID else { return }
+            guard !Task.isCancelled, weChatSelectionGeneration == generation else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
@@ -500,11 +568,12 @@ final class NewsFeedViewModel: ObservableObject {
               !isLoadingWeChatSelection,
               !isLoadingMoreWeChatSelection else { return }
         let nextPage = selectedWeChatPage + 1
+        let generation = weChatSelectionGeneration
         isLoadingMoreWeChatSelection = true
-        defer { isLoadingMoreWeChatSelection = false }
+        defer { if weChatSelectionGeneration == generation { isLoadingMoreWeChatSelection = false } }
         do {
             let result = try await fetchWeChatFeedPosts(feedID, nextPage, selectedWeChatPageSize)
-            guard !Task.isCancelled, selectedWeChatFeedID == feedID else { return }
+            guard !Task.isCancelled, weChatSelectionGeneration == generation else { return }
             var existingIDs = Set(selectedWeChatPosts.map(\.id))
             selectedWeChatPosts += result.filter { existingIDs.insert($0.id).inserted }
             selectedWeChatPage = nextPage
@@ -513,7 +582,7 @@ final class NewsFeedViewModel: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            guard selectedWeChatFeedID == feedID else { return }
+            guard !Task.isCancelled, weChatSelectionGeneration == generation else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
@@ -566,11 +635,13 @@ final class NewsFeedViewModel: ObservableObject {
 
     func selectXueqiuFeed(_ feedID: Int?) async {
         guard source == .xueqiu, selectedXueqiuFeedID != feedID else { return }
+        if let feedID, !xueqiuFeeds.contains(where: { $0.id == feedID }) { return }
         selectedXueqiuFeedID = feedID
         posts = []
         pendingRealtimePosts = []
         page = 1
-        canLoadMore = true
+        canLoadMore = false
+        xueqiuPagination = nil
         cache[.xueqiu] = nil
         await refresh()
     }
@@ -976,7 +1047,10 @@ final class NewsFeedViewModel: ObservableObject {
           "post_link": "https://x.com/web3annie/status/2077964813930799525",
           "user": {"user_name": "Annie 所长", "user_screen_name": "web3annie"},
           "videos": [{"url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "width": 1920, "height": 1080}],
-          "meta": {"metrics": {"replies": 222, "retweets": 786, "likes": 12000, "views": 960000}}
+          "meta": {
+            "metrics": {"replies": 222, "retweets": 786, "likes": 12000, "views": 960000},
+            "quoted_tweet": {"id": "99", "text": "引用原帖的完整内容", "author": {"name": "引用作者", "screenName": "quoted_author"}}
+          }
         }]
         """#
         return (try? JSONDecoder().decode([Post].self, from: Data(json.utf8))) ?? []
@@ -985,6 +1059,11 @@ final class NewsFeedViewModel: ObservableObject {
 
     func select(_ next: FeedSource) {
         guard next != source else { return }
+        requestGeneration = UUID()
+        firstPageTask?.cancel()
+        firstPageTask = nil
+        isLoading = false
+        isLoadingMore = false
         pendingRealtimePosts = []
         if !isSwitchingSource, source != .youtube || selectedYouTubePerson == nil {
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
@@ -993,9 +1072,6 @@ final class NewsFeedViewModel: ObservableObject {
         let saved = cache[next]
         if let saved {
             posts = saved.posts
-            if next == .xueqiu, selectedXueqiuFeedID == nil {
-                xueqiuDirectoryPosts = saved.posts
-            }
             page = saved.page
             canLoadMore = saved.canLoadMore
             isSwitchingSource = false
@@ -1010,46 +1086,43 @@ final class NewsFeedViewModel: ObservableObject {
         errorMessage = nil
     }
 
-    func selectAdjacent(offset: Int) {
-        let sources = FeedSource.allCases
-        guard let current = sources.firstIndex(of: source) else { return }
-        let next = current + offset
-        guard sources.indices.contains(next) else { return }
-        select(sources[next])
-    }
-
     func loadInitial() async {
+        guard !Task.isCancelled else { return }
+        if let firstPageTask {
+            await firstPageTask.value
+            return
+        }
         // Returning to a cached channel must preserve the exact feed snapshot.
         // Pull-to-refresh remains available when the user wants fresh content.
-        guard !isLoading, posts.isEmpty || isSwitchingSource else { return }
-        if (source != .youtube || selectedYouTubePerson == nil),
-           (source != .xueqiu || selectedXueqiuFeedID == nil) {
-            await restoreDiskSnapshotIfNeeded(source: source, flashCategory: selectedFlashCategory)
-        }
-        await refresh()
+        guard posts.isEmpty || isSwitchingSource || (source == .xueqiu && xueqiuPagination == nil) else { return }
+        await startFirstPage(restoringSnapshot: true)
     }
 
     func warmSourceCache() async {
-        guard let selectedIndex = FeedSource.allCases.firstIndex(of: source) else { return }
         let sources = FeedSource.allCases
-            .enumerated()
-            .filter { $0.element != source && abs($0.offset - selectedIndex) == 1 }
-            .sorted { abs($0.offset - selectedIndex) < abs($1.offset - selectedIndex) }
-            .map(\.element)
-
-        for candidate in sources {
+        guard let selectedIndex = sources.firstIndex(of: source) else { return }
+        for index in [selectedIndex - 1, selectedIndex + 1] where sources.indices.contains(index) {
             guard !Task.isCancelled else { return }
+            let candidate = sources[index]
             guard cache[candidate] == nil else { continue }
             do {
+                let generation = requestGeneration
                 let pageSize = pageSize(for: candidate)
-                let result = try await fetchPage(1, limit: pageSize, source: candidate)
+                let feeds = candidate == .xueqiu ? try await fetchXueqiuFeeds() : []
+                let pagination = candidate == .xueqiu ? XueqiuPagination(feedIDs: feeds.map(\.id)) : nil
+                let fetched = try await fetchPage(1, limit: pageSize, source: candidate, xueqiuPagination: pagination)
                 guard !Task.isCancelled, cache[candidate] == nil else { continue }
+                if candidate == .xueqiu {
+                    guard requestGeneration == generation, selectedXueqiuFeedID == nil else { continue }
+                    xueqiuFeeds = feeds
+                    xueqiuPagination = fetched.xueqiuPagination
+                }
                 cache[candidate] = .init(
-                    posts: result,
+                    posts: fetched.posts,
                     page: 1,
-                    canLoadMore: !result.isEmpty
+                    canLoadMore: fetched.xueqiuPagination?.hasMore ?? !fetched.posts.isEmpty
                 )
-                schedulePresentationPrewarm(for: result)
+                schedulePresentationPrewarm(for: fetched.posts)
             } catch is CancellationError {
                 return
             } catch {
@@ -1073,9 +1146,9 @@ final class NewsFeedViewModel: ObservableObject {
         #if DEBUG
         guard !usesFeedUIFixture else { return }
         #endif
+        guard realtimeClient == nil else { return }
         let client = RealtimeFeedClient(baseURL: ServerConfiguration.currentURL)
         client.onEvent = { [weak self] event in self?.handleRealtime(event) }
-        realtimeClient?.stop()
         realtimeClient = client
         client.start()
     }
@@ -1086,50 +1159,80 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func refresh() async {
-        let refreshID = UUID()
+        await startFirstPage(restoringSnapshot: false)
+    }
+
+    private func startFirstPage(restoringSnapshot: Bool) async {
+        guard !Task.isCancelled else { return }
+        let generation = UUID()
+        requestGeneration = generation
+        firstPageTask?.cancel()
+        isLoading = true
+        isLoadingMore = false
+        errorMessage = nil
+        // The view and background preload share this request across tab visibility changes.
+        let task = Task { await loadFirstPage(restoringSnapshot: restoringSnapshot, generation: generation) }
+        firstPageTask = task
+        await task.value
+    }
+
+    private func loadFirstPage(restoringSnapshot: Bool, generation: UUID) async {
+        defer {
+            if requestGeneration == generation {
+                firstPageTask = nil
+                isLoading = false
+            }
+        }
+        guard !Task.isCancelled, requestGeneration == generation else { return }
         let requestedSource = source
         let requestedFlashCategory = selectedFlashCategory
         let requestedYouTubePerson = selectedYouTubePerson
         let requestedXUserID = selectedXUserID
-        let requestedXueqiuFeedID = selectedXueqiuFeedID
-        let completesSourceSwitch = isSwitchingSource
-        activeRefreshID = refreshID
-        isLoading = true
-        errorMessage = nil
-        defer {
-            if activeRefreshID == refreshID {
-                activeRefreshID = nil
-                isLoading = false
-            }
+
+        if restoringSnapshot,
+           (requestedSource != .youtube || requestedYouTubePerson == nil),
+           (requestedSource != .x || requestedXUserID == nil),
+           (requestedSource != .xueqiu || selectedXueqiuFeedID == nil) {
+            await restoreDiskSnapshot(source: requestedSource, flashCategory: requestedFlashCategory, generation: generation)
         }
+        guard !Task.isCancelled, requestGeneration == generation else { return }
+
         do {
+            var pagination: XueqiuPagination?
+            if requestedSource == .xueqiu {
+                let feeds = try await fetchXueqiuFeeds()
+                guard !Task.isCancelled, requestGeneration == generation else { return }
+                xueqiuFeeds = feeds
+                let ids = feeds.map(\.id)
+                let sources = Set(ids.map { "rss:\($0)" })
+                posts.removeAll { !sources.contains($0.source ?? "") }
+                pendingRealtimePosts.removeAll { !sources.contains($0.source ?? "") }
+                if let selection = selectedXueqiuFeedID, !ids.contains(selection) {
+                    selectedXueqiuFeedID = nil
+                }
+                pagination = XueqiuPagination(feedIDs: selectedXueqiuFeedID.map { [$0] } ?? ids)
+                xueqiuPagination = nil
+                canLoadMore = false
+            }
             let pageSize = pageSize(for: requestedSource)
-            let result = try await fetchPage(
+            let fetched = try await fetchPage(
                 1,
                 limit: pageSize,
                 source: requestedSource,
                 flashCategory: requestedFlashCategory,
                 youtubePerson: requestedYouTubePerson,
                 xAuthor: requestedXUserID,
-                xueqiuFeedID: requestedXueqiuFeedID,
+                xueqiuPagination: pagination,
                 bypassCache: true
             )
-            guard source == requestedSource,
-                  selectedFlashCategory == requestedFlashCategory,
-                  selectedYouTubePerson == requestedYouTubePerson,
-                  selectedXUserID == requestedXUserID,
-                  selectedXueqiuFeedID == requestedXueqiuFeedID,
-                  activeRefreshID == refreshID else { return }
+            guard !Task.isCancelled, requestGeneration == generation else { return }
+            let result = fetched.posts
             posts = result
-            if requestedSource == .xueqiu, requestedXueqiuFeedID == nil {
-                xueqiuDirectoryPosts = result
-            }
+            if requestedSource == .xueqiu { xueqiuPagination = fetched.xueqiuPagination }
             pendingRealtimePosts = []
             page = 1
-            canLoadMore = !result.isEmpty
-            if completesSourceSwitch {
-                isSwitchingSource = false
-            }
+            canLoadMore = fetched.xueqiuPagination?.hasMore ?? !result.isEmpty
+            isSwitchingSource = false
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
             schedulePresentationPrewarm(for: result)
@@ -1138,49 +1241,51 @@ final class NewsFeedViewModel: ObservableObject {
             }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
-            guard source == requestedSource, activeRefreshID == refreshID else { return }
-            if completesSourceSwitch, posts.isEmpty {
-                isSwitchingSource = false
-            }
+            guard !Task.isCancelled, requestGeneration == generation else { return }
+            isSwitchingSource = false
             errorMessage = NetworkErrorPresentation.message(for: error)
+            if let apiError = error as? APIError, case .sourceUnavailable = apiError {
+                posts = []
+                pendingRealtimePosts = []
+                canLoadMore = false
+                cache.removeValue(forKey: requestedSource)
+                await diskCache.remove(source: requestedSource, flashCategory: requestedFlashCategory, serverURL: serverURL)
+            }
         }
     }
 
     func loadMoreIfNeeded(current post: Post, thresholdPostID: Int? = nil) async {
-        guard !isSwitchingSource,
+        guard !Task.isCancelled,
+              !isSwitchingSource,
               post.id == (thresholdPostID ?? posts.last?.id),
               canLoadMore,
               !isLoadingMore,
               !isLoading else { return }
+        let generation = requestGeneration
         let requestedSource = source
         let requestedFlashCategory = selectedFlashCategory
         let requestedYouTubePerson = selectedYouTubePerson
         let requestedXUserID = selectedXUserID
-        let requestedXueqiuFeedID = selectedXueqiuFeedID
         let pageSize = pageSize(for: requestedSource)
         isLoadingMore = true
-        defer { isLoadingMore = false }
+        defer { if requestGeneration == generation { isLoadingMore = false } }
         do {
-            let result = try await fetchPage(
+            let fetched = try await fetchPage(
                 page + 1,
                 limit: pageSize,
                 source: requestedSource,
                 flashCategory: requestedFlashCategory,
                 youtubePerson: requestedYouTubePerson,
                 xAuthor: requestedXUserID,
-                xueqiuFeedID: requestedXueqiuFeedID
+                xueqiuPagination: requestedSource == .xueqiu ? xueqiuPagination : nil
             )
-            guard source == requestedSource, selectedFlashCategory == requestedFlashCategory,
-                  selectedYouTubePerson == requestedYouTubePerson else { return }
-            guard selectedXUserID == requestedXUserID else { return }
-            guard selectedXueqiuFeedID == requestedXueqiuFeedID else { return }
+            guard !Task.isCancelled, requestGeneration == generation else { return }
+            let result = fetched.posts
             var ids = Set(posts.map(\.id))
             posts += result.filter { ids.insert($0.id).inserted }
-            if requestedSource == .xueqiu, requestedXueqiuFeedID == nil {
-                xueqiuDirectoryPosts = posts
-            }
+            if requestedSource == .xueqiu { xueqiuPagination = fetched.xueqiuPagination }
             page += 1
-            canLoadMore = !result.isEmpty
+            canLoadMore = fetched.xueqiuPagination?.hasMore ?? !result.isEmpty
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
@@ -1190,6 +1295,7 @@ final class NewsFeedViewModel: ObservableObject {
             }
             scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
+            guard !Task.isCancelled, requestGeneration == generation else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
@@ -1201,9 +1307,9 @@ final class NewsFeedViewModel: ObservableObject {
         flashCategory: String? = nil,
         youtubePerson: String? = nil,
         xAuthor: String? = nil,
-        xueqiuFeedID: Int? = nil,
+        xueqiuPagination: XueqiuPagination? = nil,
         bypassCache: Bool = false
-    ) async throws -> [Post] {
+    ) async throws -> FetchedPage {
         var lastError: Error?
         for attempt in 0..<2 {
             do {
@@ -1215,12 +1321,14 @@ final class NewsFeedViewModel: ObservableObject {
                 } else if source == .x {
                     result = try await fetchXPosts(page, limit, xAuthor, bypassCache)
                 } else if source == .xueqiu {
-                    result = try await fetchXueqiuPosts(page, limit, xueqiuFeedID)
+                    guard var pagination = xueqiuPagination else { throw APIError.invalidResponse }
+                    let posts = try await pagination.takePage(limit: limit, fetch: fetchRSSFeedPosts)
+                    return FetchedPage(posts: posts, xueqiuPagination: pagination)
                 } else {
                     result = try await fetchPosts(page, limit, source)
                 }
                 if source == .x { XAuthorVerificationStore.shared.record(posts: result) }
-                return result
+                return FetchedPage(posts: result)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -1326,20 +1434,15 @@ final class NewsFeedViewModel: ObservableObject {
         persistCurrentSnapshot()
     }
 
-    private func restoreDiskSnapshotIfNeeded(source: FeedSource, flashCategory: String?) async {
-        let key = "\(source.rawValue)|\(flashCategory ?? "all")"
-        guard restoredDiskKeys.insert(key).inserted else { return }
+    private func restoreDiskSnapshot(source: FeedSource, flashCategory: String?, generation: UUID) async {
         guard let snapshot = await diskCache.load(
             source: source,
             flashCategory: flashCategory,
             serverURL: serverURL
-        ), self.source == source, selectedFlashCategory == flashCategory else { return }
+        ), !Task.isCancelled, requestGeneration == generation else { return }
         posts = snapshot.posts
-        if source == .xueqiu, selectedXueqiuFeedID == nil {
-            xueqiuDirectoryPosts = snapshot.posts
-        }
         page = snapshot.page
-        canLoadMore = snapshot.canLoadMore
+        canLoadMore = source != .xueqiu && snapshot.canLoadMore
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         isSwitchingSource = false
         schedulePresentationPrewarm(for: posts)
@@ -1371,7 +1474,7 @@ final class NewsFeedViewModel: ObservableObject {
         case .bilibili: return post.isBilibili
         case .zhihu: return post.sourceName == "知乎"
         case .truth: return post.sourceName == "Truth"
-        case .xueqiu: return post.isXueqiu
+        case .xueqiu: return xueqiuFeeds.contains { post.source == "rss:\($0.id)" }
         case .rss: return post.isRSS && !post.hasDedicatedFeedTab
         case .laozhong: return post.isRSS && post.tagNames.contains("老中")
         case .youtube: return post.isRSS && post.tagNames.contains("YouTube")

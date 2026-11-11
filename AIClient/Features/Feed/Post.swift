@@ -84,10 +84,10 @@ struct RSSFeedPostsResponse: Decodable {
 }
 struct RSSFeedsResponse: Decodable {
     let data: Payload
-    let meta: Meta?
+    let meta: Meta
     struct Payload: Decodable { let feeds: [RSSFeedSource] }
     struct Meta: Decodable {
-        let pagination: Pagination?
+        let pagination: Pagination
         struct Pagination: Decodable {
             let page: Int
             let size: Int
@@ -131,6 +131,16 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
             .contains { value in
                 value.range(of: #"(?:^|/)weibo/user/\d+(?:/|$)"#, options: .regularExpression) != nil
             }
+    }
+
+    var isXueqiuUserFeed: Bool {
+        guard let feedURL, let path = URLComponents(string: feedURL)?.path else { return false }
+        return path.range(of: #"^/xueqiu/user/[0-9]+(?:/[0-9]+)?/?$"#, options: .regularExpression) != nil
+    }
+
+    var xueqiuAuthorName: String {
+        let prefix = "雪球-"
+        return name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : name
     }
 
     var iconURL: URL? {
@@ -483,6 +493,28 @@ struct HotTopicsResponse: Decodable {
     let success: Bool
     let data: DataPayload
     struct DataPayload: Decodable { let topics: [HotTopic] }
+}
+
+struct ZhihuHotTopicsResponse: Decodable {
+    let success: Bool
+    let data: Payload
+    struct Payload: Decodable { let topics: [ZhihuHotTopic] }
+}
+
+struct ZhihuHotTopic: Decodable {
+    let rank: Int
+    let title, url: String
+    let heat, summary, thumbnailURL: String?
+    let answerCount, followerCount, postID: Int?
+    let answerExcerpt, answerContent: String?
+    let answerAuthor: ZhihuAnswerAuthor?
+    let answerVoteupCount, answerCommentCount: Int?
+    enum CodingKeys: String, CodingKey {
+        case rank, title, url, heat, summary
+        case thumbnailURL = "thumbnail_url", answerCount = "answer_count", followerCount = "follower_count", postID = "post_id"
+        case answerExcerpt = "zhihu_answer_excerpt", answerContent = "zhihu_answer_content", answerAuthor = "zhihu_answer_author"
+        case answerVoteupCount = "zhihu_answer_voteup_count", answerCommentCount = "zhihu_answer_comment_count"
+    }
 }
 
 struct HotTopic: Decodable {
@@ -1871,6 +1903,26 @@ struct Post: Codable, Identifiable, Hashable {
         case postTags
     }
 
+    static func zhihuTopic(_ topic: ZhihuHotTopic) -> Post {
+        let metadata = PostMeta(
+            metrics: nil, lang: nil, urls: nil, rawText: nil, noteText: nil,
+            inReplyToScreenName: nil, inReplyToStatusID: nil, replyContext: nil, quotedTweet: nil, photoCredit: nil,
+            zhihuRank: topic.rank, zhihuHeat: topic.heat, zhihuAnswers: topic.answerCount, zhihuFollowerCount: topic.followerCount,
+            zhihuQuestionID: URL(string: topic.url)?.lastPathComponent, zhihuURL: topic.url, zhihuAnswerExcerpt: topic.answerExcerpt,
+            zhihuAnswerContent: topic.answerContent, zhihuAnswerAuthor: topic.answerAuthor,
+            zhihuAnswerVoteupCount: topic.answerVoteupCount, zhihuAnswerCommentCount: topic.answerCommentCount,
+            rssFeedName: nil, rssFeedIcon: nil, rssArticleLink: nil,
+            flashCategory: nil, flashSimilarityGroupId: nil, flashSimilarityScore: nil, flashSimilarCount: nil, flashPlatformCount: nil, flashPlatforms: nil
+        )
+        return Post(
+            id: topic.postID ?? syntheticID("zhihu:\(topic.url)"), title: topic.title, text: topic.title,
+            summary: topic.summary, content: topic.answerContent, contentZH: nil, source: "zhihu",
+            formattedTime: topic.heat, weightReason: nil, finalScore: nil, weight: nil, postLink: topic.url, articlePostAt: nil,
+            user: .init(userName: "知乎热榜", userScreenName: "知乎热榜", avatarURL: nil, userDesc: nil), postTags: [],
+            images: topic.thumbnailURL.map { [.init(url: $0, width: nil, height: nil)] } ?? [], videos: [], feedRank: topic.rank, meta: metadata
+        )
+    }
+
     static func hotTopic(_ topic: HotTopic, source: FeedSource, displayRank: Int? = nil) -> Post {
         let rank = displayRank ?? topic.latestRank
         let heat = topic.latestHeat.map { String(Int($0)) } ?? topic.meta?.lastPayload?.heat ?? topic.meta?.lastPayload?.hotValue.map { String(Int($0)) }
@@ -2511,22 +2563,25 @@ enum FeedSource: String, CaseIterable, Identifiable {
         case .flash: "快讯"
         }
     }
+}
 
-    var hotTopicPageTitle: String {
-        switch self {
-        case .weibo: "微博热搜"
-        case .douyin: "抖音热榜"
-        case .baidu: "百度热搜"
-        default: title
-        }
-    }
 
-    var hotTopicMarkAssetName: String {
-        switch self {
-        case .weibo: "WeiboMark"
-        case .douyin: "TikTokMark"
-        case .baidu: "BaiduMark"
-        default: ""
+enum BilibiliFeedDisplay {
+    static func uniquePosts(_ posts: [Post]) -> [Post] {
+        var identities = Set<String>()
+        return posts.filter { post in
+            var identity = "post:\(post.id)"
+            if let url = post.bilibiliPlaybackPageURL,
+               let host = url.host?.lowercased(),
+               host == "bilibili.com" || host.hasSuffix(".bilibili.com"),
+               let bvid = url.pathComponents.first(where: {
+                   $0.range(of: #"^BV[0-9A-Za-z]{10}$"#, options: .regularExpression) != nil
+               }) {
+                let part = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "p" })?.value ?? "1"
+                identity = "video:\(bvid):\(part)"
+            }
+            return identities.insert(identity).inserted
         }
     }
 }

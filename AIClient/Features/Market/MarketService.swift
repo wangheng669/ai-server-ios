@@ -28,14 +28,8 @@ struct MarketService {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/dashboard"), resolvingAgainstBaseURL: false)
         if refresh { components?.queryItems = [.init(name: "refresh", value: "true")] }
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketDashboardResponse.self, bypassCache: refresh).data
-    }
-
-    func bootstrap() async throws -> MarketBootstrap {
-        let url = baseURL.appending(path: "api/ios/v1/market/bootstrap")
-        var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
-        urlRequest.setValue("no-store", forHTTPHeaderField: "Cache-Control")
-        return try await request(urlRequest, as: MarketBootstrapResponse.self).data
+        // MarketStore owns snapshot freshness. A local HTTP cache hit cannot count as a refresh.
+        return try await request(url, as: MarketDashboardResponse.self, bypassCache: true).data
     }
 
     func chart(symbol: String, range: MarketRange, refresh: Bool = false) async throws -> MarketChart {
@@ -49,7 +43,8 @@ struct MarketService {
         if refresh { queryItems.append(.init(name: "refresh", value: "true")) }
         components?.queryItems = queryItems
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketChartResponse.self, bypassCache: refresh).data
+        // MarketStore owns chart freshness; a second HTTP cache must not retain corrected bars.
+        return try await request(url, as: MarketChartResponse.self, bypassCache: true).data
     }
 
     /// 收盘后日内 trend 兜底：拉取 5 日 5 分钟线，客户端截取最近一个交易日。
@@ -62,7 +57,7 @@ struct MarketService {
             .init(name: "limit", value: "1000")
         ]
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketChartResponse.self).data
+        return try await request(url, as: MarketChartResponse.self, bypassCache: true).data
     }
 
     func indexConstituents(symbol: String, refresh: Bool = false) async throws -> MarketIndexConstituents {
@@ -101,7 +96,7 @@ struct MarketService {
     }
 
     func prewarmInvestorMoodVideos(_ items: [InvestorMoodItem]) async {
-        await marketRunWithLimitedConcurrency(
+        await runWithLimitedConcurrency(
             Array(items.prefix(6)),
             maximumConcurrentRequests: 3
         ) { item in
@@ -111,62 +106,6 @@ struct MarketService {
             request.cachePolicy = .reloadIgnoringLocalCacheData
             _ = try? await session.data(for: request)
         }
-    }
-
-    func investorVideoInterpretationStatus(_ item: InvestorMoodItem) async throws -> InvestorVideoInterpretationResponse {
-        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/video/interpretation"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            .init(name: "source", value: "douyin-investor-mood"),
-            .init(name: "source_id", value: item.awemeId),
-        ]
-        guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
-        urlRequest.timeoutInterval = 20
-        urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        do {
-            return try await request(urlRequest, as: InvestorVideoInterpretationResponse.self)
-        } catch MarketServiceError.httpStatus(let status) {
-            throw VideoInterpretationServiceError.unavailable(status)
-        }
-    }
-
-    func aShareTemperature(days: Int = 90) async throws -> MarketAShareTemperature {
-        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/ashare-temperature"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [.init(name: "days", value: String(days))]
-        guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketAShareTemperatureResponse.self).data
-    }
-
-    func koreaLeverage(refresh: Bool = false) async throws -> MarketKoreaLeverage {
-        let url = baseURL.appending(path: "api/ios/v1/market/korea-leverage")
-        return try await request(url, as: MarketKoreaLeverageResponse.self, bypassCache: refresh).data
-    }
-
-    func hongKongValuationHistory() async throws -> MarketHKValuationHistory {
-        let history = try await valuationHistory(market: "hong-kong")
-        return MarketHKValuationHistory(date: history.date, pe: history.pe)
-    }
-
-    func unitedStatesValuationHistory() async throws -> MarketUSValuationHistory {
-        let history = try await valuationHistory(market: "united-states")
-        return MarketUSValuationHistory(pe: history.pe)
-    }
-
-    func sentimentSnapshot(market: String, refresh: Bool = false) async throws -> MarketSentimentSnapshot {
-        var components = URLComponents(
-            url: baseURL.appending(path: "api/ios/v1/market/sentiment-snapshot"),
-            resolvingAgainstBaseURL: false
-        )
-        var queryItems = [URLQueryItem(name: "market", value: market)]
-        if refresh { queryItems.append(.init(name: "refresh", value: "true")) }
-        components?.queryItems = queryItems
-        guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(
-            url,
-            as: MarketSentimentSnapshotResponse.self,
-            bypassCache: refresh,
-            useCachedResponseWhenAvailable: true
-        ).data
     }
 
     func companyValuationHistory(symbol: String) async throws -> MarketCompanyValuationHistory {
@@ -189,28 +128,17 @@ struct MarketService {
         return history
     }
 
-    private func valuationHistory(market: String) async throws -> MarketValuationHistory {
-        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/valuation-history"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [.init(name: "market", value: market)]
-        guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: MarketValuationHistoryResponse.self).data
-    }
-
     private func request<Response: Decodable>(
         _ url: URL,
         as type: Response.Type,
-        bypassCache: Bool = false,
-        useCachedResponseWhenAvailable: Bool = false
+        bypassCache: Bool = false
     ) async throws -> Response {
         let data: Data
         let response: URLResponse
         do {
             var request = URLRequest(
                 url: url,
-                cachePolicy: marketRequestCachePolicy(
-                    bypassCache: bypassCache,
-                    useCachedResponseWhenAvailable: useCachedResponseWhenAvailable
-                )
+                cachePolicy: bypassCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
             )
             if bypassCache { request.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
             (data, response) = try await session.data(for: request)
@@ -224,26 +152,6 @@ struct MarketService {
         guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
         return try decode(data, response: http, url: url, as: type)
-    }
-
-    private func request<Response: Decodable>(
-        _ request: URLRequest,
-        as type: Response.Type
-    ) async throws -> Response {
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as URLError where error.code == .cancelled {
-            throw CancellationError()
-        } catch {
-            throw MarketServiceError.transport(error)
-        }
-        guard let http = response as? HTTPURLResponse else { throw MarketServiceError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else { throw MarketServiceError.httpStatus(http.statusCode) }
-        return try decode(data, response: http, url: request.url, as: type)
     }
 
     private func decode<Response: Decodable>(
@@ -449,37 +357,6 @@ private func marketDecodingPath(_ codingPath: [CodingKey]) -> String {
         } else {
             path += ".\(key.stringValue)"
         }
-    }
-}
-
-func marketRequestCachePolicy(
-    bypassCache: Bool,
-    useCachedResponseWhenAvailable: Bool
-) -> URLRequest.CachePolicy {
-    if bypassCache { return .reloadIgnoringLocalCacheData }
-    if useCachedResponseWhenAvailable { return .returnCacheDataElseLoad }
-    return .useProtocolCachePolicy
-}
-
-enum VideoInterpretationServiceError: LocalizedError {
-    case unavailable(Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .unavailable(let status): "视频解读服务暂不可用（\(status)）"
-        }
-    }
-}
-
-func marketParseSP500PEHistory(_ html: String) -> [Double] {
-    guard let expression = try? NSRegularExpression(
-        pattern: #"<tr class=\"(?:odd|even)\">\s*<td>.*?</td>\s*<td>.*?([0-9]+(?:\.[0-9]+)?)\s*</td>\s*</tr>"#,
-        options: [.dotMatchesLineSeparators]
-    ) else { return [] }
-    let range = NSRange(html.startIndex..<html.endIndex, in: html)
-    return expression.matches(in: html, range: range).compactMap { match in
-        guard let capture = Range(match.range(at: 1), in: html) else { return nil }
-        return Double(html[capture])
     }
 }
 

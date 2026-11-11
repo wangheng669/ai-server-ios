@@ -41,11 +41,18 @@ struct FamousHoldingsManager: Codable, Identifiable {
 
     var id: String { key }
 
+    var reportIdentity: FamousHoldingsReportIdentity {
+        FamousHoldingsReportIdentity(managerKey: key, reportDate: reportDate, filingDate: filingDate)
+    }
+
+    var hasCompletePositions: Bool {
+        (positions?.count ?? 0) == positionsCount && (exitedPositions?.count ?? 0) == summary.exited
+    }
+
     var valueChangeFromPreviousReport: FamousHoldingsValueChange? {
-        guard let positions,
-              let exitedPositions,
-              positions.count == positionsCount,
-              exitedPositions.count == summary.exited,
+        let positions = positions ?? []
+        let exitedPositions = exitedPositions ?? []
+        guard hasCompletePositions,
               positions.count(where: { $0.action == .new }) == summary.new,
               positions.count(where: { $0.action == .increased }) == summary.increased,
               positions.count(where: { $0.action == .decreased }) == summary.decreased,
@@ -75,6 +82,17 @@ struct FamousHoldingsManager: Codable, Identifiable {
             amountUsd: amountUsd,
             percent: amountUsd / previousTotalValueUsd * 100
         )
+    }
+}
+
+struct FamousHoldingsReportIdentity: Hashable {
+    let managerKey: String
+    let reportDate: String
+    let filingDate: String
+
+    func covers(_ requested: Self) -> Bool {
+        managerKey == requested.managerKey
+            && (reportDate > requested.reportDate || (reportDate == requested.reportDate && filingDate >= requested.filingDate))
     }
 }
 

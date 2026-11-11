@@ -37,6 +37,18 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(payload.data.assets.first?.symbol, "GOLD")
         XCTAssertEqual(payload.data.assets.first?.marketCapUSD, 28_510_000_000_000)
         XCTAssertEqual(GlobalAssetsFormat.marketCap(28_510_000_000_000), "$28.51 万亿")
+
+        let withoutIcon = json.replacingOccurrences(
+            of: "https://cdn.coinglasscdn.com/marketCap/rank/GOLD.png",
+            with: ""
+        )
+        let rankingWithoutIcon = try JSONDecoder().decode(
+            GlobalAssetsRankingResponse.self, from: Data(withoutIcon.utf8)
+        ).data
+        XCTAssertEqual(rankingWithoutIcon.assets.count, 1)
+        XCTAssertEqual(rankingWithoutIcon.assets.first?.symbol, "GOLD")
+        XCTAssertEqual(rankingWithoutIcon.assets.first?.iconURL, "")
+        XCTAssertNil(MediaURL.image(rankingWithoutIcon.assets[0].iconURL))
     }
 
     func testDecodesRankingAndLocalizesCountry() throws {
@@ -110,14 +122,14 @@ final class CountryGDPRankingTests: XCTestCase {
         XCTAssertEqual(payload.data.points.last?.rank, 2)
     }
 
-    func testChartDragMapsToNearestYearAndClampsEdges() {
-        XCTAssertNil(CountryGDPChartInteraction.nearestIndex(progress: 0.5, count: 0))
-        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: -0.2, count: 12), 0)
-        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 0, count: 12), 0)
-        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 0.49, count: 12), 5)
-        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 0.51, count: 12), 6)
-        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 1, count: 12), 11)
-        XCTAssertEqual(CountryGDPChartInteraction.nearestIndex(progress: 1.2, count: 12), 11)
+    func testChartDragUsesLocalCoordinatesAndClampsToRenderedPointPositions() {
+        for (location, expected) in [(10.0, 18.0), (31, 18), (49, 18), (71, 40), (288, 257), (310, 257)] {
+            XCTAssertEqual(CountryGDPChartInteraction.plotX(
+                locationX: CGFloat(location), plotOriginX: 31, firstPointX: 18, lastPointX: 257
+            ), CGFloat(expected))
+        }
+        XCTAssertEqual(CountryGDPChartInteraction.plotX(locationX: 10, plotOriginX: 31, firstPointX: 257, lastPointX: 18), 18)
+        XCTAssertEqual(CountryGDPChartInteraction.plotX(locationX: 300, plotOriginX: 31, firstPointX: 40, lastPointX: 40), 40)
     }
 
     func testMergesServerMacroObservationsByYear() {

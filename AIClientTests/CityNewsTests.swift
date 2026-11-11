@@ -2,12 +2,8 @@ import XCTest
 @testable import AIServerClient
 
 final class CityNewsTests: XCTestCase {
-    func testEveryLevelHasIntroductionAndNews() {
-        assertContent(in: CityNewsMockData.root)
-    }
-
     func testHierarchyDrillsFromProvinceToCityToDistrict() {
-        let path = CityNewsMockData.path(to: "shenzhen-440305")
+        let path = CityRegions.path(to: 440305)
 
         XCTAssertEqual(path.map(\.name), ["广东省", "深圳市", "南山区"])
         XCTAssertEqual(path.map(\.level), [.province, .city, .district])
@@ -15,9 +11,9 @@ final class CityNewsTests: XCTestCase {
     }
 
     func testParentLevelsExposeTheExpectedNextLevel() throws {
-        let root = CityNewsMockData.root
-        let province = try XCTUnwrap(root.children.first { $0.id == "guangdong" })
-        let city = try XCTUnwrap(province.children.first { $0.id == "shenzhen" })
+        let root = CityRegions.root
+        let province = try XCTUnwrap(root.children.first { $0.adcode == 440000 })
+        let city = try XCTUnwrap(province.children.first { $0.adcode == 440300 })
 
         XCTAssertTrue(root.children.allSatisfy { $0.level == .province })
         XCTAssertTrue(province.children.allSatisfy { $0.level == .city })
@@ -25,127 +21,135 @@ final class CityNewsTests: XCTestCase {
     }
 
     func testGuangdongExposesAllPrefectureLevelCities() throws {
-        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
+        let guangdong = try XCTUnwrap(CityRegions.path(to: 440000).last)
 
         XCTAssertEqual(guangdong.children.count, 21)
         XCTAssertEqual(Set(guangdong.children.map(\.adcode)).count, 21)
-        XCTAssertNotNil(guangdong.children.first { $0.id == "guangzhou" })
-        XCTAssertNotNil(guangdong.children.first { $0.id == "shenzhen" })
-        XCTAssertNotNil(guangdong.children.first { $0.id == "dongguan" })
-        XCTAssertNotNil(guangdong.children.first { $0.id == "zhuhai" })
+        XCTAssertNotNil(guangdong.children.first { $0.adcode == 440100 })
+        XCTAssertNotNil(guangdong.children.first { $0.adcode == 440300 })
+        XCTAssertNotNil(guangdong.children.first { $0.adcode == 441900 })
+        XCTAssertNotNil(guangdong.children.first { $0.adcode == 440400 })
     }
 
     func testEveryRegionHasRealAdministrativeGeometry() {
-        assertGeometry(in: CityNewsMockData.root)
+        XCTAssertGreaterThan(CityRegions.root.children.count, 30)
+        assertGeometry(in: CityRegions.root)
     }
 
-    func testJourneyDrillsInPlaceAndReturnsToAnyAncestor() throws {
-        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
-        let shenzhen = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen"))
+    func testMapProjectionUsesTheSameOutlineForDrawingAndHitTesting() throws {
+        let payload = Data(#"""
+        {
+          "properties":{"adcode":1,"name":"Test","level":"city"},
+          "geometry":{"type":"Polygon","coordinates":[
+            [[0,0],[10,0],[10,10],[0,10],[0,0]],
+            [[4,4],[6,4],[6,6],[4,6],[4,4]]
+          ]}
+        }
+        """#.utf8)
+        let feature = try JSONDecoder().decode(CityMapFeature.self, from: payload)
+        let projection = CityMapProjection(features: [feature], size: CGSize(width: 200, height: 100))
+        XCTAssertEqual(projection.point(for: [5, 5]), CGPoint(x: 100, y: 50))
+        XCTAssertTrue(projection.contains(projection.point(for: [2, 5]), in: feature))
+        XCTAssertFalse(projection.contains(projection.point(for: [5, 5]), in: feature))
+        XCTAssertFalse(projection.contains(projection.point(for: [-1, 5]), in: feature))
+    }
+
+    func testJourneyDrillsInPlaceAndGoesBackOneLevelAtATime() throws {
+        let guangdong = try XCTUnwrap(CityRegions.path(to: 440000).last)
+        let shenzhen = try XCTUnwrap(CityRegions.path(to: 440300).last)
         var journey = CityRegionJourney()
 
         XCTAssertTrue(journey.enter(guangdong))
         XCTAssertTrue(journey.enter(shenzhen))
-        XCTAssertEqual(journey.current.id, "shenzhen")
-        XCTAssertEqual(journey.regionIDs, ["guangdong", "shenzhen"])
-        XCTAssertEqual(journey.trail.map(\.name), ["全国", "广东省", "深圳市"])
+        XCTAssertEqual(journey.current.id, "440300")
+        XCTAssertEqual(journey.path.map(\.id), ["440000", "440300"])
+        XCTAssertEqual(journey.parent?.name, "广东省")
 
-        XCTAssertTrue(journey.returnTo(guangdong))
-        XCTAssertEqual(journey.current.id, "guangdong")
-        XCTAssertEqual(journey.regionIDs, ["guangdong"])
+        XCTAssertTrue(journey.goBack())
+        XCTAssertEqual(journey.current.id, "440000")
+        XCTAssertEqual(journey.path.map(\.id), ["440000"])
 
-        XCTAssertTrue(journey.returnTo(CityNewsMockData.root))
-        XCTAssertEqual(journey.current.id, "china")
+        XCTAssertTrue(journey.goBack())
+        XCTAssertEqual(journey.current.id, "100000")
         XCTAssertFalse(journey.canGoBack)
+        XCTAssertFalse(journey.goBack())
     }
 
     func testJourneyRejectsInvalidOrRepeatedDrillDown() throws {
-        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
-        let zhejiang = try XCTUnwrap(CityNewsMockData.region(withID: "zhejiang"))
-        let district = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen-440305"))
+        let guangdong = try XCTUnwrap(CityRegions.path(to: 440000).last)
+        let zhejiang = try XCTUnwrap(CityRegions.path(to: 330000).last)
+        let district = try XCTUnwrap(CityRegions.path(to: 440305).last)
         var journey = CityRegionJourney()
 
         XCTAssertFalse(journey.enter(district))
         XCTAssertTrue(journey.enter(guangdong))
         XCTAssertFalse(journey.enter(guangdong))
         XCTAssertFalse(journey.enter(zhejiang))
-        XCTAssertEqual(journey.regionIDs, ["guangdong"])
+        XCTAssertEqual(journey.path.map(\.id), ["440000"])
     }
 
     func testDistrictCanSwitchToASiblingWithoutAddingAnotherLevel() throws {
-        var journey = CityRegionJourney(path: CityNewsMockData.path(to: "shenzhen-440305"))
-        let futian = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen-440304"))
+        var journey = CityRegionJourney(path: CityRegions.path(to: 440305))
+        let futian = try XCTUnwrap(CityRegions.path(to: 440304).last)
 
         XCTAssertEqual(journey.mapScope.name, "深圳市")
-        XCTAssertEqual(journey.mapRegions.map(\.name), ["南山区", "福田区", "罗湖区", "宝安区"])
-        XCTAssertEqual(journey.selectedMapRegionID, "shenzhen-440305")
+        XCTAssertTrue(Set(journey.mapRegions.map(\.name)).isSuperset(of: ["南山区", "福田区", "罗湖区", "宝安区"]))
+        XCTAssertEqual(journey.selectedMapRegionID, "440305")
         XCTAssertTrue(journey.selectPeer(futian))
         XCTAssertEqual(journey.current.name, "福田区")
-        XCTAssertEqual(journey.regionIDs, ["guangdong", "shenzhen", "shenzhen-440304"])
+        XCTAssertEqual(journey.path.map(\.id), ["440000", "440300", "440304"])
         XCTAssertEqual(journey.mapScope.name, "深圳市")
-        XCTAssertEqual(journey.selectedMapRegionID, "shenzhen-440304")
+        XCTAssertEqual(journey.selectedMapRegionID, "440304")
         XCTAssertFalse(journey.selectPeer(futian))
     }
 
     func testTerminalCityKeepsProvinceMapAvailable() throws {
-        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
-        let foshan = try XCTUnwrap(CityNewsMockData.region(withID: "foshan"))
+        let guangdong = try XCTUnwrap(CityRegions.path(to: 440000).last)
+        let foshan = try XCTUnwrap(CityRegions.path(to: 440600).last)
         var journey = CityRegionJourney(path: [guangdong])
 
         XCTAssertTrue(foshan.children.isEmpty)
         XCTAssertTrue(journey.enter(foshan))
-        XCTAssertEqual(journey.current.id, "foshan")
-        XCTAssertEqual(journey.mapScope.id, "guangdong")
-        XCTAssertEqual(journey.selectedMapRegionID, "foshan")
+        XCTAssertEqual(journey.current.id, "440600")
+        XCTAssertEqual(journey.mapScope.id, "440000")
+        XCTAssertEqual(journey.selectedMapRegionID, "440600")
         XCTAssertEqual(journey.mapRegions.count, 21)
     }
 
     func testMapScopeOnlyChangesWhenTheGeographicViewportChanges() throws {
-        let guangdong = try XCTUnwrap(CityNewsMockData.region(withID: "guangdong"))
-        let shenzhen = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen"))
-        let nanshan = try XCTUnwrap(CityNewsMockData.region(withID: "shenzhen-440305"))
+        let guangdong = try XCTUnwrap(CityRegions.path(to: 440000).last)
+        let shenzhen = try XCTUnwrap(CityRegions.path(to: 440300).last)
+        let nanshan = try XCTUnwrap(CityRegions.path(to: 440305).last)
         var journey = CityRegionJourney()
 
-        XCTAssertEqual(journey.mapScope.id, "china")
+        XCTAssertEqual(journey.mapScope.id, "100000")
         XCTAssertTrue(journey.enter(guangdong))
-        XCTAssertEqual(journey.mapScope.id, "guangdong")
+        XCTAssertEqual(journey.mapScope.id, "440000")
         XCTAssertTrue(journey.enter(shenzhen))
-        XCTAssertEqual(journey.mapScope.id, "shenzhen")
+        XCTAssertEqual(journey.mapScope.id, "440300")
         XCTAssertTrue(journey.enter(nanshan))
-        XCTAssertEqual(journey.mapScope.id, "shenzhen")
+        XCTAssertEqual(journey.mapScope.id, "440300")
         XCTAssertEqual(journey.selectedMapRegionID, nanshan.id)
         XCTAssertTrue(journey.goBack())
-        XCTAssertEqual(journey.mapScope.id, "shenzhen")
+        XCTAssertEqual(journey.mapScope.id, "440300")
         XCTAssertNil(journey.selectedMapRegionID)
-    }
-
-    private func assertContent(in region: CityRegion, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertFalse(region.introduction.isEmpty, "\(region.name) 缺少简介", file: file, line: line)
-        XCTAssertFalse(region.facts.isEmpty, "\(region.name) 缺少事实标签", file: file, line: line)
-        XCTAssertFalse(region.news.isEmpty, "\(region.name) 缺少新闻", file: file, line: line)
-        region.children.forEach { assertContent(in: $0, file: file, line: line) }
     }
 
     private func assertGeometry(in region: CityRegion, file: StaticString = #filePath, line: UInt = #line) {
         let features = CityMapRepository.shared.features(for: region)
-        XCTAssertFalse(features.isEmpty, "\(region.name) 缺少行政区边界", file: file, line: line)
-
-        if region.level == .district {
-            XCTAssertTrue(
-                features.contains { $0.id == region.adcode },
-                "\(region.name) 未出现在所属城市地图中",
-                file: file,
-                line: line
-            )
-        } else {
-            let featureAdcodes = Set(features.map(\.id))
-            XCTAssertTrue(
-                region.children.allSatisfy { featureAdcodes.contains($0.adcode) },
-                "\(region.name) 的下级入口与地图边界不匹配",
-                file: file,
-                line: line
-            )
-        }
+        XCTAssertEqual(
+            Set(features.map(\.id)),
+            Set(region.children.map(\.adcode)),
+            "\(region.name) 的下级入口与地图边界不匹配",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            region.children.allSatisfy { $0.parentAdcode == region.adcode && !$0.name.isEmpty },
+            "\(region.name) 的下级行政区信息缺失",
+            file: file,
+            line: line
+        )
 
         region.children.forEach { assertGeometry(in: $0, file: file, line: line) }
     }

@@ -20,16 +20,25 @@ final class GoogleSignalTests: XCTestCase {
     }
     func testTranslationUsesPersistentJobIdentityAndObserveIntent() throws {
         let service = GoogleSignalService(baseURL: URL(string: "https://example.com")!)
-        let read = try service.xTranslationRequest(postID: 123)
+        let read = try service.translationRequest(postID: 123, source: .x)
         XCTAssertEqual(read.url?.path, "/api/ios/v1/company-news/translations")
         XCTAssertEqual(read.httpMethod, "POST")
         let body = try JSONSerialization.jsonObject(with: XCTUnwrap(read.httpBody)) as! [String: Any]
         XCTAssertEqual(body["postIds"] as? [Int], [123])
         XCTAssertEqual(body["intent"] as? String, "read")
-        let observe = try service.xTranslationRequest(postID: 123, observe: true)
+        XCTAssertEqual(body["retry"] as? Bool, true)
+        XCTAssertNil(body["part"])
+        let observe = try service.translationRequest(postID: 123, source: .x, observe: true)
         let observation = try JSONSerialization.jsonObject(with: XCTUnwrap(observe.httpBody)) as! [String: Any]
         XCTAssertEqual(observation["intent"] as? String, "observe")
         XCTAssertEqual(observation["retry"] as? Bool, false)
+        let rss = try service.translationRequest(postID: 123, source: .rss, observe: true)
+        XCTAssertEqual(rss.url?.path, "/api/ios/v1/company-news/rss-translations")
+        let rssBody = try JSONSerialization.jsonObject(with: XCTUnwrap(rss.httpBody)) as! [String: Any]
+        XCTAssertEqual(rssBody["postIds"] as? [Int], [123])
+        XCTAssertEqual(rssBody["part"] as? String, "article")
+        XCTAssertEqual(rssBody["intent"] as? String, "observe")
+        XCTAssertEqual(rssBody["retry"] as? Bool, false)
     }
     func testDateParsing() {
         XCTAssertNotNil(GoogleSignalDateParser.date(from: "2026-08-12T12:18:05.130556+08:00"))

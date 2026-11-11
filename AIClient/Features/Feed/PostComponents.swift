@@ -70,20 +70,58 @@ struct DetailSheetCloseButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label("关闭", systemImage: "xmark")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .frame(height: 44)
-                .background(.regularMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+            ZStack {
+                Circle()
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 32, height: 32)
+                Image(systemName: "xmark")
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color(uiColor: .label))
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Compact modal actions for existing control rows and floating corners.
+struct DetailSheetControls<Actions: View>: View {
+    var closeLabel = "关闭详情"
+    var closeIdentifier = "detail-sheet-close"
+    let onClose: () -> Void
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        HStack(spacing: 12) {
+            actions
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+            DetailSheetCloseButton(action: onClose, accessibilityLabel: closeLabel)
+                .accessibilityIdentifier(closeIdentifier)
+        }
+        .padding(4)
+        .background(.regularMaterial, in: Capsule())
+    }
+}
+
+extension DetailSheetControls where Actions == EmptyView {
+    init(closeLabel: String = "关闭详情", closeIdentifier: String = "detail-sheet-close", onClose: @escaping () -> Void) {
+        self.closeLabel = closeLabel
+        self.closeIdentifier = closeIdentifier
+        self.onClose = onClose
+        self.actions = EmptyView()
+    }
+}
+
+extension View {
+    func readingSheetPresentation() -> some View {
+        appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
+            .appPresentationScrollsWithoutExpanding()
+            .appPresentationDragIndicator()
     }
 }
 
@@ -94,8 +132,6 @@ struct InAppBrowserDestination: Identifiable, Equatable {
 
 struct InAppBrowserSheet: View {
     let url: URL
-    var showsTitleHeader = true
-    var onDismiss: (() -> Void)?
     @State private var title = ""
     @State private var englishArticle: EnglishWebArticleCandidate?
     @State private var translatedArticle: TranslatedWebArticle?
@@ -110,23 +146,6 @@ struct InAppBrowserSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsTitleHeader && !title.isEmpty {
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 20)
-                            .onEnded { value in
-                                if value.translation.height > 80 { close() }
-                            }
-                    )
-                Divider().opacity(0.55)
-            }
             if ExternalAccessPolicy.requiresServerRelay(url) {
                 ServerArticleReaderView(url: url) { title = $0 }
             } else {
@@ -148,7 +167,7 @@ struct InAppBrowserSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: close, accessibilityLabel: "关闭网页详情")
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
                 .padding(16)
         }
         .overlay(alignment: .bottomLeading) {
@@ -156,7 +175,7 @@ struct InAppBrowserSheet: View {
                 .padding(16)
         }
         .accessibilityIdentifier("in-app-browser")
-        .accessibilityAction(.escape) { close() }
+        .accessibilityAction(.escape) { dismiss() }
         .task(id: englishArticle?.identity) {
             guard let englishArticle else { return }
             await translate(englishArticle)
@@ -283,14 +302,6 @@ struct InAppBrowserSheet: View {
         )
         title = translatedArticle?.title ?? title
         showsOriginal = false
-    }
-
-    private func close() {
-        if let onDismiss {
-            onDismiss()
-        } else {
-            dismiss()
-        }
     }
 }
 
@@ -488,7 +499,7 @@ struct ServerArticleReaderView: View {
                     Button("重试") { Task { await load() } }
                 }
             } else {
-                ProgressView("正在通过服务器读取正文…")
+                ContentLoadingPlaceholder(title: "正在载入正文", layout: .article, rowCount: 4)
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -600,15 +611,14 @@ private struct InAppBrowserCoverModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if horizontalSizeClass == .regular {
-            content.fullScreenCover(item: $destination) { destination in
+            content.appFullScreenCover(item: $destination) { destination in
                 InAppBrowserSheet(url: destination.url)
             }
         } else {
-            content.sheet(item: $destination) { destination in
+            content.appSheet(item: $destination) { destination in
                 InAppBrowserSheet(url: destination.url)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
             }
         }
     }
@@ -886,7 +896,7 @@ struct AvatarView: View {
     var assetName: String? = nil
     var cornerRadius: CGFloat? = nil
     var rejectsUpscaledImages = false
-    @State private var image: UIImage?
+    @State private var loadedAvatar: (request: ImageLoader.Request, image: UIImage)?
 
     private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
     private var imageBackground: Color {
@@ -896,9 +906,10 @@ struct AvatarView: View {
     }
 
     var body: some View {
+        let request = assetName == nil ? ImageLoader.avatarRequest(url, size: size) : nil
         Group {
             if let assetName { Image(assetName).resizable().scaledToFill() }
-            else if let image {
+            else if let request, let image = avatarImage(for: request) {
                 Image(uiImage: image)
                     .resizable()
                     .interpolation(.high)
@@ -914,22 +925,24 @@ struct AvatarView: View {
         .frame(width: size, height: size)
         .background(imageBackground)
         .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
-        .task(id: url) {
-            guard assetName == nil else { return }
-            let loaded = await ImageLoader.load(
-                url,
-                targetSize: CGSize(width: size, height: size),
-                prefersCompactXAvatar: true
-            )
-            guard !Task.isCancelled else { return }
-            if rejectsUpscaledImages,
-               let cgImage = loaded?.cgImage,
-               min(cgImage.width, cgImage.height) < Int(size * UIScreen.main.scale * 0.9) {
-                image = nil
-            } else {
-                image = loaded
-            }
+        .task(id: request) {
+            guard let request,
+                  let image = await ImageLoader.shared.image(for: request),
+                  !Task.isCancelled else { return }
+            loadedAvatar = (request, image)
         }
+    }
+
+    private func avatarImage(for request: ImageLoader.Request) -> UIImage? {
+        let image = loadedAvatar?.request == request
+            ? loadedAvatar?.image
+            : ImageLoader.shared.cachedImage(for: request)
+        if rejectsUpscaledImages,
+           let cgImage = image?.cgImage,
+           min(cgImage.width, cgImage.height) < Int(size * request.scale * 0.9) {
+            return nil
+        }
+        return image
     }
 }
 
@@ -1181,6 +1194,16 @@ private extension NSString {
 actor ImageLoader {
     static let shared = ImageLoader()
 
+    struct Request: Hashable {
+        let url: URL
+        let pixelLimit: CGFloat?
+        let scale: CGFloat
+
+        fileprivate var cacheKey: String {
+            "\(url.absoluteString)|\(Int(pixelLimit ?? 0))|\(scale)"
+        }
+    }
+
     private struct Download {
         let id: UUID
         let task: Task<Data?, Never>
@@ -1193,7 +1216,8 @@ actor ImageLoader {
         let prefersCompactXAvatar: Bool
     }
 
-    private let cache = NSCache<NSString, UIImage>()
+    // NSCache synchronizes its own access, so views can read decoded images during rendering.
+    nonisolated(unsafe) private let cache = NSCache<NSString, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
     private var downloads: [URL: Download] = [:]
     private var imageTasks: [String: Task<UIImage?, Never>] = [:]
@@ -1215,14 +1239,10 @@ actor ImageLoader {
 
     static func load(
         _ url: URL?,
-        targetSize: CGSize? = nil,
-        prefersCompactXAvatar: Bool = false
+        targetSize: CGSize? = nil
     ) async -> UIImage? {
         guard let url else { return nil }
-        let candidateURLs = prefersCompactXAvatar
-            ? compactAvatarCandidateURLs(url)
-            : avatarCandidateURLs(url)
-        for sourceURL in candidateURLs {
+        for sourceURL in avatarCandidateURLs(url) {
             let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
             if let image = await shared.image(
                 for: relayedURL,
@@ -1233,6 +1253,16 @@ actor ImageLoader {
             }
         }
         return nil
+    }
+
+    @MainActor
+    static func avatarRequest(_ url: URL?, size: CGFloat) -> Request? {
+        guard let url, let source = compactAvatarCandidateURLs(url).first else { return nil }
+        let scale = UIScreen.main.scale
+        let targetSize = CGSize(width: size, height: size)
+        // Standard avatar sizes share a decoded thumbnail up to the compact X image size.
+        let pixelLimit = size * scale <= 200 ? 200 : cachePixelLimit(targetSize: targetSize, scale: scale)
+        return Request(url: MediaURL.image(source.absoluteString) ?? source, pixelLimit: pixelLimit, scale: scale)
     }
 
     static func prefetchFeedImages(for posts: [Post]) async {
@@ -1290,6 +1320,13 @@ actor ImageLoader {
         await prefetch(uniqueRequests, maximumConcurrentLoads: 4)
     }
 
+    static func prefetchCommentAvatars(_ urls: [URL]) async {
+        let requests = Set(urls).map {
+            PrefetchRequest(url: $0, width: 40, height: 40, prefersCompactXAvatar: true)
+        }
+        await prefetch(requests, maximumConcurrentLoads: 4)
+    }
+
     static func avatarCandidateURLs(_ url: URL) -> [URL] {
         [highResolutionAvatarURL(sourceImageURL(from: url))]
     }
@@ -1336,13 +1373,20 @@ actor ImageLoader {
     }
 
     func image(for url: URL, targetSize: CGSize?, scale: CGFloat) async -> UIImage? {
-        let pixelLimit = Self.cachePixelLimit(targetSize: targetSize, scale: scale)
-        let key = "\(url.absoluteString)|\(Int(pixelLimit ?? 0))"
-        let cacheKey = key as NSString
-        if let cached = cache.object(forKey: cacheKey) { return cached }
+        let request = Request(url: url, pixelLimit: Self.cachePixelLimit(targetSize: targetSize, scale: scale), scale: scale)
+        return await image(for: request)
+    }
+
+    nonisolated func cachedImage(for request: Request) -> UIImage? {
+        cache.object(forKey: request.cacheKey as NSString)
+    }
+
+    func image(for request: Request) async -> UIImage? {
+        if let cached = cachedImage(for: request) { return cached }
+        let key = request.cacheKey
         if let existing = imageTasks[key] { return await existing.value }
 
-        let task = Task { await self.loadImage(for: url, pixelLimit: pixelLimit, scale: scale, cacheKey: cacheKey) }
+        let task = Task { await self.loadImage(for: request) }
         imageTasks[key] = task
         let image = await task.value
         imageTasks[key] = nil
@@ -1357,7 +1401,8 @@ actor ImageLoader {
         return ceil(pixels / 128) * 128
     }
 
-    private func loadImage(for url: URL, pixelLimit: CGFloat?, scale: CGFloat, cacheKey: NSString) async -> UIImage? {
+    private func loadImage(for request: Request) async -> UIImage? {
+        let url = request.url
         let data: Data?
         var downloadedData = false
         var loadedFromDisk = false
@@ -1389,18 +1434,18 @@ actor ImageLoader {
 
         // Visible cells await this work; do not seed ImageIO's worker queues at Utility QoS.
         let decodedImage = await Task.detached(priority: .userInitiated) {
-            Self.decode(data, pixelLimit: pixelLimit, scale: scale)
+            Self.decode(data, pixelLimit: request.pixelLimit, scale: request.scale)
         }.value
         guard let decodedImage else {
             if loadedFromDisk {
                 dataCache.removeObject(forKey: url as NSURL)
                 await ImageDiskCache.shared.removeData(for: url)
-                return await loadImage(for: url, pixelLimit: pixelLimit, scale: scale, cacheKey: cacheKey)
+                return await loadImage(for: request)
             }
             return nil
         }
-        let cost = max(1, decodedImage.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(decodedImage.size.width * decodedImage.size.height * scale * scale * 4))
-        cache.setObject(decodedImage, forKey: cacheKey, cost: cost)
+        let cost = max(1, decodedImage.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(decodedImage.size.width * decodedImage.size.height * request.scale * request.scale * 4))
+        cache.setObject(decodedImage, forKey: request.cacheKey as NSString, cost: cost)
         if downloadedData {
             Task(priority: .utility) {
                 await ImageDiskCache.shared.store(data, for: url)
@@ -1429,11 +1474,12 @@ actor ImageLoader {
     }
 
     private static func load(_ request: PrefetchRequest) async {
-        _ = await load(
-            request.url,
-            targetSize: CGSize(width: request.width, height: request.height),
-            prefersCompactXAvatar: request.prefersCompactXAvatar
-        )
+        if request.prefersCompactXAvatar {
+            guard let avatar = await avatarRequest(request.url, size: request.width) else { return }
+            _ = await shared.image(for: avatar)
+        } else {
+            _ = await load(request.url, targetSize: CGSize(width: request.width, height: request.height))
+        }
     }
 
     private static func download(_ url: URL) async -> Data? {
@@ -2223,7 +2269,7 @@ struct XVideoPlayerView: View {
                 stopPlayback()
             }
         }
-        .fullScreenCover(isPresented: $isFullscreenPresented) {
+        .appFullScreenCover(isPresented: $isFullscreenPresented) {
             if let player {
                 FullscreenVideoPlayerView(player: player, isMuted: $isMuted)
             }
@@ -2769,6 +2815,15 @@ struct FeedEngagementRow: View {
     }
 
     var body: some View {
+        VStack(spacing: 6) {
+            engagementActions
+            if let bookmarkError {
+                InlineActionNotice(message: bookmarkError, retry: saveBookmark) { self.bookmarkError = nil }
+            }
+        }
+    }
+
+    private var engagementActions: some View {
         HStack(spacing: showsTimelineActions ? 4 : 12) {
             if showsDetailActions || showsTimelineActions {
                 metric("bubble", post.meta?.metrics?.replies, label: "回复")
@@ -2785,6 +2840,7 @@ struct FeedEngagementRow: View {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: showsTimelineActions ? 14 : 17))
                         .frame(width: showsTimelineActions ? 24 : 36, height: showsTimelineActions ? 32 : 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("分享帖子")
@@ -2794,11 +2850,6 @@ struct FeedEngagementRow: View {
         .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)
         .contentShape(Rectangle())
         .sensoryFeedback(.success, trigger: isBookmarked)
-        .alert("书签保存失败", isPresented: bookmarkErrorBinding) {
-            Button("知道了", role: .cancel) { bookmarkError = nil }
-        } message: {
-            Text(bookmarkError ?? "请稍后重试")
-        }
     }
 
     private var bookmarkButton: some View {
@@ -2824,16 +2875,10 @@ struct FeedEngagementRow: View {
         .accessibilityLabel(isBookmarked ? "已加入书签" : "加入书签")
     }
 
-    private var bookmarkErrorBinding: Binding<Bool> {
-        Binding(
-            get: { bookmarkError != nil },
-            set: { if !$0 { bookmarkError = nil } }
-        )
-    }
-
     private func saveBookmark() {
         guard let tweetID = post.xTweetID, !isBookmarking, !isBookmarked else { return }
         isBookmarking = true
+        bookmarkError = nil
         Task {
             defer { isBookmarking = false }
             do {

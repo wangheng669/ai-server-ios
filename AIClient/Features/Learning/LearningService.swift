@@ -1,88 +1,58 @@
 import Foundation
 import Observation
 
-protocol LearningServing {
-    func fetchCatalog() async throws -> LearningCatalog
-    func fetchTopic(id: String) async throws -> LearningTopic
-    func fetchVideoLessons() async throws -> LearningVideoLibrary
-    func fetchVideoLesson(id: String) async throws -> LearningVideoLesson
+struct LearningResponse<Content: Decodable>: Decodable {
+    let data: Content
 }
 
-struct LearningService: LearningServing {
+struct LearningService {
     static let sourceURL = URL(string: "https://www.futunn.com/learn/wiki")!
+    private static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 20
+        configuration.urlCache = .shared
+        return URLSession(configuration: configuration)
+    }()
 
     let baseURL: URL
     private let session: URLSession
+    private var learningURL: URL { baseURL.appending(path: "api/ios/v1/learning") }
 
     init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession? = nil) {
         self.baseURL = baseURL
-        if let session {
-            self.session = session
-        } else {
-            let configuration = URLSessionConfiguration.default
-            configuration.timeoutIntervalForRequest = 20
-            configuration.requestCachePolicy = .returnCacheDataElseLoad
-            configuration.urlCache = .shared
-            self.session = URLSession(configuration: configuration)
-        }
+        self.session = session ?? Self.defaultSession
     }
 
     func fetchCatalog() async throws -> LearningCatalog {
-        let response: LearningCatalogResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/catalog")
-        )
-        return response.data
+        try await fetch(learningURL.appending(path: "catalog"))
     }
 
     func fetchTopic(id: String) async throws -> LearningTopic {
-        let response: LearningTopicResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/topics").appending(path: id),
-            cachePolicy: .reloadRevalidatingCacheData
-        )
-        return response.data
+        try await fetch(learningURL.appending(path: "topics").appending(path: id))
     }
 
     func fetchBookshelf() async throws -> LearningBookshelf {
-        let response: LearningBookshelfResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/bookshelf"),
+        try await fetch(
+            learningURL.appending(path: "bookshelf"),
             cachePolicy: .reloadIgnoringLocalCacheData
         )
-        return response.data
     }
 
     func fetchConcepts() async throws -> KnowledgeConceptLibrary {
-        let response: KnowledgeConceptLibraryResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/concepts")
-        )
-        return response.data
-    }
-
-    func fetchConcept(id: String) async throws -> KnowledgeConceptDetail {
-        let response: KnowledgeConceptDetailResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/concepts").appending(path: id),
-            cachePolicy: .reloadRevalidatingCacheData
-        )
-        return response.data
+        try await fetch(learningURL.appending(path: "concepts"))
     }
 
     func fetchVideoLessons() async throws -> LearningVideoLibrary {
-        let response: LearningVideoLibraryResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/video-lessons")
-        )
-        return response.data
+        try await fetch(learningURL.appending(path: "video-lessons"))
     }
 
     func fetchVideoLesson(id: String) async throws -> LearningVideoLesson {
-        let response: LearningVideoLessonResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/video-lessons").appending(path: id),
-            cachePolicy: .reloadRevalidatingCacheData
-        )
-        return response.data
+        try await fetch(learningURL.appending(path: "video-lessons").appending(path: id))
     }
 
     private func fetch<Value: Decodable>(
         _ url: URL,
-        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+        cachePolicy: URLRequest.CachePolicy = .reloadRevalidatingCacheData
     ) async throws -> Value {
         var request = URLRequest(url: url, cachePolicy: cachePolicy)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -92,20 +62,19 @@ struct LearningService: LearningServing {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(Value.self, from: data)
+        return try decoder.decode(LearningResponse<Value>.self, from: data).data
     }
 }
 
 @MainActor
 @Observable
 final class LearningContentRepository {
-    private(set) var topics: [String: LearningTopic] = [:]
-    private(set) var loadingIDs: Set<String> = []
+    private var topics: [String: LearningTopic] = [:]
     private(set) var errorMessages: [String: String] = [:]
-    @ObservationIgnored private let service: any LearningServing
-    @ObservationIgnored private var requests: [String: Task<LearningTopic, Error>] = [:]
+    private let service: LearningService
+    @ObservationIgnored private var requests: [String: Task<Void, Never>] = [:]
 
-    init(service: any LearningServing = LearningService()) {
+    init(service: LearningService = LearningService()) {
         self.service = service
     }
 
@@ -114,30 +83,24 @@ final class LearningContentRepository {
     }
 
     func load(id: String) async {
-        guard topics[id] == nil else { return }
-        errorMessages[id] = nil
-        loadingIDs.insert(id)
-
-        let request: Task<LearningTopic, Error>
-        if let existing = requests[id] {
-            request = existing
-        } else {
-            let service = service
-            request = Task { try await service.fetchTopic(id: id) }
-            requests[id] = request
-        }
-        defer {
-            requests[id] = nil
-            loadingIDs.remove(id)
-        }
-
-        do {
-            topics[id] = try await request.value
-        } catch is CancellationError {
+        guard !Task.isCancelled, topics[id] == nil else { return }
+        if let request = requests[id] {
+            await request.value
             return
-        } catch {
-            errorMessages[id] = error.localizedDescription
         }
+        errorMessages[id] = nil
+        let request = Task {
+            defer { requests[id] = nil }
+            do {
+                topics[id] = try await service.fetchTopic(id: id)
+            } catch is CancellationError {
+                return
+            } catch {
+                errorMessages[id] = error.localizedDescription
+            }
+        }
+        requests[id] = request
+        await request.value
     }
 
     func prefetch(_ topics: ArraySlice<LearningTopic>) async {
@@ -164,12 +127,61 @@ final class LearningStore {
     private(set) var bookshelfErrorMessage: String?
     private(set) var bookshelfFetchedAt: Date?
     private(set) var conceptLibraryErrorMessage: String?
+    private(set) var videoLibraryErrorMessage: String?
+    private(set) var hasLoadedOverview = false
+    private var overviewTask: Task<Void, Never>?
+    private var overviewLoadedAt: Date?
+    private var overviewImageTask: Task<Void, Never>?
     private let service: LearningService
 
     init(service: LearningService = LearningService()) { self.service = service }
 
+    var hasOverviewContent: Bool {
+        catalog != nil || bookshelf != nil || conceptLibrary != nil || videoLibrary != nil
+    }
+
+    func loadOverview(force: Bool = false) async {
+        if let overviewTask {
+            await overviewTask.value
+            return
+        }
+        if !force, let overviewLoadedAt, Date().timeIntervalSince(overviewLoadedAt) < 300 { return }
+        let refresh = force || hasLoadedOverview
+        let task = Task {
+            async let catalogRequest: Void = load(force: refresh)
+            async let booksRequest: Void = loadBookshelf(force: refresh)
+            async let conceptsRequest: Void = loadConceptLibrary(force: refresh)
+            async let videosRequest: Void = loadVideoLibrary(force: refresh)
+            _ = await (catalogRequest, booksRequest, conceptsRequest, videosRequest)
+            hasLoadedOverview = true
+            if catalog != nil, bookshelf != nil, conceptLibrary != nil, videoLibrary != nil,
+               errorMessage == nil, bookshelfErrorMessage == nil,
+               conceptLibraryErrorMessage == nil, videoLibraryErrorMessage == nil {
+                overviewLoadedAt = Date()
+            } else {
+                overviewLoadedAt = nil
+            }
+            prewarmOverviewImages()
+        }
+        overviewTask = task
+        await task.value
+        overviewTask = nil
+    }
+
+    private func prewarmOverviewImages() {
+        overviewImageTask?.cancel()
+        let images = [(videoLibrary?.lessons.first?.coverURL, CGSize(width: 112, height: 74)),
+                      (conceptLibrary?.concepts.first?.coverURL, CGSize(width: 68, height: 68))]
+            + (bookshelf?.books.prefix(3).map { ($0.coverURL, CGSize(width: 120, height: 128)) } ?? [])
+        overviewImageTask = Task(priority: .utility) {
+            await runWithLimitedConcurrency(images, maximumConcurrentRequests: 2) { url, size in
+                _ = await ImageLoader.load(url, targetSize: size)
+            }
+        }
+    }
+
     func load(force: Bool = false) async {
-        guard force || catalog == nil else { return }
+        guard !isLoading, force || catalog == nil else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -184,7 +196,7 @@ final class LearningStore {
 
     func loadBookshelf(force: Bool = false) async {
         let isStale = bookshelfFetchedAt.map { Date().timeIntervalSince($0) >= 300 } ?? true
-        guard force || bookshelf == nil || isStale else { return }
+        guard !isBookshelfLoading, force || bookshelf == nil || isStale else { return }
         isBookshelfLoading = true
         bookshelfErrorMessage = nil
         defer { isBookshelfLoading = false }
@@ -199,7 +211,7 @@ final class LearningStore {
     }
 
     func loadConceptLibrary(force: Bool = false) async {
-        guard force || conceptLibrary == nil else { return }
+        guard !isConceptLibraryLoading, force || conceptLibrary == nil else { return }
         isConceptLibraryLoading = true
         conceptLibraryErrorMessage = nil
         defer { isConceptLibraryLoading = false }
@@ -213,15 +225,16 @@ final class LearningStore {
     }
 
     func loadVideoLibrary(force: Bool = false) async {
-        guard force || videoLibrary == nil else { return }
+        guard !isVideoLibraryLoading, force || videoLibrary == nil else { return }
         isVideoLibraryLoading = true
+        videoLibraryErrorMessage = nil
         defer { isVideoLibraryLoading = false }
         do {
             videoLibrary = try await service.fetchVideoLessons()
         } catch is CancellationError {
             return
         } catch {
-            // Investment articles remain usable when the optional video shelf is offline.
+            videoLibraryErrorMessage = error.localizedDescription
         }
     }
 }

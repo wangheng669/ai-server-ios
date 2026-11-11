@@ -28,16 +28,12 @@ struct FamousHoldingDetailView: View {
     let store: FamousHoldingsStore
     @State private var filter = HoldingDetailFilter.current
 
-    private var resolvedManager: FamousHoldingsManager {
-        store.managerDetails[manager.key] ?? manager
-    }
-
-    private var changes: [FamousHoldingChange] {
+    private func changes(_ detail: FamousHoldingsManager) -> [FamousHoldingChange] {
         let records: [FamousHoldingChange]
         if filter == .exited {
-            records = resolvedManager.exitedPositions ?? resolvedManager.changes.filter { $0.action == .exited }
+            records = detail.exitedPositions ?? []
         } else {
-            let positions = resolvedManager.positions ?? resolvedManager.changes.filter { $0.action != .exited }
+            let positions = detail.positions ?? []
             records = filter == .current ? positions : positions.filter { filter.matches($0.action) }
         }
         return records.sorted {
@@ -48,91 +44,91 @@ struct FamousHoldingDetailView: View {
     }
 
     var body: some View {
+        let detail = store.detail(for: manager)
+        let resolvedManager = detail ?? manager
+        let visibleChanges = detail.map(changes) ?? []
         VStack(spacing: 0) {
-            navigationHeader
-            filterBar
-            listHeader
+            filterBar(resolvedManager)
+            if detail != nil { listHeader(count: visibleChanges.count) }
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if store.loadingManagerKeys.contains(manager.key) && store.managerDetails[manager.key] == nil {
-                        ProgressView("正在读取完整持仓")
-                            .frame(maxWidth: .infinity, minHeight: 220)
-                    } else {
-                        ForEach(Array(changes.enumerated()), id: \.element.id) { index, change in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(resolvedManager.displayName)的持仓")
+                            .font(.title2.bold())
+                        Text("\(quarterLabel(resolvedManager.reportDate)) · \(resolvedManager.positionsCount) 只 · \(compactUSD(resolvedManager.totalValueUsd))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                    if detail != nil {
+                        ForEach(Array(visibleChanges.enumerated()), id: \.element.id) { index, change in
                             holdingRow(change)
-                            if index < changes.count - 1 {
+                            if index < visibleChanges.count - 1 {
                                 Divider().overlay(HoldingsPalette.divider).padding(.leading, 72)
                             }
                         }
+                    } else if let message = store.detailError(for: manager) {
+                        ContentUnavailableView {
+                            Label("完整持仓暂不可用", systemImage: "list.bullet.rectangle")
+                        } description: {
+                            Text(message)
+                        } actions: {
+                            Button("重新加载") { Task { await store.loadDetail(for: manager) } }
+                        }
+                    } else {
+                        ContentLoadingPlaceholder(title: "正在读取完整持仓")
                     }
-                    footer
+                    footer(resolvedManager)
                 }
             }
             .scrollIndicators(.hidden)
             .background(HoldingsPalette.card)
         }
         .background(HoldingsPalette.canvas.ignoresSafeArea())
-        .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭持仓详情")
-                .padding(16)
-        }
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.loadDetail(managerKey: manager.key) }
+        .task(id: manager.reportIdentity) { await store.loadDetail(for: manager) }
     }
 
-    private var navigationHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("\(resolvedManager.displayName)的持仓")
-                    .font(.system(size: 21, weight: .semibold))
-                HStack(spacing: 6) {
-                    Text(quarterLabel(resolvedManager.reportDate))
-                    Text("·")
-                    Text("\(resolvedManager.positionsCount) 只")
-                    Text("·")
-                    Text(compactUSD(resolvedManager.totalValueUsd))
-                }
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-    }
-
-    private var filterBar: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(HoldingDetailFilter.allCases) { item in
-                    Button { filter = item } label: {
-                        Text("\(item.rawValue) \(filterCount(item))")
-                            .font(.system(size: 12, weight: filter == item ? .semibold : .medium))
-                            .foregroundStyle(filter == item ? Color.white : Color.secondary)
-                            .padding(.horizontal, 13)
-                            .frame(height: 32)
-                            .background(
-                                filter == item ? HoldingsPalette.blue : Color.secondary.opacity(0.09),
-                                in: Capsule()
-                            )
+    private func filterBar(_ manager: FamousHoldingsManager) -> some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(HoldingDetailFilter.allCases) { item in
+                        let count = filterCount(item, manager: manager)
+                        Button { filter = item } label: {
+                            Text("\(item.rawValue) \(count.map { String($0) } ?? "—")")
+                                .font(.system(size: 12, weight: filter == item ? .semibold : .medium))
+                                .foregroundStyle(filter == item ? Color.white : Color.secondary)
+                                .padding(.horizontal, 13)
+                                .frame(height: 32)
+                                .background(
+                                    filter == item ? HoldingsPalette.blue : Color.secondary.opacity(0.09),
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(item.rawValue)
+                        .accessibilityValue(count.map { "\($0) 条" } ?? "数量暂未返回")
+                        .accessibilityIdentifier("holding-filter-\(item.rawValue)")
+                        .accessibilityAddTraits(filter == item ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(filter == item ? .isSelected : [])
                 }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, 20)
+            .accessibilityIdentifier("holding-detail-filters")
+            .scrollIndicators(.hidden)
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭持仓详情")
+                .padding(.trailing, 12)
         }
-        .scrollIndicators(.hidden)
-        .padding(.bottom, 14)
+        .padding(.vertical, 6)
     }
 
-    private var listHeader: some View {
+    private func listHeader(count: Int) -> some View {
         HStack {
             Text(filter == .exited ? "清仓记录" : filter.rawValue)
                 .font(.system(size: 15, weight: .semibold))
-            Text("\(changes.count) 条")
+            Text("\(count) 条")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer()
@@ -192,13 +188,18 @@ struct FamousHoldingDetailView: View {
         return "\(arrow) \(change.action.title) \(percent(abs(change.weightChangePct)))"
     }
 
-    private func filterCount(_ item: HoldingDetailFilter) -> Int {
-        if item == .current { return resolvedManager.positions?.count ?? resolvedManager.positionsCount }
-        if item == .exited { return resolvedManager.exitedPositions?.count ?? resolvedManager.summary.exited }
-        return (resolvedManager.positions ?? resolvedManager.changes).count { item.matches($0.action) }
+    private func filterCount(_ item: HoldingDetailFilter, manager: FamousHoldingsManager) -> Int? {
+        switch item {
+        case .current: manager.positionsCount
+        case .new: manager.summary.new
+        case .increased: manager.summary.increased
+        case .decreased: manager.summary.decreased
+        case .exited: manager.summary.exited
+        case .unchanged: manager.summary.unchanged ?? manager.positions?.count(where: { $0.action == .unchanged })
+        }
     }
 
-    private var footer: some View {
+    private func footer(_ resolvedManager: FamousHoldingsManager) -> some View {
         HStack {
             Text("数据来源：SEC 13F 申报")
             Spacer()

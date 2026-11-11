@@ -148,16 +148,22 @@ struct SpecialPerson: Decodable, Identifiable, Hashable {
 
     var id: String { userID }
     var isCurated: Bool { userID.hasPrefix("curated:") }
-    var isIndustryPerson: Bool { topic == .technology }
     var hasOwnPostSource: Bool { hasOwnPostSourceValue ?? !isCurated }
     var hasXSource: Bool { nonempty(xScreenName) != nil }
-    var isOrganizationAccount: Bool { false }
     private var knownIdentity: KnownAccountIdentity? {
         AccountIdentityResolver.knownIdentity(userID: userID)
     }
     var name: String {
         knownIdentity?.canonicalName ?? nonempty(userName) ?? nonempty(userScreenName) ?? "未知用户"
     }
+
+    static func activityOrder(_ lhs: SpecialPerson, _ rhs: SpecialPerson) -> Bool {
+        let left = (lhs.todayCount, lhs.relatedPeople.count, lhs.totalCount)
+        let right = (rhs.todayCount, rhs.relatedPeople.count, rhs.totalCount)
+        if left != right { return left > right }
+        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    }
+
     var xHandle: String? {
         nonempty(xScreenName).map { $0.hasPrefix("@") ? $0 : "@\($0)" }
     }
@@ -418,110 +424,15 @@ struct PersonArticle: Decodable, Identifiable, Hashable {
     }
 }
 
-struct PeopleVideosResponse: Decodable {
-    let success: Bool
-    let personID: String
-    let videos: [PersonVideo]
 
-    enum CodingKeys: String, CodingKey {
-        case success, videos
-        case personID = "person_id"
-    }
-}
 
-struct PersonVideo: Decodable, Identifiable, Hashable {
-    let id: Int64
-    let personID: String
-    let platform: String
-    let platformVideoID: String
-    let title: String
-    let titleZH: String
-    let description: String?
-    let channelName: String
-    let publishedAt: String?
-    let durationSeconds: Int
-    let coverURLValue: String
-    let canonicalURLValue: String
-    let relevanceScore: Double
-    let videoType: String
-    let isFeatured: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case id, platform, title, description
-        case titleZH = "title_zh"
-        case personID = "person_id"
-        case platformVideoID = "platform_video_id"
-        case channelName = "channel_name"
-        case publishedAt = "published_at"
-        case durationSeconds = "duration_seconds"
-        case coverURLValue = "cover_url"
-        case canonicalURLValue = "canonical_url"
-        case relevanceScore = "relevance_score"
-        case videoType = "video_type"
-        case isFeatured = "is_featured"
-    }
-
-    var coverURL: URL? { MediaURL.image(coverURLValue) ?? URL(string: coverURLValue) }
-    var canonicalURL: URL? { URL(string: canonicalURLValue) }
-    var displayTitle: String {
-        nonempty(titleZH) ?? title
-    }
-    var publishedDateLabel: String? {
-        guard let publishedAt,
-              let date = ISO8601DateFormatter().date(from: publishedAt) else { return nil }
-        return date.formatted(
-            .dateTime
-                .year()
-                .month()
-                .day()
-                .locale(Locale(identifier: "zh_CN"))
-        )
-    }
-    var durationLabel: String {
-        guard durationSeconds > 0 else { return "" }
-        let hours = durationSeconds / 3_600
-        let minutes = (durationSeconds % 3_600) / 60
-        let seconds = durationSeconds % 60
-        return hours > 0
-            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
-            : String(format: "%d:%02d", minutes, seconds)
-    }
-
-    var youtubeDetailModel: YouTubeVideoDetailModel {
-        YouTubeVideoDetailModel(
-            id: "person-video-\(id)",
-            videoID: platformVideoID,
-            title: displayTitle,
-            channelName: channelName,
-            publishedLabel: publishedDateLabel,
-            durationLabel: durationLabel,
-            description: description,
-            coverURL: coverURL,
-            avatarURL: nil,
-            originalURL: canonicalURL
-        )
-    }
-}
-
-struct PersonVideoSubtitlesResponse: Decodable {
-    let success: Bool
-    let videoID: Int64
-    let language: String
-    let status: String
-    let cues: [PersonVideoSubtitleCue]
-
-    enum CodingKeys: String, CodingKey {
-        case success, language, status, cues
-        case videoID = "video_id"
-    }
-}
 
 struct BilibiliSubtitlesResponse: Decodable {
     let success: Bool
     let bvid: String
     let language: String
     let status: String
-    let cues: [PersonVideoSubtitleCue]
+    let cues: [VideoSubtitleCue]
 }
 
 struct BilibiliSummaryResponse: Decodable {
@@ -608,7 +519,7 @@ struct BilibiliInterpretationEvent: Decodable, Hashable {
     let detail: String
 }
 
-struct PersonVideoSubtitleCue: Decodable, Identifiable, Hashable {
+struct VideoSubtitleCue: Decodable, Identifiable, Hashable {
     let startMS: Int64
     let endMS: Int64
     let text: String
@@ -644,13 +555,6 @@ struct RelatedPerson: Decodable, Identifiable, Hashable {
     }
 }
 
-struct PeopleRelationshipLens: Identifiable, Equatable {
-    let title: String
-    let memberCount: Int
-
-    var id: String { title }
-}
-
 struct PeopleRelationshipMember: Identifiable, Hashable {
     let id: String
     let name: String
@@ -680,72 +584,6 @@ struct PeopleRelationshipCluster: Identifiable, Hashable {
 }
 
 enum PeopleRelationshipPlanner {
-    static func lenses(for people: [SpecialPerson], limit: Int = 6) -> [PeopleRelationshipLens] {
-        let counts = Dictionary(grouping: people) { primaryOrganization(for: $0) }
-            .mapValues(\.count)
-        return counts
-            .map { PeopleRelationshipLens(title: $0.key, memberCount: $0.value) }
-            .sorted {
-                if $0.memberCount != $1.memberCount {
-                    return $0.memberCount > $1.memberCount
-                }
-                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
-            }
-            .prefix(max(0, limit))
-            .map { $0 }
-    }
-
-    static func visiblePeople(
-        topicPeople: [SpecialPerson],
-        allPeople: [SpecialPerson],
-        focusedPersonID: String?,
-        organization: String?,
-        limit: Int = 8
-    ) -> [SpecialPerson] {
-        guard limit > 0 else { return [] }
-        let peopleByID = allPeople.reduce(into: [String: SpecialPerson]()) { result, person in
-            result[person.id] = person
-        }
-
-        if let focusedPersonID, let focused = peopleByID[focusedPersonID] {
-            var result: [SpecialPerson] = []
-            var seen = Set([focused.id])
-
-            func append(_ person: SpecialPerson?) {
-                guard let person, seen.insert(person.id).inserted else { return }
-                result.append(person)
-            }
-
-            for related in focused.relatedPeople {
-                append(peopleByID[related.id])
-            }
-            for person in allPeople where person.relatedPeople.contains(where: { $0.id == focused.id }) {
-                append(person)
-            }
-            return Array(result.prefix(limit))
-        }
-
-        let candidates: [SpecialPerson]
-        if let organization {
-            candidates = ranked(
-                topicPeople.filter { primaryOrganization(for: $0) == organization }
-            )
-        } else {
-            candidates = ranked(topicPeople)
-        }
-        return Array(candidates.prefix(limit))
-    }
-
-    static func relationshipLabel(from center: SpecialPerson, to other: SpecialPerson) -> String {
-        if let relation = center.relatedPeople.first(where: { $0.id == other.id })?.relationship {
-            return relation
-        }
-        if let relation = other.relatedPeople.first(where: { $0.id == center.id })?.relationship {
-            return relation
-        }
-        return "暂无已核实关系"
-    }
-
     static func clusters(
         around center: SpecialPerson,
         allPeople: [SpecialPerson],
@@ -864,17 +702,6 @@ enum PeopleRelationshipPlanner {
             return value
         }
         return "行业关联"
-    }
-
-    private static func ranked(_ people: [SpecialPerson]) -> [SpecialPerson] {
-        people.sorted {
-            let lhs = ($0.relatedPeople.count, $0.todayCount, $0.totalCount)
-            let rhs = ($1.relatedPeople.count, $1.todayCount, $1.totalCount)
-            if lhs.0 != rhs.0 { return lhs.0 > rhs.0 }
-            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
-            if lhs.2 != rhs.2 { return lhs.2 > rhs.2 }
-            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }
     }
 
     private static func compactOrganizationName(_ value: String, fallback: String) -> String {

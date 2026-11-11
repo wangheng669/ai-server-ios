@@ -1,29 +1,23 @@
 import Foundation
 
 struct APIClient {
+    private static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.requestCachePolicy = .useProtocolCachePolicy
+        configuration.urlCache = .shared
+        return URLSession(configuration: configuration)
+    }()
+
     let baseURL: URL
     private let session: URLSession
+
     init(baseURL: URL, session: URLSession? = nil) {
         self.baseURL = baseURL
-        if let session { self.session = session } else {
-            let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 30
-            config.requestCachePolicy = .useProtocolCachePolicy
-            config.urlCache = .shared
-            self.session = URLSession(configuration: config)
-        }
+        self.session = session ?? Self.defaultSession
     }
 
     func checkHealth() async throws { let _: HealthResponse = try await get(baseURL.appending(path: "health")) }
-
-    func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
-        let response: TodayWorldYesterdayReportResponse = try await get(
-            baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
-            cachePolicy: .reloadIgnoringLocalCacheData
-        )
-        guard response.success else { throw APIError.invalidResponse }
-        return response.data
-    }
 
     func fetchAliyunBalance(refresh: Bool = false) async throws -> AliyunAccountBalance {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/settings/aliyun-balance"), resolvingAgainstBaseURL: false)
@@ -31,6 +25,15 @@ struct APIClient {
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: AliyunBalanceResponse = try await get(
             url,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data
+    }
+
+    func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
+        let response: TodayWorldYesterdayReportResponse = try await get(
+            baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
             cachePolicy: .reloadIgnoringLocalCacheData
         )
         guard response.success else { throw APIError.invalidResponse }
@@ -47,6 +50,8 @@ struct APIClient {
         bypassCache: Bool = false
     ) async throws -> [Post] {
         switch source {
+        case .zhihu:
+            return try await fetchZhihuTopics(page: page, limit: limit)
         case .weibo, .douyin, .baidu:
             return Self.hotTopicPostsForDisplay(
                 try await fetchHotTopics(page: page, limit: limit, source: source),
@@ -61,8 +66,6 @@ struct APIClient {
                 category: flashCategory,
                 importantOnly: flashCategory == nil
             ).map(Post.flash)
-        case .xueqiu:
-            return try await fetchXueqiuPosts(page: page, limit: limit)
         case .wechat:
             return try await fetchWeChatPosts(page: page, limit: limit)
         case .youtube:
@@ -106,51 +109,65 @@ struct APIClient {
     }
 
     func fetchRSSFeeds() async throws -> [RSSFeedSource] {
-        let pageSize = 20
         func fetchPage(_ page: Int) async throws -> RSSFeedsResponse {
-            var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/rss/feeds"), resolvingAgainstBaseURL: false)
-            parts?.queryItems = [
-                .init(name: "page", value: String(page)),
+            try await fetchRSSFeedsPage(page, query: [
                 .init(name: "exclude_social", value: "true")
-            ]
-            guard let url = parts?.url else { throw APIError.invalidURL }
-            return try await get(url)
+            ])
         }
 
         let firstPage = try await fetchPage(1)
-        var pages: [(number: Int, feeds: [RSSFeedSource])] = [(1, firstPage.data.feeds)]
-        if let pagination = firstPage.meta?.pagination {
-            let totalPages = min(10, max(1, Int(ceil(Double(pagination.total) / Double(max(pagination.size, 1))))))
-            if totalPages > 1 {
-                let remaining = try await withThrowingTaskGroup(
-                    of: (Int, [RSSFeedSource]).self,
-                    returning: [(Int, [RSSFeedSource])].self
-                ) { group in
-                    for page in 2...totalPages {
-                        group.addTask {
-                            let response = try await fetchPage(page)
-                            return (page, response.data.feeds)
-                        }
-                    }
-                    var result: [(Int, [RSSFeedSource])] = []
-                    for try await page in group { result.append(page) }
-                    return result
+        let pagination = firstPage.meta.pagination
+        guard pagination.size > 0, pagination.total >= 0 else { throw APIError.invalidResponse }
+        let totalPages = min(10, (max(pagination.total, 1) - 1) / pagination.size + 1)
+        var pages = [[RSSFeedSource]](repeating: [], count: totalPages)
+        pages[0] = firstPage.data.feeds
+
+        try await withThrowingTaskGroup(of: (Int, [RSSFeedSource]).self) { group in
+            for index in 1..<totalPages {
+                group.addTask {
+                    let response = try await fetchPage(index + 1)
+                    return (index, response.data.feeds)
                 }
-                pages += remaining
             }
-        } else if firstPage.data.feeds.count == pageSize {
-            for page in 2...10 {
-                let response = try await fetchPage(page)
-                pages.append((page, response.data.feeds))
-                if response.data.feeds.count < pageSize { break }
-            }
+            for try await (index, feeds) in group { pages[index] = feeds }
         }
 
-        let feeds = pages.sorted { $0.number < $1.number }
-            .flatMap(\.feeds)
-            .filter(\.isEnabled)
         var seen = Set<Int>()
-        return feeds.filter { seen.insert($0.id).inserted }
+        return pages.joined().filter { $0.isEnabled && seen.insert($0.id).inserted }
+    }
+
+    func fetchXueqiuFeeds() async throws -> [RSSFeedSource] {
+        let query: [URLQueryItem] = [
+            .init(name: "q", value: "/xueqiu/user/"),
+            .init(name: "enabled", value: "true"),
+            .init(name: "size", value: "100")
+        ]
+        var page = 1
+        var feeds: [RSSFeedSource] = []
+        var seen = Set<Int>()
+        while true {
+            let response = try await fetchRSSFeedsPage(page, query: query, cachePolicy: .reloadIgnoringLocalCacheData)
+            let pagination = response.meta.pagination
+            guard pagination.page == page, pagination.size > 0, pagination.total >= 0 else {
+                throw APIError.invalidResponse
+            }
+            feeds += response.data.feeds.filter { $0.isEnabled && $0.isXueqiuUserFeed && seen.insert($0.id).inserted }
+            if page >= (max(pagination.total, 1) - 1) / pagination.size + 1 {
+                return feeds.sorted { $0.id < $1.id }
+            }
+            page += 1
+        }
+    }
+
+    private func fetchRSSFeedsPage(
+        _ page: Int,
+        query: [URLQueryItem],
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    ) async throws -> RSSFeedsResponse {
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/rss/feeds"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [.init(name: "page", value: String(page))] + query
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        return try await get(url, cachePolicy: cachePolicy)
     }
 
     func fetchRSSFeedPosts(
@@ -261,56 +278,17 @@ struct APIClient {
             for try await result in group { posts += result }
             return posts
         }
-        let merged = Self.mergeWeChatPosts(posts)
+        let merged = Self.mergeChronologicalRSSPosts(posts)
         let start = (page - 1) * limit
         guard start < merged.count else { return [] }
         return Array(merged.dropFirst(start).prefix(limit))
     }
 
-    static func mergeWeChatPosts(_ posts: [Post]) -> [Post] {
+    static func mergeChronologicalRSSPosts(_ posts: [Post]) -> [Post] {
         var seen = Set<Int>()
         return posts
             .sorted { ($0.articlePostAt ?? "") > ($1.articlePostAt ?? "") }
             .filter { seen.insert($0.id).inserted }
-    }
-
-    func fetchXueqiuPosts(page: Int, limit: Int, feedID: Int? = nil) async throws -> [Post] {
-        if let feedID {
-            return try await fetchRSSFeedPosts(
-                feedID: feedID,
-                page: page,
-                limit: limit,
-                includesAllScores: true
-            )
-        }
-        return try await withThrowingTaskGroup(of: [Post].self) { group in
-            for feedID in [14, 16] {
-                group.addTask {
-                    var parts = URLComponents(
-                        url: baseURL.appending(path: "api/ios/v1/rss/feeds/\(feedID)/posts"),
-                        resolvingAgainstBaseURL: false
-                    )
-                    parts?.queryItems = [
-                        .init(name: "page", value: String(page)),
-                        .init(name: "limit", value: String(limit)),
-                        .init(name: "sort", value: "time_desc"),
-                        .init(name: "include_zero_score", value: "true")
-                    ]
-                    guard let url = parts?.url else { throw APIError.invalidURL }
-                    let response: RSSFeedPostsResponse = try await get(url)
-                    return response.data.posts
-                }
-            }
-
-            var posts: [Post] = []
-            for try await result in group { posts += result }
-            var seen = Set<Int>()
-            return posts
-                .sorted { ($0.articlePostAt ?? "") > ($1.articlePostAt ?? "") }
-                .filter { seen.insert($0.id).inserted }
-                .prefix(limit)
-                .map { $0 }
-        }
     }
 
     private func fetchRegularPosts(
@@ -367,7 +345,7 @@ struct APIClient {
         xUserID: String? = nil
     ) -> [URLQueryItem] {
         let isSpecialRSS = source == .laozhong || source == .youtube
-        let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube
+        let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube || source == .bilibili
         let normalizedXUserID = source == .x
             ? xUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
             : nil
@@ -404,6 +382,21 @@ struct APIClient {
         let response: HotTopicsResponse = try await get(url)
         guard response.success else { throw APIError.invalidResponse }
         return response.data.topics
+    }
+
+    private func fetchZhihuTopics(page: Int, limit: Int) async throws -> [Post] {
+        var parts = URLComponents(url: baseURL.appending(path: "api/ios/v1/zhihu/hot/topics"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [.init(name: "page", value: String(page)), .init(name: "size", value: String(limit))]
+        guard let url = parts?.url else { throw APIError.invalidURL }
+        let (data, response) = try await session.data(for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let failure = try JSONDecoder().decode(FeedSourceFailure.self, from: data)
+            throw APIError.sourceUnavailable(failure.message)
+        }
+        let envelope = try JSONDecoder().decode(ZhihuHotTopicsResponse.self, from: data)
+        guard envelope.success else { throw APIError.invalidResponse }
+        return envelope.data.topics.map(Post.zhihuTopic)
     }
 
     static func hotTopicPostsForDisplay(
@@ -532,7 +525,7 @@ struct APIClient {
             .init(name: "title", value: title)
         ]
         guard let url = components?.url else { throw APIError.invalidURL }
-        return try await get(url)
+        return try await get(url, retriesTransientFailures: false, timeoutInterval: 90)
     }
 
     func interpretBilibiliVideo(bvid: String, title: String) async throws -> BilibiliInterpretationResponse {
@@ -613,7 +606,7 @@ struct APIClient {
     }
 
     func resolveYouTubePlayback(url: URL, title: String) async throws -> VideoPlaybackSource {
-        try await resolveVideoPlayback(url: url, title: title, formatID: "18")
+        try await resolveVideoPlayback(url: url, title: title, formatID: "")
     }
 
     func resolveBilibiliPlayback(url: URL, title: String) async throws -> VideoPlaybackSource {
@@ -744,12 +737,13 @@ struct APIClient {
         _ url: URL,
         retriesTransientFailures: Bool = true,
         cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
+        timeoutInterval: TimeInterval = 30,
         authorization: String? = nil
     ) async throws -> Response {
         let attempts = retriesTransientFailures ? 2 : 1
         for attempt in 0..<attempts {
             do {
-                var request = URLRequest(url: url, cachePolicy: cachePolicy)
+                var request = URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: timeoutInterval)
                 request.setValue(authorization, forHTTPHeaderField: "Authorization")
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
@@ -1077,13 +1071,6 @@ private struct WikipediaRelayArticleResponse: Decodable {
     let article: WikipediaRelayArticle
 }
 
-private struct HealthResponse: Decodable { let status: String }
-
-struct TodayWorldYesterdayReportResponse: Decodable {
-    let success: Bool
-    let data: TodayWorldYesterdayReportPayload
-}
-
 private struct AliyunBalanceResponse: Decodable {
     let success: Bool
     let data: AliyunAccountBalance
@@ -1123,6 +1110,13 @@ struct AIUsageDailyCosts: Decodable, Equatable {
     }
 }
 
+private struct HealthResponse: Decodable { let status: String }
+
+struct TodayWorldYesterdayReportResponse: Decodable {
+    let success: Bool
+    let data: TodayWorldYesterdayReportPayload
+}
+
 struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     let date: String
     let timezone: String
@@ -1146,19 +1140,14 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
         case completedAt = "completed_at"
     }
 
+    var isGenerating: Bool {
+        status == "running" || status == "queued"
+            || report.final?.status == "running" || report.final?.status == "queued"
+    }
 }
 
 struct TodayWorldYesterdayReportContent: Decodable, Equatable {
     let final: TodayWorldFinalReport?
-
-    enum CodingKeys: String, CodingKey {
-        case final
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        final = try container.decodeIfPresent(TodayWorldFinalReport.self, forKey: .final)
-    }
 }
 
 struct TodayWorldFinalReport: Decodable, Equatable {
@@ -1375,15 +1364,18 @@ struct XBookmarkResult: Decodable, Equatable {
     }
 }
 enum APIError: LocalizedError {
-    case invalidURL, invalidResponse, httpStatus(Int), decoding(Error), missingCategory(String), invalidXPostID
+    case invalidURL, invalidResponse, httpStatus(Int), decoding(Error), missingCategory(String), invalidXPostID, sourceUnavailable(String)
     var errorDescription: String? {
         switch self {
         case .invalidURL: "服务器地址无效"
         case .invalidResponse: "服务器响应无效"
         case .httpStatus(let code): "服务器返回错误（\(code)）"
+        case .sourceUnavailable(let message): message
         case .decoding: "新闻数据格式暂时无法识别"
         case .missingCategory(let name): "找不到 \(name) 数据分类"
         case .invalidXPostID: "这条内容缺少有效的 X 帖子 ID"
         }
     }
 }
+
+private struct FeedSourceFailure: Decodable { let message: String }

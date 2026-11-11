@@ -12,12 +12,54 @@ struct LearningCatalog: Decodable, Equatable {
     }
 
     var topicCount: Int { sections.reduce(0) { $0 + $1.topics.count } }
+    var stockTopics: [LearningTopic] { sections.first { $0.name == "股票" }?.topics ?? [] }
 }
 
 struct LearningSection: Decodable, Identifiable, Equatable {
     let id: String
     let name: String
     let topics: [LearningTopic]
+}
+
+struct LearningMilestone: Identifiable {
+    let title: String
+    let topic: LearningTopic
+
+    var id: String { "\(title)-\(topic.id)" }
+
+    static func plan(from topics: [LearningTopic]) -> [LearningMilestone] {
+        let definitions: [(String, [String])] = [
+            ("基础概念", ["净收入", "净资产"]),
+            ("读懂财报", ["资产负债", "现金流", "财报"]),
+            ("估值方法", ["市盈率", "估值"]),
+            ("风险管理", ["风险", "安全边际"])
+        ]
+
+        var usedIDs = Set<String>()
+        return definitions.compactMap { title, keywords in
+            guard let topic = topics.first(where: { topic in
+                !usedIDs.contains(topic.id) && keywords.contains(where: topic.title.contains)
+            }) else { return nil }
+            usedIDs.insert(topic.id)
+            return LearningMilestone(title: title, topic: topic)
+        }
+    }
+}
+
+struct LearningLessonPosition: Hashable {
+    let title: String
+    let number: Int
+    let count: Int
+
+    var progress: CGFloat {
+        guard count > 0 else { return 0 }
+        return CGFloat(min(max(number, 0), count)) / CGFloat(count)
+    }
+
+    var text: String {
+        let position = "第 \(number)/\(count) 节"
+        return title.isEmpty ? position : "\(position) · \(title)"
+    }
 }
 
 struct LearningTopic: Decodable, Identifiable, Hashable {
@@ -43,9 +85,6 @@ struct LearningTopic: Decodable, Identifiable, Hashable {
 
     func mediaURL(_ value: String?, baseURL: URL = ServerConfiguration.currentURL) -> URL? {
         guard let value, !value.isEmpty else { return nil }
-        if let absolute = URL(string: value), absolute.scheme != nil {
-            return MediaURL.video(absolute.absoluteString) ?? absolute
-        }
         return URL(string: value, relativeTo: baseURL)?.absoluteURL
     }
 
@@ -70,6 +109,12 @@ struct LearningDetail: Decodable, Hashable {
     let blocks: [LearningBlock]
     let companyExamples: [LearningCompanyExample]?
     let videoReferences: [LearningVideoReference]?
+
+    /// Only identical cases are duplicates; distinct explanations for a company remain visible.
+    var uniqueCompanyExamples: [LearningCompanyExample] {
+        var seen = Set<LearningCompanyExample>()
+        return (companyExamples ?? []).filter { seen.insert($0).inserted }
+    }
 
     enum CodingKeys: String, CodingKey {
         case title, subtitle, views, blocks
@@ -148,7 +193,7 @@ struct LearningCompanyExample: Decodable, Hashable, Identifiable {
     let connection: String
     let caution: String
 
-    var id: String { "\(company)-\(ticker ?? "")-\(situation)" }
+    var id: Self { self }
 }
 
 struct LearningBlock: Decodable, Hashable, Identifiable {
@@ -170,19 +215,9 @@ struct LearningBlock: Decodable, Hashable, Identifiable {
     }
 }
 
-struct LearningCatalogResponse: Decodable { let data: LearningCatalog }
-struct LearningTopicResponse: Decodable { let data: LearningTopic }
 
 struct LearningVideoLibrary: Decodable, Equatable {
     let lessons: [LearningVideoLesson]
-}
-
-struct LearningVideoLibraryResponse: Decodable {
-    let data: LearningVideoLibrary
-}
-
-struct LearningVideoLessonResponse: Decodable {
-    let data: LearningVideoLesson
 }
 
 struct LearningVideoLesson: Decodable, Identifiable, Hashable {
@@ -340,10 +375,6 @@ struct LearningBookshelf: Decodable, Equatable {
     }
 }
 
-struct LearningBookshelfResponse: Decodable {
-    let data: LearningBookshelf
-}
-
 struct KnowledgeBook: Identifiable, Decodable, Hashable {
     let id: String
     let title: String
@@ -422,14 +453,6 @@ struct KnowledgeConceptLibrary: Decodable, Equatable {
     let concepts: [KnowledgeConceptCard]
 }
 
-struct KnowledgeConceptLibraryResponse: Decodable {
-    let data: KnowledgeConceptLibrary
-}
-
-struct KnowledgeConceptDetailResponse: Decodable {
-    let data: KnowledgeConceptDetail
-}
-
 enum KnowledgeConceptKind: String, Decodable, Hashable {
     case event
     case person
@@ -460,39 +483,6 @@ struct KnowledgeConceptCard: Identifiable, Decodable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, kind, title, subtitle, summary, importance
-        case coverURLValue = "cover_url"
-        case imageAttribution = "image_attribution"
-        case wikipediaLanguage = "wikipedia_language"
-        case wikipediaTitle = "wikipedia_title"
-        case wikipediaURLValue = "wikipedia_url"
-        case keyPeople = "key_people"
-    }
-
-    var coverURL: URL? {
-        KnowledgeConceptImageURL.optimized(coverURLValue)
-    }
-
-    var wikipediaURL: URL? { URL(string: wikipediaURLValue) }
-}
-
-struct KnowledgeConceptDetail: Identifiable, Decodable, Hashable {
-    let id: String
-    let kind: KnowledgeConceptKind
-    let title: String
-    let subtitle: String
-    let summary: String
-    let importance: String
-    let coverURLValue: String?
-    let imageAttribution: String
-    let wikipediaLanguage: String
-    let wikipediaTitle: String
-    let wikipediaURLValue: String
-    let keyPeople: [String]
-    let content: KnowledgeConceptContent
-    let related: [KnowledgeRelatedConcept]
-
-    enum CodingKeys: String, CodingKey {
-        case id, kind, title, subtitle, summary, importance, content, related
         case coverURLValue = "cover_url"
         case imageAttribution = "image_attribution"
         case wikipediaLanguage = "wikipedia_language"
@@ -543,39 +533,5 @@ enum KnowledgeConceptImageURL {
 
     private static func isRasterImage(_ url: URL) -> Bool {
         ["jpg", "jpeg", "png", "webp"].contains(url.pathExtension.lowercased())
-    }
-}
-
-struct KnowledgeConceptContent: Decodable, Hashable {
-    let background: String
-    let timeline: [KnowledgeConceptTimelinePoint]
-    let keyPoints: [String]
-    let keyPeople: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case background, timeline
-        case keyPoints = "key_points"
-        case keyPeople = "key_people"
-    }
-}
-
-struct KnowledgeConceptTimelinePoint: Decodable, Hashable, Identifiable {
-    let date: String
-    let title: String
-    let description: String
-
-    var id: String { "\(date)-\(title)" }
-}
-
-struct KnowledgeRelatedConcept: Decodable, Hashable, Identifiable {
-    let id: String
-    let kind: KnowledgeConceptKind
-    let title: String
-    let subtitle: String
-    let relationType: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, kind, title, subtitle
-        case relationType = "relation_type"
     }
 }

@@ -21,7 +21,7 @@ struct DeploymentStatusSnapshot: Equatable {
     }
 
     init?(message: DeploymentStatusMessage) {
-        let date = Self.date(from: message.updatedAt) ?? Date()
+        guard let date = Self.date(from: message.updatedAt) else { return nil }
         switch message.phase {
         case "running": phase = .running(progress: message.progress)
         case "succeeded": phase = .succeeded
@@ -78,13 +78,6 @@ struct DeploymentStatusSnapshot: Equatable {
         }
     }
 
-    var compactDetail: String {
-        switch phase {
-        case .running: runningStageTitle
-        case .succeeded, .failed: detail
-        }
-    }
-
     private var runningStageTitle: String {
         switch stage {
         case "merging": "正在合并代码"
@@ -119,12 +112,10 @@ struct DeploymentStatusSnapshot: Equatable {
 }
 
 struct DeploymentStatusMessage: Decodable {
-    let type: String
     let phase: String
     let stage: String?
     let progress: Double
     let commit: String
-    let runId: String?
     let updatedAt: String
 }
 
@@ -143,8 +134,9 @@ final class DeploymentStatusStore: ObservableObject {
     private var realtimeClient: RealtimeFeedClient?
     private var snapshotTask: Task<Void, Never>?
     private var dismissalTask: Task<Void, Never>?
+    private var latestSnapshot: DeploymentStatusSnapshot?
     private static let acknowledgedCompletionKey = "iosDeploymentAcknowledgedCompletion"
-    static let acknowledgedFailureKey = "iosDeploymentAcknowledgedFailure"
+    private static let acknowledgedFailureKey = "iosDeploymentAcknowledgedFailure"
     private static let successDisplayDuration: Duration = .seconds(3)
 
     init(
@@ -159,6 +151,7 @@ final class DeploymentStatusStore: ObservableObject {
 
     func start() {
         guard realtimeClient == nil else { return }
+        if let snapshot, !snapshot.isVisible() { self.snapshot = nil }
         snapshotTask?.cancel()
         snapshotTask = Task { [weak self] in await self?.loadSnapshot() }
 
@@ -168,7 +161,7 @@ final class DeploymentStatusStore: ObservableObject {
             self?.apply(snapshot)
         }
         realtimeClient = client
-        client.start()
+        client.start(scope: .deployment)
     }
 
     func stop() {
@@ -176,6 +169,7 @@ final class DeploymentStatusStore: ObservableObject {
         snapshotTask = nil
         dismissalTask?.cancel()
         dismissalTask = nil
+        if case .succeeded? = snapshot?.phase { snapshot = nil }
         realtimeClient?.stop()
         realtimeClient = nil
     }
@@ -205,12 +199,12 @@ final class DeploymentStatusStore: ObservableObject {
     }
 
     func apply(_ value: DeploymentStatusSnapshot) {
+        guard value.isVisible() else { return }
+        if let latestSnapshot, value == latestSnapshot || value.updatedAt < latestSnapshot.updatedAt { return }
+        latestSnapshot = value
+
         dismissalTask?.cancel()
         dismissalTask = nil
-        guard value.isVisible() else {
-            snapshot = nil
-            return
-        }
         if case .succeeded = value.phase {
             if defaults.string(forKey: Self.acknowledgedCompletionKey) == value.completionIdentity {
                 snapshot = nil
@@ -244,7 +238,7 @@ struct DeploymentStatusTip: View {
     init(
         snapshot: DeploymentStatusSnapshot,
         initiallyExpanded: Bool = false,
-        onDismiss: @escaping () -> Void = {},
+        onDismiss: @escaping () -> Void,
     ) {
         self.snapshot = snapshot
         self.onDismiss = onDismiss

@@ -21,10 +21,83 @@ private actor MarketConcurrencyProbe {
     }
 }
 
+private final class MarketRequestProbeProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var recorded: [URLRequest] = []
+    private static var payloads: [Data] = []
+    private static var onRequest: (() -> Void)?
+
+    static func reset(payloads: [Data] = [], onRequest: (() -> Void)? = nil) {
+        lock.lock()
+        defer { lock.unlock() }
+        recorded = []
+        Self.payloads = payloads
+        Self.onRequest = onRequest
+    }
+    static func requests() -> [URLRequest] { lock.lock(); defer { lock.unlock() }; return recorded }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lock.lock()
+        let payload = Self.recorded.count < Self.payloads.count ? Self.payloads[Self.recorded.count] : nil
+        Self.recorded.append(request)
+        let onRequest = Self.onRequest
+        Self.lock.unlock()
+        onRequest?()
+        let response = HTTPURLResponse(url: request.url!, statusCode: payload == nil ? 503 : 200, httpVersion: nil, headerFields: [:])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: payload ?? Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 final class MarketPresentationTests: XCTestCase {
+    func testIndustryMetricFormattingPreservesMagnitudeUnitsAndQualifiers() {
+        for (raw, qualifier, value, unit) in [
+            ("1,649万辆", "", "1,649", "万辆"),
+            ("近6,000亿元", "近", "6,000", "亿元"),
+            ("超3,650万吨", "超", "3,650", "万吨"),
+            ("7,982万千瓦", "", "7,982", "万千瓦"),
+            ("2.94亿部", "", "2.94", "亿部"),
+            ("万亿元级", "", "万亿元级", "")
+        ] {
+            let parts = IndustryMetricParts(raw)
+            XCTAssertEqual(parts.qualifier, qualifier)
+            XCTAssertEqual(parts.value, value)
+            XCTAssertEqual(parts.unit, unit)
+            XCTAssertEqual(parts.qualifier + parts.value + parts.unit, raw)
+        }
+    }
+
+    func testIndustryMonthlyComparisonUsesConsecutiveCalendarMonthsAndSelectedMeasure() {
+        let december = industryMonth("2025-12", total: 100, nev: 40)
+        let january = industryMonth("2026-01", total: 90, nev: 44)
+        XCTAssertEqual(IndustryDataPresentation.monthlyChange([january, december], isNEV: true)!, 10, accuracy: 0.0001)
+        XCTAssertEqual(IndustryDataPresentation.monthlyChange([december, january], isNEV: false)!, -10, accuracy: 0.0001)
+        XCTAssertEqual(IndustryDataPresentation.monthLabel("2026-06"), "2026年6月")
+    }
+
+    func testIndustryMonthlyComparisonDoesNotInventRatesAcrossMissingMonthsOrZeroValues() {
+        let april = industryMonth("2026-04", total: 100, nev: 50)
+        let june = industryMonth("2026-06", total: 120, nev: 60)
+        let mayZero = industryMonth("2026-05", total: 0, nev: 0)
+        XCTAssertNil(IndustryDataPresentation.monthlyChange([april, june], isNEV: true))
+        XCTAssertNil(IndustryDataPresentation.monthlyChange([mayZero, june], isNEV: true))
+        XCTAssertNil(IndustryDataPresentation.monthlyChange([june], isNEV: false))
+    }
+
+    private func industryMonth(_ period: String, total: Double, nev: Double) -> IndustryPayload.AutoSales.Month {
+        .init(period: period, totalSales: total, nevSales: nev, totalYoY: 0, nevYoY: 0, nevPenetrationRate: 0)
+    }
+
+    private func researchItem(id: String = "translated", publishedOn: String = "2026-09-15") throws -> InstitutionResearchItem {
+        let data = Data(#"{"id":"\#(id)","institution":"Goldman Sachs","institutionShortName":"GS","title":"中文标题","originalTitle":"Original title","summary":"中文摘要","originalSummary":"Official original synopsis.","translationStatus":"translated","publishedOn":"\#(publishedOn)","sourceType":"官网摘要 · 机器翻译","categories":[],"metrics":[],"sourceTitle":"Original title","sourceUrl":"https://www.goldmansachs.com/insights/articles/test","isSystemSummary":false,"presentation":"snapshot"}"#.utf8)
+        return try JSONDecoder().decode(InstitutionResearchItem.self, from: data)
+    }
+
     func testResearchTranslationKeepsOriginalForComparison() throws {
-        let data = Data(#"{"id":"translated","institution":"Goldman Sachs","institutionShortName":"GS","title":"中文标题","originalTitle":"Original title","summary":"中文摘要","originalSummary":"Official original synopsis.","translationStatus":"translated","publishedOn":"2026-09-15","sourceType":"官网摘要 · 机器翻译","categories":[],"metrics":[],"source":{"title":"Original title","url":"https://www.goldmansachs.com/insights/articles/test"},"isSystemSummary":false,"presentation":"snapshot"}"#.utf8)
-        let item = try JSONDecoder().decode(InstitutionResearchItem.self, from: data)
+        let item = try researchItem()
         XCTAssertEqual(item.title, "中文标题")
         XCTAssertEqual(item.originalSummary, "Official original synopsis.")
         XCTAssertEqual(item.translationLabel, "中文译文")
@@ -33,11 +106,20 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(pending.translationLabel, "翻译待重试 · 英文原文")
     }
 
-    func testResearchFreshnessUsesPublicationDate() {
+    func testResearchFreshnessUsesPublicationDate() throws {
         let now = ISO8601DateFormatter().date(from: "2026-09-17T00:00:00Z")!
-        XCTAssertEqual(institutionResearchAgeLabel("2026-09-15", now: now), "近期观点")
-        XCTAssertEqual(institutionResearchAgeLabel("2026-07-22", now: now), "历史观点")
-        XCTAssertEqual(institutionResearchAgeLabel("2027-01-01", now: now), "日期待核验")
+        XCTAssertEqual(try researchItem().age(now: now), .recent)
+        XCTAssertEqual(try researchItem(publishedOn: "2026-08-18").age(now: now), .recent)
+        XCTAssertEqual(try researchItem(publishedOn: "2026-08-17").age(now: now), .historical)
+        XCTAssertEqual(try researchItem(publishedOn: "2027-01-01").age(now: now), .unverified)
+        XCTAssertEqual(try researchItem(publishedOn: "unknown").age(now: now), .unverified)
+    }
+
+    func testResearchPayloadPreparesStableChronologicalOrderAndUniqueInstitutions() throws {
+        let items = try [researchItem(id: "z"), researchItem(id: "old", publishedOn: "2026-07-22"), researchItem(id: "a")]
+        let payload = InstitutionResearchPayload(institutionsCount: 1, items: items, updatedAt: nil)
+        XCTAssertEqual(payload.items.map(\.id), ["a", "z", "old"])
+        XCTAssertEqual(payload.institutionShortNames, ["GS"])
     }
 
     func testInstitutionResearchDecodesCurrentReportsContractAndFiltersInactive() throws {
@@ -94,11 +176,6 @@ final class MarketPresentationTests: XCTestCase {
         await store.load()
         await store.load(force: true)
         XCTAssertEqual(store.payload?.summary, "第2次")
-    }
-
-    func testCompactResearchDateUsesChineseMonthAndDay() {
-        XCTAssertEqual(marketCompactResearchDate("2026-07-22"), "7月22日")
-        XCTAssertEqual(marketCompactResearchDate("unknown"), "unknown")
     }
 
     func testMarketDecodingDiagnosticIncludesMissingFieldPath() throws {
@@ -163,22 +240,6 @@ final class MarketPresentationTests: XCTestCase {
         }
     }
 
-    func testMarketSentimentOverviewUsesRequestedMarketOrder() {
-        XCTAssertEqual(
-            SentimentMarket.marketOverviewOrder,
-            [.china, .hongKong, .korea, .unitedStates]
-        )
-        XCTAssertEqual(SentimentMarket.marketOverviewOrder.map(\.title), ["A 股", "港股", "韩股", "美股"])
-    }
-
-    func testSentimentLabelsCoverOverviewTemperatureScale() {
-        XCTAssertEqual(SentimentSnapshot.label(for: 25), "偏冷")
-        XCTAssertEqual(SentimentSnapshot.label(for: 50), "正常")
-        XCTAssertEqual(SentimentSnapshot.label(for: 79), "偏热")
-        XCTAssertEqual(SentimentSnapshot.displayLabel(for: "critical"), "高风险")
-        XCTAssertEqual(SentimentSnapshot.displayLabel(for: "warning"), "预警")
-    }
-
     func testCompanyLogoPathsSurviveMarketStoreRecreation() throws {
         let suiteName = "MarketPresentationTests.companyLogoPaths.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -194,15 +255,6 @@ final class MarketPresentationTests: XCTestCase {
                 now: Date(timeIntervalSinceNow: 31 * 24 * 60 * 60)
             ).isEmpty
         )
-    }
-
-    func testChartFallsBackOnlyWhenPrimaryHasNoDrawableLine() {
-        let primary = [chartPoint(timestamp: 1, close: 10)]
-        let fallback = [chartPoint(timestamp: 1, close: 10), chartPoint(timestamp: 2, close: 11)]
-
-        XCTAssertTrue(marketShouldUseFallbackChart(primaryPoints: primary, fallbackPoints: fallback))
-        XCTAssertFalse(marketShouldUseFallbackChart(primaryPoints: fallback, fallbackPoints: fallback))
-        XCTAssertFalse(marketShouldUseFallbackChart(primaryPoints: primary, fallbackPoints: primary))
     }
 
     func testRealtimeProxyUsesClearDetailAndCompactMarketNames() throws {
@@ -224,7 +276,7 @@ final class MarketPresentationTests: XCTestCase {
     func testMarketAuxiliaryRequestsKeepConcurrencySlotsFullWithoutExceedingLimit() async {
         let probe = MarketConcurrencyProbe()
 
-        await marketRunWithLimitedConcurrency(Array(0..<10), maximumConcurrentRequests: 3) { value in
+        await runWithLimitedConcurrency(Array(0..<10), maximumConcurrentRequests: 3) { value in
             await probe.start()
             try? await Task.sleep(for: .milliseconds(value.isMultiple(of: 3) ? 12 : 3))
             await probe.finish(value)
@@ -235,54 +287,181 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(result.maximumActive, 3)
     }
 
-    func testSentimentSnapshotCachePolicyUsesAvailableCacheOnWeakNetworks() {
-        XCTAssertEqual(
-            marketRequestCachePolicy(bypassCache: false, useCachedResponseWhenAvailable: true),
-            .returnCacheDataElseLoad
-        )
-        XCTAssertEqual(
-            marketRequestCachePolicy(bypassCache: true, useCachedResponseWhenAvailable: true),
-            .reloadIgnoringLocalCacheData
-        )
-        XCTAssertEqual(
-            marketRequestCachePolicy(bypassCache: false, useCachedResponseWhenAvailable: false),
-            .useProtocolCachePolicy
-        )
+    func testChartsReachServerDespiteFreshFiveMinuteHTTPCache() async throws {
+        MarketRequestProbeProtocol.reset()
+        let cache = URLCache(memoryCapacity: 1024 * 1024, diskCapacity: 0)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = cache
+        configuration.protocolClasses = [MarketRequestProbeProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let base = URL(string: "https://chart-cache.example")!
+        var parts = URLComponents(url: base.appending(path: "api/ios/v1/market/chart"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [.init(name: "symbol", value: "NVDA"), .init(name: "interval", value: MarketRange.week.apiInterval), .init(name: "range", value: MarketRange.week.apiRange), .init(name: "limit", value: String(MarketRange.week.apiLimit))]
+        let response = HTTPURLResponse(url: parts.url!, statusCode: 200, httpVersion: nil, headerFields: ["Cache-Control": "public, max-age=300"])!
+        cache.storeCachedResponse(CachedURLResponse(response: response, data: Data("old chart".utf8)), for: URLRequest(url: parts.url!))
+        let service = MarketService(baseURL: base, session: session)
+        for recent in [false, true] {
+            do {
+                if recent { _ = try await service.recentIntradayChart(symbol: "NVDA") }
+                else { _ = try await service.chart(symbol: "NVDA", range: .week) }
+                XCTFail("A cached chart must not hide the current server response")
+            } catch MarketServiceError.httpStatus(503) {
+                // The fresh server response must win, even when a cache entry is still fresh.
+            }
+        }
+        let requests = MarketRequestProbeProtocol.requests()
+        XCTAssertEqual(requests.count, 2)
+        for request in requests {
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
+            XCTAssertFalse(request.url!.query!.contains("refresh=true"), "HTTP freshness must not request an upstream repair")
+        }
     }
 
-    func testDecodesCachedSentimentSnapshot() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_sentiment_snapshot_v1","market":"hong-kong","score":66.67,"label":"正常","valuationPercentile":83.33,"sentimentPercentile":50,"advancerShare":50,"breadth":{"up":4,"down":5,"flat":1},"fetchedAt":"2026-08-12T02:00:00Z","cached":true,"stale":false}}"#.utf8)
+    func testDashboardBypassesLocalCacheWithoutForcingUpstreamRefresh() async throws {
+        MarketRequestProbeProtocol.reset()
+        defer { MarketRequestProbeProtocol.reset() }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MarketRequestProbeProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let service = MarketService(baseURL: URL(string: "https://market-cache.example")!, session: session)
 
-        let snapshot = try JSONDecoder().decode(MarketSentimentSnapshotResponse.self, from: data).data
+        do {
+            _ = try await service.dashboard(refresh: false)
+            XCTFail("The request probe returns a server error")
+        } catch MarketServiceError.httpStatus(503) {}
 
-        XCTAssertEqual(snapshot.dataContract, "market_sentiment_snapshot_v1")
-        XCTAssertEqual(snapshot.score, 66.67, accuracy: 0.001)
-        XCTAssertEqual(snapshot.valuationPercentile, 83.33)
-        XCTAssertEqual(snapshot.breadth?.up, 4)
-        XCTAssertTrue(snapshot.cached)
-        XCTAssertFalse(snapshot.stale)
+        let request = try XCTUnwrap(MarketRequestProbeProtocol.requests().first)
+        XCTAssertEqual(request.url?.path, "/api/ios/v1/market/dashboard")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
     }
 
-    func testDecodesMarketBootstrapFirstScreenContract() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_bootstrap_v1","generatedAt":"2026-08-24T01:00:00Z","dashboard":{"dataContract":"market_dashboard_v4","definitionVersion":"test","generatedAt":"2026-08-24T01:00:00Z","refreshIntervalMs":30000,"coreIndices":[],"referenceIndices":[],"realtimeProxies":[],"metrics":[],"componentsByRegion":{},"crypto":[],"commodities":[],"missingSymbols":[],"expectedSymbols":[],"symbolHealth":[],"regions":[]},"temperature":{"dataContract":"market_ashare_temperature_v3","days":90,"latest":{"ai_server":{"composite_temperature":{"value":48,"label":"正常","tradeDate":"2026-08-22","fetchedAt":"2026-08-22T07:00:00Z"}}}},"sentimentSnapshots":{"hong-kong":{"dataContract":"market_sentiment_snapshot_v1","market":"hong-kong","score":52,"label":"正常","fetchedAt":"2026-08-24T01:00:00Z","cached":true,"stale":false}},"errors":{"korea":"delayed"}}}"#.utf8)
+    private let chartProbePayload = #"""
+        {"success":true,"data":{
+          "symbol":"NVDA","market":"US","tradingDate":"2026-10-21","timezone":"America/New_York","session":"regular","interval":"1m",
+          "analysis":{"aggregation":"none","candleTimestamp":"interval-end","sessionWindows":[]},
+          "quality":{"status":"complete","expected":1,"actual":1,"missing":[],"freshnessSeconds":0,"isFinal":true},
+          "quote":{"previousClose":10,"changePercent":10,"source":"test"},
+          "candles":[{"timestamp":60000,"open":10,"high":12,"low":9,"close":11,"volume":100,"state":"confirmed","source":"test","session":"regular"}]
+        }}
+        """#
 
-        let bootstrap = try JSONDecoder().decode(MarketBootstrapResponse.self, from: data).data
+    @MainActor
+    func testChartSnapshotChangesForMetadataCorrectionsAndSurvivesFailedRefresh() async throws {
+        let original = chartProbePayload
+        let corrected = original.replacingOccurrences(of: #""previousClose":10"#, with: #""previousClose":10.5"#)
+        MarketRequestProbeProtocol.reset(payloads: [Data(original.utf8), Data(corrected.utf8)])
+        defer { MarketRequestProbeProtocol.reset() }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MarketRequestProbeProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let store = MarketStore(baseURL: URL(string: "https://chart-snapshot.example")!, session: session)
 
-        XCTAssertEqual(bootstrap.dataContract, "market_bootstrap_v1")
-        XCTAssertEqual(bootstrap.dashboard.dataContract, "market_dashboard_v4")
-        XCTAssertEqual(bootstrap.temperature?.latest.aiServer?.compositeTemperature?.value, 48)
-        XCTAssertEqual(bootstrap.sentimentSnapshots["hong-kong"]?.score, 52)
-        XCTAssertEqual(bootstrap.errors?["korea"], "delayed")
+        await store.loadChart(symbol: "NVDA", range: .day)
+        let first = try XCTUnwrap(store.chartSnapshot(symbol: "NVDA", range: .day))
+        await store.loadChart(symbol: "NVDA", range: .day)
+        XCTAssertEqual(store.chartSnapshot(symbol: "NVDA", range: .day)?.id, first.id)
+        XCTAssertEqual(MarketRequestProbeProtocol.requests().count, 1)
+
+        await store.loadChart(symbol: "NVDA", range: .day, force: true)
+        let updated = try XCTUnwrap(store.chartSnapshot(symbol: "NVDA", range: .day))
+        XCTAssertNotEqual(updated.id, first.id)
+        XCTAssertEqual(updated.chart.candles, first.chart.candles)
+        XCTAssertEqual(updated.chart.quote.previousClose, 10.5)
+        XCTAssertEqual(updated.artifacts.presentation.values, [11])
+
+        await store.loadChart(symbol: "NVDA", range: .day, force: true)
+        XCTAssertEqual(store.chartSnapshot(symbol: "NVDA", range: .day)?.id, updated.id)
+        XCTAssertNotNil(store.chartError(symbol: "NVDA", range: .day))
+        XCTAssertEqual(MarketRequestProbeProtocol.requests().count, 3)
+    }
+
+    @MainActor
+    func testChartRequestFinishesForNextPageWhenStartingPageIsCancelled() async {
+        let requestStarted = expectation(description: "Initial chart request started")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        MarketRequestProbeProtocol.reset(payloads: [Data(chartProbePayload.utf8)]) {
+            requestStarted.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 5)
+        }
+        defer { MarketRequestProbeProtocol.reset() }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MarketRequestProbeProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let store = MarketStore(baseURL: URL(string: "https://chart-handoff.example")!, session: session)
+
+        let firstPage = Task { await store.loadChart(symbol: "NVDA", range: .day) }
+        await fulfillment(of: [requestStarted], timeout: 5)
+        firstPage.cancel()
+        releaseResponse.signal()
+        await store.loadChart(symbol: "NVDA", range: .day)
+
+        XCTAssertEqual(store.chartSnapshot(symbol: "NVDA", range: .day)?.artifacts.listTrend, [11])
+        XCTAssertEqual(MarketRequestProbeProtocol.requests().count, 1)
+        XCTAssertFalse(store.isLoadingChart(symbol: "NVDA", range: .day))
+        await firstPage.value
+    }
+
+    @MainActor
+    func testHoldingsDetailKeepsSummaryRowsSeparateAndScopesCacheToTheFiling() async throws {
+        let summary = #"""
+        {"key":"ark","cik":"1","displayName":"ARK","institutionName":"ARK","reportDate":"2026-06-30",
+         "filingDate":"2026-08-14","positionsCount":1,"totalValueUsd":100,
+         "summary":{"new":0,"increased":0,"decreased":0,"exited":0,"unchanged":1},
+         "changesCount":0,"changes":[]}
+        """#
+        let details = summary.dropLast() + #"""
+        ,"positions":[{"id":"current:1","symbol":"AAA","name":"A","action":"unchanged","previousWeightPct":100,
+         "weightPct":100,"weightChangePct":0,"valueUsd":100,"previousValueUsd":90}]}
+        """#
+        func response(_ manager: String) -> Data {
+            Data(#"{"success":true,"data":{"generatedAt":"2026-08-14T00:00:00Z","reportDate":"2026-06-30","periodLabel":"Q2","disclaimer":"","summary":{"new":0,"increased":0,"decreased":0,"exited":0},"managers":[\#(manager)]}}"#.utf8)
+        }
+        MarketRequestProbeProtocol.reset(payloads: [response(summary), response(String(details)), response(String(details))])
+        defer { MarketRequestProbeProtocol.reset() }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MarketRequestProbeProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let store = FamousHoldingsStore(baseURL: URL(string: "https://holdings.example")!, session: session)
+        let manager = try JSONDecoder().decode(FamousHoldingsManager.self, from: Data(summary.utf8))
+
+        await store.loadDetail(for: manager)
+        XCTAssertNil(store.detail(for: manager))
+        XCTAssertNotNil(store.detailError(for: manager))
+        XCTAssertNil(store.errorMessage)
+
+        await store.loadDetail(for: manager)
+        let loaded = try XCTUnwrap(store.detail(for: manager))
+        XCTAssertEqual(loaded.positions?.count, 1)
+        XCTAssertEqual(loaded.valueChangeFromPreviousReport?.amountUsd, 10)
+        XCTAssertNil(store.detailError(for: manager))
+        await store.loadDetail(for: manager)
+        XCTAssertEqual(MarketRequestProbeProtocol.requests().count, 2)
+
+        let amended = summary.replacingOccurrences(of: "2026-08-14", with: "2026-08-15")
+        let amendedManager = try JSONDecoder().decode(FamousHoldingsManager.self, from: Data(amended.utf8))
+        XCTAssertNil(store.detail(for: amendedManager))
+        await store.loadDetail(for: amendedManager)
+        XCTAssertNil(store.detail(for: amendedManager))
+        XCTAssertNotNil(store.detailError(for: amendedManager))
+        XCTAssertEqual(MarketRequestProbeProtocol.requests().count, 3)
     }
 
     func testDecodesServerBackedInstitutionResearch() throws {
-        let data = Data(#"{"data":{"institutionsCount":3,"items":[{"id":"morgan-stanley-more-stocks-join-bull-market","institution":"Morgan Stanley","institutionShortName":"MS","title":"更多股票加入牛市","originalTitle":"More Stocks Join the Bull Market","summary":"市场领导力正在扩散。","publishedOn":"2026-07-22","sourceType":"官方播客文字稿","categories":["美股","市场广度"],"metrics":[],"source":{"title":"More Stocks Join the Bull Market","url":"https://www.morganstanley.com/insights/example"},"isSystemSummary":true,"presentation":"lead"},{"id":"goldman-sp500-forecast-2026","institution":"Goldman Sachs","institutionShortName":"GS","title":"盈利增长推动美股上行","originalTitle":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","summary":"盈利预测上调。","publishedOn":"2026-05-28","sourceType":"官方研究文章","categories":["美股"],"metrics":[{"label":"2026 EPS","value":"$340"}],"targetRevision":{"label":"标普500年末目标","previousValue":"7,600","currentValue":"8,000"},"source":{"title":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","url":"https://www.goldmansachs.com/insights/example"},"isSystemSummary":true,"presentation":"revision"}],"updatedAt":"2026-08-10T00:00:00Z"}}"#.utf8)
+        let data = Data(#"{"data":{"updatedAt":"2026-08-10T00:00:00Z","reports":[{"id":"morgan-stanley-more-stocks-join-bull-market","institution":"Morgan Stanley","institutionShortName":"MS","title":"更多股票加入牛市","originalTitle":"More Stocks Join the Bull Market","summary":"市场领导力正在扩散。","publishedOn":"2026-07-22","sourceType":"官方播客文字稿","categories":["美股","市场广度"],"metrics":[],"isSystemSummary":true,"presentation":"lead","sourceTitle":"More Stocks Join the Bull Market","sourceUrl":"https://www.morganstanley.com/insights/example","isActive":true},{"id":"goldman-sp500-forecast-2026","institution":"Goldman Sachs","institutionShortName":"GS","title":"盈利增长推动美股上行","originalTitle":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","summary":"盈利预测上调。","publishedOn":"2026-05-28","sourceType":"官方研究文章","categories":["美股"],"metrics":[{"label":"2026 EPS","value":"$340"}],"targetRevision":{"label":"标普500年末目标","previousValue":"7,600","currentValue":"8,000"},"isSystemSummary":true,"presentation":"revision","sourceTitle":"The S&P 500 Is Forecast to Climb as Earnings Growth Powers Stocks Higher","sourceUrl":"https://www.goldmansachs.com/insights/example","isActive":true}]},"success":true}"#.utf8)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
         let payload = try decoder.decode(InstitutionResearchResponse.self, from: data).data
 
-        XCTAssertEqual(payload.institutionsCount, 3)
+        XCTAssertEqual(payload.institutionsCount, 2)
         XCTAssertEqual(payload.items.first?.presentation, .lead)
         XCTAssertEqual(payload.items.last?.targetRevision?.currentValue, "8,000")
         XCTAssertEqual(payload.items.last?.metrics.first?.value, "$340")
@@ -437,26 +616,6 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketFinancialAmount(-850_000_000, currency: "HKD"), "-8.5 亿港元")
     }
 
-    func testDecodesHongKongValuationHistory() throws {
-        let data = Data(#"{"date":["2026-07-22","2026-07-23"],"pe":[13.79,13.97],"close":[25635.28,25950.93]}"#.utf8)
-        let history = try JSONDecoder().decode(MarketHKValuationHistory.self, from: data)
-
-        XCTAssertEqual(history.date.last, "2026-07-23")
-        XCTAssertEqual(history.pe.last, 13.97)
-    }
-
-    func testDecodesBackendValuationHistoryContract() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_valuation_history_v1","market":"united-states","date":[],"pe":[28.85,25.43],"source":"multpl","fetchedAt":"2026-07-29T10:00:00Z","cached":true,"stale":false}}"#.utf8)
-        let response = try JSONDecoder().decode(MarketValuationHistoryResponse.self, from: data)
-
-        XCTAssertEqual(response.data.dataContract, "market_valuation_history_v1")
-        XCTAssertEqual(response.data.market, "united-states")
-        XCTAssertEqual(response.data.pe, [28.85, 25.43])
-        XCTAssertEqual(response.data.source, "multpl")
-        XCTAssertTrue(response.data.cached)
-        XCTAssertFalse(response.data.stale)
-    }
-
     func testDecodesCompanyStaticAndTTMPEHistory() throws {
         let data = Data(#"{"success":true,"data":{"dataContract":"company_valuation_history_v2","symbol":"GOOGL","frequency":"daily","method":"fiscal_anchor_scaled_by_adjusted_daily_close","peStatic":[{"date":"2026-08-07","value":32.61},{"date":"2026-08-10","value":32.75}],"peTTM":[{"date":"2026-08-07","value":17.72},{"date":"2026-08-10","value":17.80}],"source":"TradingView","asOf":"2026-08-10T08:00:00Z"}}"#.utf8)
 
@@ -492,39 +651,52 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(displayPoints.map(\.date), displayPoints.map(\.date).sorted())
     }
 
-    func testParsesSP500PEHistoryTable() {
-        let html = #"""
-        <table id="datatable">
-        <tr class="odd"><td>Jul 22, 2026</td><td><abbr title="Estimate">†</abbr>28.85</td></tr>
-        <tr class="even"><td>Jun 1, 2026</td><td>&#x2002;25.43</td></tr>
-        </table>
-        """#
+    func testCompanyPEProjectionUsesEveryPointForStatisticsAndDateSelection() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let points = (0..<1_000).map { index in
+            CompanyPEChartPoint(
+                date: start.addingTimeInterval(Double(index) * 86_400),
+                value: index < 900 ? 10 : index < 999 ? 30 : 20
+            )
+        }
+        let projection = CompanyPEChartProjection(sortedPoints: points)
 
-        XCTAssertEqual(marketParseSP500PEHistory(html), [28.85, 25.43])
+        XCTAssertEqual(projection.points.count, 1_000)
+        XCTAssertLessThanOrEqual(projection.displayPoints.count, 480)
+        XCTAssertEqual(projection.median, 10)
+        XCTAssertEqual(try XCTUnwrap(projection.percentile), 90.1, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(projection.previousChange), -100.0 / 3, accuracy: 0.000_001)
+        XCTAssertEqual(projection.minimum?.value, 10)
+        XCTAssertEqual(projection.maximum?.value, 30)
+        XCTAssertEqual(projection.yDomain, 7.6...32.4)
+
+        let renderedDates = Set(projection.displayPoints.map(\.date))
+        let omitted = try XCTUnwrap(points.first { !renderedDates.contains($0.date) })
+        XCTAssertEqual(projection.point(closestTo: omitted.date)?.date, omitted.date)
+        XCTAssertEqual(projection.point(closestTo: points[4].date.addingTimeInterval(43_200))?.date, points[4].date)
+        XCTAssertEqual(projection.point(closestTo: nil)?.date, points.last?.date)
     }
 
-    func testDecodesAShareTemperatureContract() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_ashare_temperature_v3","days":90,"latest":{"ai_server":{"composite_temperature":{"value":84.55,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"valuation_percentile":{"value":82.35,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"sentiment_percentile":{"value":86.75,"label":"偏热","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"},"advancer_share":{"value":0.7759,"label":"","tradeDate":"2026-07-23","fetchedAt":"2026-07-23T08:04:36Z"}}}}}"#.utf8)
+    func testCompanyPEProjectionRebuildsStatisticsForSelectedSeriesAndRange() throws {
+        let latest = Date(timeIntervalSince1970: 1_700_000_000)
+        let cutoff = try XCTUnwrap(Calendar(identifier: .gregorian).date(byAdding: .year, value: -5, to: latest))
+        let points = [
+            CompanyPEChartPoint(date: cutoff.addingTimeInterval(-86_400), value: 100),
+            CompanyPEChartPoint(date: cutoff, value: 10),
+            CompanyPEChartPoint(date: latest, value: 20),
+        ]
+        let fiveYears = CompanyPEChartProjection(sortedPoints: points, years: 5)
+        let otherSeries = CompanyPEChartProjection(sortedPoints: points.map { .init(date: $0.date, value: $0.value * 2) }, years: 5)
+        let empty = CompanyPEChartProjection(sortedPoints: [])
 
-        let response = try JSONDecoder().decode(MarketAShareTemperatureResponse.self, from: data)
-
-        XCTAssertEqual(response.data.dataContract, "market_ashare_temperature_v3")
-        XCTAssertEqual(response.data.latest.aiServer?.compositeTemperature?.value, 84.55)
-        XCTAssertEqual(response.data.latest.aiServer?.valuationPercentile?.value, 82.35)
-        XCTAssertEqual(response.data.latest.aiServer?.sentimentPercentile?.value, 86.75)
-        XCTAssertEqual(response.data.latest.aiServer?.advancerShare?.value, 0.7759)
-    }
-
-    func testDecodesKoreaLeverageContract() throws {
-        let data = Data(#"{"success":true,"data":{"dataContract":"market_korea_leverage_v1","asOf":"20260730","generatedAt":"2026-08-01T21:31:00+08:00","fetchedAt":"2026-08-02T06:25:00Z","leverageThermometer":{"value":51.64,"weighted":51.64,"unit":"percent","anchor":"20240102","note":"ratio"},"r2FinancingRatio":{"value":30.72,"percentile10Y":16.4,"unit":"percent","note":"credit / deposits"},"forcedLiquidation":{"unsettledBillionKRW":1.725,"fiveDayAverageBillionKRW":419,"percentile10Y":94},"indices":{"kospi":5593.56,"spx":7437.63},"alert":{"level":"critical","value":51.64,"message":"高位报警","thresholds":{"warning":40,"critical":45}},"freshness":{"staleDays":2,"dailyFullRefreshBeijing":"14:16","recommendedPoll":"after 14:20"},"source":{"name":"KOFIA + KSD","url":"https://kimpremium.com/","docs":"https://kimpremium.com/api"},"disclaimer":"not investment advice"}}"#.utf8)
-
-        let response = try JSONDecoder().decode(MarketKoreaLeverageResponse.self, from: data)
-
-        XCTAssertEqual(response.data.dataContract, "market_korea_leverage_v1")
-        XCTAssertEqual(response.data.alert.level, "critical")
-        XCTAssertEqual(response.data.leverageThermometer.value, 51.64)
-        XCTAssertEqual(response.data.forcedLiquidation.fiveDayAverageBillionKRW, 419)
-        XCTAssertEqual(response.data.freshness.staleDays, 2)
+        XCTAssertEqual(CompanyPEChartProjection(sortedPoints: points).maximum?.value, 100)
+        XCTAssertEqual(fiveYears.points.map(\.date), [cutoff, latest])
+        XCTAssertEqual(fiveYears.median, 15)
+        XCTAssertEqual(fiveYears.percentile, 100)
+        XCTAssertEqual(otherSeries.median, 30)
+        XCTAssertNil(empty.median)
+        XCTAssertNil(empty.point(closestTo: latest))
+        XCTAssertEqual(empty.yDomain, 0...1)
     }
 
     func testDecodesInvestorMoodPublicVideoSamples() throws {
@@ -555,29 +727,8 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(response.data.items.first?.stale, true)
     }
 
-    func testDecodesInvestorVideoInterpretation() throws {
-        let data = Data(#"{"success":true,"source_id":"123","status":"ready","provider":"bigmodel","model":"glm-4.6v","cached":false,"estimated_cost_cny":0.036,"interpretation":{"overview":"作者认为短线仍需谨慎。","visual_findings":["画面显示上证指数分时图"],"timeline":[{"time":"00:18","title":"提出观点","detail":"作者判断市场仍在震荡。"}],"creator_notes":["观点主要依据短期走势，未讨论仓位风险。"]}}"#.utf8)
-
-        let response = try JSONDecoder().decode(InvestorVideoInterpretationResponse.self, from: data)
-
-        XCTAssertEqual(response.sourceID, "123")
-        XCTAssertEqual(response.model, "glm-4.6v")
-        XCTAssertEqual(response.interpretation?.timeline.first?.time, "00:18")
-        XCTAssertEqual(response.estimatedCostCNY, 0.036)
-        XCTAssertFalse(response.cached)
-    }
-
-    func testDecodesPendingInvestorVideoInterpretation() throws {
-        let data = Data(#"{"success":true,"source_id":"123","status":"pending","provider":"","model":"","cached":false,"estimated_cost_cny":0}"#.utf8)
-
-        let response = try JSONDecoder().decode(InvestorVideoInterpretationResponse.self, from: data)
-
-        XCTAssertEqual(response.status, "pending")
-        XCTAssertNil(response.interpretation)
-    }
-
     func testDecodesMarketChartQualityContract() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","periodReturn":{"range":"1d","basis":"previous-close","startPrice":3864.37,"endPrice":3883.58,"change":19.21,"percent":0.4971,"startTimestamp":null,"endTimestamp":1784691000000},"periodVolatility":{"range":"1d","basis":"annualized-log-returns","percent":18.42,"observationCount":118,"annualizationPeriods":98280},"quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"symbol":"000001.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"regular","interval":"1m","periodReturn":{"range":"1d","basis":"previous-close","startPrice":3864.37,"endPrice":3883.58,"change":19.21,"percent":0.4971,"startTimestamp":null,"endTimestamp":1784691000000},"periodVolatility":{"range":"1d","basis":"annualized-log-returns","percent":18.42,"observationCount":118,"annualizationPeriods":98280},"analysis":{"aggregation":"none","candleTimestamp":"interval-end","sessionWindows":[]},"quality":{"status":"repairing","expected":120,"actual":119,"missing":[{"startTimestamp":1784691000000,"endTimestamp":1784691000000}],"freshnessSeconds":35,"isFinal":false},"quote":{"price":3883.58,"previousClose":3864.37,"change":19.21,"changePercent":0.5,"providerTimestamp":1784691000000,"receivedTimestamp":1784691005000,"source":"eastmoney"},"candles":[{"timestamp":1784683860000,"open":3839.67,"high":3845.42,"low":3839.67,"close":3845.42,"volume":18226640,"state":"confirmed","source":"eastmoney","session":"regular"}]}}"#.utf8)
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
         XCTAssertEqual(response.data.quality.status, .repairing)
         XCTAssertEqual(response.data.quality.missing.count, 1)
@@ -592,28 +743,31 @@ final class MarketPresentationTests: XCTestCase {
     }
 
     func testUnavailableEmptyStockChartRequestsAControlledRetry() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"601398.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"closed","interval":"1m","quality":{"status":"unavailable","expected":240,"actual":0,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"price":7.6,"previousClose":7.56,"change":0.04,"changePercent":0.53,"providerTimestamp":1784707014348,"receivedTimestamp":1784707014348,"source":"eastmoney"},"candles":[]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"symbol":"601398.SS","market":"CN","tradingDate":"2026-07-22","timezone":"Asia/Shanghai","session":"closed","interval":"1m","analysis":{"aggregation":"none","candleTimestamp":"interval-end","sessionWindows":[]},"quality":{"status":"unavailable","expected":240,"actual":0,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"price":7.6,"previousClose":7.56,"change":0.04,"changePercent":0.53,"providerTimestamp":1784707014348,"receivedTimestamp":1784707014348,"source":"eastmoney"},"candles":[]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
 
         XCTAssertTrue(marketChartNeedsRetry(response.data))
-        XCTAssertFalse(marketChartCanUseCache(response.data))
+        XCTAssertFalse(marketChartCanUseCache(response.data, loadedAt: periodTestNow, now: periodTestNow))
     }
 
     func test52WeekLowUsesValidCandleLows() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","market":"US","tradingDate":"2026-08-04","timezone":"America/New_York","session":"closed","interval":"1d","quality":{"status":"complete","expected":3,"actual":3,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"price":220,"previousClose":219,"change":1,"changePercent":0.46,"providerTimestamp":null,"receivedTimestamp":null,"source":"yahoo"},"candles":[{"timestamp":1,"open":210,"high":215,"low":205,"close":212,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"},{"timestamp":2,"open":200,"high":210,"low":180,"close":205,"volume":1,"state":"invalid","source":"yahoo","session":"regular"},{"timestamp":3,"open":190,"high":220,"low":185.5,"close":220,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","market":"US","tradingDate":"2026-08-04","timezone":"America/New_York","session":"closed","interval":"1d","analysis":{"aggregation":"none","candleTimestamp":"trading-date","sessionWindows":[]},"quality":{"status":"complete","expected":3,"actual":3,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"price":220,"previousClose":219,"change":1,"changePercent":0.46,"providerTimestamp":null,"receivedTimestamp":null,"source":"yahoo"},"candles":[{"timestamp":1,"open":210,"high":215,"low":205,"close":212,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"},{"timestamp":2,"open":200,"high":210,"low":180,"close":205,"volume":1,"state":"invalid","source":"yahoo","session":"regular"},{"timestamp":3,"open":190,"high":220,"low":185.5,"close":220,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"}]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
 
         XCTAssertEqual(market52WeekLow(response.data), 185.5)
+        XCTAssertEqual(market52WeekHigh(response.data, symbol: "AAPL"), 220)
+        XCTAssertNil(market52WeekHigh(response.data, symbol: "SPY"), "An index or another instrument cannot supply an ETF price statistic")
     }
 
     func test52WeekLowRejectsPartialHistory() throws {
-        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","market":"US","tradingDate":"2026-08-04","timezone":"America/New_York","session":"closed","interval":"1d","quality":{"status":"partial","expected":6,"actual":6,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"source":"yahoo"},"candles":[{"timestamp":1,"open":210,"high":215,"low":205,"close":212,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"}]}}"#.utf8)
+        let data = Data(#"{"success":true,"data":{"symbol":"AAPL","market":"US","tradingDate":"2026-08-04","timezone":"America/New_York","session":"closed","interval":"1d","analysis":{"aggregation":"none","candleTimestamp":"trading-date","sessionWindows":[]},"quality":{"status":"partial","expected":6,"actual":6,"missing":[],"freshnessSeconds":null,"isFinal":true},"quote":{"source":"yahoo"},"candles":[{"timestamp":1,"open":210,"high":215,"low":205,"close":212,"volume":1,"state":"confirmed","source":"yahoo","session":"regular"}]}}"#.utf8)
 
         let response = try JSONDecoder().decode(MarketChartResponse.self, from: data)
 
         XCTAssertNil(market52WeekLow(response.data))
+        XCTAssertNil(market52WeekHigh(response.data, symbol: "AAPL"))
     }
 
     func testCryptoDisplayCodeUsesTradingPair() throws {
@@ -1262,8 +1416,8 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(MarketRange.week.apiInterval, "15m")
         XCTAssertEqual(MarketRange.week.apiLimit, 1_000)
         XCTAssertEqual(MarketRange.month.apiInterval, "1d")
-        XCTAssertEqual(MarketRange.fiveYears.apiLimit, 600)
-        XCTAssertEqual(MarketRange.maximum.apiLimit, 600)
+        XCTAssertEqual(MarketRange.fiveYears.apiLimit, 2_000)
+        XCTAssertEqual(MarketRange.maximum.apiLimit, 50_000)
     }
 
     func testLeadChartPrefersLoadedRangePointsOverDashboardSummary() {
@@ -1280,12 +1434,87 @@ final class MarketPresentationTests: XCTestCase {
         )
     }
 
-    func testDailyChartPointsRemainInOneDrawableSegment() {
-        let previous = MarketChartPoint(timestamp: 1_000, open: 10, high: 11, low: 9, close: 10, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
-        let nextDay = MarketChartPoint(timestamp: 1_000 + 24 * 60 * 60 * 1_000, open: 11, high: 12, low: 10, close: 11, volume: nil, state: "confirmed", source: "eastmoney", session: nil)
+    func testDailyChartPointsRemainInOneDrawableSegmentAcrossTheWeekend() throws {
+        let points = try [
+            periodPoint("2026-10-16T04:00:00Z", close: 10),
+            periodPoint("2026-10-19T04:00:00Z", close: 11),
+            periodPoint("2026-10-20T04:00:00Z", close: 12)
+        ]
+        let presentation = MarketChartPresentation(chart: periodChart(points, interval: "1d", status: .partial))
 
-        XCTAssertFalse(marketChartShouldSplitSegment(previous: previous, current: nextDay, interval: "1d"))
-        XCTAssertTrue(marketChartShouldSplitSegment(previous: previous, current: nextDay, interval: "1m"))
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        XCTAssertEqual(presentation.lineSegments.count, 1)
+        XCTAssertEqual(presentation.lineSegments.first?.indices, [0, 1, 2])
+        XCTAssertTrue(presentation.lineSegments.allSatisfy { $0.isRegular && !$0.isMissing })
+    }
+
+    func testNonemptyIncompleteChartsKeepRequestingCoverageRepairInsteadOfFreezingTheCache() {
+        let points = [chartPoint(timestamp: 60_000, close: 10), chartPoint(timestamp: 180_000, close: 11)]
+        for status in [MarketChartQualityStatus.partial, .repairing] {
+            let chart = periodChart(points, status: status, expected: 3, actual: 2)
+
+            XCTAssertTrue(marketChartNeedsRetry(chart))
+            XCTAssertFalse(marketChartCanUseCache(chart, loadedAt: periodTestNow, now: periodTestNow))
+        }
+    }
+
+    func testExplicitSourceCoverageGapsCannotBeCachedAsComplete() {
+        let points = [chartPoint(timestamp: 60_000, close: 10), chartPoint(timestamp: 180_000, close: 11)]
+        let missing = [MarketChartGap(startTimestamp: 120_000, endTimestamp: 120_000)]
+        for chart in [
+            periodChart(points, expected: 3, actual: 2, missing: missing),
+            periodChart(points, missing: missing)
+        ] {
+            XCTAssertTrue(marketChartNeedsRetry(chart))
+            XCTAssertFalse(marketChartCanUseCache(chart, loadedAt: periodTestNow, now: periodTestNow))
+        }
+
+        let complete = periodChart(points)
+        XCTAssertFalse(marketChartNeedsRetry(complete))
+        XCTAssertTrue(marketChartCanUseCache(complete, loadedAt: periodTestNow, now: periodTestNow))
+    }
+
+    func testCompleteSparseCoverageKeepsItsSourceContractWithoutRepairRetries() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:30:00Z", close: 10),
+            periodPoint("2026-10-21T13:39:00Z", close: 12)
+        ]
+        for market in ["FX", "JP", "KR"] {
+            let source = periodChart(points, market: market, expected: 10, actual: 2)
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: .intraday, now: periodTestNow))
+
+            XCTAssertEqual(result.candles, points)
+            XCTAssertEqual(result.quality.status, .complete)
+            XCTAssertEqual(result.quality.expected, 10)
+            XCTAssertEqual(result.quality.actual, 2)
+            XCTAssertTrue(result.quality.missing.isEmpty)
+            XCTAssertFalse(marketChartNeedsRetry(result))
+            XCTAssertTrue(marketChartCanUseCache(result, loadedAt: periodTestNow, now: periodTestNow))
+            XCTAssertTrue(MarketChartPresentation(chart: result).lineSegments.allSatisfy { !$0.isMissing })
+        }
+    }
+
+    func testOpenCompleteChartExpiresWithoutRequestingCoverageRepair() {
+        let points = [chartPoint(timestamp: 60_000, close: 10), chartPoint(timestamp: 120_000, close: 11)]
+        let chart = periodChart(points, isFinal: false)
+
+        XCTAssertFalse(marketChartNeedsRetry(chart))
+        XCTAssertTrue(marketChartCanUseCache(chart, loadedAt: periodTestNow, now: periodTestNow))
+        XCTAssertFalse(marketChartCanUseCache(chart, loadedAt: periodTestNow, now: periodTestNow.addingTimeInterval(30)))
+    }
+
+    func testChartCacheExpiresBySourceIntervalEvenWhenTheSessionWasFinal() {
+        let points = [chartPoint(timestamp: 60_000, close: 10), chartPoint(timestamp: 120_000, close: 11)]
+        for (interval, lifetime) in [("1m", 30.0), ("15m", 30.0), ("1d", 300.0)] {
+            let chart = periodChart(points, interval: interval)
+
+            XCTAssertTrue(marketChartCanUseCache(
+                chart, loadedAt: periodTestNow, now: periodTestNow.addingTimeInterval(lifetime - 1)
+            ))
+            XCTAssertFalse(marketChartCanUseCache(
+                chart, loadedAt: periodTestNow, now: periodTestNow.addingTimeInterval(lifetime)
+            ))
+        }
     }
 
     func testChartXFractionUsesTimestampScale() {
@@ -1318,25 +1547,10 @@ final class MarketPresentationTests: XCTestCase {
             MarketChartPoint(timestamp: timestamp(hour: hour, minute: minute), open: 10, high: 10, low: 10, close: 10, volume: 1, state: "confirmed", source: "eastmoney", session: "regular")
         }
 
-        let lunchBreak = marketChartLunchBreak(
-            points: [point(hour: 11, minute: 30), point(hour: 13, minute: 0)],
-            market: "CN",
-            interval: "1m",
-            timezone: "Asia/Shanghai"
-        )
+        let lunchBreak = marketChartSessionBreak(points: [point(hour: 11, minute: 30), point(hour: 13, minute: 1)], chart: periodChart([point(hour: 11, minute: 30), point(hour: 13, minute: 1)], symbol: "000001.SS", market: "CN", timezone: "Asia/Shanghai"))
         XCTAssertEqual(lunchBreak?.label, "午间休市")
-        XCTAssertNil(marketChartLunchBreak(
-            points: [point(hour: 10, minute: 0), point(hour: 11, minute: 5)],
-            market: "CN",
-            interval: "1m",
-            timezone: "Asia/Shanghai"
-        ))
-        XCTAssertNil(marketChartLunchBreak(
-            points: [point(hour: 11, minute: 30), point(hour: 13, minute: 0)],
-            market: "US",
-            interval: "1m",
-            timezone: "America/New_York"
-        ))
+        XCTAssertNil(marketChartSessionBreak(points: [point(hour: 10, minute: 0), point(hour: 11, minute: 5)], chart: periodChart([point(hour: 10, minute: 0), point(hour: 11, minute: 5)], symbol: "000001.SS", market: "CN", timezone: "Asia/Shanghai")))
+        XCTAssertNil(marketChartSessionBreak(points: [point(hour: 11, minute: 30), point(hour: 13, minute: 1)], chart: periodChart([point(hour: 11, minute: 30), point(hour: 13, minute: 1)], symbol: "TEST", market: "US", timezone: "America/New_York")))
     }
 
     func testDailyChartKeepsCalendarTimeScale() {
@@ -1372,7 +1586,7 @@ final class MarketPresentationTests: XCTestCase {
         """#.utf8)
         let points = try JSONDecoder().decode([MarketChartPoint].self, from: data)
 
-        XCTAssertEqual(marketChartDisplayPoints(points).map(\.timestamp), [2])
+        XCTAssertEqual(marketChartDisplayPoints(points, interval: "1m").map(\.timestamp), [2])
     }
 
     func testChartPresentationPrecomputesStableDrawingInputs() throws {
@@ -1380,6 +1594,7 @@ final class MarketPresentationTests: XCTestCase {
         {
           "symbol":"TEST","market":"US","tradingDate":"2026-08-20",
           "timezone":"America/New_York","session":"regular","interval":"1m",
+          "analysis":{"aggregation":"none","candleTimestamp":"interval-end","sessionWindows":[]},
           "quality":{"status":"complete","expected":3,"actual":3,"missing":[],"freshnessSeconds":0,"isFinal":true},
           "quote":{"previousClose":10,"changePercent":10,"source":"test"},
           "candles":[
@@ -1402,6 +1617,7 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.hasVolume)
         XCTAssertEqual(presentation.volumeCeiling, 200)
         XCTAssertEqual(presentation.volumeFractionGap, 0.5)
+        assertLinePlanCoversEveryEdgeOnce(presentation)
     }
 
     func testMarketSampledChartTrendUsesWholeDayAndKeepsEndpoints() {
@@ -1416,7 +1632,7 @@ final class MarketPresentationTests: XCTestCase {
             points.append(point)
         }
 
-        let values = marketSampledChartTrend(points, limit: 40)
+        let values = marketSampledChartTrend(points, interval: "1m", limit: 40)
 
         XCTAssertEqual(values.count, 40)
         XCTAssertEqual(values.first, 1)
@@ -1476,13 +1692,13 @@ final class MarketPresentationTests: XCTestCase {
                 state: "confirmed", source: "test", session: "regular"
             )
         }
-        let values = marketSampledChartTrend(points)
+        let values = marketSampledChartTrend(points, interval: "1m")
 
         XCTAssertEqual(values.count, 120)
         XCTAssertEqual(values.first, 1)
         XCTAssertEqual(values.last, 390)
         XCTAssertTrue(values.contains { $0 > 190 && $0 < 200 })
-        XCTAssertEqual(marketSampledChartTrend(Array(points.prefix(80))).count, 80)
+        XCTAssertEqual(marketSampledChartTrend(Array(points.prefix(80)), interval: "1m").count, 80)
     }
 
     func testVolumeScaleUsesRobustPercentileCeiling() throws {
@@ -1501,13 +1717,1355 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketAxisDigits(values: [4_900, 4_950]), 0)
     }
 
-    func testCandlesAggregateWithoutLosingOHLCBounds() {
-        let points = [
-            chartPoint(timestamp: 1, open: 10, high: 13, low: 9, close: 12, volume: 4),
-            chartPoint(timestamp: 2, open: 12, high: 15, low: 11, close: 14, volume: 6)
+    func testAxisDigitsDistinguishAllFiveTicksInRealLowPriceAndCurrencyWindows() throws {
+        let windows: [(symbol: String, low: Double, high: Double, digits: Int)] = [
+            ("DOGEUSDT 1m", 0.0787, 0.0796, 4),
+            ("DOGEUSDT 15m", 0.07785, 0.0838, 3),
+            ("XRPUSDT 1m", 1.3065, 1.3214, 3),
+            ("USDCNY 1m", 6.6717, 6.674, 4),
+            ("USDCNY 15m", 6.6715, 6.6862, 3)
         ]
-        let candle = marketCandleSamples(points, maxCount: 1).first
-        XCTAssertEqual(candle, MarketCandleSample(timestamp: 2, open: 10, high: 15, low: 9, close: 14, volume: 10))
+        for window in windows {
+            let step = (window.high - window.low) / 4
+            let digits = marketAxisDigits(values: [window.low, window.high])
+            let quantum = pow(10, -Double(digits))
+            let ticks = (0..<5).map { window.high - (window.high - window.low) * Double($0) / 4 }
+            let labels = ticks.map {
+                $0.formatted(.number.grouping(.never).precision(.fractionLength(digits)).locale(Locale(identifier: "en_US_POSIX")))
+            }
+
+            XCTAssertEqual(digits, window.digits, window.symbol)
+            XCTAssertEqual(Set(labels).count, 5, "\(window.symbol): \(labels)")
+            XCTAssertLessThanOrEqual(quantum, step, window.symbol)
+            for (tick, label) in zip(ticks, labels) {
+                let displayed = try XCTUnwrap(Double(label))
+                XCTAssertLessThanOrEqual(abs(displayed - tick), quantum / 2 + 1e-12, window.symbol)
+            }
+        }
+    }
+
+    func testAxisDigitsBoundTinyRangesAndKeepExistingLargeStepPrecision() {
+        XCTAssertEqual(marketAxisDigits(values: []), 2)
+        XCTAssertEqual(marketAxisDigits(values: [0, 0]), 2)
+        XCTAssertEqual(marketAxisDigits(values: [10, 14]), 1)
+        XCTAssertEqual(marketAxisDigits(values: [10, 50]), 0)
+        XCTAssertEqual(marketAxisDigits(values: [0, 1e-30]), 10)
+        XCTAssertEqual(marketAxisDigits(values: [0, Double.leastNonzeroMagnitude]), 10)
+    }
+
+    func testChartPeriodsSeparateSourceWindowsFromDisplayedLineIntervalsAndTitles() {
+        let cases: [(MarketChartPeriod, MarketRange, String, Bool, Bool, String, String, String)] = [
+            (.intraday, .day, "1m", true, false, "HH:mm", "分时", "分时走势"),
+            (.fiveDays, .week, "15m", true, false, "MM-dd HH:mm", "5日", "5日走势"),
+            (.minute1, .day, "1m", true, true, "HH:mm", "1分", "1分钟走势"),
+            (.minute5, .day, "5m", true, true, "HH:mm", "5分", "5分钟走势"),
+            (.minute15, .week, "15m", true, true, "MM-dd HH:mm", "15分", "15分钟走势"),
+            (.minute30, .day, "30m", true, true, "HH:mm", "30分", "30分钟走势"),
+            (.minute60, .day, "60m", true, true, "HH:mm", "60分", "60分钟走势"),
+            (.daily, .year, "1d", false, false, "MM-dd", "日线", "日线走势"),
+            (.weekly, .fiveYears, "1wk", false, false, "yyyy-MM-dd", "周线", "周线走势"),
+            (.monthly, .maximum, "1mo", false, false, "yyyy-MM", "月线", "月线走势")
+        ]
+
+        XCTAssertEqual(cases.map { $0.0 }, MarketChartPeriod.allCases)
+        for (period, sourceRange, interval, isIntraday, isMinute, dateFormat, label, title) in cases {
+            XCTAssertEqual(period.sourceRange, sourceRange)
+            XCTAssertEqual(period.displayInterval, interval)
+            XCTAssertEqual(period.isIntraday, isIntraday)
+            XCTAssertEqual(period.isMinute, isMinute)
+            XCTAssertEqual(period.dateFormat, dateFormat)
+            XCTAssertEqual(period.rawValue, label)
+            XCTAssertEqual(period.chartTitle, title)
+        }
+        for period in MarketChartPeriod.allCases {
+            XCTAssertTrue(period.chartTitle.hasSuffix("走势"))
+            XCTAssertFalse(period.chartTitle.contains("K线"))
+            XCTAssertFalse(period.rawValue.contains("K"))
+        }
+    }
+
+    func testMinuteContractRejectsUnalignedOrDuplicateKeysBeforeAggregation() throws {
+        let canonical = try [
+            periodPoint("2026-10-21T13:31:00Z", close: 12, volume: 100),
+            periodPoint("2026-10-21T13:32:00Z", close: 14, volume: 250),
+            periodPoint("2026-10-21T13:33:00Z", close: 16, volume: 50)
+        ]
+        let unaligned = try periodPoint("2026-10-21T13:31:12Z", close: 99, volume: 999)
+        for period in [MarketChartPeriod.intraday, .minute1, .minute5, .minute30, .minute60] {
+            XCTAssertNil(marketChartForDisplay(periodChart([canonical[0], canonical[0]]), period: period, now: periodTestNow))
+            XCTAssertNil(marketChartForDisplay(periodChart([unaligned]), period: period, now: periodTestNow))
+            let result = try XCTUnwrap(marketChartForDisplay(periodChart(canonical), period: period, now: periodTestNow))
+            XCTAssertEqual(result.quality.actual, 3)
+            XCTAssertEqual(result.candles.compactMap(\.volume).reduce(0, +), 400)
+            if period == .intraday || period == .minute1 {
+                XCTAssertEqual(result.candles, canonical)
+                XCTAssertEqual(marketMovingAverageValues(result.candles, period: 3), [nil, nil, 14])
+            } else {
+                XCTAssertEqual(result.candles.count, 1)
+                XCTAssertEqual(result.candles.first?.timestamp, try periodTimestamp("2026-10-21T13:30:00Z"))
+                XCTAssertEqual(result.candles.first?.close, 16)
+            }
+        }
+    }
+
+    func testNativeMinutePeriodsRetainRealGapsAndRejectInvalidSourceSamples() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:31:00Z", close: 10, volume: 100),
+            periodPoint("2026-10-21T13:32:00Z", close: 999, volume: 1000, state: "invalid"),
+            periodPoint("2026-10-21T13:33:00Z", close: 12, volume: 200)
+        ]
+        let missingMinute = try periodTimestamp("2026-10-21T13:32:00Z")
+        let gaps = [MarketChartGap(startTimestamp: missingMinute, endTimestamp: missingMinute)]
+        let source = periodChart(points, expected: 3, actual: 2, missing: gaps)
+
+        for period in [MarketChartPeriod.intraday, .minute1] {
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            XCTAssertEqual(result.candles.map(\.timestamp), try [
+                periodTimestamp("2026-10-21T13:31:00Z"), periodTimestamp("2026-10-21T13:33:00Z")
+            ])
+            XCTAssertEqual(result.candles.map(\.close), [10, 12])
+            XCTAssertEqual(result.quality.status, .partial)
+            XCTAssertEqual(result.quality.expected, 3)
+            XCTAssertEqual(result.quality.actual, 2)
+            XCTAssertEqual(result.quality.missing, gaps)
+        }
+    }
+
+    func testHiddenSnapshotsDoNotDowngradeNativeMinuteCoverage() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:31:00Z", close: 10, volume: 100),
+            periodPoint("2026-10-21T13:30:42Z", close: 999, volume: 0,
+                        state: "provisional", source: "TradingView"),
+            periodPoint("2026-10-21T13:32:00Z", close: 12, volume: 200),
+            periodPoint("2026-10-21T13:31:42Z", close: 888, volume: 0,
+                        state: "provisional", session: "post")
+        ]
+        for period in [MarketChartPeriod.intraday, .minute1] {
+            let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, expected: 2, actual: 2), period: period, now: periodTestNow))
+            XCTAssertEqual(result.candles.map(\.close), [10, 12])
+            XCTAssertEqual(result.candles.map(\.volume), [100, 200])
+            XCTAssertEqual(result.quality.status, .complete)
+        }
+    }
+
+    func testFiveMinuteCandlesUseElapsedTimeAndPreserveOHLCAndOptionalVolume() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:31:00Z", open: 10, high: 13, low: 9, close: 12, volume: 2),
+            periodPoint("2026-10-21T13:32:00Z", open: 12, high: 14, low: 11, close: 13),
+            periodPoint("2026-10-21T13:34:00Z", open: 13, high: 15, low: 8, close: 11, volume: 3),
+            periodPoint("2026-10-21T13:36:00Z", open: 11, high: 12, low: 10, close: 12),
+            periodPoint("2026-10-21T13:39:00Z", open: 12, high: 16, low: 11, close: 15),
+            periodPoint("2026-10-21T13:46:00Z", open: 15, high: 17, low: 14, close: 16, volume: 4)
+        ]
+        let chart = periodChart(points)
+
+        let result = try XCTUnwrap(marketChartForDisplay(chart, period: .minute5, now: periodTestNow))
+
+        XCTAssertEqual(result.interval, "5m")
+        XCTAssertEqual(result.candles, try [
+            periodPoint("2026-10-21T13:30:00Z", open: 10, high: 15, low: 8, close: 11, volume: 5),
+            periodPoint("2026-10-21T13:35:00Z", open: 11, high: 16, low: 10, close: 15),
+            periodPoint("2026-10-21T13:45:00Z", open: 15, high: 17, low: 14, close: 16, volume: 4)
+        ])
+        XCTAssertEqual(result.quality.expected, points.count)
+        XCTAssertEqual(result.quality.actual, points.count)
+        XCTAssertEqual(result.quality.status, .complete)
+        // No synthetic candle is inserted for the empty 13:41 bucket.
+        XCTAssertEqual(result.candles.count, 3)
+        XCTAssertNil(result.candles[1].volume)
+    }
+
+    func testThirtyAndSixtyMinuteCandlesUseTheirActualTimeBoundaries() throws {
+        let instants = [
+            "2026-10-21T13:31:00Z", "2026-10-21T13:45:00Z", "2026-10-21T14:00:00Z",
+            "2026-10-21T14:01:00Z", "2026-10-21T14:16:00Z", "2026-10-21T14:30:00Z",
+            "2026-10-21T14:31:00Z"
+        ]
+        let points = try instants.enumerated().map { index, instant in
+            try periodPoint(instant, close: Double(index + 1))
+        }
+        let chart = periodChart(points)
+
+        let halfHour = try XCTUnwrap(marketChartForDisplay(chart, period: .minute30, now: periodTestNow))
+        let hour = try XCTUnwrap(marketChartForDisplay(chart, period: .minute60, now: periodTestNow))
+
+        XCTAssertEqual(halfHour.interval, "30m")
+        XCTAssertEqual(halfHour.candles, try [
+            periodPoint("2026-10-21T13:30:00Z", open: 1, high: 3, low: 1, close: 3),
+            periodPoint("2026-10-21T14:00:00Z", open: 4, high: 6, low: 4, close: 6),
+            periodPoint("2026-10-21T14:30:00Z", close: 7)
+        ])
+        XCTAssertEqual(hour.interval, "60m")
+        XCTAssertEqual(hour.candles, try [
+            periodPoint("2026-10-21T13:30:00Z", open: 1, high: 6, low: 1, close: 6),
+            periodPoint("2026-10-21T14:30:00Z", close: 7)
+        ])
+    }
+
+    func testMinuteCandleAnchorsUseDeclaredSessionOpenAfterLunch() throws {
+        let points = try [
+            periodPoint("2026-10-21T01:31:00Z", close: 10),
+            periodPoint("2026-10-21T01:45:00Z", close: 11),
+            periodPoint("2026-10-21T05:01:00Z", close: 20),
+            periodPoint("2026-10-21T05:14:00Z", close: 21)
+        ]
+        let source = periodChart(points, market: "CN", timezone: "Asia/Shanghai")
+        let result = try XCTUnwrap(marketChartForDisplay(source, period: .minute60, now: periodTestNow))
+        XCTAssertEqual(result.candles, try [
+            periodPoint("2026-10-21T01:30:00Z", open: 10, high: 11, low: 10, close: 11),
+            periodPoint("2026-10-21T05:00:00Z", open: 20, high: 21, low: 20, close: 21)
+        ])
+    }
+
+    func testContinuousMarketBucketsUseDeclaredDailyBounds() throws {
+        let points = try [periodPoint("2026-10-21T23:58:00Z", close: 10), periodPoint("2026-10-22T00:02:00Z", close: 20)]
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, market: "CRYPTO", timezone: "UTC"), period: .minute30, now: periodTestNow))
+        XCTAssertEqual(result.candles, try [periodPoint("2026-10-21T23:30:00Z", close: 10),periodPoint("2026-10-22T00:00:00Z", close: 20)])
+    }
+
+    func testWeeklyCandlesStartOnExchangeLocalMonday() throws {
+        let points = try [
+            periodPoint("2026-10-22T15:00:00Z", open: 10, high: 12, low: 9, close: 11, volume: 2),
+            periodPoint("2026-10-25T15:00:00Z", open: 20, high: 23, low: 19, close: 22, volume: 3),
+            periodPoint("2026-10-26T15:00:00Z", open: 22, high: 25, low: 18, close: 24, volume: 4)
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, interval: "1d", timezone: "Asia/Tokyo"), period: .weekly, now: periodTestNow))
+
+        XCTAssertEqual(result.interval, "1wk")
+        XCTAssertEqual(result.candles, try [
+            periodPoint("2026-10-18T15:00:00Z", open: 10, high: 12, low: 9, close: 11, volume: 2),
+            periodPoint("2026-10-25T15:00:00Z", open: 20, high: 25, low: 18, close: 24, volume: 7)
+        ])
+        XCTAssertEqual(result.quality.expected, 3)
+        XCTAssertEqual(result.quality.actual, 3)
+        XCTAssertEqual(result.quality.status, .complete)
+        XCTAssertEqual(result.tradingDate, "2026-10-27")
+    }
+
+    func testMonthlyCandlesUseExchangeLocalMonthAndKeepProvisionalTail() throws {
+        let points = try [
+            periodPoint("2026-09-29T15:00:00Z", open: 10, high: 12, low: 9, close: 11),
+            periodPoint("2026-09-30T15:00:00Z", open: 20, high: 23, low: 19, close: 22, volume: 3),
+            periodPoint("2026-10-01T15:00:00Z", open: 22, high: 25, low: 18, close: 24, volume: 4, state: "provisional")
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(
+            periodChart(points, interval: "1d", timezone: "Asia/Tokyo"),
+            period: .monthly, now: periodTestNow
+        ))
+
+        XCTAssertEqual(result.interval, "1mo")
+        XCTAssertEqual(result.candles, try [
+            periodPoint("2026-08-31T15:00:00Z", open: 10, high: 12, low: 9, close: 11),
+            periodPoint("2026-09-30T15:00:00Z", open: 20, high: 25, low: 18, close: 24, volume: 7, state: "provisional")
+        ])
+        XCTAssertFalse(result.quality.isFinal)
+        XCTAssertEqual(result.tradingDate, "2026-10-02")
+    }
+
+    func testCalendarLinesKeepSingleSampleOpeningBucketsAtTheStartOfTheWindow() throws {
+        for (period, openingDate, nextDate) in [
+            (MarketChartPeriod.weekly, "2026-10-16", "2026-10-19"),
+            (.monthly, "2026-09-30", "2026-10-01")
+        ] {
+            let points = try [
+                periodPoint("\(openingDate)T00:00:00Z", close: 10, volume: 2, tradingDate: openingDate),
+                periodPoint("\(nextDate)T00:00:00Z", close: 12, volume: 3, tradingDate: nextDate)
+            ]
+            let result = try XCTUnwrap(marketChartForDisplay(
+                periodChart(points, interval: "1d"), period: period, now: periodTestNow
+            ))
+            let presentation = MarketChartPresentation(chart: result)
+
+            XCTAssertEqual(result.candles.map(\.close), [10, 12])
+            XCTAssertEqual(result.candles.map(\.volume), [2, 3])
+            XCTAssertEqual(result.quality.actual, 2)
+            XCTAssertEqual(result.quality.expected, 2)
+            XCTAssertEqual(result.periodReturn?.startPrice, 10)
+            XCTAssertEqual(result.periodReturn?.startTimestamp, try periodTimestamp("\(openingDate)T04:00:00Z"))
+            XCTAssertEqual(result.periodReturn?.endPrice, 12)
+            XCTAssertEqual(presentation.xFractions, [0, 1])
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+        }
+    }
+
+    func testLongDailyHistoryKeepsEverySampleWhenBuildingWeeklyAndMonthlyLines() throws {
+        let start = try periodTimestamp("2019-12-30T00:00:00Z")
+        // A continuously traded asset supplies 105 full weeks, including a leap year.
+        var points: [MarketChartPoint] = []
+        for index in 0..<735 {
+            let value = Double(index)
+            let timestamp = start + Int64(index) * 86_400_000
+            let high: Double = index == 400 ? 50_000 : 102 + value
+            let low: Double = index == 500 ? 1 : 98 + value
+            points.append(chartPoint(
+                timestamp: timestamp,
+                open: 99 + value,
+                high: high,
+                low: low,
+                close: 100 + value,
+                volume: Double(index + 1),
+                source: "history"
+            ))
+        }
+        let source = periodChart(points, interval: "1d", symbol: "BTC-USD", market: "CRYPTO", timezone: "UTC")
+        let now = Date(timeIntervalSince1970: Double(try periodTimestamp("2023-01-01T00:00:00Z")) / 1_000)
+
+        let cases: [(MarketChartPeriod, Int, Double, Double, Double, String)] = [
+            (.weekly, 105, 106.0, 108.0, 28.0, "2021-12-27T00:00:00Z"),
+            (.monthly, 26, 101.0, 103.0, 3.0, "2022-01-01T00:00:00Z")
+        ]
+        for (period, count, firstClose, firstHigh, firstVolume, finalBucketStart) in cases {
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: now))
+            let first = try XCTUnwrap(result.candles.first)
+            let last = try XCTUnwrap(result.candles.last)
+            let periodReturn = try XCTUnwrap(result.periodReturn)
+
+            XCTAssertEqual(result.candles.count, count)
+            XCTAssertEqual(first.open, 99)
+            XCTAssertEqual(first.close, firstClose)
+            XCTAssertEqual(first.high, firstHigh)
+            XCTAssertEqual(first.low, 98)
+            XCTAssertEqual(first.volume, firstVolume)
+            XCTAssertEqual(last.timestamp, try periodTimestamp(finalBucketStart))
+            XCTAssertEqual(last.close, 834)
+            XCTAssertEqual(result.candles.map(\.high).max(), 50_000)
+            XCTAssertEqual(result.candles.map(\.low).min(), 1)
+            XCTAssertEqual(result.candles.compactMap(\.volume).reduce(0, +), 270_480)
+            XCTAssertEqual(result.quality.actual, 735)
+            XCTAssertEqual(result.quality.expected, 735)
+            XCTAssertEqual(result.quality.status, .complete)
+            XCTAssertTrue(result.quality.isFinal)
+            XCTAssertEqual(periodReturn.range, period.sourceRange.apiRange)
+            XCTAssertEqual(periodReturn.startTimestamp, start)
+            XCTAssertEqual(periodReturn.endTimestamp, try periodTimestamp("2022-01-02T00:00:00Z"))
+            XCTAssertEqual(periodReturn.startPrice, 100)
+            XCTAssertEqual(periodReturn.endPrice, 834)
+            XCTAssertEqual(periodReturn.change, 734)
+            XCTAssertEqual(periodReturn.percent ?? .nan, 734, accuracy: 0.000_001)
+            assertLinePlanCoversEveryEdgeOnce(MarketChartPresentation(chart: result))
+        }
+    }
+
+    func testCalendarLinesKeepWindowsThatFitEntirelyWithinOnePartialWeekOrMonth() throws {
+        let points = try [
+            periodPoint("2026-10-21T00:00:00Z", open: 9, high: 12, low: 8, close: 10,
+                        volume: 2, tradingDate: "2026-10-21"),
+            periodPoint("2026-10-22T00:00:00Z", open: 10, high: 15, low: 9, close: 14,
+                        volume: 3, tradingDate: "2026-10-22")
+        ]
+        for period in [MarketChartPeriod.weekly, .monthly] {
+            for count in 1...points.count {
+                let samples = Array(points.prefix(count))
+                let result = try XCTUnwrap(marketChartForDisplay(
+                    periodChart(samples, interval: "1d"), period: period, now: periodTestNow
+                ))
+                let point = try XCTUnwrap(result.candles.first)
+                let presentation = MarketChartPresentation(chart: result)
+
+                XCTAssertEqual(result.candles.count, 1)
+                XCTAssertEqual(point.open, 9)
+                XCTAssertEqual(point.low, 8)
+                XCTAssertEqual(point.high, count == 1 ? 12 : 15)
+                XCTAssertEqual(point.close, samples.last?.close)
+                XCTAssertEqual(point.volume, count == 1 ? 2 : 5)
+                XCTAssertEqual(result.quality.actual, count)
+                XCTAssertEqual(result.periodReturn?.startPrice, 10)
+                XCTAssertEqual(result.periodReturn?.endPrice, samples.last?.close)
+                XCTAssertEqual(result.periodReturn?.startTimestamp, try periodTimestamp("2026-10-21T04:00:00Z"))
+                XCTAssertEqual(presentation.values, [samples.last!.close])
+                XCTAssertEqual(presentation.xFractions, [0.5])
+            }
+        }
+    }
+
+    func testMinuteLinePresentationsKeepMixedProviderProvisionalTailBuckets() async throws {
+        let points = try [
+            periodPoint("2026-10-21T13:00:00Z", close: 8, source: "tradingview"),
+            periodPoint("2026-10-21T14:00:00Z", close: 10, source: "tradingview"),
+            periodPoint("2026-10-21T14:01:00Z", close: 11, source: "tradingview"),
+            periodPoint("2026-10-21T14:02:00Z", close: 12, state: "provisional", source: "sina-foreign-futures"),
+            periodPoint("2026-10-21T14:03:00Z", close: 999, state: "provisional", source: "TradingView"),
+            periodPoint("2026-10-21T14:04:00Z", close: 888, state: "provisional", source: "sina-foreign-futures", session: "post")
+        ]
+        for period in [MarketChartPeriod.minute5, .minute30, .minute60] {
+            let source = periodChart(points, market: "COMMODITY", isFinal: false)
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            let tail = try XCTUnwrap(result.candles.last)
+            let artifacts = try await marketChartArtifacts(for: result)
+
+            XCTAssertEqual(tail.timestamp, try periodTimestamp("2026-10-21T14:00:00Z"))
+            XCTAssertEqual(tail.close, 12)
+            XCTAssertEqual(tail.state, "provisional")
+            XCTAssertEqual(Set(tail.source.split(separator: ",")), ["sina-foreign-futures", "tradingview"])
+            XCTAssertFalse(result.quality.isFinal)
+            XCTAssertEqual(artifacts.presentation.points, result.candles)
+            XCTAssertEqual(artifacts.presentation.values, [8, 10, 12])
+            XCTAssertEqual(artifacts.presentation.xFractions, [0, 0.5, 1])
+            XCTAssertEqual(artifacts.listTrend, [8, 10, 12])
+            assertLinePlanCoversEveryEdgeOnce(artifacts.presentation)
+        }
+    }
+
+    func testCalendarLinePresentationsKeepMixedProviderProvisionalTailBuckets() async throws {
+        let points = try [
+            periodPoint("2026-08-31T00:00:00Z", close: 8, source: "tradingview", tradingDate: "2026-08-31"),
+            periodPoint("2026-09-30T00:00:00Z", close: 10, source: "tradingview", tradingDate: "2026-09-30"),
+            periodPoint("2026-10-01T00:00:00Z", close: 11, source: "tradingview", tradingDate: "2026-10-01"),
+            periodPoint("2026-10-02T00:00:00Z", close: 12, state: "provisional",
+                        source: "yahoo", tradingDate: "2026-10-02"),
+            periodPoint("2026-10-03T00:00:00Z", close: 999, state: "invalid",
+                        source: "TradingView", tradingDate: "2026-10-03")
+        ]
+        for period in [MarketChartPeriod.weekly, .monthly] {
+            let source = periodChart(points, interval: "1d", market: "COMMODITY", isFinal: false)
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            let tail = try XCTUnwrap(result.candles.last)
+            let artifacts = try await marketChartArtifacts(for: result)
+            let expectedValues: [Double] = period == .weekly ? [8, 12] : [8, 10, 12]
+
+            XCTAssertEqual(tail.close, 12)
+            XCTAssertEqual(tail.state, "provisional")
+            XCTAssertEqual(Set(tail.source.split(separator: ",")), ["yahoo", "tradingview"])
+            XCTAssertEqual(result.tradingDate, "2026-10-02")
+            XCTAssertFalse(result.quality.isFinal)
+            XCTAssertEqual(result.periodReturn?.endPrice, 12)
+            XCTAssertEqual(artifacts.presentation.points, result.candles)
+            XCTAssertEqual(artifacts.presentation.values, expectedValues)
+            XCTAssertEqual(artifacts.presentation.xFractions.last, 1)
+            XCTAssertEqual(artifacts.listTrend, expectedValues)
+            assertLinePlanCoversEveryEdgeOnce(artifacts.presentation)
+        }
+    }
+
+    func testDailyChartPointDecodesTheExplicitTradingDateContract() throws {
+        let timestamp = try periodTimestamp("2026-10-19T00:00:00Z")
+        let data = Data("""
+        {"timestamp":\(timestamp),"tradingDate":"2026-10-19","open":10,"high":12,
+         "low":9,"close":11,"volume":null,"state":"confirmed","source":"cboe"}
+        """.utf8)
+
+        let point = try JSONDecoder().decode(MarketChartPoint.self, from: data)
+
+        XCTAssertEqual(point.tradingDate, "2026-10-19")
+        XCTAssertEqual(point.timestamp, timestamp)
+    }
+
+    func testPureTradingViewDailyLiveTailSurvivesDailyWeeklyMonthlyAndListPresentation() async throws {
+        let points = try [
+            periodPoint("2026-10-16T00:00:00Z", close: 8, volume: 1, source: "tradingview", tradingDate: "2026-10-16"),
+            periodPoint("2026-10-19T00:00:00Z", close: 10, volume: 1, source: "tradingview", tradingDate: "2026-10-19"),
+            periodPoint("2026-10-20T00:00:00Z", close: 11, volume: 1, source: "tradingview", tradingDate: "2026-10-20"),
+            periodPoint("2026-10-21T05:00:00Z", open: 11, high: 13, low: 10, close: 12, volume: 2,
+                        state: "provisional", source: "TradingViewBrowser", tradingDate: "2026-10-21")
+        ]
+        let source = periodChart(points, interval: "1d", symbol: "NG1!", market: "COMMODITY", timezone: "America/Chicago", isFinal: false)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-21T16:00:00Z"))
+        for period in [MarketChartPeriod.daily, .weekly, .monthly] {
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: now))
+            let tail = try XCTUnwrap(result.candles.last)
+            let artifacts = try await marketChartArtifacts(for: result)
+            XCTAssertEqual(tail.close, 12)
+            XCTAssertEqual(tail.high, 13)
+            XCTAssertEqual(tail.state, "provisional")
+            XCTAssertEqual(result.tradingDate, "2026-10-21")
+            XCTAssertEqual(result.quality.actual, 4)
+            XCTAssertFalse(result.quality.isFinal)
+            XCTAssertEqual(result.periodReturn?.endPrice, 12)
+            XCTAssertEqual(artifacts.presentation.points, result.candles)
+            XCTAssertEqual(artifacts.presentation.values.last, 12)
+            XCTAssertEqual(artifacts.listTrend.last, 12)
+            assertLinePlanCoversEveryEdgeOnce(artifacts.presentation)
+        }
+        XCTAssertEqual(marketSampledChartTrend(points, interval: "1d").last, 12)
+    }
+
+    func testRawTradingViewProvisionalBarsRemainHiddenAtBothNativeIntradayIntervals() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:30:00Z", close: 10, source: "TradingViewBrowser"),
+            periodPoint("2026-10-21T13:45:00Z", close: 999, state: "provisional", source: "TradingViewBrowser"),
+            periodPoint("2026-10-21T14:00:00Z", close: 888, state: "provisional", source: "yahoo", session: "post")
+        ]
+        for interval in ["1m", "15m"] {
+            XCTAssertEqual(marketChartDisplayPoints(points, interval: interval), [points[0]])
+            XCTAssertEqual(MarketChartPresentation(chart: periodChart(points, interval: interval)).points, [points[0]])
+            XCTAssertEqual(marketSampledChartTrend(points, interval: interval), [10])
+        }
+    }
+
+    func testWeeklyCandlesUseTradingDateInsteadOfShiftingUTCDateLabelsToSunday() throws {
+        let points = try [
+            periodPoint("2026-10-19T00:00:00Z", open: 10, high: 12, low: 9, close: 11,
+                        volume: 2, source: "cboe", session: nil, tradingDate: "2026-10-19"),
+            periodPoint("2026-10-20T00:00:00Z", open: 11, high: 15, low: 8, close: 14,
+                        volume: 3, source: "cboe", session: nil, tradingDate: "2026-10-20")
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, interval: "1d"), period: .weekly, now: periodTestNow))
+
+        let candle = try XCTUnwrap(result.candles.first)
+        XCTAssertEqual(result.candles.count, 1)
+        XCTAssertEqual(candle.timestamp, try periodTimestamp("2026-10-19T04:00:00Z"))
+        XCTAssertEqual(candle.open, 10)
+        XCTAssertEqual(candle.high, 15)
+        XCTAssertEqual(candle.low, 8)
+        XCTAssertEqual(candle.close, 14)
+        XCTAssertEqual(candle.volume, 5)
+    }
+
+    func testMonthlyCandlesUseTradingDateInsteadOfThePreviousLocalCalendarDate() throws {
+        let points = try [
+            periodPoint("2026-09-30T00:00:00Z", close: 10, source: "cboe", session: nil,
+                        tradingDate: "2026-09-30"),
+            periodPoint("2026-10-01T00:00:00Z", close: 20, source: "cboe", session: nil,
+                        tradingDate: "2026-10-01")
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, interval: "1d"), period: .monthly, now: periodTestNow))
+
+        XCTAssertEqual(result.candles.map(\.timestamp), try [
+            periodTimestamp("2026-09-01T04:00:00Z"),
+            periodTimestamp("2026-10-01T04:00:00Z")
+        ])
+        XCTAssertEqual(result.candles.map(\.close), [10, 20])
+    }
+
+    func testAggregationExcludesInvalidPricesWithoutClaimingCompleteCoverage() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:31:00Z", open: 10, high: 11, low: 9, close: 10, volume: 2),
+            periodPoint("2026-10-21T13:32:00Z", open: 1, high: 999, low: 1, close: 999, volume: 1000, state: "invalid"),
+            periodPoint("2026-10-21T13:33:00Z", open: 10, high: 12, low: 8, close: 11, volume: 4),
+            periodPoint("2026-10-21T13:35:00Z", open: 11, high: 13, low: 10, close: 12, volume: 3, state: "provisional")
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, isFinal: false), period: .minute5, now: periodTestNow))
+
+        XCTAssertEqual(result.candles, try [
+            periodPoint("2026-10-21T13:30:00Z", open: 10, high: 13, low: 8, close: 12, volume: 9, state: "provisional")
+        ])
+        XCTAssertEqual(result.quality.status, .partial)
+        XCTAssertEqual(result.quality.expected, 4)
+        XCTAssertEqual(result.quality.actual, 4)
+        XCTAssertFalse(result.quality.isFinal)
+
+        let invalidOnly = try XCTUnwrap(marketChartForDisplay(periodChart([points[1]]), period: .minute5, now: periodTestNow))
+        XCTAssertTrue(invalidOnly.candles.isEmpty)
+        XCTAssertEqual(invalidOnly.quality.status, .partial)
+    }
+
+    func testAggregatedCandleKeepsProvisionalStateUntilEverySourcePointIsConfirmed() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:30:00Z", close: 10, state: "provisional"),
+            periodPoint("2026-10-21T13:31:00Z", close: 12)
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points), period: .minute5, now: periodTestNow))
+
+        XCTAssertEqual(result.candles.first?.state, "provisional")
+        XCTAssertFalse(result.quality.isFinal)
+    }
+
+    func testHiddenProvisionalSnapshotsDoNotHideConfirmedCandlesOrClaimMissingData() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:31:00Z", close: 10, volume: 2),
+            periodPoint("2026-10-21T13:32:00Z", close: 999, volume: 1000,
+                        state: "provisional", source: "TradingView"),
+            periodPoint("2026-10-21T13:33:00Z", close: 12, volume: 3),
+            periodPoint("2026-10-21T13:34:00Z", close: 888, volume: 1000,
+                        state: "provisional", session: "post")
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points), period: .minute5, now: periodTestNow))
+
+        XCTAssertEqual(result.candles, try [
+            periodPoint("2026-10-21T13:30:00Z", open: 10, high: 12, low: 10, close: 12, volume: 5)
+        ])
+        XCTAssertEqual(MarketChartPresentation(chart: result).values, [12])
+        XCTAssertEqual(result.quality.status, .complete)
+        XCTAssertEqual(result.quality.expected, 4)
+        XCTAssertEqual(result.quality.actual, 4)
+    }
+
+    func testAggregationPreservesRepairingStatusAndSourceGapStatistics() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:31:00Z", close: 10, source: "provider-a"),
+            periodPoint("2026-10-21T13:33:00Z", close: 12, source: "provider-b")
+        ]
+        let gapTimestamp = try periodTimestamp("2026-10-21T13:31:00Z")
+        let gaps = [MarketChartGap(startTimestamp: gapTimestamp, endTimestamp: gapTimestamp)]
+        let source = periodChart(points, status: .repairing, expected: 3, actual: 2, missing: gaps, isFinal: false)
+
+        let result = try XCTUnwrap(marketChartForDisplay(source, period: .minute5, now: periodTestNow))
+
+        XCTAssertEqual(result.candles.count, 1)
+        XCTAssertEqual(Set(result.candles[0].source.split(separator: ",").map(String.init)), ["provider-a", "provider-b"])
+        XCTAssertEqual(result.quality.status, .repairing)
+        XCTAssertEqual(result.quality.expected, 3)
+        XCTAssertEqual(result.quality.actual, 2)
+        XCTAssertEqual(result.quality.missing, gaps)
+        XCTAssertEqual(result.quality.freshnessSeconds, source.quality.freshnessSeconds)
+        XCTAssertFalse(result.quality.isFinal)
+
+        let unavailable = try XCTUnwrap(marketChartForDisplay(
+            periodChart([], interval: "1d", status: .unavailable, expected: 250, actual: 0),
+            period: .weekly, now: periodTestNow
+        ))
+        XCTAssertTrue(unavailable.candles.isEmpty)
+        XCTAssertEqual(unavailable.quality.status, .unavailable)
+        XCTAssertEqual(unavailable.quality.expected, 250)
+        XCTAssertEqual(unavailable.quality.actual, 0)
+    }
+
+    func testNativePeriodsPreserveCanonicalCandlesAndSourceQuality() throws {
+        for (period, interval) in [
+            (MarketChartPeriod.intraday, "1m"), (.fiveDays, "15m"), (.minute1, "1m"),
+            (.minute15, "15m"), (.daily, "1d")
+        ] {
+            let points: [MarketChartPoint]
+            if interval == "1d" {
+                points = try [
+                    periodPoint("2026-10-19T04:00:00Z", close: 10, tradingDate: "2026-10-19"),
+                    periodPoint("2026-10-20T04:00:00Z", close: 12, tradingDate: "2026-10-20"),
+                    periodPoint("2026-10-21T04:00:00Z", close: 11, tradingDate: "2026-10-21")
+                ]
+            } else {
+                let middle = interval == "15m" ? "2026-10-21T13:45:00Z" : "2026-10-21T13:31:00Z"
+                let last = interval == "15m" ? "2026-10-21T14:00:00Z" : "2026-10-21T13:32:00Z"
+                points = try [
+                    periodPoint("2026-10-21T13:30:00Z", close: 10),
+                    periodPoint(middle, close: 12),
+                    periodPoint(last, close: 11)
+                ]
+            }
+            let source = periodChart(points, interval: interval, status: .partial, expected: 4, actual: 3, isFinal: false)
+
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+
+            XCTAssertEqual(result.candles, source.candles)
+            XCTAssertEqual(result.interval, source.interval)
+            XCTAssertEqual(result.symbol, source.symbol)
+            XCTAssertEqual(result.market, source.market)
+            XCTAssertEqual(result.tradingDate, source.tradingDate)
+            XCTAssertEqual(result.timezone, source.timezone)
+            XCTAssertEqual(result.session, source.session)
+            XCTAssertEqual(result.quality.status, source.quality.status)
+            XCTAssertEqual(result.quality.expected, source.quality.expected)
+            XCTAssertEqual(result.quality.actual, source.quality.actual)
+            XCTAssertEqual(result.quality.missing, source.quality.missing)
+            XCTAssertEqual(result.quality.freshnessSeconds, source.quality.freshnessSeconds)
+            XCTAssertEqual(result.quality.isFinal, source.quality.isFinal)
+            XCTAssertEqual(result.quote.price, source.quote.price)
+            XCTAssertEqual(result.quote.source, source.quote.source)
+        }
+    }
+
+    func testDailyDateLabelsNormalizeToExchangeMidnightBeforeDrawing() throws {
+        let points = try [
+            periodPoint("2026-10-19T00:00:00Z", open: 10, high: 12, low: 9, close: 11,
+                        source: "cboe", session: nil, tradingDate: "2026-10-19"),
+            periodPoint("2026-10-20T00:00:00Z", open: 11, high: 15, low: 8, close: 14,
+                        source: "cboe", session: nil, tradingDate: "2026-10-20")
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, interval: "1d"), period: .daily, now: periodTestNow))
+
+        XCTAssertEqual(result.candles.map(\.timestamp), try [
+            periodTimestamp("2026-10-19T04:00:00Z"), periodTimestamp("2026-10-20T04:00:00Z")
+        ])
+        XCTAssertEqual(result.candles.map(\.tradingDate), ["2026-10-19", "2026-10-20"])
+        XCTAssertEqual(result.candles.map(\.close), [11, 14])
+        XCTAssertEqual(result.quality.status, .complete)
+    }
+
+    func testInvalidDailyDateIsExcludedAndMarksCoveragePartial() throws {
+        let points = try [
+            periodPoint("2026-10-19T00:00:00Z", close: 10, source: "cboe", tradingDate: "2026-10-19"),
+            periodPoint("2026-10-20T00:00:00Z", close: 999, source: "cboe", tradingDate: "2026-99-99")
+        ]
+
+        let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, interval: "1d"), period: .daily, now: periodTestNow))
+
+        XCTAssertEqual(result.candles.map(\.timestamp), try [periodTimestamp("2026-10-19T04:00:00Z")])
+        XCTAssertEqual(result.candles.map(\.close), [10])
+        XCTAssertEqual(result.tradingDate, "2026-10-19")
+        XCTAssertEqual(result.quality.status, .partial)
+        XCTAssertEqual(result.quality.expected, 2)
+        XCTAssertEqual(result.quality.actual, 2)
+    }
+
+    func testExplicitSourceGapsDowngradeCompleteWithoutFillingMissingMinutes() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:30:00Z", close: 10),
+            periodPoint("2026-10-21T13:32:00Z", close: 12)
+        ]
+        let missingMinute = try periodTimestamp("2026-10-21T13:31:00Z")
+        let gaps = [MarketChartGap(startTimestamp: missingMinute, endTimestamp: missingMinute)]
+        for source in [
+            periodChart(points, expected: 3, actual: 2, missing: gaps),
+            periodChart(points, expected: 2, actual: 2, missing: gaps)
+        ] {
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: .intraday, now: periodTestNow))
+            XCTAssertEqual(result.candles, points)
+            XCTAssertEqual(result.quality.status, .partial)
+            XCTAssertEqual(result.quality.expected, source.quality.expected)
+            XCTAssertEqual(result.quality.actual, source.quality.actual)
+            XCTAssertEqual(result.quality.missing, source.quality.missing)
+        }
+    }
+
+    func testCalendarChartDateStopsAtTheLastSourceDayActuallyDrawn() throws {
+        for (period, firstInstant, firstTradingDate) in [
+            (MarketChartPeriod.weekly, "2026-10-19T00:00:00Z", "2026-10-19"),
+            (.monthly, "2026-10-01T00:00:00Z", "2026-10-01")
+        ] {
+            let points = try [
+                periodPoint(firstInstant, close: 10, source: "cboe", tradingDate: firstTradingDate),
+                periodPoint("2026-10-20T00:00:00Z", close: 12, source: "cboe", tradingDate: "2026-10-20"),
+                periodPoint("2026-10-21T00:00:00Z", close: 999, state: "invalid",
+                            source: "TradingView", tradingDate: "2026-10-21")
+            ]
+
+            let result = try XCTUnwrap(marketChartForDisplay(periodChart(points, interval: "1d"), period: period, now: periodTestNow))
+
+            XCTAssertEqual(result.tradingDate, "2026-10-20")
+            XCTAssertEqual(result.candles.last?.close, 12)
+            XCTAssertEqual(result.quality.status, .partial)
+        }
+    }
+
+    func testDisplayedCalendarReturnsUseAllIncludedDailyClosesAfterFiltering() throws {
+        for period in [MarketChartPeriod.daily, .weekly, .monthly] {
+            let firstDate = period == .monthly ? "2026-10-01" : "2026-10-19"
+            var points: [MarketChartPoint] = []
+            if period != .daily {
+                let truncatedDate = period == .weekly ? "2026-10-16" : "2026-09-30"
+                points.append(try periodPoint("\(truncatedDate)T00:00:00Z", close: 5,
+                                              source: "cboe", tradingDate: truncatedDate))
+            }
+            points += try [
+                periodPoint("\(firstDate)T00:00:00Z", close: 10, source: "cboe", tradingDate: firstDate),
+                periodPoint("2026-10-20T00:00:00Z", close: 12, source: "cboe", tradingDate: "2026-10-20"),
+                periodPoint("2026-10-21T00:00:00Z", close: 999, state: "invalid",
+                            source: "TradingView", tradingDate: "2026-10-21")
+            ]
+            let sourceReturn = MarketChartPeriodReturn(
+                range: "1y", basis: "source-with-hidden-tail", startPrice: 5, endPrice: 999,
+                change: 994, percent: 19_880, startTimestamp: points.first?.timestamp,
+                endTimestamp: points.last?.timestamp
+            )
+            let volatility = MarketChartPeriodVolatility(
+                range: "1y", basis: "annualized-log-returns", percent: 18.5,
+                observationCount: 252, annualizationPeriods: 252
+            )
+            let source = periodChart(points, interval: "1d", periodReturn: sourceReturn, periodVolatility: volatility)
+
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            let displayedReturn = try XCTUnwrap(result.periodReturn)
+
+            XCTAssertEqual(displayedReturn.range, period.sourceRange.apiRange)
+            XCTAssertEqual(displayedReturn.basis, "displayed-close-to-close")
+            let startPrice = period == .daily ? 10.0 : 5.0
+            let startDate = period == .daily ? firstDate : period == .weekly ? "2026-10-16" : "2026-09-30"
+            XCTAssertEqual(displayedReturn.startPrice, startPrice)
+            XCTAssertEqual(displayedReturn.endPrice, 12)
+            XCTAssertEqual(displayedReturn.change, 12 - startPrice)
+            XCTAssertEqual(displayedReturn.percent ?? .nan, (12 - startPrice) / startPrice * 100, accuracy: 0.000_001)
+            XCTAssertEqual(displayedReturn.startTimestamp, try periodTimestamp("\(startDate)T04:00:00Z"))
+            XCTAssertEqual(displayedReturn.endTimestamp, try periodTimestamp("2026-10-20T04:00:00Z"))
+            XCTAssertEqual(result.periodVolatility?.percent, 18.5)
+            XCTAssertEqual(result.periodVolatility?.basis, "annualized-log-returns")
+        }
+    }
+
+    func testFiveDayReturnUsesTheVisibleFifteenMinuteCloses() throws {
+        let points = try [
+            periodPoint("2026-10-20T13:30:00Z", close: 10),
+            periodPoint("2026-10-21T13:30:00Z", close: 12),
+            periodPoint("2026-10-21T13:45:00Z", close: 999, state: "provisional", source: "TradingView")
+        ]
+        let sourceReturn = MarketChartPeriodReturn(
+            range: "5d", basis: "source-with-hidden-tail", startPrice: 10, endPrice: 999,
+            change: 989, percent: 9_890, startTimestamp: points[0].timestamp, endTimestamp: points[2].timestamp
+        )
+
+        let result = try XCTUnwrap(marketChartForDisplay(
+            periodChart(points, interval: "15m", periodReturn: sourceReturn), period: .fiveDays, now: periodTestNow
+        ))
+        let displayedReturn = try XCTUnwrap(result.periodReturn)
+
+        XCTAssertEqual(displayedReturn.range, "5d")
+        XCTAssertEqual(displayedReturn.basis, "displayed-close-to-close")
+        XCTAssertEqual(displayedReturn.startPrice, 10)
+        XCTAssertEqual(displayedReturn.endPrice, 12)
+        XCTAssertEqual(displayedReturn.percent ?? .nan, 20, accuracy: 0.000_001)
+        XCTAssertEqual(displayedReturn.startTimestamp, points[0].timestamp)
+        XCTAssertEqual(displayedReturn.endTimestamp, points[1].timestamp)
+    }
+
+    func testEmptyDisplayedRangesDoNotRetainReturnsForInvisibleSourcePrices() throws {
+        let sourceReturn = MarketChartPeriodReturn(
+            range: "1y", basis: "source", startPrice: 10, endPrice: 12, change: 2,
+            percent: 20, startTimestamp: 1, endTimestamp: 2
+        )
+        for period in [MarketChartPeriod.fiveDays, .daily, .weekly, .monthly] {
+            let source = periodChart([], interval: period.sourceRange.apiInterval, status: .unavailable,
+                                     expected: 100, actual: 0, periodReturn: sourceReturn)
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            XCTAssertNil(result.periodReturn)
+        }
+    }
+
+    func testIntradayAndMinutePeriodsKeepTheSourceReturnContract() throws {
+        let sourceReturn = MarketChartPeriodReturn(
+            range: "1d", basis: "previous-close", startPrice: 9, endPrice: 12, change: 3,
+            percent: 33.33, startTimestamp: 1, endTimestamp: 2
+        )
+        for period in [MarketChartPeriod.intraday, .minute1, .minute5, .minute15, .minute30, .minute60] {
+            let last = period == .minute15 ? "2026-10-21T13:45:00Z" : "2026-10-21T13:31:00Z"
+            let points = try [periodPoint("2026-10-21T13:30:00Z", close: 10), periodPoint(last, close: 12)]
+            let result = try XCTUnwrap(marketChartForDisplay(
+                periodChart(points, interval: period.sourceRange.apiInterval, periodReturn: sourceReturn), period: period, now: periodTestNow
+            ))
+            XCTAssertEqual(result.periodReturn?.basis, sourceReturn.basis)
+            XCTAssertEqual(result.periodReturn?.startPrice, sourceReturn.startPrice)
+            XCTAssertEqual(result.periodReturn?.endPrice, sourceReturn.endPrice)
+            XCTAssertEqual(result.periodReturn?.percent, sourceReturn.percent)
+            XCTAssertEqual(result.periodReturn?.startTimestamp, sourceReturn.startTimestamp)
+            XCTAssertEqual(result.periodReturn?.endTimestamp, sourceReturn.endTimestamp)
+        }
+    }
+
+    func testCurrentMinuteAndFifteenMinuteBucketsAreUnfinishedEvenWithConfirmedSourceBars() throws {
+        for (period, interval, start, during, end) in [
+            (MarketChartPeriod.intraday, "1m", "2026-10-21T14:00:00Z", "2026-10-21T14:00:30Z", "2026-10-21T14:01:00Z"),
+            (.minute1, "1m", "2026-10-21T14:00:00Z", "2026-10-21T14:00:30Z", "2026-10-21T14:01:00Z"),
+            (.fiveDays, "15m", "2026-10-21T14:00:00Z", "2026-10-21T14:07:00Z", "2026-10-21T14:15:00Z"),
+            (.minute15, "15m", "2026-10-21T14:00:00Z", "2026-10-21T14:07:00Z", "2026-10-21T14:15:00Z")
+        ] {
+            let source = periodChart(try [periodPoint(start, close: 10)], interval: interval)
+            let duringBucket = Date(timeIntervalSince1970: Double(try periodTimestamp(during)) / 1_000)
+            let followingBucket = Date(timeIntervalSince1970: Double(try periodTimestamp(end)) / 1_000)
+
+            let current = try XCTUnwrap(marketChartForDisplay(source, period: period, now: duringBucket))
+            let closed = try XCTUnwrap(marketChartForDisplay(source, period: period, now: followingBucket))
+
+            XCTAssertFalse(current.quality.isFinal)
+            XCTAssertTrue(closed.quality.isFinal)
+            XCTAssertEqual(current.quality.status, source.quality.status)
+            XCTAssertEqual(current.quality.expected, source.quality.expected)
+            XCTAssertEqual(current.quality.actual, source.quality.actual)
+            XCTAssertEqual(current.candles.first?.state, "confirmed")
+        }
+    }
+
+    func testEveryChartPeriodRejectsMismatchedSourceIntervalsAndInvalidTimezones() throws {
+        let points = try [periodPoint("2026-10-21T13:30:00Z", close: 10)]
+        for period in MarketChartPeriod.allCases {
+            let sourceInterval = period.sourceRange.apiInterval
+            let wrongInterval = sourceInterval == "1d" ? "1m" : "1d"
+            XCTAssertNil(marketChartForDisplay(periodChart(points, interval: wrongInterval), period: period, now: periodTestNow))
+            XCTAssertNil(marketChartForDisplay(
+                periodChart(points, interval: sourceInterval, timezone: "Invalid/Exchange"),
+                period: period, now: periodTestNow
+            ))
+        }
+    }
+
+    func testDailyPeriodsDecodeAndRejectPreviouslyDownsampledOHLCBuckets() throws {
+        let json = """
+        {"symbol":"SPY","market":"US","tradingDate":"2026-10-21",
+         "timezone":"America/New_York","session":"regular","interval":"1d",
+         "analysis":{"aggregation":"ohlc-buckets","candleTimestamp":"trading-date","sessionWindows":[]},
+         "quality":{"status":"complete","expected":2,"actual":2,"missing":[],
+                    "freshnessSeconds":12,"isFinal":true},
+         "quote":{"source":"yahoo"},
+         "candles":[
+           {"timestamp":1792468800000,"open":10,"high":12,"low":9,"close":11,
+            "volume":2,"state":"confirmed","source":"yahoo","session":"regular"},
+           {"timestamp":1792555200000,"open":11,"high":14,"low":10,"close":13,
+            "volume":3,"state":"confirmed","source":"yahoo","session":"regular"}
+         ]}
+        """
+        let sampled = try JSONDecoder().decode(MarketChart.self, from: Data(json.utf8))
+        XCTAssertEqual(sampled.analysis.aggregation, "ohlc-buckets")
+        for period in [MarketChartPeriod.daily, .weekly, .monthly] {
+            XCTAssertNil(marketChartForDisplay(sampled, period: period, now: periodTestNow),
+                         "A time-window OHLC bucket cannot be relabeled as a daily, weekly, or monthly candle")
+        }
+
+        let raw = try JSONDecoder().decode(
+            MarketChart.self, from: Data(json.replacingOccurrences(of: "ohlc-buckets", with: "none").utf8)
+        )
+        XCTAssertEqual(raw.analysis.aggregation, "none")
+        for period in [MarketChartPeriod.daily, .weekly, .monthly] {
+            XCTAssertNotNil(marketChartForDisplay(raw, period: period, now: periodTestNow))
+        }
+
+        let unknown = try JSONDecoder().decode(
+            MarketChart.self, from: Data(json.replacingOccurrences(of: "ohlc-buckets", with: "unknown-aggregation").utf8)
+        )
+        for period in [MarketChartPeriod.daily, .weekly, .monthly] {
+            XCTAssertNil(marketChartForDisplay(unknown, period: period, now: periodTestNow))
+        }
+    }
+
+    func testCurrentWeeklyCandleIsUnfinishedWithoutChangingConfirmedSourceState() throws {
+        let points = try [periodPoint("2026-10-26T04:00:00Z", close: 10)]
+        let source = periodChart(points, interval: "1d")
+        let duringWeek = Date(timeIntervalSince1970: Double(try periodTimestamp("2026-10-27T13:00:00Z")) / 1_000)
+        let followingWeek = Date(timeIntervalSince1970: Double(try periodTimestamp("2026-11-02T13:00:00Z")) / 1_000)
+
+        let current = try XCTUnwrap(marketChartForDisplay(source, period: .weekly, now: duringWeek))
+        let closed = try XCTUnwrap(marketChartForDisplay(source, period: .weekly, now: followingWeek))
+
+        XCTAssertFalse(current.quality.isFinal)
+        XCTAssertTrue(closed.quality.isFinal)
+        XCTAssertEqual(current.candles.first?.state, "confirmed")
+        XCTAssertEqual(current.quality.status, source.quality.status)
+        XCTAssertEqual(current.quality.expected, source.quality.expected)
+        XCTAssertEqual(current.quality.actual, source.quality.actual)
+    }
+
+    func testCurrentMonthlyCandleUsesTheExchangeLocalClockForFinality() throws {
+        let points = try [periodPoint("2026-09-30T15:00:00Z", close: 10)]
+        let source = periodChart(points, interval: "1d", timezone: "Asia/Tokyo")
+        // Tokyo is already in October/November while UTC is still in the previous month.
+        let duringMonth = Date(timeIntervalSince1970: Double(try periodTimestamp("2026-09-30T16:00:00Z")) / 1_000)
+        let followingMonth = Date(timeIntervalSince1970: Double(try periodTimestamp("2026-10-31T16:00:00Z")) / 1_000)
+
+        let current = try XCTUnwrap(marketChartForDisplay(source, period: .monthly, now: duringMonth))
+        let closed = try XCTUnwrap(marketChartForDisplay(source, period: .monthly, now: followingMonth))
+
+        XCTAssertFalse(current.quality.isFinal)
+        XCTAssertTrue(closed.quality.isFinal)
+        XCTAssertEqual(current.candles.first?.state, "confirmed")
+        XCTAssertEqual(current.quality.status, source.quality.status)
+        XCTAssertEqual(current.quality.expected, source.quality.expected)
+        XCTAssertEqual(current.quality.actual, source.quality.actual)
+    }
+
+    func testAggregatedSixtyMinuteChartStillLabelsTheChinaLunchBreak() throws {
+        let instants = [
+            "2026-10-21T02:31:00Z", "2026-10-21T02:45:00Z", "2026-10-21T03:00:00Z",
+            "2026-10-21T03:15:00Z", "2026-10-21T03:30:00Z", "2026-10-21T05:01:00Z",
+            "2026-10-21T05:02:00Z"
+        ]
+        let points = try instants.enumerated().map { index, instant in
+            try periodPoint(instant, close: Double(index + 1))
+        }
+        let chart = try XCTUnwrap(marketChartForDisplay(
+            periodChart(points, market: "CN", timezone: "Asia/Shanghai"), period: .minute60, now: periodTestNow
+        ))
+
+        let presentation = MarketChartPresentation(chart: chart)
+
+        XCTAssertEqual(chart.candles.count, 2)
+        XCTAssertEqual(presentation.sessionBreak?.label, "午间休市")
+        XCTAssertEqual(presentation.sessionBreak?.previousTimestamp, try periodTimestamp("2026-10-21T02:30:00Z"))
+        XCTAssertEqual(presentation.sessionBreak?.currentTimestamp, try periodTimestamp("2026-10-21T05:00:00Z"))
+    }
+
+    func testFiveMinutePresentationKeepsExtendedSessionLabelsButMonthlyChartsDoNot() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:00:00Z", close: 10, session: "pre"),
+            periodPoint("2026-10-21T13:01:00Z", close: 11, session: "pre"),
+            periodPoint("2026-10-21T13:30:00Z", close: 12)
+        ]
+        let minuteChart = try XCTUnwrap(marketChartForDisplay(periodChart(points), period: .minute5, now: periodTestNow))
+        XCTAssertEqual(MarketChartPresentation(chart: minuteChart).extendedSessionLabel, "含盘前盘后")
+
+        let monthlyChart = try XCTUnwrap(marketChartForDisplay(periodChart(points, interval: "1d"), period: .monthly, now: periodTestNow))
+        XCTAssertNil(MarketChartPresentation(chart: monthlyChart).extendedSessionLabel)
+
+        let minute = Int64(60 * 1_000)
+        let fractions = marketChartXFractions(timestamps: [0, 60 * minute, 300 * minute], interval: "1mo")
+        XCTAssertEqual(fractions[1], 0.2, accuracy: 0.0001)
+        let followingMonth = try periodPoint("2026-11-21T13:00:00Z", close: 15, session: "pre")
+        let monthlyPresentation = MarketChartPresentation(chart: periodChart([points[0], followingMonth], interval: "1mo"))
+        assertLinePlanCoversEveryEdgeOnce(monthlyPresentation)
+        XCTAssertTrue(monthlyPresentation.lineSegments.allSatisfy { !$0.isMissing })
+    }
+
+    func testSessionColorChangesPreserveEveryContinuousPremarketToRegularEdge() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:28:00Z", close: 10, session: "pre"),
+            periodPoint("2026-10-21T13:29:00Z", close: 11, session: "pre"),
+            periodPoint("2026-10-21T13:30:00Z", close: 12),
+            periodPoint("2026-10-21T13:31:00Z", close: 13)
+        ]
+        let presentation = MarketChartPresentation(chart: periodChart(points))
+
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        assertLineEdge(endingAt: 1, in: presentation, isRegular: false, isMissing: false)
+        assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: false)
+        assertLineEdge(endingAt: 3, in: presentation, isRegular: true, isMissing: false)
+    }
+
+    func testNVDAMinuteAggregationsKeepTheContinuousPremarketToRegularBoundary() throws {
+        let sourcePoints = try [
+            periodPoint("2026-10-21T13:28:00Z", close: 180.10, session: "pre"),
+            periodPoint("2026-10-21T13:29:00Z", close: 180.20, session: "pre"),
+            periodPoint("2026-10-21T13:30:00Z", close: 180.30, session: "pre"),
+            periodPoint("2026-10-21T13:31:00Z", close: 180.40)
+        ]
+        let source = periodChart(sourcePoints)
+
+        for period in [MarketChartPeriod.minute5, .minute30, .minute60] {
+            let chart = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            let presentation = MarketChartPresentation(chart: chart)
+
+            XCTAssertEqual(presentation.points.count, 2)
+            XCTAssertEqual(presentation.points.map(\.session), ["pre", "regular"])
+            XCTAssertEqual(presentation.values, [180.30, 180.40])
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+            assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: false)
+        }
+    }
+
+    func testLineSegmentColorUsesTheCurrentPointAndNormalizesRegularSessionLabels() throws {
+        let minute = Int64(60 * 1_000)
+        let start = try periodTimestamp("2026-10-21T13:29:00Z")
+        let sessions: [String?] = ["pre", "regular", nil, "closed", "post", "overnight", "regular"]
+        let points = sessions.enumerated().map { index, session in
+            chartPoint(timestamp: start + Int64(index) * minute, close: Double(index + 10), session: session)
+        }
+        let presentation = MarketChartPresentation(chart: periodChart(points))
+
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        for (end, regular) in [true, true, true, false, false, true].enumerated() {
+            assertLineEdge(endingAt: end + 1, in: presentation, isRegular: regular, isMissing: false)
+        }
+    }
+
+    func testCompleteMinuteCoverageDoesNotInventMissingDataFromWallClockSpacing() throws {
+        let minute = Int64(60 * 1_000)
+        let start = try periodTimestamp("2026-10-21T14:00:00Z")
+        for (interval, minutes) in [("1m", 1), ("5m", 5), ("15m", 15), ("30m", 30), ("60m", 60)] {
+            let points = [
+                chartPoint(timestamp: start, close: 10),
+                chartPoint(timestamp: start + Int64(minutes * 2) * minute, close: 12)
+            ]
+            let presentation = MarketChartPresentation(chart: periodChart(points, interval: interval))
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+            assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: false)
+        }
+    }
+
+    func testPartialAndRepairingCoverageMarkOnlyOversizedGapsWithinTheOpenSession() throws {
+        let minute = Int64(60 * 1_000)
+        let start = try periodTimestamp("2026-10-21T14:00:00Z")
+        for status in [MarketChartQualityStatus.partial, .repairing] {
+            for (interval, minutes) in [("1m", 1), ("5m", 5), ("15m", 15), ("30m", 30), ("60m", 60)] {
+                let points = [
+                    chartPoint(timestamp: start, close: 10),
+                    chartPoint(timestamp: start + Int64(minutes) * minute, close: 11),
+                    chartPoint(timestamp: start + Int64(minutes * 3) * minute, close: 12)
+                ]
+                let presentation = MarketChartPresentation(chart: periodChart(
+                    points, interval: interval, status: status, expected: 4, actual: 3
+                ))
+                assertLinePlanCoversEveryEdgeOnce(presentation)
+                assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: false)
+                assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: true)
+            }
+        }
+    }
+
+    func testExplicitMissingRangeMarksAnEdgeEvenWhenSourceStatusSaysComplete() throws {
+        let points = try [
+            periodPoint("2026-10-21T14:00:00Z", close: 10),
+            periodPoint("2026-10-21T14:05:00Z", close: 12),
+            periodPoint("2026-10-21T14:10:00Z", close: 13)
+        ]
+        let missingTimestamp = try periodTimestamp("2026-10-21T14:03:00Z")
+        let presentation = MarketChartPresentation(chart: periodChart(
+            points, interval: "5m", missing: [MarketChartGap(startTimestamp: missingTimestamp, endTimestamp: missingTimestamp)]
+        ))
+
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: true)
+        assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: false)
+    }
+
+    func testExplicitMissingRangeOutsideAnEdgeDoesNotMarkUnrelatedPrices() throws {
+        let points = try [
+            periodPoint("2026-10-21T14:00:00Z", close: 10),
+            periodPoint("2026-10-21T14:05:00Z", close: 11)
+        ]
+        let earlier = try periodTimestamp("2026-10-21T13:59:00Z")
+        let later = try periodTimestamp("2026-10-21T14:06:00Z")
+        let presentation = MarketChartPresentation(chart: periodChart(
+            points, interval: "5m", missing: [
+                MarketChartGap(startTimestamp: earlier, endTimestamp: earlier),
+                MarketChartGap(startTimestamp: later, endTimestamp: later)
+            ]
+        ))
+
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: false)
+    }
+
+    func testMissingDataAndSessionColorChangesKeepIndependentEdgeStyles() throws {
+        let points = try [
+            periodPoint("2026-10-21T13:28:00Z", close: 10, session: "pre"),
+            periodPoint("2026-10-21T13:30:00Z", close: 12),
+            periodPoint("2026-10-21T13:31:00Z", close: 13)
+        ]
+        let missingTimestamp = try periodTimestamp("2026-10-21T13:29:00Z")
+        let presentation = MarketChartPresentation(chart: periodChart(
+            points, status: .partial, expected: 4, actual: 3,
+            missing: [MarketChartGap(startTimestamp: missingTimestamp, endTimestamp: missingTimestamp)]
+        ))
+
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: true)
+        assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: false)
+    }
+
+    func testFiveTradingDaysOfFifteenMinutePricesKeepOvernightAndWeekendEdgesSolid() throws {
+        let minute = Int64(60 * 1_000)
+        var points: [MarketChartPoint] = []
+        for day in ["2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21"] {
+            let open = try periodTimestamp("\(day)T13:30:00Z")
+            for index in 0...26 {
+                points.append(chartPoint(timestamp: open + Int64(index * 15) * minute, close: Double(points.count + 100)))
+            }
+        }
+        for status in [MarketChartQualityStatus.complete, .partial, .repairing] {
+            let presentation = MarketChartPresentation(chart: periodChart(points, interval: "15m", status: status))
+
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+            XCTAssertEqual(presentation.lineSegments.count, 1)
+            XCTAssertEqual(presentation.lineSegments.first?.indices, Array(points.indices))
+            XCTAssertTrue(presentation.lineSegments.allSatisfy { $0.isRegular && !$0.isMissing })
+        }
+    }
+
+    func testChinaLunchClosureRemainsSolidWhileExplicitMissingMinutesRemainMissing() throws {
+        let points = try [
+            periodPoint("2026-10-21T03:29:00Z", close: 10),
+            periodPoint("2026-10-21T03:30:00Z", close: 11),
+            periodPoint("2026-10-21T05:01:00Z", close: 12),
+            periodPoint("2026-10-21T05:02:00Z", close: 13)
+        ]
+        let presentation = MarketChartPresentation(chart: periodChart(
+            points, market: "CN", timezone: "Asia/Shanghai", status: .repairing
+        ))
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        XCTAssertTrue(presentation.lineSegments.allSatisfy { !$0.isMissing })
+        assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: false)
+
+        let beforeLunch = try [
+            periodPoint("2026-10-21T03:15:00Z", close: 10),
+            periodPoint("2026-10-21T05:01:00Z", close: 12)
+        ]
+        let missingTimestamp = try periodTimestamp("2026-10-21T03:20:00Z")
+        let withRealGap = MarketChartPresentation(chart: periodChart(
+            beforeLunch, market: "CN", timezone: "Asia/Shanghai", status: .partial,
+            missing: [MarketChartGap(startTimestamp: missingTimestamp, endTimestamp: missingTimestamp)]
+        ))
+        assertLinePlanCoversEveryEdgeOnce(withRealGap)
+        assertLineEdge(endingAt: 1, in: withRealGap, isRegular: true, isMissing: true)
+    }
+
+    func testCornScheduledBreakPreservesPricesWithoutMissingEdgesAtEveryMinutePeriod() throws {
+        let points = try [
+            periodPoint("2026-10-21T12:44:00Z", close: 10, volume: 1),
+            periodPoint("2026-10-21T12:45:00Z", close: 11, volume: 1),
+            periodPoint("2026-10-21T13:31:00Z", close: 12, volume: 1),
+            periodPoint("2026-10-21T13:32:00Z", close: 13, volume: 1)
+        ]
+        let source = periodChart(points, symbol: "ZC1!", market: "COMMODITY", timezone: "America/Chicago", status: .partial)
+        for period in [MarketChartPeriod.intraday, .minute5, .minute30, .minute60] {
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            let presentation = MarketChartPresentation(chart: result)
+            XCTAssertEqual(result.candles.first?.open, 10)
+            XCTAssertEqual(result.candles.last?.close, 13)
+            XCTAssertEqual(result.candles.compactMap(\.volume).reduce(0, +), 4)
+            XCTAssertEqual(result.quality.actual, 4)
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+            XCTAssertTrue(presentation.lineSegments.allSatisfy { !$0.isMissing })
+            XCTAssertEqual(presentation.sessionBreak?.label, "日间休市")
+            XCTAssertEqual(presentation.sessionBreak?.currentTimestamp, try periodTimestamp(period == .intraday ? "2026-10-21T13:31:00Z" : "2026-10-21T13:30:00Z"))
+        }
+    }
+
+    func testOvernightBucketsKeepFixedAnchorsAcrossChicagoMidnight() throws {
+        let points = try [
+            periodPoint("2026-10-22T04:58:00Z", close: 10, volume: 1),
+            periodPoint("2026-10-22T04:59:00Z", close: 11, volume: 1),
+            periodPoint("2026-10-22T05:00:00Z", close: 12, volume: 1),
+            periodPoint("2026-10-22T05:01:00Z", close: 13, volume: 1)
+        ]
+        for (period, firstStart) in [(MarketChartPeriod.minute5,"04:55"),(.minute30,"04:30"),(.minute60,"04:00")] {
+            for symbol in ["ZC1!", "GC1!"] {
+                let chart = try XCTUnwrap(marketChartForDisplay(periodChart(points, symbol: symbol, market: "COMMODITY", timezone: "America/Chicago"), period: period, now: periodTestNow))
+                XCTAssertEqual(chart.candles, try [
+                    periodPoint("2026-10-22T\(firstStart):00Z", open: 10, high: 12, low: 10, close: 12, volume: 3),
+                    periodPoint("2026-10-22T05:00:00Z", close: 13, volume: 1)
+                ])
+            }
+        }
+    }
+
+    func testCornTradingDayRetainsItsPreviousEveningAndRestartsAtNextEvening() throws {
+        let points = try [
+            periodPoint("2026-10-21T00:01:00Z", close: 10, volume: 1),
+            periodPoint("2026-10-21T00:02:00Z", close: 11, volume: 1),
+            periodPoint("2026-10-21T18:20:00Z", close: 12, volume: 1),
+            periodPoint("2026-10-22T00:01:00Z", close: 13, volume: 1),
+            periodPoint("2026-10-22T00:02:00Z", close: 14, volume: 1)
+        ]
+        let source = periodChart(points, symbol: "ZC1!", market: "COMMODITY", timezone: "America/Chicago")
+        let intraday = try XCTUnwrap(marketChartForDisplay(source, period: .intraday, now: periodTestNow))
+        XCTAssertEqual(intraday.candles, points, "A trading-day date label must not discard the previous local evening")
+        for (period, finalStart) in [(MarketChartPeriod.minute5,"18:15"),(.minute30,"18:00"),(.minute60,"17:30")] {
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            XCTAssertEqual(result.candles.map(\.timestamp), try [
+                periodTimestamp("2026-10-21T00:00:00Z"),
+                periodTimestamp("2026-10-21T\(finalStart):00Z"),
+                periodTimestamp("2026-10-22T00:00:00Z")
+            ])
+            XCTAssertEqual(result.candles.compactMap(\.volume).reduce(0, +), 5)
+            XCTAssertEqual(result.candles.last?.close, 14)
+        }
+    }
+
+    func testCornRealMissingMinutesAcrossMidnightRemainMissing() throws {
+        let points = try [
+            periodPoint("2026-10-22T04:59:00Z", close: 10),
+            periodPoint("2026-10-22T05:01:00Z", close: 11),
+            periodPoint("2026-10-22T05:02:00Z", close: 12)
+        ]
+        let presentation = MarketChartPresentation(chart: periodChart(
+            points, symbol: "ZC1!", market: "COMMODITY", timezone: "America/Chicago", status: .repairing
+        ))
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: true)
+        assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: false)
+        XCTAssertNil(presentation.sessionBreak)
+    }
+
+    func testCornQuarterHourDaySessionStartsAtEightThirtyWithoutMissingBreak() throws {
+        let points = try [
+            periodPoint("2026-10-21T12:30:00Z", close: 10),
+            periodPoint("2026-10-21T13:30:00Z", close: 11),
+            periodPoint("2026-10-21T13:45:00Z", close: 12),
+            periodPoint("2026-10-21T18:15:00Z", close: 13)
+        ]
+        let source = periodChart(points, interval: "15m", symbol: "ZC1!", market: "COMMODITY", timezone: "America/Chicago", status: .partial)
+        for period in [MarketChartPeriod.fiveDays, .minute15] {
+            let result = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            XCTAssertEqual(result.candles, points, "The day-session's first and last real buckets must remain visible")
+            let presentation = MarketChartPresentation(chart: result)
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+            assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: false)
+            XCTAssertEqual(presentation.sessionBreak?.label, "日间休市")
+            XCTAssertEqual(presentation.sessionBreak?.currentTimestamp, try periodTimestamp("2026-10-21T13:30:00Z"))
+        }
+    }
+
+    func testCornQuarterHourNightSessionIncludesNineteenHundredBucketStart() throws {
+        let points = try [
+            periodPoint("2026-10-22T00:00:00Z", close: 10),
+            periodPoint("2026-10-22T00:30:00Z", close: 11)
+        ]
+        let result = try XCTUnwrap(marketChartForDisplay(
+            periodChart(points, interval: "15m", symbol: "ZC1!", market: "COMMODITY", timezone: "America/Chicago", status: .repairing),
+            period: .minute15, now: periodTestNow
+        ))
+        XCTAssertEqual(result.candles, points)
+        let presentation = MarketChartPresentation(chart: result)
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: true)
+        XCTAssertNil(presentation.sessionBreak)
+    }
+
+    func testCornQuarterHourLastNightBucketKeepsItsSessionAndRealGap() throws {
+        let points = try [
+            periodPoint("2026-10-21T12:00:00Z", close: 10),
+            periodPoint("2026-10-21T12:30:00Z", close: 11),
+            periodPoint("2026-10-21T13:30:00Z", close: 12)
+        ]
+        let result = try XCTUnwrap(marketChartForDisplay(
+            periodChart(points, interval: "15m", symbol: "ZC1!", market: "COMMODITY", timezone: "America/Chicago", status: .partial),
+            period: .fiveDays, now: periodTestNow
+        ))
+        XCTAssertEqual(result.candles, points)
+        let presentation = MarketChartPresentation(chart: result)
+        assertLinePlanCoversEveryEdgeOnce(presentation)
+        assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: true)
+        assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: false)
+        XCTAssertEqual(presentation.sessionBreak?.previousTimestamp, try periodTimestamp("2026-10-21T12:30:00Z"))
+    }
+
+    func testCryptoMissingMinutesAcrossMidnightStayMissingDuringContinuousTrading() throws {
+        let points = try [
+            periodPoint("2026-10-20T23:59:00Z", close: 10),
+            periodPoint("2026-10-21T00:01:00Z", close: 11),
+            periodPoint("2026-10-21T00:02:00Z", close: 12)
+        ]
+        for status in [MarketChartQualityStatus.partial, .repairing] {
+            let presentation = MarketChartPresentation(chart: periodChart(
+                points, market: "CRYPTO", timezone: "UTC", status: status, expected: 4, actual: 3
+            ))
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+            assertLineEdge(endingAt: 1, in: presentation, isRegular: true, isMissing: true)
+            assertLineEdge(endingAt: 2, in: presentation, isRegular: true, isMissing: false)
+        }
+    }
+
+    func testEmptyAndSinglePointLinePlansKeepDrawablePointsWithoutInventingEdges() {
+        let empty = MarketChartPresentation(chart: periodChart([]))
+        XCTAssertTrue(empty.lineSegments.isEmpty)
+        assertLinePlanCoversEveryEdgeOnce(empty)
+
+        for session: String? in [nil, "regular", "closed", "pre", "post", "overnight"] {
+            let presentation = MarketChartPresentation(chart: periodChart([
+                chartPoint(timestamp: 1_000, close: 10, session: session)
+            ]))
+            assertLinePlanCoversEveryEdgeOnce(presentation)
+            XCTAssertEqual(presentation.lineSegments.count, 1)
+            XCTAssertEqual(presentation.lineSegments.first?.indices, [0])
+            XCTAssertEqual(presentation.lineSegments.first?.isRegular, session == nil || session == "regular" || session == "closed")
+            XCTAssertEqual(presentation.lineSegments.first?.isMissing, false)
+        }
+    }
+
+    func testLinePointsAndVolumeBarsUseTheSameCoordinatesWithOnlyEdgeClamping() {
+        XCTAssertEqual(marketChartXFractions(timestamps: [], interval: "1m"), [])
+        XCTAssertEqual(marketChartXFractions(timestamps: [1_000], interval: "1m"), [0.5])
+        XCTAssertEqual(marketVolumeBarX(fraction: 0.5, width: 300, barWidth: 8), 150)
+        XCTAssertEqual(marketVolumeBarX(fraction: 0.25, width: 300, barWidth: 8), 75)
+        XCTAssertEqual(marketVolumeBarX(fraction: 0.75, width: 300, barWidth: 8), 225)
+
+        let points = (0..<5).map { index in
+            chartPoint(timestamp: Int64(index) * 60_000, close: Double(index + 10), volume: 100)
+        }
+        let presentation = MarketChartPresentation(chart: periodChart(points))
+        XCTAssertEqual(presentation.xFractions, [0, 0.25, 0.5, 0.75, 1])
+        XCTAssertTrue(presentation.hasVolume)
+        for fraction in presentation.xFractions.dropFirst().dropLast() {
+            XCTAssertEqual(marketVolumeBarX(fraction: fraction, width: 300, barWidth: 8), 300 * fraction)
+        }
+        XCTAssertEqual(marketVolumeBarX(fraction: presentation.xFractions[0], width: 300, barWidth: 8), 4)
+        XCTAssertEqual(marketVolumeBarX(fraction: presentation.xFractions[4], width: 300, barWidth: 8), 296)
+    }
+
+    func testFlatPriceChartsExpandOnlyTheFiniteDisplayAxis() {
+        for price in [100.0, 0.0, 0.000_000_01] {
+            let points = [chartPoint(timestamp: 1_000, close: price), chartPoint(timestamp: 61_000, close: price)]
+            let presentation = MarketChartPresentation(chart: periodChart(points))
+            let margin = max(abs(price) * 0.001, 0.000_001)
+
+            XCTAssertEqual(presentation.low ?? .nan, price - margin, accuracy: 0.000_000_001)
+            XCTAssertEqual(presentation.high ?? .nan, price + margin, accuracy: 0.000_000_001)
+            XCTAssertTrue(presentation.low?.isFinite == true)
+            XCTAssertTrue(presentation.high?.isFinite == true)
+            XCTAssertEqual(presentation.values, [price, price])
+            XCTAssertEqual(presentation.points, points)
+        }
     }
 
     func testMovingAverageStartsAfterFullPeriod() {
@@ -1533,6 +3091,77 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(marketNearestChartIndex(fraction: -1, fractions: fractions), 0)
         XCTAssertEqual(marketNearestChartIndex(fraction: 0.62, fractions: fractions), 2)
         XCTAssertEqual(marketNearestChartIndex(fraction: 2, fractions: fractions), 4)
+        XCTAssertNil(marketNearestChartIndex(fraction: 0.5, fractions: []))
+        XCTAssertEqual(marketNearestChartIndex(fraction: 0.25, fractions: [0.5]), 0)
+    }
+
+    func testNearestChartIndexUsesFirstPointWhenPositionsOrDistancesTie() {
+        let fractions: [CGFloat] = [0, 0.25, 0.25, 0.75, 0.75, 1, 1]
+        XCTAssertEqual(marketNearestChartIndex(fraction: 0.25, fractions: fractions), 1)
+        XCTAssertEqual(marketNearestChartIndex(fraction: 0.5, fractions: fractions), 1)
+        XCTAssertEqual(marketNearestChartIndex(fraction: 0.625, fractions: fractions), 3)
+        XCTAssertEqual(marketNearestChartIndex(fraction: 2, fractions: fractions), 5)
+    }
+
+    func testChartDisplayArtifactsReuseDisplayedPointsForIndicatorsAndCoverage() async throws {
+        let start = try periodTimestamp("2026-10-21T13:24:00Z")
+        let points: [MarketChartPoint] = (1...24).map { minute in
+            let timestamp = start + Int64(minute) * 60_000
+            let state = minute == 24 ? "invalid" : "confirmed"
+            let session = minute <= 6 ? "pre" : "regular"
+            return chartPoint(timestamp: timestamp, close: Double(minute), state: state, session: session)
+        }
+        let result = try await marketChartDisplayArtifacts(for: periodChart(points), period: .intraday)
+        let artifacts = try XCTUnwrap(result)
+        XCTAssertEqual(artifacts.presentation.lineSegments.count, 2)
+        XCTAssertEqual(artifacts.drawnPointCount, 23)
+        XCTAssertEqual(artifacts.movingAverages.map(\.period), [5, 10, 20])
+        XCTAssertEqual(artifacts.movingAverages.map { $0.values.first ?? nil }, [nil, nil, nil])
+        XCTAssertEqual(artifacts.movingAverages.map { $0.values.last ?? nil }, [21, 18.5, 13.5])
+    }
+
+    func testSubCentSparklinesKeepTheirRealMovementAndRemainScaleInvariant() {
+        let values = [0.07701, 0.07723, 0.07710]
+        let size = CGSize(width: 76, height: 34)
+        let points = marketSparklinePoints(values, size: size)
+        let scaled = marketSparklinePoints(values.map { $0 * 1000 }, size: size)
+        XCTAssertEqual(points.map(\.y).max()! - points.map(\.y).min()!, 28, accuracy: 0.000001)
+        for (actual, expected) in zip(points, scaled) {
+            XCTAssertEqual(actual.y, expected.y, accuracy: 0.000001)
+        }
+        for value in [0.0, 0.07711, 100.0] {
+            let flat = marketSparklinePoints([value, value], size: size)
+            XCTAssertTrue(flat.allSatisfy { $0.y.isFinite && abs($0.y - 17) < 0.000001 })
+        }
+        let bounds = marketSparklineBounds(values, minimumRelativeRange: 0.0025)
+        XCTAssertEqual(bounds.upper - bounds.lower, 0.00022, accuracy: 0.000001)
+    }
+
+    func testDetailPricePrecisionPreservesLowPricesAndSmallChanges() {
+        XCTAssertEqual(marketDetailPriceDigits(value: 0.07718, price: 0.07718, symbol: "BINANCE:DOGEUSDT"), 5)
+        XCTAssertEqual(marketDetailPriceDigits(value: -0.00001, price: 0.07718, symbol: "BINANCE:DOGEUSDT"), 5)
+        XCTAssertEqual(marketDetailPriceDigits(value: -0.000001, price: 0.07718, symbol: "BINANCE:DOGEUSDT"), 6)
+        XCTAssertEqual(marketDetailPriceDigits(value: 0.0, price: 0.07718, symbol: "BINANCE:DOGEUSDT"), 5)
+        XCTAssertEqual(marketDetailPriceDigits(value: 760.95, price: 761, symbol: "SPY"), 2)
+    }
+
+    func testInstrumentPrecisionPreservesCurrencyFuturesAndYieldMoves() {
+        for (symbol, price, digits) in [("USDCNY", 6.6678, 4), ("USDJPY", 156.985, 3), ("NG1!", 2.519, 3), ("HG1!", 6.487, 3), ("^TNX", 4.968, 3), ("KR10Y", 4.079, 3)] {
+            XCTAssertEqual(marketPriceDigits(price, symbol: symbol), digits, symbol)
+            XCTAssertEqual(marketDetailPriceDigits(value: -0.0024, price: price, symbol: symbol), max(digits, 3), symbol)
+        }
+        XCTAssertEqual(marketPriceDigits(0.0000001234, symbol: "BINANCE:TESTUSDT"), 10)
+        XCTAssertEqual(marketPriceDigits(-2.519, symbol: "NG1!"), 3)
+    }
+
+    func testChartReadoutKeepsInstrumentPrecisionWhenWideRangeUsesFewerAxisDigits() {
+        let wideAxis = marketAxisDigits(values: [6.60, 6.72])
+        XCTAssertEqual(wideAxis, 2)
+        XCTAssertEqual(marketChartReadoutDigits(6.6678, symbol: "USDCNY", axisDigits: wideAxis), 4)
+        XCTAssertEqual(marketChartReadoutDigits(0.07718, symbol: "BINANCE:DOGEUSDT", axisDigits: wideAxis), 5)
+        XCTAssertEqual(marketChartReadoutDigits(6.487, symbol: "HG1!", axisDigits: wideAxis), 3)
+        XCTAssertEqual(marketChartReadoutDigits(761.1, symbol: "SPY", axisDigits: 0), 2)
+        XCTAssertEqual(marketChartReadoutDigits(761.0001, symbol: "SPY", axisDigits: 4), 4)
     }
 
     func testLeadSparklineDoesNotExaggerateTinyRelativeMoves() {
@@ -1549,13 +3178,81 @@ final class MarketPresentationTests: XCTestCase {
         XCTAssertEqual(bounds, MarketSparklineBounds(lower: 100, upper: 104))
     }
 
+    func testSparklineExtremaAndEndpointsLeaveRoomForTheStrokeAndLatestPoint() {
+        let size = CGSize(width: 50, height: 20)
+        let points = marketSparklinePoints([10, 15, 5, 12], size: size)
+        let markerRadius: CGFloat = 2.5
+
+        XCTAssertEqual(points.count, 4)
+        for point in points {
+            XCTAssertGreaterThanOrEqual(point.x - markerRadius, 0)
+            XCTAssertLessThanOrEqual(point.x + markerRadius, size.width)
+            XCTAssertGreaterThanOrEqual(point.y - markerRadius, 0)
+            XCTAssertLessThanOrEqual(point.y + markerRadius, size.height)
+        }
+        XCTAssertEqual(points.first?.x, 3)
+        XCTAssertEqual(points.last?.x, size.width - 3)
+        XCTAssertEqual(marketLinePlotX(fraction: 0, width: 200), 3)
+        XCTAssertEqual(marketLinePlotX(fraction: 1, width: 200), 197)
+    }
+
+    func testSparklineSinglePointsAndCollapsedLayoutsRemainInsideTheirBounds() {
+        XCTAssertEqual(marketSparklinePoints([10], size: CGSize(width: 50, height: 20)), [CGPoint(x: 25, y: 10)])
+        XCTAssertTrue(marketSparklinePoints([], size: CGSize(width: 50, height: 20)).isEmpty)
+        for size in [CGSize.zero, CGSize(width: 2, height: 1)] {
+            let points = marketSparklinePoints([10, 12, 8], size: size)
+            for point in points {
+                XCTAssertTrue(point.x.isFinite && point.y.isFinite)
+                XCTAssertGreaterThanOrEqual(point.x, 0)
+                XCTAssertLessThanOrEqual(point.x, size.width)
+                XCTAssertGreaterThanOrEqual(point.y, 0)
+                XCTAssertLessThanOrEqual(point.y, size.height)
+            }
+        }
+    }
+
+    private func assertLinePlanCoversEveryEdgeOnce(
+        _ presentation: MarketChartPresentation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actualEdges = presentation.lineSegments.flatMap { segment in
+            zip(segment.indices, segment.indices.dropFirst()).map { [$0, $1] }
+        }
+        let expectedEdges = (0..<max(presentation.points.count - 1, 0)).map { [$0, $0 + 1] }
+        XCTAssertEqual(actualEdges, expectedEdges, "Every consecutive price edge must be drawn exactly once", file: file, line: line)
+        XCTAssertTrue(presentation.lineSegments.allSatisfy { segment in
+            !segment.indices.isEmpty && segment.indices.allSatisfy { presentation.points.indices.contains($0) }
+        }, file: file, line: line)
+    }
+
+    private func assertLineEdge(
+        endingAt end: Int,
+        in presentation: MarketChartPresentation,
+        isRegular: Bool,
+        isMissing: Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let segments = presentation.lineSegments.filter { segment in
+            zip(segment.indices, segment.indices.dropFirst()).contains { $0 == end - 1 && $1 == end }
+        }
+        XCTAssertEqual(segments.count, 1, "A price edge needs exactly one rendering style", file: file, line: line)
+        XCTAssertEqual(segments.first?.isRegular, isRegular, file: file, line: line)
+        XCTAssertEqual(segments.first?.isMissing, isMissing, file: file, line: line)
+    }
+
     private func chartPoint(
         timestamp: Int64,
         open: Double? = nil,
         high: Double? = nil,
         low: Double? = nil,
         close: Double,
-        volume: Double? = nil
+        volume: Double? = nil,
+        state: String = "confirmed",
+        source: String = "test",
+        session: String? = "regular",
+        tradingDate: String? = nil
     ) -> MarketChartPoint {
         MarketChartPoint(
             timestamp: timestamp,
@@ -1564,9 +3261,145 @@ final class MarketPresentationTests: XCTestCase {
             low: low ?? close,
             close: close,
             volume: volume,
-            state: "confirmed",
-            source: "test",
-            session: "regular"
+            state: state,
+            source: source,
+            session: session,
+            tradingDate: tradingDate
+        )
+    }
+
+    private var periodTestNow: Date { Date(timeIntervalSince1970: 1_800_000_000) }
+
+    private func periodTimestamp(_ instant: String) throws -> Int64 {
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: instant))
+        return Int64(date.timeIntervalSince1970 * 1000)
+    }
+
+    private func periodPoint(
+        _ instant: String,
+        open: Double? = nil,
+        high: Double? = nil,
+        low: Double? = nil,
+        close: Double,
+        volume: Double? = nil,
+        state: String = "confirmed",
+        source: String = "yahoo",
+        session: String? = "regular",
+        tradingDate: String? = nil
+    ) throws -> MarketChartPoint {
+        chartPoint(
+            timestamp: try periodTimestamp(instant), open: open, high: high, low: low,
+            close: close, volume: volume, state: state, source: source, session: session,
+            tradingDate: tradingDate
+        )
+    }
+
+    func testMissingOpeningMinutesNeverMoveDeclaredBucketBoundaries() throws {
+        let points = try [
+            periodPoint("2026-10-21T01:34:00Z", close: 10, volume: 1),
+            periodPoint("2026-10-21T01:35:00Z", close: 11, volume: 2),
+            periodPoint("2026-10-21T01:36:00Z", close: 12, volume: 3),
+            periodPoint("2026-10-21T02:16:00Z", close: 13, volume: 4)
+        ]
+        let source = periodChart(points, market: "CN", timezone: "Asia/Shanghai", status: .partial)
+        let chart = try XCTUnwrap(marketChartForDisplay(source, period: .minute5, now: periodTestNow))
+        XCTAssertEqual(chart.candles.map(\.timestamp), try [
+            periodTimestamp("2026-10-21T01:30:00Z"), periodTimestamp("2026-10-21T01:35:00Z"), periodTimestamp("2026-10-21T02:15:00Z")
+        ])
+        XCTAssertEqual(chart.candles.compactMap(\.volume), [3, 3, 4])
+        XCTAssertEqual(chart.analysis.candleTimestamp, .intervalStart)
+    }
+
+    func testFullChinaSessionHasExactMinuteBucketCountsAndVolume() throws {
+        let start = try periodTimestamp("2026-10-21T01:30:00Z")
+        let afternoon = try periodTimestamp("2026-10-21T05:00:00Z")
+        let points = (1...120).map { minute in
+            chartPoint(timestamp: start + Int64(minute) * 60_000, close: 10, volume: 1)
+        } + (1...120).map { minute in
+            chartPoint(timestamp: afternoon + Int64(minute) * 60_000, close: 11, volume: 1)
+        }
+        let source = periodChart(points, market: "CN", timezone: "Asia/Shanghai")
+        for (period, count) in [(MarketChartPeriod.minute5,48),(.minute30,8),(.minute60,4)] {
+            let chart = try XCTUnwrap(marketChartForDisplay(source, period: period, now: periodTestNow))
+            XCTAssertEqual(chart.candles.count, count)
+            XCTAssertEqual(chart.candles.compactMap(\.volume).reduce(0, +), 240)
+            XCTAssertEqual(chart.quality.actual, 240)
+            XCTAssertEqual(MarketChartPresentation(chart: chart).sessionBreak?.label, "午间休市")
+        }
+    }
+
+    private func fixtureSessionWindows(
+        _ points: [MarketChartPoint], market: String, symbol: String, timezone: String, interval: String
+    ) -> [MarketChartSessionWindow] {
+        guard interval != "1d", let zone = TimeZone(identifier: timezone) else { return [] }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let specifications: [(Int, Int, String)]
+        switch market {
+        case "CN": specifications = [(570, 690, "regular"), (780, 900, "regular")]
+        case "HK": specifications = [(570, 720, "regular"), (780, 960, "regular")]
+        case "JP": specifications = [(540, 690, "regular"), (750, 930, "regular")]
+        case "KR": specifications = [(540, 930, "regular")]
+        case "COMMODITY" where symbol == "ZC1!": specifications = [(-300, 465, "regular"), (510, 800, "regular")]
+        case "COMMODITY" where symbol != "TEST": specifications = [(-420, 960, "regular")]
+        case "FX": specifications = [(-120, 1320, "regular")]
+        case "US": specifications = [(-240, 240, "overnight"), (240, 570, "pre"), (570, 960, "regular"), (960, 1200, "post")]
+        default: specifications = [(0, 1440, "regular")]
+        }
+        var dates = Set<Date>()
+        for point in points {
+            let instant = Date(timeIntervalSince1970: Double(point.timestamp + (interval == "1m" ? -1 : 1)) / 1_000)
+            let day = calendar.startOfDay(for: instant)
+            let minute = calendar.component(.hour, from: instant) * 60 + calendar.component(.minute, from: instant)
+            let rollover = specifications.first!.0
+            let tradingDay = rollover < 0 && minute >= 1440 + rollover ? calendar.date(byAdding: .day, value: 1, to: day)! : day
+            dates.insert(tradingDay)
+        }
+        let formatter = DateFormatter()
+        formatter.timeZone = zone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return dates.flatMap { day in
+            specifications.map { start, end, session in
+                MarketChartSessionWindow(
+                    startTimestamp: Int64(day.addingTimeInterval(Double(start * 60)).timeIntervalSince1970 * 1_000),
+                    endTimestamp: Int64(day.addingTimeInterval(Double(end * 60)).timeIntervalSince1970 * 1_000),
+                    tradingDate: formatter.string(from: day), session: session
+                )
+            }
+        }.sorted { $0.startTimestamp < $1.startTimestamp }
+    }
+
+    private func periodChart(
+        _ points: [MarketChartPoint],
+        interval: String = "1m",
+        symbol: String = "TEST",
+        market: String = "US",
+        timezone: String = "America/New_York",
+        status: MarketChartQualityStatus = .complete,
+        expected: Int? = nil,
+        actual: Int? = nil,
+        missing: [MarketChartGap] = [],
+        isFinal: Bool = true,
+        periodReturn: MarketChartPeriodReturn? = nil,
+        periodVolatility: MarketChartPeriodVolatility? = nil
+    ) -> MarketChart {
+        MarketChart(
+            symbol: symbol, market: market, tradingDate: "2026-10-21", timezone: timezone,
+            session: "regular", interval: interval, periodReturn: periodReturn, periodVolatility: periodVolatility,
+            quality: MarketChartQuality(
+                status: status, expected: expected ?? points.count, actual: actual ?? points.count,
+                missing: missing, freshnessSeconds: 12, isFinal: isFinal
+            ),
+            quote: MarketChartQuote(
+                price: 100, previousClose: 99, change: 1, changePercent: 1,
+                providerTimestamp: points.last?.timestamp, receivedTimestamp: points.last?.timestamp,
+                source: "fixture"
+            ),
+            candles: points,
+            analysis: MarketChartAnalysis(
+                aggregation: "none", candleTimestamp: interval == "1m" ? .intervalEnd : interval == "1d" ? .tradingDate : .intervalStart,
+                sessionWindows: fixtureSessionWindows(points, market: market, symbol: symbol, timezone: timezone, interval: interval)
+            )
         )
     }
 }

@@ -58,22 +58,6 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil { return true }
         #endif
         Task { await PersonPushNotificationManager.shared.restoreRegistration() }
-        #if DEBUG
-        if let preview = ProcessInfo.processInfo.arguments.first(where: {
-            $0.hasPrefix("--person-push-video-preview=")
-        })?.split(separator: "=", maxSplits: 1).last {
-            let values = preview.split(separator: ":", maxSplits: 1).map(String.init)
-            if values.count == 2 {
-                Task { @MainActor in
-                    PersonPushNavigationStore.shared.handle(userInfo: [
-                        "kind": "video",
-                        "person_id": values[0],
-                        "content_id": values[1]
-                    ])
-                }
-            }
-        }
-        #endif
         return true
     }
 
@@ -125,7 +109,6 @@ struct PersonPushNavigationRequest: Equatable {
     let id = UUID()
     let kind: String
     let contentID: String
-    let personID: String
     let details: PushNotificationDestination?
 }
 
@@ -300,20 +283,16 @@ final class PersonPushNavigationStore: ObservableObject {
     func handle(userInfo: [AnyHashable: Any]) {
         let kind = userInfo["kind"] as? String ?? ""
         let contentID = userInfo["content_id"] as? String ?? ""
-        let personID = userInfo["person_id"] as? String ?? ""
         let details: PushNotificationDestination?
         switch kind {
         case "post":
             guard let id = Int(contentID), id > 0 else { return }
             details = nil
-        case "video":
-            guard let id = Int64(contentID), id > 0, !personID.isEmpty else { return }
-            details = nil
         default:
             guard let value = userInfo["notification_id"] as? String, let id = UUID(uuidString: value) else { return }
             details = PushNotificationDestination(id: id)
         }
-        request = PersonPushNavigationRequest(kind: kind, contentID: contentID, personID: personID, details: details)
+        request = PersonPushNavigationRequest(kind: kind, contentID: contentID, details: details)
     }
 
     func clear() {
@@ -329,32 +308,118 @@ struct AIServerClientApp: App {
         URLCache.shared = URLCache(memoryCapacity: 48_000_000, diskCapacity: 240_000_000)
     }
 
-    var body: some Scene { WindowGroup { EditorialRootView() } }
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--modal-contract-preview") {
+                    AppModalContractPreview()
+                } else {
+                    EditorialRootView()
+                }
+                #else
+                EditorialRootView()
+                #endif
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: [.vertical, .horizontal])
+        }
+    }
 }
 
 private enum EditorialTab: Hashable {
-    case world, signal, observation, investment, company, learning
+    case world, signal, observation, investment, learning
+}
 
-    static let researchTabs: [EditorialTab] = [.investment, .company]
+private enum EditorialPreview {
+    #if DEBUG
+    private static let arguments = Set(ProcessInfo.processInfo.arguments)
+    #endif
 
-    var sectionTitle: String {
-        switch self {
-        case .signal: "信号"
-        case .observation: "动态"
-        case .company: "公司"
-        case .world: "今日"
-        case .investment: "数据"
-        case .learning: "知识"
+    static let initialTab: EditorialTab = {
+        #if DEBUG
+        if arguments.contains("--today-world-preview") { return .world }
+        if arguments.contains("--feed-preview") { return .observation }
+        if arguments.contains("--google-signal-preview") { return .signal }
+        if !arguments.isDisjoint(with: [
+            "--people-preview", "--person-detail-preview", "--article-detail-preview"
+        ]) { return .learning }
+        if opensResearchSheet || !arguments.isDisjoint(with: [
+            "--market-preview", "--company-preview"
+        ]) { return .investment }
+        if !arguments.isDisjoint(with: [
+            "--learning-preview", "--learning-detail-preview", "--learning-video-preview",
+            "--learning-books-preview", "--learning-book-preview", "--learning-concepts-preview",
+            "--learning-concept-detail-preview", "--learning-ideology-preview",
+            "--city-preview", "--city-province-preview", "--city-city-preview", "--city-district-preview"
+        ]) { return .learning }
+        #endif
+        return .world
+    }()
+
+    static let opensResearchSheet: Bool = {
+        #if DEBUG
+        return !arguments.isDisjoint(with: [
+            "--china-macro-preview", "--holdings-preview", "--institution-research-preview",
+            "--industries-preview", "--market-core-stocks-preview", "--market-structure-sheet-preview",
+            "--gdp-preview"
+        ]) || arguments.contains { $0.hasPrefix("--gdp-detail-preview=") }
+        #else
+        return false
+        #endif
+    }()
+
+    static let externalLink: InAppBrowserDestination? = {
+        #if DEBUG
+        let prefix = "--in-app-browser-preview="
+        if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }),
+           let url = URL(string: String(argument.dropFirst(prefix.count))) {
+            return InAppBrowserDestination(url: url)
         }
-    }
+        #endif
+        return nil
+    }()
 
-    var researchSelectorIcon: String {
-        switch self {
-        case .investment: "chart.xyaxis.line"
-        case .company: "building.2"
-        default: "magnifyingglass"
+    static let deployment: DeploymentStatusSnapshot? = {
+        #if DEBUG
+        let phase: DeploymentStatusSnapshot.Phase
+        let stage: String?
+        if arguments.contains("--deployment-tip-success-preview") {
+            phase = .succeeded
+            stage = "installed"
+        } else if arguments.contains("--deployment-tip-failed-preview") {
+            phase = .failed
+            stage = "install-failed"
+        } else if expandsDeployment || arguments.contains("--deployment-tip-collapsed-preview") {
+            phase = .running(progress: 0.75)
+            stage = nil
+        } else {
+            return nil
         }
-    }
+        return DeploymentStatusSnapshot(
+            phase: phase,
+            commit: "b0d5411",
+            updatedAt: Date(timeIntervalSince1970: 0),
+            stage: stage
+        )
+        #else
+        return nil
+        #endif
+    }()
+
+    static let expandsDeployment: Bool = {
+        #if DEBUG
+        arguments.contains("--deployment-tip-preview")
+        #else
+        false
+        #endif
+    }()
+}
+
+@MainActor
+private final class EditorialPageStores {
+    lazy var today = TodayWorldStore()
+    lazy var feed = NewsFeedViewModel()
+    lazy var research = InstitutionResearchStore()
 }
 
 private struct EditorialRootView: View {
@@ -364,175 +429,73 @@ private struct EditorialRootView: View {
     @StateObject private var personPushNavigation = PersonPushNavigationStore.shared
     @State private var peopleStore = PeopleStore()
     @State private var marketStore = MarketStore()
-    @State private var marketSentimentStore = RetailSentimentStore()
-    @State private var selectedTab: EditorialTab = {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--today-world-preview") { return .world }
-        if ProcessInfo.processInfo.arguments.contains("--feed-preview") { return .observation }
-        if ProcessInfo.processInfo.arguments.contains("--google-signal-preview") { return .signal }
-        if ProcessInfo.processInfo.arguments.contains("--people-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--person-detail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--article-detail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--video-detail-preview") {
-            return .learning
-        }
-        if ProcessInfo.processInfo.arguments.contains("--market-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--institution-research-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--market-structure-sheet-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--retail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--sentiment-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--korea-leverage-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
-            ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) { return .investment }
-        if ProcessInfo.processInfo.arguments.contains("--company-preview") { return .company }
-        if ProcessInfo.processInfo.arguments.contains("--learning-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-detail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-video-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-book-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-concepts-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--learning-ideology-preview") { return .learning }
-        if ProcessInfo.processInfo.arguments.contains("--city-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--city-province-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--city-city-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--city-district-preview") { return .learning }
-        return .world
-        #else
-        .world
-        #endif
-    }()
-    @State private var marketShowsDetail = false
-    @StateObject private var todayStore = TodayWorldStore()
-    @State private var feedShowsDetail = false
+    @State private var investorMoodStore = InvestorMoodStore()
+    @State private var learningStore = LearningStore()
+    @State private var pageStores = EditorialPageStores()
+    @State private var selectedTab = EditorialPreview.initialTab
     @State private var learningShowsDetail = false
     @State private var feedHidesTabBar = false
     @State private var notificationPostID: Int?
-    @State private var notificationPersonID: String?
-    @State private var notificationVideoID: Int64?
     @State private var notificationPresentationAnchor: UIView?
     @State private var presentedNotificationDetails: PushNotificationDestination?
     @State private var lastDynamicTab: EditorialTab = .observation
-    @State private var lastResearchTab: EditorialTab = .investment
-    @State private var presentedExternalLink: InAppBrowserDestination? = {
-        #if DEBUG
-        let prefix = "--in-app-browser-preview="
-        guard let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) }),
-              let url = URL(string: String(argument.dropFirst(prefix.count))) else { return nil }
-        return InAppBrowserDestination(url: url)
-        #else
-        return nil
-        #endif
-    }()
+    @State private var presentedExternalLink = EditorialPreview.externalLink
     @State private var signalSentiment: GoogleSignalSentimentFilter = .all
     @State private var showsSignalFilters = false
+    @State private var visitedTabs: Set<EditorialTab> = []
     @State private var rootBottomChromeHeight: CGFloat = 0
     @State private var dismissedDeploymentIdentity: String?
 
-    private var deploymentPreview: DeploymentStatusSnapshot? {
-        #if DEBUG
-        let previewDate = Date(timeIntervalSince1970: 0)
-        if ProcessInfo.processInfo.arguments.contains("--deployment-tip-success-preview") {
-            return DeploymentStatusSnapshot(
-                phase: .succeeded,
-                commit: "b0d5411",
-                updatedAt: previewDate,
-                stage: "installed"
-            )
-        }
-        if ProcessInfo.processInfo.arguments.contains("--deployment-tip-failed-preview") {
-            return DeploymentStatusSnapshot(
-                phase: .failed,
-                commit: "b0d5411",
-                updatedAt: previewDate,
-                stage: "install-failed"
-            )
-        }
-        guard ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--deployment-tip-collapsed-preview") else { return nil }
-        return DeploymentStatusSnapshot(
-            phase: .running(progress: 0.75),
-            commit: "b0d5411",
-            updatedAt: previewDate
-        )
-        #else
-        return nil
-        #endif
-    }
-
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil ||
-            ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--china-macro-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--institution-research-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--industries-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--market-structure-sheet-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--market-research-entries-preview") ||
-            ProcessInfo.processInfo.arguments.contains("--gdp-preview") ||
-            ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--gdp-detail-preview=") }) { return nil }
+        if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil { return nil }
         #endif
-        let value = deploymentPreview ?? deploymentStore.snapshot
+        guard !EditorialPreview.opensResearchSheet else { return nil }
+        let value = EditorialPreview.deployment ?? deploymentStore.snapshot
         guard value?.identity != dismissedDeploymentIdentity else { return nil }
         return value
     }
 
+    // Native sheets cover root navigation without changing its layout underneath.
     private var hidesRootTabBar: Bool {
         switch selectedTab {
-        case .world: false
-        case .signal: false
-        case .observation: feedHidesTabBar || feedShowsDetail
-        case .investment: marketShowsDetail
-        case .company: false
+        case .observation: feedHidesTabBar
         case .learning: learningShowsDetail
+        case .world, .signal, .investment: false
         }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                tabContent(.world) {
-                    TodayWorldView(store: todayStore)
-                }
-                tabContent(.signal) {
-                    GoogleSignalView(
-                        sentiment: $signalSentiment
-                    )
-                }
-                tabContent(.observation) {
-                    NewsFeedView(
-                        showsDetail: $feedShowsDetail,
-                        hidesTabBar: $feedHidesTabBar,
-                        notificationPostID: $notificationPostID
-                    )
-                }
-                tabContent(.investment) {
-                    InvestmentView(
-                        showsDetail: $marketShowsDetail,
-                        marketStore: marketStore,
-                        sentimentStore: marketSentimentStore
-                    )
-                }
-                tabContent(.company) {
-                    CompanyResearchView()
-                }
-                tabContent(.learning) {
-                    LearningView(
-                        peopleStore: peopleStore,
-                        showsDetail: $learningShowsDetail,
-                        notificationPersonID: $notificationPersonID,
-                        notificationVideoID: $notificationVideoID
-                    )
-                }
+        ZStack {
+            tabContent(.world) {
+                TodayWorldView(store: pageStores.today)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            tabContent(.signal) {
+                GoogleSignalView(sentiment: signalSentiment)
+            }
+            tabContent(.observation) {
+                NewsFeedView(
+                    model: pageStores.feed,
+                    hidesTabBar: $feedHidesTabBar,
+                    notificationPostID: $notificationPostID
+                )
+            }
+            tabContent(.investment) {
+                MarketView(
+                    store: marketStore,
+                    investorMoodStore: investorMoodStore,
+                    researchStore: pageStores.research
+                )
+            }
+            tabContent(.learning) {
+                LearningView(
+                    peopleStore: peopleStore,
+                    store: learningStore,
+                    showsDetail: $learningShowsDetail
+                )
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .background {
             NotificationPresentationAnchor { view in
@@ -561,8 +524,7 @@ private struct EditorialRootView: View {
             if let deploymentStatus {
                 DeploymentStatusTip(
                     snapshot: deploymentStatus,
-                    initiallyExpanded: deploymentPreview != nil &&
-                        ProcessInfo.processInfo.arguments.contains("--deployment-tip-preview"),
+                    initiallyExpanded: EditorialPreview.expandsDeployment,
                     onDismiss: {
                         dismissedDeploymentIdentity = deploymentStatus.identity
                         deploymentStore.dismissFailure(deploymentStatus)
@@ -586,12 +548,11 @@ private struct EditorialRootView: View {
                 if !hidesRootTabBar {
                     RootNavigationBar(
                         selection: $selectedTab,
-                        dynamicTarget: lastDynamicTab,
-                        researchTarget: lastResearchTab
+                        dynamicTarget: lastDynamicTab
                     )
                 }
             }
-            .padding(.bottom, -13)
+            .padding(.bottom, 4)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -618,26 +579,28 @@ private struct EditorialRootView: View {
             }
         }
         .animation(
-            reduceMotion ? nil : .smooth(duration: 0.24, extraBounce: 0),
+            reduceMotion ? nil : AppModalMotion.animation,
             value: showsSignalFilters
         )
         .sensoryFeedback(.success, trigger: deploymentStatus?.identity) { _, _ in
             if case .succeeded = deploymentStatus?.phase { return true }
             return false
         }
-        .task {
-            deploymentStore.start()
-            await peopleStore.load()
+        .task(id: scenePhase == .active, priority: .utility) {
+            guard scenePhase == .active else { return }
+            do { try await Task.sleep(for: .milliseconds(800)) }
+            catch { return }
+            let tabs: [EditorialTab] = [.learning, .investment, .observation, .signal, .world]
+            await runWithLimitedConcurrency(tabs, maximumConcurrentRequests: 2) { tab in
+                await prepareTab(tab)
+            }
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 deploymentStore.start()
             } else {
                 deploymentStore.stop()
             }
-        }
-        .task {
-            await marketSentimentStore.preload(marketStore: marketStore)
         }
         .task(id: NotificationNavigationTaskID(
             requestID: personPushNavigation.request?.id,
@@ -656,45 +619,64 @@ private struct EditorialRootView: View {
             case "post":
                 selectedTab = .observation
                 notificationPostID = Int(request.contentID)
-            case "video":
-                selectedTab = .learning
-                notificationPersonID = request.personID
-                notificationVideoID = Int64(request.contentID)
             default:
                 break
             }
             personPushNavigation.clear()
         }
         .onChange(of: selectedTab, initial: true) { _, tab in
+            visitedTabs.insert(tab)
             if tab != .signal {
                 showsSignalFilters = false
             }
             switch tab {
             case .signal, .observation:
                 lastDynamicTab = tab
-            case .investment, .company:
-                lastResearchTab = tab
-            case .world, .learning:
+            case .investment, .world, .learning:
                 break
             }
         }
     }
 
+    @ViewBuilder
     private func tabContent<Content: View>(
         _ tab: EditorialTab,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        content()
-            .environment(\.rootTabIsActive, selectedTab == tab)
-            .opacity(selectedTab == tab ? 1 : 0)
-            .scaleEffect(selectedTab == tab || reduceMotion ? 1 : 0.992)
-            .allowsHitTesting(selectedTab == tab)
-            .accessibilityHidden(selectedTab != tab)
-            .zIndex(selectedTab == tab ? 1 : 0)
-            .animation(
-                reduceMotion ? nil : .smooth(duration: 0.2, extraBounce: 0),
-                value: selectedTab
-            )
+        let isSelected = selectedTab == tab
+        if isSelected || visitedTabs.contains(tab) {
+            content()
+                .environment(\.rootTabIsActive, isSelected)
+                .opacity(isSelected ? 1 : 0)
+                .allowsHitTesting(isSelected)
+                .accessibilityHidden(!isSelected)
+                .zIndex(isSelected ? 1 : 0)
+                .transition(.identity)
+        }
+    }
+
+    private func prepareTab(_ tab: EditorialTab) async {
+        guard !Task.isCancelled, selectedTab != tab else { return }
+        switch tab {
+        case .learning:
+            async let overview: Void = learningStore.loadOverview()
+            async let people: Void = peopleStore.load()
+            _ = await (overview, people)
+        case .investment:
+            async let dashboard: Void = marketStore.preloadDashboard()
+            async let research: Void = pageStores.research.load()
+            _ = await (dashboard, research)
+            await marketStore.preloadListCharts(symbols: ResearchHomeContent.chartSymbols)
+        case .observation:
+            await pageStores.feed.loadInitial()
+        case .signal:
+            let service = GoogleSignalService()
+            if let company = try? await service.fetchCompanies().first {
+                _ = try? await service.fetchNews(company: company.id, sentiment: .all)
+            }
+        case .world:
+            await pageStores.today.load()
+        }
     }
 }
 
@@ -707,40 +689,48 @@ private struct NotificationNavigationTaskID: Equatable {
 private struct RootNavigationBar: View {
     @Binding var selection: EditorialTab
     let dynamicTarget: EditorialTab
-    let researchTarget: EditorialTab
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var accent: Color {
+        colorScheme == .dark
+            ? Color(red: 0.67, green: 0.84, blue: 0.72)
+            : Color(red: 0.22, green: 0.36, blue: 0.27)
+    }
+
+    private var selectedForeground: Color {
+        colorScheme == .dark
+            ? Color(red: 0.09, green: 0.16, blue: 0.11)
+            : .white
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            item(.world, title: "今日", icon: "globe")
+        HStack(spacing: 4) {
+            item(.world, title: "今日", icon: "list.bullet.rectangle")
             intelligenceItem
-            researchItem
-            item(.learning, title: "知识", icon: "books.vertical")
+            item(.investment, title: "研究", icon: "chart.bar.fill")
+            item(.learning, title: "知识", icon: "book")
         }
-        .frame(maxWidth: 368)
-        .frame(height: 54)
-        .background(
-            Color(uiColor: .systemBackground),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.primary.opacity(0.16), lineWidth: 0.7)
-        }
+        .frame(height: 52)
+        .padding(4)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 11)
-        .padding(.bottom, 2)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 12, y: 5)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
     private var intelligenceItem: some View {
         let isSelected = selection == .observation || selection == .signal
         let currentTab = isSelected ? selection : dynamicTarget
-        let icon = currentTab == .signal ? "waveform.path.ecg" : "list.bullet.rectangle"
+        let currentTitle = currentTab == .signal ? "信号" : "动态"
 
         return Menu {
             Picker("情报视图", selection: Binding(
                 get: { currentTab },
-                set: { select($0) }
+                set: { selection = $0 }
             )) {
                 Label("动态", systemImage: "list.bullet.rectangle")
                     .tag(EditorialTab.observation)
@@ -748,7 +738,7 @@ private struct RootNavigationBar: View {
                     .tag(EditorialTab.signal)
             }
         } label: {
-            itemLabel(title: "情报", icon: icon, isSelected: isSelected)
+            itemLabel(title: "情报", icon: "doc.on.doc", isSelected: isSelected)
         } primaryAction: {
             let destination: EditorialTab
             switch selection {
@@ -759,36 +749,11 @@ private struct RootNavigationBar: View {
             default:
                 destination = dynamicTarget
             }
-            select(destination)
+            selection = destination
         }
         .menuOrder(.fixed)
-        .accessibilityLabel("情报，当前\(currentTab.sectionTitle)")
+        .accessibilityLabel("情报，当前\(currentTitle)")
         .accessibilityHint(isSelected ? "轻点切换动态和信号，长按选择" : "轻点打开，长按选择动态或信号")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private var researchItem: some View {
-        let isSelected = EditorialTab.researchTabs.contains(selection)
-        let currentTab = isSelected ? selection : researchTarget
-
-        return Menu {
-            Picker("研究栏目", selection: Binding(
-                get: { currentTab },
-                set: { select($0) }
-            )) {
-                ForEach(EditorialTab.researchTabs, id: \.self) { tab in
-                    Label(tab.sectionTitle, systemImage: tab.researchSelectorIcon)
-                        .tag(tab)
-                }
-            }
-        } label: {
-            itemLabel(title: "研究", icon: currentTab.researchSelectorIcon, isSelected: isSelected)
-        } primaryAction: {
-            select(currentTab)
-        }
-        .menuOrder(.fixed)
-        .accessibilityLabel("研究，当前\(currentTab.sectionTitle)")
-        .accessibilityHint(isSelected ? "轻点保持当前栏目，长按选择其他研究栏目" : "轻点打开，长按选择研究栏目")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -800,7 +765,7 @@ private struct RootNavigationBar: View {
         let isSelected = selection == tab
 
         return Button {
-            select(tab)
+            selection = tab
         } label: {
             itemLabel(title: title, icon: icon, isSelected: isSelected)
         }
@@ -810,39 +775,30 @@ private struct RootNavigationBar: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func select(_ tab: EditorialTab) {
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.24, extraBounce: 0.04)) {
-            selection = tab
-        }
-    }
-
     private func itemLabel(title: String, icon: String, isSelected: Bool) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 18, weight: isSelected ? .semibold : .regular))
+                .resizable()
+                .scaledToFit()
+                .font(.system(size: 21, weight: isSelected ? .semibold : .regular))
                 .symbolRenderingMode(.monochrome)
+                .frame(width: 22, height: 22)
 
             Text(title)
-                .font(.system(size: 10, weight: isSelected ? .medium : .regular))
+                .font(.system(size: 11, weight: isSelected ? .medium : .regular))
 
-            Circle()
-                .fill(isSelected ? InvestmentDesign.accent : Color.clear)
-                .frame(width: 3, height: 3)
         }
         .foregroundStyle(
             isSelected
-                ? InvestmentDesign.accent
-                : Color.primary.opacity(0.68)
+                ? selectedForeground
+                : Color.secondary
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
         .background {
             if isSelected {
-                Capsule()
-                    .fill(InvestmentDesign.accent.opacity(0.1))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
+                Capsule().fill(accent)
             }
         }
+        .contentShape(Capsule())
     }
 }

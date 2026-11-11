@@ -5,13 +5,21 @@ struct InstitutionResearchResponse: Decodable {
     let data: InstitutionResearchPayload
 }
 
+enum InstitutionResearchAge: String {
+    case recent = "近期观点", historical = "历史观点", unverified = "日期待核验"
+}
+
 struct InstitutionResearchPayload: Decodable {
     let institutionsCount: Int
     let items: [InstitutionResearchItem]
     let updatedAt: Date?
+    let institutionShortNames: [String]
 
-    var chronologicalItems: [InstitutionResearchItem] {
-        items.sorted { $0.publishedOn == $1.publishedOn ? $0.id < $1.id : $0.publishedOn > $1.publishedOn }
+    init(institutionsCount: Int, items: [InstitutionResearchItem], updatedAt: Date?) {
+        self.institutionsCount = institutionsCount
+        self.items = items.sorted { $0.publishedOn == $1.publishedOn ? $0.id < $1.id : $0.publishedOn > $1.publishedOn }
+        self.updatedAt = updatedAt
+        institutionShortNames = Array(Set(items.map(\.institutionShortName))).sorted()
     }
 }
 
@@ -23,6 +31,7 @@ struct InstitutionResearchItem: Decodable, Identifiable, Hashable {
     let originalTitle: String
     let summary: String
     let publishedOn: String
+    private let publicationDate: Date?
     let sourceType: String
     let categories: [String]
     let metrics: [InstitutionResearchMetric]
@@ -49,11 +58,24 @@ struct InstitutionResearchItem: Decodable, Identifiable, Hashable {
         default: sourceType
         }
     }
+
+    func age(now: Date = Date()) -> InstitutionResearchAge {
+        guard let publicationDate, publicationDate <= now else { return .unverified }
+        return now.timeIntervalSince(publicationDate) > 30 * 86400 ? .historical : .recent
+    }
+
+    private static let publicationDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }
 
 extension InstitutionResearchPayload {
     private enum CodingKeys: String, CodingKey {
-        case institutionsCount, items, sources, reports, updatedAt
+        case reports, updatedAt
     }
 
     private struct ReportRecord: Decodable {
@@ -63,29 +85,24 @@ extension InstitutionResearchPayload {
         init(from decoder: Decoder) throws {
             item = try InstitutionResearchItem(from: decoder)
             let values = try decoder.container(keyedBy: CodingKeys.self)
-            isActive = try values.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+            isActive = try values.decode(Bool.self, forKey: .isActive)
         }
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        if values.contains(.items) {
-            items = try values.decode([InstitutionResearchItem].self, forKey: .items)
-        } else {
-            items = try values.decode([ReportRecord].self, forKey: .reports)
-                .filter(\.isActive).map(\.item)
-        }
-        institutionsCount = try values.decodeIfPresent(Int.self, forKey: .institutionsCount)
-            ?? Set(items.map(\.institution)).count
+        let items = try values.decode([ReportRecord].self, forKey: .reports)
+            .filter(\.isActive).map(\.item)
+        let institutionsCount = Set(items.map(\.institution)).count
         let timestamp = try values.decodeIfPresent(String.self, forKey: .updatedAt)
-        updatedAt = marketISODate(timestamp)
+        self.init(institutionsCount: institutionsCount, items: items, updatedAt: marketISODate(timestamp))
     }
 }
 
 extension InstitutionResearchItem {
     private enum CodingKeys: String, CodingKey {
         case id, institution, institutionShortName, title, originalTitle, summary, publishedOn
-        case sourceType, categories, metrics, targetRevision, source, sourceTitle, sourceUrl
+        case sourceType, categories, metrics, targetRevision, sourceTitle, sourceUrl
         case isSystemSummary, presentation, originalSummary, translationStatus
     }
 
@@ -98,18 +115,15 @@ extension InstitutionResearchItem {
         originalTitle = try values.decode(String.self, forKey: .originalTitle)
         summary = try values.decode(String.self, forKey: .summary)
         publishedOn = try values.decode(String.self, forKey: .publishedOn)
+        publicationDate = Self.publicationDateFormatter.date(from: publishedOn)
         sourceType = try values.decode(String.self, forKey: .sourceType)
         categories = try values.decode([String].self, forKey: .categories)
         metrics = try values.decode([InstitutionResearchMetric].self, forKey: .metrics)
         targetRevision = try values.decodeIfPresent(InstitutionResearchTargetRevision.self, forKey: .targetRevision)
-        if let nested = try values.decodeIfPresent(InstitutionResearchSource.self, forKey: .source) {
-            source = nested
-        } else {
-            source = InstitutionResearchSource(
-                title: try values.decode(String.self, forKey: .sourceTitle),
-                url: try values.decode(URL.self, forKey: .sourceUrl)
-            )
-        }
+        source = InstitutionResearchSource(
+            title: try values.decode(String.self, forKey: .sourceTitle),
+            url: try values.decode(URL.self, forKey: .sourceUrl)
+        )
         isSystemSummary = try values.decode(Bool.self, forKey: .isSystemSummary)
         presentation = try values.decode(InstitutionResearchPresentation.self, forKey: .presentation)
         originalSummary = try values.decodeIfPresent(String.self, forKey: .originalSummary)
@@ -198,30 +212,41 @@ final class InstitutionResearchStore: ObservableObject {
 struct InstitutionResearchView: View {
     @StateObject private var store: InstitutionResearchStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @FocusState private var searchIsFocused: Bool
     @State private var selectedInstitution: String?
     @State private var scope = ResearchScope.all
     @State private var search = ""
-    private let accent = Color(red: 0.98, green: 0.36, blue: 0.12)
+    private let accent = InvestmentDesign.accent
+    private let showsCloseButton: Bool
 
     private enum ResearchScope: String, CaseIterable {
         case all = "全部", recent = "近30天", history = "历史"
     }
 
-    init() { _store = StateObject(wrappedValue: InstitutionResearchStore()) }
-    init(store: InstitutionResearchStore) { _store = StateObject(wrappedValue: store) }
+    init() {
+        _store = StateObject(wrappedValue: InstitutionResearchStore())
+        showsCloseButton = true
+    }
 
-    private var items: [InstitutionResearchItem] { store.payload?.chronologicalItems ?? [] }
-    private var institutions: [String] { Array(Set(items.map(\.institutionShortName))).sorted() }
-    private var filtered: [InstitutionResearchItem] {
-        items.filter { item in
-            let age = institutionResearchAgeLabel(item.publishedOn)
-            return (selectedInstitution == nil || item.institutionShortName == selectedInstitution)
-                && (scope == .all || (scope == .recent ? age == "近期观点" : age == "历史观点"))
+    init(store: InstitutionResearchStore, showsCloseButton: Bool = true) {
+        _store = StateObject(wrappedValue: store)
+        self.showsCloseButton = showsCloseButton
+    }
+
+    private func filteredItems(_ items: [InstitutionResearchItem]) -> [InstitutionResearchItem] {
+        guard selectedInstitution != nil || scope != .all || !search.isEmpty else { return items }
+        let now = Date()
+        return items.filter { item in
+            (selectedInstitution == nil || item.institutionShortName == selectedInstitution)
+                && (scope == .all || item.age(now: now) == (scope == .recent ? .recent : .historical))
                 && (search.isEmpty || "\(item.title) \(item.summary) \(item.originalTitle) \(item.institution)".localizedCaseInsensitiveContains(search))
         }
     }
 
     var body: some View {
+        let items = store.payload?.items ?? []
+        let filtered = filteredItems(items)
         VStack(spacing: 0) {
             filters
             if !items.isEmpty {
@@ -243,6 +268,7 @@ struct InstitutionResearchView: View {
                                 InstitutionResearchDetail(item: item)
                             } label: { row(item) }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("institution-report-\(item.id)")
                             Divider().opacity(0.45)
                         }
                         Text("中文为机器翻译，英文原文可对照。报告发布日期超过30天标为历史观点。")
@@ -256,9 +282,9 @@ struct InstitutionResearchView: View {
                     }
                     .padding(.horizontal, 18)
                 }
-                .refreshable { await store.load(force: true) }
             } else if store.isLoading {
-                Spacer(); ProgressView("正在加载研究"); Spacer()
+                ContentLoadingPlaceholder(title: "正在载入研究报告")
+                    .frame(maxHeight: .infinity, alignment: .top)
             } else {
                 ContentUnavailableView {
                     Label(store.errorMessage ?? "暂无公开研究", systemImage: "doc.text.magnifyingglass")
@@ -268,52 +294,65 @@ struct InstitutionResearchView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
-        .navigationTitle("机构观点")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("关闭", systemImage: "xmark") { dismiss() }
-                    .labelStyle(.iconOnly)
-            }
-        }
-        .searchable(text: $search, prompt: "搜索观点、机构或关键词")
+        .toolbar(.hidden, for: .navigationBar)
+        .scrollDismissesKeyboard(.interactively)
         .tint(accent)
-        .task { await store.load() }
+        .task(id: rootTabIsActive) {
+            guard rootTabIsActive else { return }
+            await store.load()
+        }
+        .onChange(of: rootTabIsActive) { _, active in
+            if !active { searchIsFocused = false }
+        }
     }
 
     private var filters: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ScrollView(.horizontal) {
+        VStack(spacing: 4) {
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("搜索观点、机构或关键词", text: $search)
+                        .focused($searchIsFocused)
+                        .font(.subheadline)
+                        .submitLabel(.search)
+                        .accessibilityIdentifier("institution-search")
+                    if !search.isEmpty {
+                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                            .accessibilityLabel("清除搜索")
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                Menu {
+                    Picker("发布时间", selection: $scope) {
+                        ForEach(ResearchScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                } label: {
+                    Label(scope == .all ? "全部时间" : scope.rawValue, systemImage: "line.3.horizontal.decrease")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("institution-time-filter")
+                if showsCloseButton {
+                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭")
+                }
+            }
+            .padding(.horizontal, 20)
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     institutionFilter(nil, title: "全部机构")
-                    ForEach(institutions, id: \.self) { name in
+                    ForEach(store.payload?.institutionShortNames ?? [], id: \.self) { name in
                         institutionFilter(name, title: institutionChineseName(name))
                     }
                 }
-            }
-            .scrollIndicators(.hidden)
-            HStack(spacing: 22) {
-                ForEach(ResearchScope.allCases, id: \.self) { option in
-                    Button { scope = option } label: {
-                        VStack(spacing: 6) {
-                            Text(option.rawValue)
-                                .font(.subheadline.weight(scope == option ? .semibold : .regular))
-                                .foregroundStyle(scope == option ? .primary : .secondary)
-                            Rectangle().fill(scope == option ? accent : .clear).frame(height: 2)
-                        }
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(scope == option ? .isSelected : [])
-                }
-                Spacer()
-                Text("官方来源").font(.caption2).foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 8)
-        .overlay(alignment: .bottom) { Divider().opacity(0.5) }
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private func institutionFilter(_ value: String?, title: String) -> some View {
@@ -322,8 +361,9 @@ struct InstitutionResearchView: View {
                 .font(.subheadline.weight(selectedInstitution == value ? .semibold : .regular))
                 .foregroundStyle(selectedInstitution == value ? accent : .secondary)
                 .padding(.horizontal, 13)
+                .frame(minHeight: 32)
+                .background(selectedInstitution == value ? accent.opacity(0.08) : Color(uiColor: .secondarySystemBackground), in: Capsule())
                 .frame(minHeight: 44)
-                .background(selectedInstitution == value ? accent.opacity(0.08) : Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selectedInstitution == value ? .isSelected : [])
@@ -354,7 +394,7 @@ struct InstitutionResearchView: View {
                 .multilineTextAlignment(.leading)
                 .lineLimit(3)
             HStack(spacing: 8) {
-                Text(institutionResearchAgeLabel(item.publishedOn))
+                Text(item.age().rawValue)
                 Text("·")
                 Text(item.translationLabel)
                 Spacer()
@@ -369,7 +409,7 @@ struct InstitutionResearchView: View {
     }
 }
 
-private struct InstitutionResearchDetail: View {
+struct InstitutionResearchDetail: View {
     let item: InstitutionResearchItem
     @State private var showsOriginal = false
     private let accent = Color(red: 0.98, green: 0.36, blue: 0.12)
@@ -384,7 +424,7 @@ private struct InstitutionResearchDetail: View {
                 }
                 Text(item.displayTitle).font(.system(size: 25, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    Text(institutionResearchAgeLabel(item.publishedOn))
+                    Text(item.age().rawValue)
                     Text("·")
                     Text(item.translationLabel)
                 }
@@ -431,28 +471,20 @@ private struct InstitutionResearchDetail: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(20)
+            .padding(.bottom, 76)
         }
         .background(Color(uiColor: .systemBackground))
-        .navigationTitle("研究详情")
+        .toolbar(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .tint(accent)
     }
 }
 
-private func institutionChineseName(_ short: String) -> String {
+func institutionChineseName(_ short: String) -> String {
     switch short {
     case "GS": "高盛"
     case "MS": "摩根士丹利"
     case "JPM": "摩根大通"
     default: short
     }
-}
-
-func institutionResearchAgeLabel(_ publishedOn: String, now: Date = Date()) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    formatter.dateFormat = "yyyy-MM-dd"
-    guard let date = formatter.date(from: publishedOn), date <= now else { return "日期待核验" }
-    return now.timeIntervalSince(date) > 30 * 86400 ? "历史观点" : "近期观点"
 }
