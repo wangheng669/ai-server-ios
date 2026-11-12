@@ -210,10 +210,8 @@ end
 def reset_tester_invitation(api, app_id, build_id)
   groups = api.get("/v1/apps/#{app_id}/betaGroups", "limit" => "200",
                    "fields[betaGroups]" => "isInternalGroup,hasAccessToAllBuilds").fetch("data")
-  memberships = groups.filter_map do |group|
-    id = group.fetch("id")
-    id if target_tester_in_group(api, id)
-  end
+  group_ids = groups.map { |group| group.fetch("id") }
+  memberships = group_ids.select { |id| target_tester_in_group(api, id) }
   raise "Unexpected group memberships for the confirmed tester" unless memberships == [GROUP_ID]
 
   remove_path = "/v1/apps/#{app_id}/relationships/betaTesters"
