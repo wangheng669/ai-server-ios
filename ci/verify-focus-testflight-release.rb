@@ -40,6 +40,22 @@ class FocusTestFlightClient < TestFlightProcessing::Client
     exit 1
   end
 
+  def change_tester_membership(method, path, tester_id)
+    uri = URI.join(TestFlightProcessing::API_BASE, path)
+    request = method.new(uri)
+    request["Authorization"] = "Bearer #{token}"
+    request["Content-Type"] = "application/json"
+    request.body = JSON.generate(data: [{type: "betaTesters", id: tester_id}])
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 8, read_timeout: 15) do |http|
+      http.request(request)
+    end
+    return response.code if %w[202 204].include?(response.code)
+
+    payload = JSON.parse(response.body) rescue {}
+    codes = Array(payload["errors"]).map { |error| error["code"] }
+    raise "Apple returned HTTP #{response.code} for #{request.method}: #{codes.join(", ")}"
+  end
+
   def resend_invitation(app_id, tester_id)
     uri = URI.join(TestFlightProcessing::API_BASE, "/v1/betaTesterInvitations")
     request = Net::HTTP::Post.new(uri)
@@ -161,6 +177,68 @@ def audit_visibility(api, app_id, build)
   })
 end
 
+def target_tester_in_group(api, group_id)
+  testers = api.get("/v1/betaGroups/#{group_id}/betaTesters", "limit" => "200",
+                    "fields[betaTesters]" => "state").fetch("data")
+  testers.find { |tester| tester.fetch("id") == TESTER_ID }
+end
+
+def confirmed_tester(api)
+  tester = api.get("/v1/betaTesters/#{TESTER_ID}", "fields[betaTesters]" => "email,inviteType")
+    .dig("data", "attributes")
+  raise "Recipient does not match the confirmed account" unless masked_email(tester.fetch("email")) == "26***@qq.com"
+end
+
+def restore_internal_membership(api, build_id)
+  path = "/v1/betaGroups/#{GROUP_ID}/relationships/betaTesters"
+  last_error = nil
+  4.times do
+    begin
+      tester = target_tester_in_group(api, GROUP_ID)
+      if tester && assigned?(api, build_id)
+        return tester.dig("attributes", "state")
+      end
+      api.change_tester_membership(Net::HTTP::Post, path, TESTER_ID) unless tester
+    rescue StandardError => error
+      last_error = error.message
+    end
+    sleep 3
+  end
+  raise "Could not verify restored internal access: #{last_error || "Apple has not applied the membership"}"
+end
+
+def reset_tester_invitation(api, app_id, build_id)
+  groups = api.get("/v1/apps/#{app_id}/betaGroups", "limit" => "200",
+                   "fields[betaGroups]" => "isInternalGroup,hasAccessToAllBuilds").fetch("data")
+  memberships = groups.filter_map do |group|
+    id = group.fetch("id")
+    id if target_tester_in_group(api, id)
+  end
+  raise "Unexpected group memberships for the confirmed tester" unless memberships == [GROUP_ID]
+
+  remove_path = "/v1/apps/#{app_id}/relationships/betaTesters"
+  removal_confirmed = false
+  begin
+    status = api.change_tester_membership(Net::HTTP::Delete, remove_path, TESTER_ID)
+    8.times do
+      unless target_tester_in_group(api, GROUP_ID)
+        removal_confirmed = true
+        break
+      end
+      sleep 3
+    end
+    puts JSON.generate(removal_http_status: status, app_membership_removal_confirmed: removal_confirmed)
+  ensure
+    restored_state = restore_internal_membership(api, build_id)
+    puts JSON.generate(internal_membership_restored: true, target_tester_state: restored_state,
+                       build_number: BUILD_NUMBER, confirmed_recipient: "26***@qq.com")
+  end
+  raise "Apple did not confirm removal and reenrollment" unless removal_confirmed
+  if restored_state == "NOT_INVITED"
+    api.resend_invitation(app_id, TESTER_ID)
+  end
+end
+
 $stdout.sync = true
 api = FocusTestFlightClient.new(
   key_path: ENV.fetch("APP_STORE_CONNECT_KEY_PATH"),
@@ -178,6 +256,18 @@ case mode
 when "audit"
   audit_visibility(api, app_id, build)
   exit
+when "reset-invitation", "restore-membership"
+  raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
+    !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))
+  raise "Expected internal automatic distribution" unless group[:internal_group] && group[:automatically_receives_builds]
+  confirmed_tester(api)
+  if mode == "reset-invitation"
+    raise "Target is no longer in the expected group" unless group[:target_tester_state]
+    reset_tester_invitation(api, app_id, build.fetch("id"))
+  else
+    state = restore_internal_membership(api, build.fetch("id"))
+    puts JSON.generate(internal_membership_restored: true, target_tester_state: state, build_number: BUILD_NUMBER)
+  end
 when "reinvite", "assign-tester"
   raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
     !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))
