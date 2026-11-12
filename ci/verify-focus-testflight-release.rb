@@ -278,13 +278,16 @@ def restore_by_account(api, app_id, build, group)
                      internal_group_only: !tester_groups.dig("links", "next") &&
                        tester_groups.fetch("data").map { |entry| entry.fetch("id") } == [GROUP_ID])
 
-  testers = api.get("/v1/apps/#{app_id}/betaTesters", "limit" => "200",
-                    "fields[betaTesters]" => "state,appDevices").fetch("data")
+  testers = api.get("/v1/betaGroups/#{GROUP_ID}/betaTesters", "limit" => "200",
+                    "fields[betaTesters]" => "state").fetch("data")
   linked_devices = testers.map do |tester|
-    attributes = tester.fetch("attributes")
-    devices = attributes["appDevices"]
+    tester_id = tester.fetch("id")
+    devices = read_diagnostics do
+      detail = api.get("/v1/betaTesters/#{tester_id}", "fields[betaTesters]" => "appDevices")
+      detail.dig("data", "attributes", "appDevices")&.map { |device| device.slice("platform", "appBuildVersion") }
+    end
     { confirmed_recipient: tester.fetch("id") == TESTER_ID,
-      state: attributes["state"], devices: devices&.map { |device| device.slice("platform", "appBuildVersion") } }
+      state: tester.dig("attributes", "state"), devices: devices }
   end
   builds = api.builds(app_id)
   versions = builds.fetch("included", []).to_h { |entry| [entry.fetch("id"), entry.dig("attributes", "version")] }
