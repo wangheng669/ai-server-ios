@@ -431,7 +431,7 @@ enum AliyunRecharge {
 }
 
 struct TodayHeaderView: View {
-    private static let testFlightURL = URL(string: "https://testflight.apple.com/v1/app/6793626100")!
+    private static let testFlightURL = URL(string: "itms-beta://testflight.apple.com/v1/app/6793626100")!
 
     @Environment(\.openURL) private var openURL
     @State private var rechargeUnavailable = false

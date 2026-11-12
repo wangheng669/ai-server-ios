@@ -36,8 +36,12 @@ final class TodayPageUITests: XCTestCase {
         let balance = app.staticTexts["today-aliyun-balance"]
         XCTAssertTrue(balance.waitForExistence(timeout: 10))
         XCTAssertEqual(balance.label, "¥123.45")
-        XCTAssertTrue(app.buttons["today-app-update"].isHittable)
         XCTAssertFalse(app.scrollViews["today-overview"].exists)
+
+        let update = app.buttons["today-app-update"]
+        XCTAssertTrue(update.isHittable)
+        update.tap()
+        XCTAssertTrue(app.alerts["无法打开 TestFlight"].waitForExistence(timeout: 8))
     }
 
     private func launch(report: String?) -> XCUIApplication {
