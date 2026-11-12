@@ -41,7 +41,7 @@ final class TodayPageUITests: XCTestCase {
         let update = app.buttons["today-app-update"]
         XCTAssertTrue(update.isHittable)
         update.tap()
-        XCTAssertTrue(app.alerts["无法打开 TestFlight"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.alerts["直装入口暂不可用"].waitForExistence(timeout: 8))
     }
 
     private func launch(report: String?) -> XCUIApplication {

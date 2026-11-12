@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private enum TodayBriefStyle {
     static let canvas = Color(uiColor: .systemBackground)
@@ -431,8 +432,6 @@ enum AliyunRecharge {
 }
 
 struct TodayHeaderView: View {
-    private static let testFlightURL = URL(string: "itms-beta://testflight.apple.com/v1/app/6793626100")!
-
     @Environment(\.openURL) private var openURL
     @State private var rechargeUnavailable = false
     @State private var updateUnavailable = false
@@ -463,16 +462,27 @@ struct TodayHeaderView: View {
         } message: {
             Text("请在已安装支付宝的 iPhone 上点击余额，前往阿里云官方充值页。")
         }
-        .alert("无法打开 TestFlight", isPresented: $updateUnavailable) {
+        .alert("直装入口暂不可用", isPresented: $updateUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("请打开 TestFlight，在「焦点AI」页面查看更新。")
+            Text("请确认当前构建已配置直装入口，或稍后再试。")
         }
     }
 
     private var updateButton: some View {
         Button {
-            openURL(Self.testFlightURL) { accepted in
+            guard let value = Bundle.main.object(forInfoDictionaryKey: "FocusDirectInstallURL") as? String,
+                  var components = URLComponents(string: value),
+                  components.scheme == "https", components.host != nil else {
+                updateUnavailable = true
+                return
+            }
+            components.queryItems = [URLQueryItem(name: "open", value: UUID().uuidString)]
+            guard let url = components.url else {
+                updateUnavailable = true
+                return
+            }
+            UIApplication.shared.open(url) { accepted in
                 updateUnavailable = !accepted
             }
         } label: {
@@ -488,7 +498,7 @@ struct TodayHeaderView: View {
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
         .accessibilityIdentifier("today-app-update")
-        .accessibilityHint("打开 TestFlight 安装焦点AI 的最新版本")
+        .accessibilityHint("打开焦点AI 最新版的直装页面")
     }
 
     private func costItem(_ title: String, amount: Double?, identifier: String) -> some View {
