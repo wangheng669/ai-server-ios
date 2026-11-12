@@ -10,9 +10,9 @@ REVIEW_STATES = %w[WAITING_FOR_BETA_REVIEW IN_BETA_REVIEW READY_FOR_BETA_TESTING
 TEST_NOTES = "验证 iPhone 上首次安装与自动更新，检查首页、资讯列表及通知详情。".freeze
 
 class ExternalTestFlightClient < TestFlightProcessing::Client
-  def create(path, payload, expected_code)
+  def create(path, payload, expected_code, method: Net::HTTP::Post)
     uri = URI.join(TestFlightProcessing::API_BASE, path)
-    request = Net::HTTP::Post.new(uri)
+    request = method.new(uri)
     request["Authorization"] = "Bearer #{token}"
     request["Content-Type"] = "application/json"
     request.body = JSON.generate(payload)
@@ -33,11 +33,11 @@ def linkage(type, id)
   { type: type, id: id }
 end
 
-def build_info(api, app_id)
+def build_info(api, app_id, build_number: BUILD)
   response = api.builds(app_id)
   versions = response.fetch("included", []).to_h { |item| [item.fetch("id"), item.dig("attributes", "version")] }
   response.fetch("data").find do |item|
-    item.dig("attributes", "version") == BUILD &&
+    item.dig("attributes", "version") == build_number &&
       versions[item.dig("relationships", "preReleaseVersion", "data", "id")] == VERSION
   end
 end
@@ -195,6 +195,36 @@ def write_invitation(api, app_id)
   puts JSON.generate(private_invitation_saved: true, tester_limit: 1, build: BUILD, external_build_state: state)
 end
 
+def close_external_testing(api, app_id)
+  group = external_group(api, app_id) || raise("The external group is missing")
+  group_id = group.fetch("id")
+  raise "Expected the dedicated external group" if group.dig("attributes", "isInternalGroup")
+  build = build_info(api, app_id) || raise("Build 12 is missing")
+  build_id = build.fetch("id")
+  ids = group_build_ids(api, group_id)
+  raise "The group has a different build" unless (ids - [build_id]).empty?
+  if group.dig("attributes", "publicLinkEnabled")
+    api.patch("/v1/betaGroups/#{group_id}", data: {
+      type: "betaGroups", id: group_id, attributes: { publicLinkEnabled: false }
+    })
+  end
+  unless ids.empty?
+    api.create("/v1/betaGroups/#{group_id}/relationships/builds",
+               { data: [linkage("builds", build_id)] }, "204", method: Net::HTTP::Delete)
+  end
+  group = external_group(api, app_id)
+  link_closed = group.dig("attributes", "publicLinkEnabled") == false
+  detached = !group_build_ids(api, group_id).include?(build_id)
+  raise "Apple did not confirm external testing was closed" unless link_closed && detached
+  details = beta_details(api, build_id).fetch("attributes")
+  internal = build_info(api, app_id, build_number: "11")
+  internal_state = internal ? beta_details(api, internal.fetch("id")).dig("attributes", "internalBuildState") : nil
+  puts JSON.generate(external_invitation_enabled: false, build_12_removed_from_external_group: true,
+                     build_12_external_review: details["externalBuildState"],
+                     build_12_expired: build.dig("attributes", "expired"),
+                     build_11_internal_testing: internal_state)
+end
+
 $stdout.sync = true
 api = ExternalTestFlightClient.new(
   key_path: ENV.fetch("APP_STORE_CONNECT_KEY_PATH"),
@@ -220,6 +250,8 @@ when "audit"
     details[:group_build_count] = group_build_ids(api, group_id).size
   end
   puts JSON.generate(**details, **review_metadata(api, app_id))
+when "withdraw"
+  close_external_testing(api, app_id)
 when "preflight"
   raise "Build 12 is already registered; use the review operation" if build_info(api, app_id)
   group = external_group(api, app_id)

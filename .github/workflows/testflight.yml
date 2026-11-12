@@ -6,7 +6,7 @@ on:
       operation:
         description: Inspect or publish Focus 1.0.23 (12)
         type: choice
-        options: [audit, upload, review, issue-link]
+        options: [audit, withdraw]
         default: audit
       archive_path:
         description: Verified archive in the local iOS release cache
