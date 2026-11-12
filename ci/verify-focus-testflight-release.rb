@@ -47,9 +47,9 @@ def group_status(api)
 end
 
 def assigned?(api, build_id)
-  groups = api.get("/v1/builds/#{build_id}/betaGroups", "limit" => "200",
-                   "fields[betaGroups]" => "isInternalGroup").fetch("data")
-  groups.any? { |group| group.fetch("id") == GROUP_ID }
+  builds = api.get("/v1/betaGroups/#{GROUP_ID}/builds", "limit" => "200",
+                   "fields[builds]" => "version").fetch("data")
+  builds.any? { |build| build.fetch("id") == build_id }
 end
 
 def processed_build(api, app_id)
