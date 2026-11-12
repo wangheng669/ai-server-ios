@@ -171,9 +171,7 @@ def write_invitation(api, app_id)
   attributes = group.fetch("attributes")
   id = valid_build(api, app_id)
   state = beta_details(api, id).dig("attributes", "externalBuildState")
-  unless %w[READY_FOR_BETA_TESTING IN_BETA_TESTING].include?(state)
-    raise "Apple has not approved the external build (#{state})"
-  end
+  raise "The build is not in external review or testing (#{state})" unless REVIEW_STATES.include?(state)
   archive = ENV.fetch("ARCHIVE_PATH")
   expected_path = %r{\A/Users/wang/\.cache/ai-server-ios/testflight-1\.0\.23-build12\.[A-Za-z0-9]+/VerifiedAIServerClient\.xcarchive\.zip\z}
   raise "Expected the local release archive" unless archive.match?(expected_path) && File.file?(archive) && !File.symlink?(archive)
@@ -194,7 +192,7 @@ def write_invitation(api, app_id)
   File.open(File.join(File.dirname(archive), "private-testflight-invite.json"), "w", 0o600) do |file|
     file.write(JSON.generate(url: url, tester_limit: 1, version: VERSION, build: BUILD))
   end
-  puts JSON.generate(private_invitation_saved: true, tester_limit: 1, build: BUILD)
+  puts JSON.generate(private_invitation_saved: true, tester_limit: 1, build: BUILD, external_build_state: state)
 end
 
 $stdout.sync = true
