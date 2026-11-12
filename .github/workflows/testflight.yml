@@ -1,13 +1,8 @@
-name: Upload verified Focus build 16 to TestFlight
+name: Export Focus Ad Hoc for the registered iPhone
 
 on:
   workflow_dispatch:
     inputs:
-      operation:
-        description: Inspect or publish Focus 1.0.24 (16)
-        type: choice
-        options: [audit, upload, verify]
-        default: audit
       archive_path:
         description: Verified archive in the local iOS release cache
         type: string
@@ -15,10 +10,10 @@ on:
         description: SHA-256 of the verified archive
         type: string
 
-run-name: Focus 1.0.24 (16) TestFlight — ${{ inputs.operation }}
+run-name: Export signed Focus Ad Hoc package
 
 concurrency:
-  group: ios-testflight-upload
+  group: focus-adhoc-signing
   cancel-in-progress: false
 
 permissions:
@@ -31,7 +26,6 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       TESTED_COMMIT: 3e99b6ac8df759e87be9f588154d28d5c7cf433a
-      OPERATION: ${{ inputs.operation }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,7 +33,6 @@ jobs:
           persist-credentials: false
 
       - name: Confirm the signed archive identity
-        if: inputs.operation == 'upload'
         shell: bash
         env:
           ARCHIVE_PATH: ${{ inputs.archive_path }}
@@ -49,10 +42,10 @@ jobs:
           umask 077
           git merge-base --is-ancestor "$TESTED_COMMIT" HEAD
           test "$(plutil -extract ProductBuildVersion raw -o - "$DEVELOPER_DIR/../version.plist")" = 17F113
-          [[ "$ARCHIVE_PATH" =~ ^/Users/wang/\.cache/ai-server-ios/testflight-1\.0\.24-build16\.[A-Za-z0-9]+/VerifiedAIServerClient\.xcarchive\.zip$ ]]
+          [[ "$ARCHIVE_PATH" =~ ^/Users/wang/\.cache/ai-server-ios/focus-adhoc-export\.[A-Za-z0-9]+/VerifiedAIServerClient\.xcarchive\.zip$ ]]
           [[ "$ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]]
           test -f "$ARCHIVE_PATH" && test ! -L "$ARCHIVE_PATH"
-          release_dir="$(mktemp -d "$RUNNER_TEMP/focus-build16.XXXXXX")"
+          release_dir="$(mktemp -d "$RUNNER_TEMP/focus-adhoc-export.XXXXXX")"
           printf 'FOCUS_RELEASE_DIR=%s\n' "$release_dir" >> "$GITHUB_ENV"
           cp "$ARCHIVE_PATH" "$release_dir/archive.zip"
           printf '%s  %s\n' "$ARCHIVE_SHA256" "$release_dir/archive.zip" | shasum -a 256 -c -
@@ -62,33 +55,37 @@ jobs:
           codesign -dv "$app" 2>&1 | grep -Fx 'TeamIdentifier=9M7P4VLHY3'
           test "$(plutil -extract CFBundleIdentifier raw -o - "$app/Info.plist")" = com.wangheng.aiserverclient
           for component in "$app" "$app"/PlugIns/*.appex; do
-            test "$(plutil -extract CFBundleShortVersionString raw -o - "$component/Info.plist")" = 1.0.24
-            test "$(plutil -extract CFBundleVersion raw -o - "$component/Info.plist")" = 16
+            test "$(plutil -extract CFBundleVersion raw -o - "$component/Info.plist")" = "$(plutil -extract CFBundleVersion raw -o - "$app/Info.plist")"
           done
 
-      - name: Check account and publish to TestFlight
+      - name: Sign and export for registered devices
         shell: bash
         env:
+          ARCHIVE_PATH: ${{ inputs.archive_path }}
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
         run: |
           set -euo pipefail
           umask 077
-          key_dir="$(mktemp -d "$RUNNER_TEMP/focus-build16-key.XXXXXX")"
+          key_dir="$(mktemp -d "$RUNNER_TEMP/focus-adhoc-export-key.XXXXXX")"
           trap 'rm -f -- "$key_dir/AuthKey.p8"; rmdir "$key_dir"' EXIT
           export APP_STORE_CONNECT_KEY_PATH="$key_dir/AuthKey.p8"
           printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$APP_STORE_CONNECT_KEY_PATH"
           unset APP_STORE_CONNECT_PRIVATE_KEY_BASE64
-          if [[ "$OPERATION" != upload ]]; then
-            ruby ci/verify-focus-testflight-release.rb "$OPERATION"
-            exit
-          fi
-          ruby ci/verify-focus-testflight-release.rb preflight
           options="$FOCUS_RELEASE_DIR/export-options.plist"
-          cp ci/ExportOptions-TestFlight.plist "$options"
-          plutil -replace manageAppVersionAndBuildNumber -bool NO "$options"
-          plutil -insert testFlightInternalTestingOnly -bool YES "$options"
+          python3 - "$options" <<'PYTHON'
+          import json, pathlib, plistlib, sys
+          path = pathlib.Path.home() / ".local/share/focus-direct-install/config.json"
+          config = json.loads(path.read_text())
+          pathlib.Path(sys.argv[1]).write_bytes(plistlib.dumps({
+              "destination": "export",
+              "method": "release-testing",
+              "signingStyle": "automatic",
+              "teamID": config["team_id"],
+              "manageAppVersionAndBuildNumber": False,
+          }))
+          PYTHON
           xcodebuild -exportArchive \
             -archivePath "$FOCUS_RELEASE_DIR/AIServerClient.xcarchive" \
             -exportOptionsPlist "$options" \
@@ -97,12 +94,16 @@ jobs:
             -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
-          ruby ci/verify-focus-testflight-release.rb verify
+          ipa=("$FOCUS_RELEASE_DIR"/export/*.ipa)
+          test "${#ipa[@]}" -eq 1 && test -f "${ipa[0]}"
+          output="$(dirname "$ARCHIVE_PATH")"
+          test ! -e "$output/Focus-AdHoc.ipa"
+          install -m 0600 "${ipa[0]}" "$output/Focus-AdHoc.ipa"
 
       - name: Remove staged archive
         if: always()
         shell: bash
         run: |
-          if [[ -n "${FOCUS_RELEASE_DIR:-}" && "$FOCUS_RELEASE_DIR" == "$RUNNER_TEMP"/focus-build16.* ]]; then
+          if [[ -n "${FOCUS_RELEASE_DIR:-}" && "$FOCUS_RELEASE_DIR" == "$RUNNER_TEMP"/focus-adhoc-export.* ]]; then
             rm -rf -- "$FOCUS_RELEASE_DIR"
           fi
