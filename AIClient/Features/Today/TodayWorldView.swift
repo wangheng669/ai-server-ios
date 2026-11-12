@@ -173,7 +173,11 @@ struct TodayWorldView: View {
         let preparation = PreparationRequest(ids: preparationIDs, baseURL: ServerConfiguration.currentURL)
         NavigationStack {
             VStack(spacing: 0) {
-                balanceView
+                TodayHeaderView(
+                    waitingForRechargeReturn: $waitingForRechargeReturn,
+                    balance: store.balance,
+                    isLoading: store.isLoading
+                )
                 Group {
                     if let brief = store.brief {
                         reportView(brief)
@@ -249,14 +253,6 @@ struct TodayWorldView: View {
         case .highlight(let event):
             TodayEventDetailView(event: event)
         }
-    }
-
-    private var balanceView: some View {
-        TodayAliyunBalanceView(
-            waitingForRechargeReturn: $waitingForRechargeReturn,
-            balance: store.balance,
-            isLoading: store.isLoading
-        )
     }
 }
 

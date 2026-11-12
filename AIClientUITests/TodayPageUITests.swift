@@ -12,6 +12,7 @@ final class TodayPageUITests: XCTestCase {
         XCTAssertEqual(balance.label, "¥123.45")
         XCTAssertEqual(app.staticTexts["today-model-cost"].label, "¥0.50")
         XCTAssertTrue(app.scrollViews["today-overview"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["today-app-update"].isHittable)
 
         let article = app.buttons["today-highlight-0"]
         XCTAssertTrue(article.waitForExistence(timeout: 8))
@@ -35,6 +36,7 @@ final class TodayPageUITests: XCTestCase {
         let balance = app.staticTexts["today-aliyun-balance"]
         XCTAssertTrue(balance.waitForExistence(timeout: 10))
         XCTAssertEqual(balance.label, "¥123.45")
+        XCTAssertTrue(app.buttons["today-app-update"].isHittable)
         XCTAssertFalse(app.scrollViews["today-overview"].exists)
     }
 

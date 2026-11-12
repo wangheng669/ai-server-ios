@@ -430,16 +430,22 @@ enum AliyunRecharge {
     }()
 }
 
-struct TodayAliyunBalanceView: View {
+struct TodayHeaderView: View {
+    private static let testFlightURL = URL(string: "https://testflight.apple.com/v1/app/6793626100")!
+
     @Environment(\.openURL) private var openURL
     @State private var rechargeUnavailable = false
+    @State private var updateUnavailable = false
     @Binding var waitingForRechargeReturn: Bool
     let balance: AliyunAccountBalance?
     let isLoading: Bool
 
     var body: some View {
         VStack(spacing: 8) {
-            rechargeButton
+            HStack(spacing: 12) {
+                rechargeButton
+                updateButton
+            }
             HStack(spacing: 24) {
                 costItem("今日花费", amount: balance?.usage.todayCostCNY, identifier: "today-model-cost")
                 costItem("昨日花费", amount: balance?.usage.yesterdayCostCNY, identifier: "yesterday-model-cost")
@@ -457,6 +463,32 @@ struct TodayAliyunBalanceView: View {
         } message: {
             Text("请在已安装支付宝的 iPhone 上点击余额，前往阿里云官方充值页。")
         }
+        .alert("无法打开 TestFlight", isPresented: $updateUnavailable) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("请打开 TestFlight，在「焦点AI」页面查看更新。")
+        }
+    }
+
+    private var updateButton: some View {
+        Button {
+            openURL(Self.testFlightURL) { accepted in
+                updateUnavailable = !accepted
+            }
+        } label: {
+            Label("更新", systemImage: "arrow.down.circle")
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.accentColor.opacity(0.1), in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+        .accessibilityIdentifier("today-app-update")
+        .accessibilityHint("打开 TestFlight 安装焦点AI 的最新版本")
     }
 
     private func costItem(_ title: String, amount: Double?, identifier: String) -> some View {
