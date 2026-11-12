@@ -106,13 +106,20 @@ end
 def prepare_review_notes(api, build_id)
   notes = api.get("/v1/builds/#{build_id}/betaBuildLocalizations", "limit" => "50",
                   "fields[betaBuildLocalizations]" => "locale,whatsNew").fetch("data")
-  return if notes.any? { |item| item.dig("attributes", "locale") == "zh-Hans" &&
-    !item.dig("attributes", "whatsNew").to_s.strip.empty? }
+  localized = notes.find { |item| item.dig("attributes", "locale") == "zh-Hans" }
+  if localized
+    return unless localized.dig("attributes", "whatsNew").to_s.strip.empty?
 
-  api.create("/v1/betaBuildLocalizations", { data: {
-    type: "betaBuildLocalizations", attributes: { locale: "zh-Hans", whatsNew: TEST_NOTES },
-    relationships: { build: { data: linkage("builds", build_id) } }
-  } }, "201")
+    id = localized.fetch("id")
+    api.patch("/v1/betaBuildLocalizations/#{id}", data: {
+      type: "betaBuildLocalizations", id: id, attributes: { whatsNew: TEST_NOTES }
+    })
+  else
+    api.create("/v1/betaBuildLocalizations", { data: {
+      type: "betaBuildLocalizations", attributes: { locale: "zh-Hans", whatsNew: TEST_NOTES },
+      relationships: { build: { data: linkage("builds", build_id) } }
+    } }, "201")
+  end
 end
 
 def start_review(api, app_id, group)
@@ -122,20 +129,18 @@ def start_review(api, app_id, group)
   details = beta_details(api, id)
   state = details.dig("attributes", "externalBuildState")
   raise "Apple marked the build as #{state}" if %w[REJECTED BETA_REJECTED EXPIRED NOT_APPLICABLE].include?(state)
-  others = group_build_ids(api) - [id]
-  raise "The external group already contains another build" unless others.empty?
-  if !REVIEW_STATES.include?(state)
+  group_ids = group_build_ids(api)
+  raise "The external group already contains another build" unless (group_ids - [id]).empty?
+  unless group_ids.include?(id)
     prepare_review_notes(api, id)
-    api.create("/v1/betaGroups/#{GROUP_ID}/relationships/builds",
-               { data: [linkage("builds", id)] }, "204") unless group_build_ids(api).include?(id)
-    details = beta_details(api, id)
-    state = details.dig("attributes", "externalBuildState")
-    if !REVIEW_STATES.include?(state)
-      api.create("/v1/betaAppReviewSubmissions", { data: {
-        type: "betaAppReviewSubmissions",
-        relationships: { build: { data: linkage("builds", id) } }
-      } }, "201")
-    end
+    api.create("/v1/betaGroups/#{GROUP_ID}/relationships/builds", { data: [linkage("builds", id)] }, "204")
+  end
+  state = beta_details(api, id).dig("attributes", "externalBuildState")
+  unless REVIEW_STATES.include?(state)
+    api.create("/v1/betaAppReviewSubmissions", { data: {
+      type: "betaAppReviewSubmissions",
+      relationships: { build: { data: linkage("builds", id) } }
+    } }, "201")
   end
   8.times do
     state = beta_details(api, id).dig("attributes", "externalBuildState")
