@@ -27,8 +27,10 @@ class FocusTestFlightClient < TestFlightProcessing::Client
       return payload.fetch("data").fetch("id")
     end
 
-    codes = Array(payload["errors"]).map { |error| error["code"] }
-    raise "Apple declined internal enrollment by email (HTTP #{response.code}: #{codes.join(", ")})"
+    errors = Array(payload["errors"]).map do |error|
+      [error["code"], error["detail"].to_s.gsub(/[^\s]+@[^\s]+/, "[email]")[0, 220]]
+    end
+    raise "Apple declined internal enrollment by email (HTTP #{response.code}: #{JSON.generate(errors)})"
   end
 
   def associate_build(group_id, build_id)
@@ -275,6 +277,21 @@ def restore_by_account(api, app_id, build, group)
                      account_tester_group_count: tester_groups.fetch("data").size,
                      internal_group_only: !tester_groups.dig("links", "next") &&
                        tester_groups.fetch("data").map { |entry| entry.fetch("id") } == [GROUP_ID])
+
+  testers = api.get("/v1/apps/#{app_id}/betaTesters", "limit" => "200",
+                    "fields[betaTesters]" => "state,appDevices").fetch("data")
+  linked_devices = testers.map do |tester|
+    attributes = tester.fetch("attributes")
+    devices = attributes["appDevices"]
+    { confirmed_recipient: tester.fetch("id") == TESTER_ID,
+      state: attributes["state"], devices: devices&.map { |device| device.slice("platform", "appBuildVersion") } }
+  end
+  builds = api.builds(app_id)
+  versions = builds.fetch("included", []).to_h { |entry| [entry.fetch("id"), entry.dig("attributes", "version")] }
+  active = builds.fetch("data").reject { |entry| entry.dig("attributes", "expired") }
+  puts JSON.generate(linked_devices: linked_devices, active_builds: active.map { |entry|
+    [versions[entry.dig("relationships", "preReleaseVersion", "data", "id")], entry.dig("attributes", "version")]
+  })
 
   build_id = build.fetch("id")
   raise "Expected automatic internal distribution" unless group[:internal_group] && group[:automatically_receives_builds]
