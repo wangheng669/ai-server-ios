@@ -225,6 +225,34 @@ def close_external_testing(api, app_id)
                      build_11_internal_testing: internal_state)
 end
 
+def expire_build12(api, app_id)
+  group = external_group(api, app_id) || raise("The external group is missing")
+  unless group.dig("attributes", "isInternalGroup") == false &&
+      group.dig("attributes", "publicLinkEnabled") == false &&
+      group_build_ids(api, group.fetch("id")).empty?
+    raise "The dedicated external group is still active"
+  end
+
+  build12 = build_info(api, app_id) || raise("Build 12 is missing")
+  build11 = build_info(api, app_id, build_number: "11") || raise("Build 11 is missing")
+  build12_id = build12.fetch("id")
+  build11_id = build11.fetch("id")
+  unless build11.dig("attributes", "expired") == false &&
+      beta_details(api, build11_id).dig("attributes", "internalBuildState") == "IN_BETA_TESTING"
+    raise "Build 11 must be available for internal testing"
+  end
+
+  api.expire_build(build12_id) unless build12.dig("attributes", "expired")
+  build12 = api.get("/v1/builds/#{build12_id}", "fields[builds]" => "expired").fetch("data")
+  raise "Apple did not confirm build 12 expired" unless build12.dig("attributes", "expired") == true
+  details = beta_details(api, build12_id).fetch("attributes")
+  build11_state = beta_details(api, build11_id).dig("attributes", "internalBuildState")
+  raise "Build 11 is no longer available for internal testing" unless build11_state == "IN_BETA_TESTING"
+  puts JSON.generate(build_12_expired: true, build_12_external_state: details["externalBuildState"],
+                     build_12_internal_state: details["internalBuildState"],
+                     build_11_internal_testing: build11_state)
+end
+
 $stdout.sync = true
 api = ExternalTestFlightClient.new(
   key_path: ENV.fetch("APP_STORE_CONNECT_KEY_PATH"),
@@ -252,6 +280,8 @@ when "audit"
   puts JSON.generate(**details, **review_metadata(api, app_id))
 when "withdraw"
   close_external_testing(api, app_id)
+when "expire-build12"
+  expire_build12(api, app_id)
 when "preflight"
   raise "Build 12 is already registered; use the review operation" if build_info(api, app_id)
   group = external_group(api, app_id)
