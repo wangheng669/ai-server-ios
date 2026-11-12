@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and publish 焦点 for the device in the local direct-install configuration."""
+"""Prepare or publish an Ad Hoc build of 焦点 for the registered iPhone."""
 
 import argparse
 import fcntl
@@ -80,59 +80,84 @@ def build_app(work, config, entry_url, version, build):
             "CODE_SIGN_STYLE=Automatic", "COMPILER_INDEX_STORE_ENABLE=NO",
             f"MARKETING_VERSION={version}", f"CURRENT_PROJECT_VERSION={build}",
         ], cwd=source, stdout=log, stderr=subprocess.STDOUT)
-    return archive, source / "AIClient/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
+    return archive
 
 
-def export_app(work, config, archive, assets):
-    options = work / "ExportOptions.plist"
-    options.write_bytes(plistlib.dumps({
-        "destination": "export",
-        "method": "debugging",
-        "signingStyle": "automatic",
-        "stripSwiftSymbols": True,
-        "teamID": config["team_id"],
-        "manifest": {
-            "appURL": assets["software-package"],
-            "displayImageURL": assets["display-image"],
-            "fullSizeImageURL": assets["full-size-image"],
-        },
-    }))
-    export = work / "export"
-    with (work / "export.log").open("wb") as log:
-        command([
-            "xcodebuild", "-exportArchive", "-archivePath", str(archive),
-            "-exportOptionsPlist", str(options), "-exportPath", str(export),
-        ], stdout=log, stderr=subprocess.STDOUT)
-    ipa, = export.glob("*.ipa")
-    return ipa, export / "manifest.plist"
+def prepare_archive(config, entry_url, version, build):
+    WORK_ROOT.mkdir(exist_ok=True, parents=True)
+    work = Path(tempfile.mkdtemp(prefix="focus-adhoc-build.", dir=WORK_ROOT))
+    print(f"Building {version} ({build}). Logs: {work}", flush=True)
+    archive = build_app(work, config, entry_url, version, build)
+    stage = Path(tempfile.mkdtemp(prefix="focus-adhoc-export.", dir=WORK_ROOT))
+    archive_zip = stage / "VerifiedAIServerClient.xcarchive.zip"
+    command(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", archive, archive_zip])
+    print(f"archive_path={archive_zip}")
+    print(f"archive_sha256={sha256(archive_zip)}")
+
+
+def component_plist(args):
+    return plistlib.loads(command(args, capture_output=True).stdout)
 
 
 def verify_app(work, ipa, config, entry_url, version, build):
     verification = work / "verify-ipa"
     verification.mkdir()
-    command(["ditto", "-x", "-k", str(ipa), str(verification)])
+    command(["ditto", "-x", "-k", ipa, verification])
     app, = (verification / "Payload").glob("*.app")
-    command(["codesign", "--verify", "--deep", "--strict", str(app)])
+    command(["codesign", "--verify", "--deep", "--strict", app])
     extensions = sorted((app / "PlugIns").glob("*.appex"))
-    require(len(extensions) == 2, "Expected both notification extensions")
-    expiry = []
-    for component in [app, *extensions]:
+    expected_ids = {
+        BUNDLE_ID,
+        BUNDLE_ID + ".NotificationContentExtension",
+        BUNDLE_ID + ".NotificationServiceExtension",
+    }
+    verified_ids = set()
+    for index, component in enumerate([app, *extensions]):
         info = plistlib.loads((component / "Info.plist").read_bytes())
+        bundle_id = info["CFBundleIdentifier"]
+        require(bundle_id in expected_ids - verified_ids, f"Unexpected app identifier: {bundle_id}")
+        verified_ids.add(bundle_id)
         require((info["CFBundleShortVersionString"], info["CFBundleVersion"]) == (version, str(build)),
-                f"Version mismatch in {component.name}")
-        profile = plistlib.loads(command(
-            ["security", "cms", "-D", "-i", str(component / "embedded.mobileprovision")],
-            capture_output=True,
-        ).stdout)
+                f"Version mismatch in {bundle_id}")
+        profile = component_plist(["security", "cms", "-D", "-i", component / "embedded.mobileprovision"])
+        signed = component_plist(["codesign", "-d", "--entitlements", ":-", component])
+        allowed = profile["Entitlements"]
         require(profile["ProvisionedDevices"] == [config["device_udid"]],
-                f"Unexpected device list in {component.name}")
-        require(profile["TeamIdentifier"] == [config["team_id"]], f"Unexpected team in {component.name}")
-        expiry.append(profile["ExpirationDate"].replace(tzinfo=timezone.utc))
+                f"Unexpected device list in {bundle_id}")
+        require(profile["TeamIdentifier"] == [config["team_id"]] and not profile.get("ProvisionsAllDevices"),
+                f"Unexpected profile team or distribution type in {bundle_id}")
+        require(profile["ExpirationDate"].replace(tzinfo=timezone.utc) > datetime.now(timezone.utc),
+                f"Expired profile in {bundle_id}")
+        app_id = config["team_id"] + "." + bundle_id
+        for entitlements in (signed, allowed):
+            require(entitlements.get("application-identifier") == app_id, f"Unexpected App ID in {bundle_id}")
+            require(not entitlements.get("get-task-allow") and not entitlements.get("beta-reports-active"),
+                    f"Expected Ad Hoc distribution in {bundle_id}")
+        certificate_prefix = verification / f"certificate-{index}-"
+        command(["codesign", "-d", f"--extract-certificates={certificate_prefix}", component],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        leaf = Path(str(certificate_prefix) + "0").read_bytes()
+        require(leaf in profile["DeveloperCertificates"], f"Signing certificate is not in profile for {bundle_id}")
         if component == app:
-            require(info["CFBundleIdentifier"] == BUNDLE_ID, "Unexpected app identifier")
+            require(bundle_id == BUNDLE_ID, "Unexpected main application identifier")
             require(info["FocusDirectInstallURL"] == entry_url, "The app must open the fixed install page")
-            require(profile["Entitlements"]["aps-environment"] == "development", "Unexpected push environment")
-    require(min(expiry) > datetime.now(timezone.utc), "The device profiles have expired")
+            require(signed.get("aps-environment") == allowed.get("aps-environment") == "production",
+                    "Expected production push notifications for Ad Hoc distribution")
+        print(f"Verified Ad Hoc signature and registered device: {bundle_id}", flush=True)
+    require(verified_ids == expected_ids, "Expected both notification extensions")
+
+
+def install_manifest(assets, version):
+    return plistlib.dumps({"items": [{
+        "assets": [{"kind": kind, "url": url} for kind, url in assets.items()],
+        "metadata": {
+            "bundle-identifier": BUNDLE_ID,
+            "bundle-version": version,
+            "kind": "software",
+            "platform-identifier": "com.apple.platform.iphoneos",
+            "title": "焦点",
+        },
+    }]})
 
 
 INSTALL_PAGE = """<!doctype html>
@@ -245,6 +270,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
     parser.add_argument("--build", required=True, type=int)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--prepare", action="store_true", help="Build the archive for the Ad Hoc signer")
+    action.add_argument("--signed-ipa", type=Path, help="Verify and publish this signed Ad Hoc package")
     args = parser.parse_args()
     target_version = version_key(args.version, args.build)
     require(not CONFIG.stat().st_mode & 0o077, "Direct-install configuration must be private")
@@ -267,17 +295,24 @@ def main():
             current = json.loads(latest.read_bytes())
             require(target_version > version_key(current["version"], current["build"]),
                     "The direct-install page already serves this build or a newer one")
+        if args.prepare:
+            prepare_archive(config, entry_url, args.version, args.build)
+            return
         WORK_ROOT.mkdir(exist_ok=True, parents=True)
-        work = Path(tempfile.mkdtemp(prefix="focus-direct-", dir=WORK_ROOT))
-        print(f"Building {args.version} ({args.build}). Logs: {work}", flush=True)
-        archive, icon = build_app(work, config, entry_url, args.version, args.build)
+        work = Path(tempfile.mkdtemp(prefix="focus-adhoc-publish.", dir=WORK_ROOT))
+        ipa = work / "Focus-AdHoc.ipa"
+        shutil.copyfile(args.signed_ipa, ipa)
+        verify_app(work, ipa, config, entry_url, args.version, args.build)
+        if latest.exists():
+            shutil.copyfile(latest, work / "previous-latest.json")
         package = channel / f"build-{args.version}-{args.build}-{secrets.token_hex(8)}"
         base = f"{config['public_origin']}/img/{channel_name}/{package.name}/"
         assets = {kind: base + file for kind, file in {
             "software-package": "Focus.ipa", "display-image": "icon-57.png", "full-size-image": "icon-512.png",
         }.items()}
-        ipa, manifest = export_app(work, config, archive, assets)
-        verify_app(work, ipa, config, entry_url, args.version, args.build)
+        manifest = work / "manifest.plist"
+        manifest.write_bytes(install_manifest(assets, args.version))
+        icon = PROJECT / "AIClient/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
         publish(work, channel, entry_url, package, base, assets, ipa, manifest, icon, args.version, args.build)
         print(f"Published {args.version} ({args.build}): {entry_url}", flush=True)
 

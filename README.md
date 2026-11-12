@@ -39,6 +39,8 @@ GitHub `main` 是稳定代码源。日常任务默认直接在 `main` 开发，�
 
 ## iPhone 直装发布
 
-在黑苹果上提交本次改动后，从干净的工作树运行 `python3 ci/publish-direct-install.py --version 1.0.23 --build 15`。后续发布传入递增的版本和构建号。发布器将签名、导出和公网回读作为同一次操作，文件校验完成后才更新「今日 → 更新」打开的固定页面。
+在黑苹果的干净工作树准备比直装页已发布版本更新的版本和构建号，例如 `python3 ci/publish-direct-install.py --prepare --version 1.0.25 --build 17`。把输出的 `archive_path` 和 `archive_sha256` 交给 `codex/focus-adhoc-signing` 分支上的 Ad Hoc 签名任务。签名任务仅在本机导出 `Focus-AdHoc.ipa`。
+
+再用相同版本和构建号运行 `python3 ci/publish-direct-install.py --signed-ipa <签名任务导出的文件> --version 1.0.25 --build 17`。发布前核验主 App 和两个通知扩展的 Ad Hoc 签名、设备范围及推送权限，并从公网回读安装包。校验通过后，固定的「今日 → 更新」入口才会指向新版本。
 
 本机配置在 `~/.local/share/focus-direct-install/config.json`，由发布主机保管，文件权限为 `0600`。配置包括 HTTPS 公网入口 `public_origin`、静态资源目录 `public_img_root`、固定的随机目录名 `channel`、唯一的设备登记编号 `device_udid` 和签名团队 `team_id`。同一设备的后续构建继续使用同一个 `channel`。直装发布会把该页面地址写入已签名 App 的 `FocusDirectInstallURL`。
