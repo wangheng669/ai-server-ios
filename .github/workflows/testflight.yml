@@ -1,203 +1,108 @@
-name: Upload iOS app to TestFlight
+name: Upload verified Focus build 12 for external TestFlight review
 
 on:
   workflow_dispatch:
     inputs:
-      git_ref:
-        description: Branch, tag, or commit SHA to upload
-        required: false
-        default: main
+      operation:
+        description: Inspect or publish Focus 1.0.23 (12)
+        type: choice
+        options: [audit, upload, review, issue-link]
+        default: audit
+      archive_path:
+        description: Verified archive in the local iOS release cache
         type: string
-      only_if_new:
-        description: Skip when this revision was already uploaded successfully
-        required: false
-        default: false
-        type: boolean
+      archive_sha256:
+        description: SHA-256 of the verified archive
+        type: string
 
-run-name: Upload ${{ inputs.git_ref || 'main' }} to TestFlight
+run-name: Focus 1.0.23 (12) TestFlight — ${{ inputs.operation }}
 
 concurrency:
   group: ios-testflight-upload
   cancel-in-progress: false
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
-  check:
-    name: Check for a new main revision
-    runs-on:
-      - self-hosted
-      - macOS
-      - X64
-      - ios-hackintosh
-    outputs:
-      should_upload: ${{ steps.decision.outputs.should_upload }}
-    steps:
-      - name: Decide whether an upload is needed
-        id: decision
-        uses: actions/github-script@v8
-        env:
-          ONLY_IF_NEW: ${{ inputs.only_if_new }}
-        with:
-          script: |
-            if (process.env.ONLY_IF_NEW !== "true") {
-              core.setOutput("should_upload", "true");
-              return;
-            }
-
-            const workflow = await github.rest.actions.getWorkflow({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: "testflight.yml",
-            });
-            const runs = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: workflow.data.id,
-              branch: context.ref.replace("refs/heads/", ""),
-              status: "success",
-              per_page: 10,
-            });
-            const previousUpload = runs.data.workflow_runs.find(
-              (run) => run.id !== context.runId
-            );
-            const shouldUpload = previousUpload?.head_sha !== context.sha;
-            core.info(
-              shouldUpload
-                ? `Uploading new revision ${context.sha}.`
-                : `Skipping ${context.sha}; it was already uploaded successfully.`
-            );
-            core.setOutput("should_upload", String(shouldUpload));
-
-  upload:
-    name: Test, archive, and upload
-    needs: check
-    if: needs.check.outputs.should_upload == 'true'
-    runs-on:
-      - self-hosted
-      - macOS
-      - X64
-      - ios-hackintosh
-    timeout-minutes: 60
+  release:
+    runs-on: [self-hosted, macOS, X64, ios-hackintosh]
+    timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-      EXPECTED_XCODE_BUILD: 17F113
-
+      TESTED_COMMIT: 767fa05d50f05009aad06fd2f4187a35cc9a57d9
+      OPERATION: ${{ inputs.operation }}
     steps:
-      - name: Check out requested version
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.git_ref || 'main' }}
+          fetch-depth: 8
+          persist-credentials: false
 
-      - name: Verify supported Xcode
+      - name: Confirm the signed archive identity
+        if: inputs.operation == 'upload'
+        shell: bash
+        env:
+          ARCHIVE_PATH: ${{ inputs.archive_path }}
+          ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
         run: |
           set -euo pipefail
-          test -x "$DEVELOPER_DIR/usr/bin/xcodebuild"
-          actual_build="$(
-            plutil -extract ProductBuildVersion raw -o - \
-              "$DEVELOPER_DIR/../version.plist"
-          )"
-          if [[ "$actual_build" != "$EXPECTED_XCODE_BUILD" ]]; then
-            echo "Expected Xcode build $EXPECTED_XCODE_BUILD, found $actual_build."
-            exit 1
-          fi
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+          umask 077
+          git merge-base --is-ancestor "$TESTED_COMMIT" HEAD
+          test "$(plutil -extract ProductBuildVersion raw -o - "$DEVELOPER_DIR/../version.plist")" = 17F113
+          [[ "$ARCHIVE_PATH" =~ ^/Users/wang/\.cache/ai-server-ios/testflight-1\.0\.23-build12\.[A-Za-z0-9]+/VerifiedAIServerClient\.xcarchive\.zip$ ]]
+          [[ "$ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          test -f "$ARCHIVE_PATH" && test ! -L "$ARCHIVE_PATH"
+          release_dir="$(mktemp -d "$RUNNER_TEMP/focus-build12.XXXXXX")"
+          printf 'FOCUS_RELEASE_DIR=%s\n' "$release_dir" >> "$GITHUB_ENV"
+          cp "$ARCHIVE_PATH" "$release_dir/archive.zip"
+          printf '%s  %s\n' "$ARCHIVE_SHA256" "$release_dir/archive.zip" | shasum -a 256 -c -
+          ditto -x -k "$release_dir/archive.zip" "$release_dir"
+          app="$release_dir/AIServerClient.xcarchive/Products/Applications/AIServerClient.app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv "$app" 2>&1 | grep -Fx 'TeamIdentifier=9M7P4VLHY3'
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$app/Info.plist")" = com.wangheng.aiserverclient
+          for component in "$app" "$app"/PlugIns/*.appex; do
+            test "$(plutil -extract CFBundleShortVersionString raw -o - "$component/Info.plist")" = 1.0.23
+            test "$(plutil -extract CFBundleVersion raw -o - "$component/Info.plist")" = 12
+          done
 
-      - name: Prepare App Store Connect authentication
+      - name: Check external TestFlight readiness
+        shell: bash
         env:
+          ARCHIVE_PATH: ${{ inputs.archive_path }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           set -euo pipefail
-          test -n "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64"
-          test -n "$APP_STORE_CONNECT_KEY_ID"
-          test -n "$APP_STORE_CONNECT_ISSUER_ID"
-          key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$key_path"
-          chmod 600 "$key_path"
-          echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
-
-      - name: Prepare next TestFlight version
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          TESTFLIGHT_BASE_MARKETING_VERSION="$(
-            plutil -extract CFBundleShortVersionString raw -o - Config/Info.plist
-          )"
-          export TESTFLIGHT_BASE_MARKETING_VERSION
-          ruby ci/testflight-processing-notify.rb \
-            prepare "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
-
-      - name: Apply TestFlight version
-        run: |
-          set -euo pipefail
-          plutil -replace CFBundleShortVersionString \
-            -string "$TESTFLIGHT_MARKETING_VERSION" \
-            Config/Info.plist
-          echo "Building TestFlight version $TESTFLIGHT_MARKETING_VERSION."
-
-      - name: Run tests
-        run: |
-          set -o pipefail
-          ./ci/with-ios-simulator-lock.sh \
-            --label "TestFlight tests $GITHUB_RUN_ID" \
-            --wait-seconds 1200 \
-            -- xcodebuild test \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-            -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
-            CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO
-
-      - name: Create App Store archive
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -o pipefail
-          xcodebuild archive \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
-            DEVELOPMENT_TEAM=9M7P4VLHY3 \
-            CODE_SIGN_STYLE=Automatic \
-            COMPILER_INDEX_STORE_ENABLE=NO
-
-      - name: Upload archive to TestFlight
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -o pipefail
+          umask 077
+          key_dir="$(mktemp -d "$RUNNER_TEMP/focus-build12-key.XXXXXX")"
+          trap 'rm -f -- "$key_dir/AuthKey.p8"; rmdir "$key_dir"' EXIT
+          export APP_STORE_CONNECT_KEY_PATH="$key_dir/AuthKey.p8"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$APP_STORE_CONNECT_KEY_PATH"
+          unset APP_STORE_CONNECT_PRIVATE_KEY_BASE64
+          if [[ "$OPERATION" != upload ]]; then
+            ruby ci/focus-testflight-external.rb "$OPERATION"
+            exit
+          fi
+          ruby ci/focus-testflight-external.rb preflight
+          options="$FOCUS_RELEASE_DIR/export-options.plist"
+          cp ci/ExportOptions-TestFlight.plist "$options"
+          plutil -replace manageAppVersionAndBuildNumber -bool NO "$options"
           xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
-            -exportOptionsPlist ci/ExportOptions-TestFlight.plist \
-            -exportPath "$RUNNER_TEMP/TestFlightExport" \
+            -archivePath "$FOCUS_RELEASE_DIR/AIServerClient.xcarchive" \
+            -exportOptionsPlist "$options" \
+            -exportPath "$FOCUS_RELEASE_DIR/export" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+          ruby ci/focus-testflight-external.rb review
 
-      - name: Wait for App Store Connect processing and notify iOS
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ruby ci/testflight-processing-notify.rb wait "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
-
-      - name: Remove authentication key
-        if: ${{ always() }}
-        run: rm -f "$APP_STORE_CONNECT_KEY_PATH"
+      - name: Remove staged archive
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${FOCUS_RELEASE_DIR:-}" && "$FOCUS_RELEASE_DIR" == "$RUNNER_TEMP"/focus-build12.* ]]; then
+            rm -rf -- "$FOCUS_RELEASE_DIR"
+          fi
