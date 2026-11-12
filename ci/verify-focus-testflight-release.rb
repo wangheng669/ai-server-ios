@@ -21,6 +21,25 @@ class FocusTestFlightClient < TestFlightProcessing::Client
     raise "Could not associate build with internal group (HTTP #{response.code})" unless response.code == "204"
   end
 
+  def assign_individual_tester(build_id, tester_id)
+    uri = URI.join(TestFlightProcessing::API_BASE, "/v1/builds/#{build_id}/relationships/individualTesters")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{token}"
+    request["Content-Type"] = "application/json"
+    request.body = JSON.generate(data: [{type: "betaTesters", id: tester_id}])
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 30) do |http|
+      http.request(request)
+    end
+    return if response.code == "204"
+
+    payload = JSON.parse(response.body) rescue {}
+    errors = Array(payload["errors"]).map do |error|
+      {code: error["code"], detail: error["detail"].to_s.gsub(/[^\s]+@[^\s]+/, "[email]")[0, 250]}
+    end
+    puts JSON.generate(individual_assignment: "DECLINED", http_status: response.code, errors: errors)
+    exit 1
+  end
+
   def resend_invitation(app_id, tester_id)
     uri = URI.join(TestFlightProcessing::API_BASE, "/v1/betaTesterInvitations")
     request = Net::HTTP::Post.new(uri)
@@ -159,14 +178,31 @@ case mode
 when "audit"
   audit_visibility(api, app_id, build)
   exit
-when "reinvite"
+when "reinvite", "assign-tester"
   raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
     !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))
   raise "Internal membership changed" unless group[:internal_group] && group[:target_tester_state]
   tester = api.get("/v1/betaTesters/#{TESTER_ID}", "fields[betaTesters]" => "email,inviteType")
     .dig("data", "attributes")
   raise "Recipient does not match the confirmed account" unless masked_email(tester.fetch("email")) == "26***@qq.com"
-  api.resend_invitation(app_id, TESTER_ID)
+  if mode == "reinvite"
+    api.resend_invitation(app_id, TESTER_ID)
+  else
+    build_id = build.fetch("id")
+    list_individuals = -> { api.get("/v1/builds/#{build_id}/individualTesters", "limit" => "200",
+      "fields[betaTesters]" => "state").fetch("data") }
+    assigned = ->(testers) { testers.any? { |entry| entry.fetch("id") == TESTER_ID } }
+    api.assign_individual_tester(build_id, TESTER_ID) unless assigned.call(list_individuals.call)
+    4.times do
+      if assigned.call(list_individuals.call)
+        puts JSON.generate(individual_assignment: "VERIFIED", recipient: "26***@qq.com", version: MARKETING_VERSION,
+                           build: BUILD_NUMBER, internal_group_assignment: assigned?(api, build_id))
+        exit
+      end
+      sleep 3
+    end
+    raise "Apple accepted the assignment but did not list it yet"
+  end
 when "preflight"
   raise "Build number is already registered; check its delivery run before any retry" if build
   raise "Target account is not in the expected internal group" unless group[:internal_group] && group[:target_tester_state]
