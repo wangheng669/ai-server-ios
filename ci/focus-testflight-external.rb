@@ -3,7 +3,7 @@
 require_relative "testflight-processing-notify"
 
 APP_ID = "6793626100"
-GROUP_ID = "2476542b-3a15-4536-92ac-fbf8fceb69c0"
+GROUP_NAME = "焦点AI 个人测试"
 VERSION = "1.0.23"
 BUILD = "12"
 REVIEW_STATES = %w[WAITING_FOR_BETA_REVIEW IN_BETA_REVIEW READY_FOR_BETA_TESTING IN_BETA_TESTING].freeze
@@ -19,7 +19,7 @@ class ExternalTestFlightClient < TestFlightProcessing::Client
     response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 30) do |http|
       http.request(request)
     end
-    return if response.code == expected_code
+    return response.body.to_s.empty? ? nil : JSON.parse(response.body) if response.code == expected_code
 
     result = JSON.parse(response.body) rescue {}
     errors = Array(result["errors"]).map do |error|
@@ -42,19 +42,27 @@ def build_info(api, app_id)
   end
 end
 
-def external_group(api)
-  api.get("/v1/betaGroups/#{GROUP_ID}",
-          "fields[betaGroups]" => "name,isInternalGroup,publicLinkEnabled,publicLinkLimitEnabled,publicLinkLimit,publicLink")
-    .dig("data", "attributes")
+def external_group(api, app_id, create_group: false)
+  fields = "name,isInternalGroup,publicLinkEnabled,publicLinkLimitEnabled,publicLinkLimit,publicLink"
+  groups = api.get("/v1/apps/#{app_id}/betaGroups", "limit" => "200", "fields[betaGroups]" => fields)
+    .fetch("data").select { |item| item.dig("attributes", "name") == GROUP_NAME }
+  raise "More than one group uses the private testing name" if groups.size > 1
+  return groups.first unless groups.empty? && create_group
+
+  api.create("/v1/betaGroups", { data: {
+    type: "betaGroups",
+    attributes: { name: GROUP_NAME, isInternalGroup: false, publicLinkEnabled: false },
+    relationships: { app: { data: linkage("apps", app_id) } }
+  } }, "201").fetch("data")
 end
 
-def group_build_ids(api)
-  api.get("/v1/betaGroups/#{GROUP_ID}/builds", "limit" => "200",
+def group_build_ids(api, group_id)
+  api.get("/v1/betaGroups/#{group_id}/builds", "limit" => "200",
           "fields[builds]" => "version").fetch("data").map { |item| item.fetch("id") }
 end
 
-def group_tester_count(api)
-  api.get("/v1/betaGroups/#{GROUP_ID}/betaTesters", "limit" => "200",
+def group_tester_count(api, group_id)
+  api.get("/v1/betaGroups/#{group_id}/betaTesters", "limit" => "200",
           "fields[betaTesters]" => "state").fetch("data").size
 end
 
@@ -122,18 +130,21 @@ def prepare_review_notes(api, build_id)
   end
 end
 
-def start_review(api, app_id, group)
-  raise "Expected the external group with invitations closed" unless !group.fetch("isInternalGroup") && !group["publicLinkEnabled"]
-  raise "The external group has other testers" unless group_tester_count(api).zero?
+def start_review(api, app_id)
+  group = external_group(api, app_id, create_group: true)
+  group_id = group.fetch("id")
+  attributes = group.fetch("attributes")
+  raise "Expected the external group with invitations closed" unless !attributes.fetch("isInternalGroup") && !attributes["publicLinkEnabled"]
+  raise "The external group has other testers" unless group_tester_count(api, group_id).zero?
   id = valid_build(api, app_id)
   details = beta_details(api, id)
   state = details.dig("attributes", "externalBuildState")
   raise "Apple marked the build as #{state}" if %w[REJECTED BETA_REJECTED EXPIRED NOT_APPLICABLE].include?(state)
-  group_ids = group_build_ids(api)
+  group_ids = group_build_ids(api, group_id)
   raise "The external group already contains another build" unless (group_ids - [id]).empty?
   unless group_ids.include?(id)
     prepare_review_notes(api, id)
-    api.create("/v1/betaGroups/#{GROUP_ID}/relationships/builds", { data: [linkage("builds", id)] }, "204")
+    api.create("/v1/betaGroups/#{group_id}/relationships/builds", { data: [linkage("builds", id)] }, "204")
   end
   state = beta_details(api, id).dig("attributes", "externalBuildState")
   unless REVIEW_STATES.include?(state)
@@ -144,7 +155,7 @@ def start_review(api, app_id, group)
   end
   8.times do
     state = beta_details(api, id).dig("attributes", "externalBuildState")
-    if REVIEW_STATES.include?(state) && group_build_ids(api).include?(id)
+    if REVIEW_STATES.include?(state) && group_build_ids(api, group_id).include?(id)
       puts JSON.generate(review_build: VERSION, build: BUILD, external_build_state: state,
                          assigned_to_external_group: true, invitations_open: false)
       return
@@ -154,7 +165,10 @@ def start_review(api, app_id, group)
   raise "Apple has not confirmed the external review state (#{state})"
 end
 
-def write_invitation(api, app_id, group)
+def write_invitation(api, app_id)
+  group = external_group(api, app_id) || raise("External group does not exist")
+  group_id = group.fetch("id")
+  attributes = group.fetch("attributes")
   id = valid_build(api, app_id)
   state = beta_details(api, id).dig("attributes", "externalBuildState")
   unless %w[READY_FOR_BETA_TESTING IN_BETA_TESTING].include?(state)
@@ -163,15 +177,15 @@ def write_invitation(api, app_id, group)
   archive = ENV.fetch("ARCHIVE_PATH")
   expected_path = %r{\A/Users/wang/\.cache/ai-server-ios/testflight-1\.0\.23-build12\.[A-Za-z0-9]+/VerifiedAIServerClient\.xcarchive\.zip\z}
   raise "Expected the local release archive" unless archive.match?(expected_path) && File.file?(archive) && !File.symlink?(archive)
-  raise "Expected only build 12 in the external group" unless group_build_ids(api) == [id] && !group.fetch("isInternalGroup")
-  unless group["publicLinkEnabled"]
-    raise "External group already has a tester" unless group_tester_count(api).zero?
-    api.patch("/v1/betaGroups/#{GROUP_ID}", data: {
-      type: "betaGroups", id: GROUP_ID,
+  raise "Expected only build 12 in the external group" unless group_build_ids(api, group_id) == [id] && !attributes.fetch("isInternalGroup")
+  unless attributes["publicLinkEnabled"]
+    raise "External group already has a tester" unless group_tester_count(api, group_id).zero?
+    api.patch("/v1/betaGroups/#{group_id}", data: {
+      type: "betaGroups", id: group_id,
       attributes: { publicLinkEnabled: true, publicLinkLimitEnabled: true, publicLinkLimit: 1 }
     })
   end
-  updated = external_group(api)
+  updated = external_group(api, app_id).fetch("attributes")
   url = updated["publicLink"].to_s
   unless updated["publicLinkEnabled"] && updated["publicLinkLimitEnabled"] && updated["publicLinkLimit"] == 1 &&
       url.match?(%r{\Ahttps://testflight\.apple\.com/join/[A-Za-z0-9]+\z})
@@ -191,22 +205,33 @@ api = ExternalTestFlightClient.new(
 )
 app_id = api.app_id(TestFlightProcessing::BUNDLE_ID)
 raise "Unexpected app" unless app_id == APP_ID
-group = external_group(api)
 mode = ARGV.fetch(0)
 case mode
 when "audit"
+  group = external_group(api, app_id)
   build = build_info(api, app_id)
   state = build ? beta_details(api, build.fetch("id")).dig("attributes", "externalBuildState") : nil
-  puts JSON.generate(external_group: group.fetch("name"), invitations_open: group["publicLinkEnabled"],
-                     tester_count: group_tester_count(api), group_build_count: group_build_ids(api).size,
-                     build_registered: !build.nil?, external_build_state: state, **review_metadata(api, app_id))
+  details = {
+    external_group: group&.dig("attributes", "name"),
+    invitations_open: group&.dig("attributes", "publicLinkEnabled"),
+    build_registered: !build.nil?, external_build_state: state
+  }
+  if group
+    group_id = group.fetch("id")
+    details[:tester_count] = group_tester_count(api, group_id)
+    details[:group_build_count] = group_build_ids(api, group_id).size
+  end
+  puts JSON.generate(**details, **review_metadata(api, app_id))
 when "preflight"
   raise "Build 12 is already registered; use the review operation" if build_info(api, app_id)
-  raise "Unexpected external group" if group.fetch("isInternalGroup") || group["publicLinkEnabled"]
+  group = external_group(api, app_id)
+  if group && (group.dig("attributes", "isInternalGroup") || group.dig("attributes", "publicLinkEnabled"))
+    raise "Unexpected external group"
+  end
 when "review"
-  start_review(api, app_id, group)
+  start_review(api, app_id)
 when "issue-link"
-  write_invitation(api, app_id, group)
+  write_invitation(api, app_id)
 else
   raise "Unknown action"
 end
