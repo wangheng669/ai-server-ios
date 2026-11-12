@@ -200,28 +200,27 @@ def audit_team_account(api, app_id)
   matching_gmail = users.fetch("data").count do |user|
     user.dig("attributes", "username").match?(/\Aa[^@]*@gmail\.com\z/i)
   end
+  qq_users = exact_matches.map do |user|
+    attributes = user.fetch("attributes")
+    visible_apps = if attributes["allAppsVisible"]
+      []
+    else
+      api.get("/v1/users/#{user.fetch("id")}/relationships/visibleApps").fetch("data")
+    end
+    attributes.slice("roles", "allAppsVisible", "provisioningAllowed").merge(
+      "focus_visible" => attributes["allAppsVisible"] || visible_apps.any? { |app| app.fetch("id") == app_id },
+      "focus_only" => visible_apps.map { |app| app.fetch("id") } == [app_id]
+    )
+  end
+  puts JSON.generate(qq_team_users: qq_users, matching_gmail_team_user_count: matching_gmail)
+
   pending = api.get("/v1/userInvitations", "limit" => "200",
                     "fields[userInvitations]" => "email,expirationDate,roles,allAppsVisible")
   raise "More pending team invitations than expected" if pending.dig("links", "next")
-  qq_pending = pending.fetch("data").filter_map do |invitation|
-    attributes = invitation.fetch("attributes")
-    next unless attributes.fetch("email").casecmp?(email)
-
-    visible_apps = api.get("/v1/userInvitations/#{invitation.fetch("id")}/relationships/visibleApps").fetch("data")
-    attributes.slice("expirationDate", "roles", "allAppsVisible").merge(
-      "focus_only" => visible_apps.map { |app| app.fetch("id") } == [app_id]
-    )
-  end
-  qq_users = exact_matches.map do |user|
-    attributes = user.fetch("attributes")
-    visible_apps = api.get("/v1/users/#{user.fetch("id")}/relationships/visibleApps").fetch("data")
-    attributes.slice("roles", "allAppsVisible", "provisioningAllowed").merge(
-      "focus_visible" => visible_apps.any? { |app| app.fetch("id") == app_id },
-      "focus_only" => visible_apps.map { |app| app.fetch("id") } == [app_id]
-    )
-  end
-  puts JSON.generate(qq_team_users: qq_users, matching_gmail_team_user_count: matching_gmail,
-                     qq_team_invitations: qq_pending)
+  qq_pending = pending.fetch("data").select { |invite| invite.dig("attributes", "email").casecmp?(email) }
+  puts JSON.generate(qq_team_invitations: qq_pending.map { |invite|
+    invite.fetch("attributes").slice("expirationDate", "roles", "allAppsVisible")
+  })
 rescue StandardError => error
   abort "Team membership lookup failed (#{error.message[/HTTP [0-9]{3}/] || error.class})"
 end
