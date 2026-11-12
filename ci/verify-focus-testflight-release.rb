@@ -309,6 +309,35 @@ def restore_by_account(api, app_id, build, group)
                      state: membership.dig("attributes", "state"))
 end
 
+def audit_build_usage(api, app_id)
+  testers = api.get("/v1/betaTesters", "filter[apps]" => app_id, "limit" => "200",
+                    "fields[betaTesters]" => "state,appDevices")
+  visible_testers = testers.fetch("data").map do |tester|
+    attributes = tester.fetch("attributes")
+    devices = attributes["appDevices"]&.map { |device| device.slice("platform", "appBuildVersion") }
+    { confirmed_recipient: tester.fetch("id") == TESTER_ID, state: attributes["state"], devices: devices }
+  end
+  puts JSON.generate(app_tester_devices: visible_testers, more_testers: !!testers.dig("links", "next"))
+
+  response = api.builds(app_id)
+  versions = response.fetch("included", []).to_h { |entry| [entry.fetch("id"), entry.dig("attributes", "version")] }
+  active = response.fetch("data").reject { |entry| entry.dig("attributes", "expired") }
+  metrics = active.map do |build|
+    attributes = build.fetch("attributes")
+    build_id = build.fetch("id")
+    usage = read_diagnostics do
+      response = api.get("/v1/builds/#{build_id}/metrics/betaBuildUsages", "period" => "P90D")
+      points = response.fetch("data").flat_map { |row| row.fetch("dataPoints") }
+      { installs: points.sum { |point| point.dig("values", "installCount").to_i },
+        sessions: points.sum { |point| point.dig("values", "sessionCount").to_i },
+        latest_metric_end: points.map { |point| point["end"] }.compact.max }
+    end
+    { version: versions[build.dig("relationships", "preReleaseVersion", "data", "id")],
+      build: attributes.fetch("version"), uploaded: attributes.fetch("uploadedDate"), usage: usage }
+  end
+  puts JSON.generate(active_build_usage: metrics)
+end
+
 def reset_tester_invitation(api, app_id, build_id)
   groups = api.get("/v1/apps/#{app_id}/betaGroups", "limit" => "200",
                    "fields[betaGroups]" => "isInternalGroup,hasAccessToAllBuilds").fetch("data")
@@ -362,6 +391,8 @@ when "restore-by-account"
   raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
     !build.dig("attributes", "expired")
   restore_by_account(api, app_id, build, group)
+when "audit-build-usage"
+  audit_build_usage(api, app_id)
 when "reset-invitation", "restore-membership"
   raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
     !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))

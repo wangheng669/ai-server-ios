@@ -6,7 +6,7 @@ on:
       operation:
         description: Inspect or publish Focus 1.0.23 (11)
         type: choice
-        options: [audit, upload, verify, reinvite, assign-tester, reset-invitation, restore-membership, audit-account, restore-by-account]
+        options: [audit, upload, verify, reinvite, assign-tester, reset-invitation, restore-membership, audit-account, restore-by-account, audit-build-usage]
         default: audit
       archive_path:
         description: Verified archive in the local iOS release cache
