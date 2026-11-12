@@ -149,12 +149,10 @@ struct TodayBriefOverviewView: View {
         VStack(spacing: 0) {
             masthead
             TodayBriefCategories(sections: brief.sections, selection: $selectedSectionKey)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 14)
+                .padding(.horizontal, 22)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 28) {
-                        Color.clear.frame(height: 0).id("today-reading-top")
                         if selectedSectionKey == nil, let headline = brief.overviewHeadline {
                             Text(headline)
                                 .font(.title3.weight(.medium)).lineSpacing(5)
@@ -218,7 +216,9 @@ struct TodayBriefOverviewView: View {
                             .accessibilityIdentifier("today-reading-end")
                     }
                     .padding(.horizontal, 22)
+                    .padding(.top, 8)
                     .padding(.bottom, bottomInset + 20)
+                    .id("today-reading-top")
                 }
                 .scrollIndicators(.hidden)
                 .refreshable { await onRefresh() }
@@ -232,20 +232,29 @@ struct TodayBriefOverviewView: View {
     }
 
     private var masthead: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("今日").font(.system(size: 32, weight: .bold, design: .serif))
-                Text("\(brief.postCount) 条动态 · \(brief.sourceCount) 个信息源")
-                    .font(.caption).foregroundStyle(TodayBriefStyle.secondary)
+        let title = Text("今日").font(.system(.title3, design: .serif, weight: .bold))
+        let date = Text(brief.displayDate).font(.subheadline.weight(.medium))
+        let counts = Text("\(brief.postCount) 条动态 · \(brief.sourceCount) 个信息源 · \(brief.systems.count) 组动向")
+            .font(.caption)
+            .foregroundStyle(TodayBriefStyle.secondary)
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                title.fixedSize()
+                date.fixedSize()
+                Spacer(minLength: 0)
+                counts.fixedSize()
             }
-            Spacer(minLength: 12)
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(brief.displayDate).font(.subheadline.weight(.medium))
-                Text("日报 · \(brief.systems.count) 组动向")
-                    .font(.caption).foregroundStyle(TodayBriefStyle.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    title
+                    date
+                }
+                counts
             }
         }
-        .padding(.horizontal, 22).padding(.top, 10).padding(.bottom, 22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 22)
+        .padding(.top, 6)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("today-report-metadata")
     }
@@ -323,9 +332,10 @@ private struct TodayBriefCategories: View {
             Text(title)
                 .font(.subheadline.weight(selection == id ? .semibold : .regular))
                 .foregroundStyle(selection == id ? TodayBriefStyle.canvas : TodayBriefStyle.secondary)
-                .padding(.horizontal, 17).padding(.vertical, 11)
+                .padding(.horizontal, 14).padding(.vertical, 6)
                 .background(selection == id ? TodayBriefStyle.accent : Color(uiColor: .tertiarySystemFill), in: Capsule())
-                .contentShape(Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(TodayBriefButtonStyle())
         .accessibilityIdentifier("today-category-\(id ?? "all")")
@@ -440,20 +450,31 @@ struct TodayHeaderView: View {
     let isLoading: Bool
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                rechargeButton
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                rechargeButton.fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                costs
+                Spacer(minLength: 0)
                 updateButton
             }
-            HStack(spacing: 24) {
-                costItem("今日花费", amount: balance?.usage.todayCostCNY, identifier: "today-model-cost")
-                costItem("昨日花费", amount: balance?.usage.yesterdayCostCNY, identifier: "yesterday-model-cost")
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    rechargeButton
+                    Spacer(minLength: 8)
+                    updateButton
+                }
+                ViewThatFits(in: .horizontal) {
+                    costs
+                    VStack(alignment: .leading, spacing: 6) {
+                        costItem("今日花费", amount: balance?.usage.todayCostCNY, identifier: "today-model-cost")
+                        costItem("昨日花费", amount: balance?.usage.yesterdayCostCNY, identifier: "yesterday-model-cost")
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 22)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
+        .padding(.vertical, 4)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
         .background(TodayBriefStyle.canvas)
@@ -489,8 +510,8 @@ struct TodayHeaderView: View {
             Label("更新", systemImage: "arrow.down.circle")
                 .font(.subheadline.weight(.semibold))
                 .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
                 .background(Color.accentColor.opacity(0.1), in: Capsule())
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -501,18 +522,28 @@ struct TodayHeaderView: View {
         .accessibilityHint("打开焦点AI 最新版的直装页面")
     }
 
+    private var costs: some View {
+        HStack(spacing: 12) {
+            costItem("今日花费", amount: balance?.usage.todayCostCNY, identifier: "today-model-cost")
+            costItem("昨日花费", amount: balance?.usage.yesterdayCostCNY, identifier: "yesterday-model-cost")
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     private func costItem(_ title: String, amount: Double?, identifier: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(TodayBriefStyle.secondary)
-            Text(AIUsageDailyCosts.formattedCost(amount) ?? (isLoading ? "查询中…" : "暂不可用"))
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
+        billingMetric(
+            label: Text(title),
+            value: Text(AIUsageDailyCosts.formattedCost(amount) ?? (isLoading ? "查询中…" : "暂不可用"))
                 .accessibilityIdentifier(identifier)
                 .accessibilityHint("AI Server 模型调用费用，按北京时间统计")
+        )
+    }
+
+    private func billingMetric(label: some View, value: some View) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            label.font(.caption).foregroundStyle(TodayBriefStyle.secondary)
+            value.font(.subheadline.weight(.semibold)).monospacedDigit()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var rechargeButton: some View {
@@ -525,20 +556,16 @@ struct TodayHeaderView: View {
                 }
             }
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Text("阿里云余额")
-                    .font(.body)
-                    .foregroundStyle(TodayBriefStyle.secondary)
-                Spacer(minLength: 0)
-                Text(balance?.formattedAmount ?? (isLoading ? "查询中…" : "暂不可用"))
-                    .font(.title2.weight(.semibold))
-                    .monospacedDigit()
+            billingMetric(
+                label: HStack(spacing: 4) {
+                    Text("阿里云余额")
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2.weight(.semibold))
+                        .accessibilityHidden(true)
+                },
+                value: Text(balance?.formattedAmount ?? (isLoading ? "查询中…" : "暂不可用"))
                     .accessibilityIdentifier("today-aliyun-balance")
-                Image(systemName: "arrow.up.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(TodayBriefStyle.secondary)
-                    .accessibilityHidden(true)
-            }
+            )
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }

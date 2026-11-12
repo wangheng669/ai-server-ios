@@ -13,6 +13,10 @@ final class TodayPageUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["today-model-cost"].label, "¥0.50")
         XCTAssertTrue(app.scrollViews["today-overview"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["today-app-update"].isHittable)
+        XCTAssertTrue(app.buttons["today-aliyun-recharge"].isHittable)
+        let headline = app.staticTexts["测试日报"]
+        XCTAssertTrue(headline.waitForExistence(timeout: 8))
+        XCTAssertLessThan(headline.frame.minY, app.frame.height * 0.30)
 
         let article = app.buttons["today-highlight-0"]
         XCTAssertTrue(article.waitForExistence(timeout: 8))
@@ -28,6 +32,13 @@ final class TodayPageUITests: XCTestCase {
         screenshot.name = "today-report"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        let technology = app.buttons["today-category-technology"]
+        XCTAssertTrue(technology.isHittable)
+        technology.tap()
+        XCTAssertFalse(headline.exists)
+        app.buttons["today-category-all"].tap()
+        XCTAssertTrue(headline.waitForExistence(timeout: 8))
     }
 
     func testTodayShowsBalanceWhenReportCannotLoad() {
