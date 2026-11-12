@@ -20,6 +20,34 @@ class FocusTestFlightClient < TestFlightProcessing::Client
     end
     raise "Could not associate build with internal group (HTTP #{response.code})" unless response.code == "204"
   end
+
+  def resend_invitation(app_id, tester_id)
+    uri = URI.join(TestFlightProcessing::API_BASE, "/v1/betaTesterInvitations")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{token}"
+    request["Content-Type"] = "application/json"
+    request.body = JSON.generate(data: {
+      type: "betaTesterInvitations",
+      relationships: {
+        app: {data: {type: "apps", id: app_id}},
+        betaTester: {data: {type: "betaTesters", id: tester_id}}
+      }
+    })
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 30) do |http|
+      http.request(request)
+    end
+    payload = JSON.parse(response.body) rescue {}
+    if response.code == "201"
+      puts JSON.generate(invitation: "RESENT", http_status: 201, recipient: "26***@qq.com",
+                         response_type: payload.dig("data", "type"))
+    else
+      errors = Array(payload["errors"]).map do |error|
+        {code: error["code"], detail: error["detail"].to_s.gsub(/[^\s]+@[^\s]+/, "[email]")[0, 250]}
+      end
+      puts JSON.generate(invitation: "DECLINED", http_status: response.code, errors: errors)
+      exit 1
+    end
+  end
 end
 
 def exact_build(api, app_id)
@@ -131,6 +159,14 @@ case mode
 when "audit"
   audit_visibility(api, app_id, build)
   exit
+when "reinvite"
+  raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
+    !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))
+  raise "Internal membership changed" unless group[:internal_group] && group[:target_tester_state]
+  tester = api.get("/v1/betaTesters/#{TESTER_ID}", "fields[betaTesters]" => "email,inviteType")
+    .dig("data", "attributes")
+  raise "Recipient does not match the confirmed account" unless masked_email(tester.fetch("email")) == "26***@qq.com"
+  api.resend_invitation(app_id, TESTER_ID)
 when "preflight"
   raise "Build number is already registered; check its delivery run before any retry" if build
   raise "Target account is not in the expected internal group" unless group[:internal_group] && group[:target_tester_state]
