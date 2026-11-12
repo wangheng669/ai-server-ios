@@ -336,7 +336,7 @@ def audit_build_usage(api, app_id)
     attributes = build.fetch("attributes")
     build_id = build.fetch("id")
     usage = read_diagnostics do
-      response = api.get("/v1/builds/#{build_id}/metrics/betaBuildUsages", "period" => "P90D")
+      response = api.get("/v1/builds/#{build_id}/metrics/betaBuildUsages", "limit" => "200")
       points = response.fetch("data").flat_map { |row| row.fetch("dataPoints") }
       { installs: points.sum { |point| point.dig("values", "installCount").to_i },
         sessions: points.sum { |point| point.dig("values", "sessionCount").to_i },
