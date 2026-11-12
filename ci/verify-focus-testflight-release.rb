@@ -9,6 +9,28 @@ MARKETING_VERSION = "1.0.23"
 BUILD_NUMBER = "11"
 
 class FocusTestFlightClient < TestFlightProcessing::Client
+  def enroll_by_email(email, group_id)
+    uri = URI.join(TestFlightProcessing::API_BASE, "/v1/betaTesters")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{token}"
+    request["Content-Type"] = "application/json"
+    request.body = JSON.generate(data: {
+      type: "betaTesters",
+      attributes: { email: email },
+      relationships: { betaGroups: { data: [{ type: "betaGroups", id: group_id }] } }
+    })
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 30) do |http|
+      http.request(request)
+    end
+    payload = JSON.parse(response.body) rescue {}
+    if response.code == "201"
+      return payload.fetch("data").fetch("id")
+    end
+
+    codes = Array(payload["errors"]).map { |error| error["code"] }
+    raise "Apple declined internal enrollment by email (HTTP #{response.code}: #{codes.join(", ")})"
+  end
+
   def associate_build(group_id, build_id)
     uri = URI.join(TestFlightProcessing::API_BASE, "/v1/betaGroups/#{group_id}/relationships/builds")
     request = Net::HTTP::Post.new(uri)
@@ -243,6 +265,30 @@ def restore_internal_membership(api, build_id)
   raise "Could not verify restored internal access: #{last_error || "Apple has not applied the membership"}"
 end
 
+def restore_by_account(api, app_id, build, group)
+  email = confirmed_tester(api).fetch("email")
+  tester_apps = api.get("/v1/betaTesters/#{TESTER_ID}/relationships/apps", "limit" => "200")
+  tester_groups = api.get("/v1/betaTesters/#{TESTER_ID}/relationships/betaGroups", "limit" => "200")
+  puts JSON.generate(account_tester_app_count: tester_apps.fetch("data").size,
+                     focus_only: !tester_apps.dig("links", "next") &&
+                       tester_apps.fetch("data").map { |app| app.fetch("id") } == [app_id],
+                     account_tester_group_count: tester_groups.fetch("data").size,
+                     internal_group_only: !tester_groups.dig("links", "next") &&
+                       tester_groups.fetch("data").map { |entry| entry.fetch("id") } == [GROUP_ID])
+
+  build_id = build.fetch("id")
+  raise "Expected automatic internal distribution" unless group[:internal_group] && group[:automatically_receives_builds]
+  raise "Build 11 is not available to this group" unless assigned?(api, build_id)
+  result_id = api.enroll_by_email(email, GROUP_ID)
+  membership = api.get("/v1/betaGroups/#{GROUP_ID}/betaTesters", "limit" => "200",
+                       "fields[betaTesters]" => "email,state").fetch("data").find do |tester|
+    tester.fetch("id") == result_id && tester.dig("attributes", "email").casecmp?(email)
+  end
+  raise "Apple did not confirm the internal tester membership" unless membership
+  puts JSON.generate(qq_internal_enrollment_verified: true, reused_existing_tester: result_id == TESTER_ID,
+                     state: membership.dig("attributes", "state"))
+end
+
 def reset_tester_invitation(api, app_id, build_id)
   groups = api.get("/v1/apps/#{app_id}/betaGroups", "limit" => "200",
                    "fields[betaGroups]" => "isInternalGroup,hasAccessToAllBuilds").fetch("data")
@@ -292,6 +338,10 @@ when "audit"
   exit
 when "audit-account"
   audit_team_account(api, app_id)
+when "restore-by-account"
+  raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
+    !build.dig("attributes", "expired")
+  restore_by_account(api, app_id, build, group)
 when "reset-invitation", "restore-membership"
   raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
     !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))
