@@ -9,6 +9,16 @@ MARKETING_VERSION = "1.0.23"
 BUILD_NUMBER = "11"
 
 class FocusTestFlightClient < TestFlightProcessing::Client
+  def delete_tester(tester_id)
+    uri = URI.join(TestFlightProcessing::API_BASE, "/v1/betaTesters/#{tester_id}")
+    request = Net::HTTP::Delete.new(uri)
+    request["Authorization"] = "Bearer #{token}"
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 30) do |http|
+      http.request(request)
+    end
+    raise "Apple declined deletion of the TestFlight record (HTTP #{response.code})" unless %w[202 204].include?(response.code)
+  end
+
   def enroll_by_email(email, group_id)
     uri = URI.join(TestFlightProcessing::API_BASE, "/v1/betaTesters")
     request = Net::HTTP::Post.new(uri)
@@ -338,6 +348,74 @@ def audit_build_usage(api, app_id)
   puts JSON.generate(active_build_usage: metrics)
 end
 
+def rebuild_qq_tester(api, app_id, build, group)
+  build_id = build.fetch("id")
+  build_state = api.get("/v1/builds/#{build_id}/buildBetaDetail").dig("data", "attributes", "internalBuildState")
+  unless build_state == "IN_BETA_TESTING" && group[:internal_group] &&
+      group[:automatically_receives_builds] && assigned?(api, build_id)
+    raise "Build 11 is unavailable for automatic internal distribution"
+  end
+
+  email = confirmed_tester(api).fetch("email")
+  users = api.get("/v1/users", "filter[username]" => email, "fields[users]" => "username,roles").fetch("data")
+  unless users.one? && users.first.dig("attributes", "username").casecmp?(email) &&
+      users.first.dig("attributes", "roles").include?("ACCOUNT_HOLDER")
+    raise "Apple did not confirm the original team account"
+  end
+
+  apps = api.get("/v1/betaTesters/#{TESTER_ID}/relationships/apps", "limit" => "200")
+  groups = api.get("/v1/betaTesters/#{TESTER_ID}/relationships/betaGroups", "limit" => "200")
+  unless !apps.dig("links", "next") && apps.fetch("data").map { |app| app.fetch("id") } == [app_id] &&
+      !groups.dig("links", "next") && groups.fetch("data").map { |entry| entry.fetch("id") } == [GROUP_ID]
+    raise "TestFlight record is associated with other apps or groups"
+  end
+  target = api.get("/v1/betaTesters", "filter[apps]" => app_id, "filter[id]" => TESTER_ID,
+                   "fields[betaTesters]" => "state,appDevices").fetch("data")
+  unless target.one? && target.first.fetch("id") == TESTER_ID &&
+      target.first.dig("attributes", "state") == "INVITED" &&
+      target.first.dig("attributes", "appDevices") == []
+    raise "The TestFlight record has changed or has a linked device"
+  end
+
+  api.delete_tester(TESTER_ID)
+  puts JSON.generate(qq_testflight_delete_accepted: true)
+
+  begin
+    deleted = false
+    12.times do
+      previous = api.get("/v1/betaTesters", "filter[id]" => TESTER_ID,
+                         "fields[betaTesters]" => "state").fetch("data")
+      if previous.empty?
+        deleted = true
+        break
+      end
+      sleep 4
+    end
+    raise "Apple retained the old TestFlight record after deletion" unless deleted
+
+    result_id = api.enroll_by_email(email, GROUP_ID)
+    membership = nil
+    6.times do
+      members = api.get("/v1/betaGroups/#{GROUP_ID}/betaTesters", "limit" => "200",
+                        "fields[betaTesters]" => "email,state").fetch("data")
+      membership = members.find { |entry| entry.fetch("id") == result_id && entry.dig("attributes", "email").casecmp?(email) }
+      break if membership
+      sleep 3
+    end
+    raise "Apple did not confirm enrollment of the replacement tester" unless membership
+    state = membership.dig("attributes", "state")
+    api.resend_invitation(app_id, result_id) if state == "NOT_INVITED"
+    puts JSON.generate(qq_testflight_record_rebuilt: true, new_tester_id: result_id != TESTER_ID,
+                       state: state, build: BUILD_NUMBER)
+  rescue StandardError => error
+    puts JSON.generate(qq_testflight_rebuild_error: error.message.gsub(/[^\s]+@[^\s]+/, "[email]")[0, 400])
+    state = restore_internal_membership(api, build_id)
+    api.resend_invitation(app_id, TESTER_ID) if state == "NOT_INVITED"
+    puts JSON.generate(qq_original_internal_membership_restored: true, state: state)
+    exit 1
+  end
+end
+
 def reset_tester_invitation(api, app_id, build_id)
   groups = api.get("/v1/apps/#{app_id}/betaGroups", "limit" => "200",
                    "fields[betaGroups]" => "isInternalGroup,hasAccessToAllBuilds").fetch("data")
@@ -393,6 +471,10 @@ when "restore-by-account"
   restore_by_account(api, app_id, build, group)
 when "audit-build-usage"
   audit_build_usage(api, app_id)
+when "rebuild-qq-tester"
+  raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
+    !build.dig("attributes", "expired")
+  rebuild_qq_tester(api, app_id, build, group)
 when "reset-invitation", "restore-membership"
   raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
     !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))
