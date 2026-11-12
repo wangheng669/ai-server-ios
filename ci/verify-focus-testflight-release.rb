@@ -187,6 +187,43 @@ def confirmed_tester(api)
   tester = api.get("/v1/betaTesters/#{TESTER_ID}", "fields[betaTesters]" => "email,inviteType")
     .dig("data", "attributes")
   raise "Recipient does not match the confirmed account" unless masked_email(tester.fetch("email")) == "26***@qq.com"
+  tester
+end
+
+def audit_team_account(api, app_id)
+  email = confirmed_tester(api).fetch("email").downcase
+  users = api.get("/v1/users", "limit" => "200",
+                  "fields[users]" => "username,roles,allAppsVisible,provisioningAllowed")
+  raise "More team users than expected" if users.dig("links", "next")
+
+  exact_matches = users.fetch("data").select { |user| user.dig("attributes", "username").casecmp?(email) }
+  matching_gmail = users.fetch("data").count do |user|
+    user.dig("attributes", "username").match?(/\Aa[^@]*@gmail\.com\z/i)
+  end
+  pending = api.get("/v1/userInvitations", "limit" => "200",
+                    "fields[userInvitations]" => "email,expirationDate,roles,allAppsVisible")
+  raise "More pending team invitations than expected" if pending.dig("links", "next")
+  qq_pending = pending.fetch("data").filter_map do |invitation|
+    attributes = invitation.fetch("attributes")
+    next unless attributes.fetch("email").casecmp?(email)
+
+    visible_apps = api.get("/v1/userInvitations/#{invitation.fetch("id")}/relationships/visibleApps").fetch("data")
+    attributes.slice("expirationDate", "roles", "allAppsVisible").merge(
+      "focus_only" => visible_apps.map { |app| app.fetch("id") } == [app_id]
+    )
+  end
+  qq_users = exact_matches.map do |user|
+    attributes = user.fetch("attributes")
+    visible_apps = api.get("/v1/users/#{user.fetch("id")}/relationships/visibleApps").fetch("data")
+    attributes.slice("roles", "allAppsVisible", "provisioningAllowed").merge(
+      "focus_visible" => visible_apps.any? { |app| app.fetch("id") == app_id },
+      "focus_only" => visible_apps.map { |app| app.fetch("id") } == [app_id]
+    )
+  end
+  puts JSON.generate(qq_team_users: qq_users, matching_gmail_team_user_count: matching_gmail,
+                     qq_team_invitations: qq_pending)
+rescue StandardError => error
+  abort "Team membership lookup failed (#{error.message[/HTTP [0-9]{3}/] || error.class})"
 end
 
 def restore_internal_membership(api, build_id)
@@ -254,6 +291,8 @@ case mode
 when "audit"
   audit_visibility(api, app_id, build)
   exit
+when "audit-account"
+  audit_team_account(api, app_id)
 when "reset-invitation", "restore-membership"
   raise "Build 11 is unavailable" unless build&.dig("attributes", "processingState") == "VALID" &&
     !build.dig("attributes", "expired") && assigned?(api, build.fetch("id"))
