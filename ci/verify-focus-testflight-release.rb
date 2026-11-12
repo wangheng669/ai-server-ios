@@ -68,6 +68,52 @@ def processed_build(api, app_id)
   end
 end
 
+def masked_email(value)
+  local, domain = value.to_s.split("@", 2)
+  return nil unless domain && !local.empty?
+  "#{local[0, 2]}***@#{domain}"
+end
+
+def read_diagnostics
+  yield
+rescue StandardError => error
+  { error: error.message[/HTTP [0-9]{3}/] || error.class.name }
+end
+
+def audit_visibility(api, app_id, build)
+  app = api.get("/v1/apps/#{app_id}", "fields[apps]" => "name,primaryLocale,bundleId")
+    .dig("data", "attributes")
+  groups = api.get("/v1/apps/#{app_id}/betaGroups", "limit" => "200",
+                   "fields[betaGroups]" => "name,isInternalGroup,hasAccessToAllBuilds,publicLinkEnabled")
+    .fetch("data")
+  testers = api.get("/v1/betaGroups/#{GROUP_ID}/betaTesters", "limit" => "200",
+                    "fields[betaTesters]" => "email,state,inviteType").fetch("data")
+  memberships = testers.map do |entry|
+    attributes = entry.fetch("attributes")
+    devices = read_diagnostics do
+      response = api.get("/v1/betaTesters/#{entry.fetch("id")}/appDevices", "limit" => "20")
+      response.fetch("data").map do |device|
+        device.fetch("attributes").slice("model", "deviceModel", "deviceFamily", "platform", "osVersion")
+      end
+    end
+    { prior_release_target: entry.fetch("id") == TESTER_ID, invitation: masked_email(attributes["email"]),
+      state: attributes["state"], devices: devices }
+  end
+  beta_build = nil
+  if build
+    id = build.fetch("id")
+    attributes = api.get("/v1/builds/#{id}", "fields[builds]" =>
+      "version,processingState,expired,expirationDate,minOsVersion,buildAudienceType,usesNonExemptEncryption")
+      .dig("data", "attributes")
+    beta = api.get("/v1/builds/#{id}/buildBetaDetail").dig("data", "attributes")
+    beta_build = { attributes: attributes, beta: beta, assigned_to_group: assigned?(api, id) }
+  end
+  puts JSON.generate(visibility_audit: {
+    app: app, groups: groups.map { |entry| entry.fetch("attributes") },
+    testers: memberships, build: beta_build
+  })
+end
+
 $stdout.sync = true
 api = FocusTestFlightClient.new(
   key_path: ENV.fetch("APP_STORE_CONNECT_KEY_PATH"),
@@ -83,6 +129,7 @@ puts JSON.generate(app_id: app_id, exact_build: build&.fetch("attributes"), **gr
 
 case mode
 when "audit"
+  audit_visibility(api, app_id, build)
   exit
 when "preflight"
   raise "Build number is already registered; check its delivery run before any retry" if build
