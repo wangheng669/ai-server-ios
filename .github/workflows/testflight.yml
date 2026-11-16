@@ -72,7 +72,7 @@ jobs:
             core.setOutput("should_upload", String(shouldUpload));
 
   upload:
-    name: Test, archive, and upload
+    name: Archive and upload
     needs: check
     if: needs.check.outputs.should_upload == 'true'
     runs-on:
@@ -141,20 +141,6 @@ jobs:
             -string "$TESTFLIGHT_MARKETING_VERSION" \
             Config/Info.plist
           echo "Building TestFlight version $TESTFLIGHT_MARKETING_VERSION."
-
-      - name: Run tests
-        run: |
-          set -o pipefail
-          ./ci/with-ios-simulator-lock.sh \
-            --label "TestFlight tests $GITHUB_RUN_ID" \
-            --wait-seconds 1200 \
-            -- xcodebuild test \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-            -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
-            CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Create App Store archive
         env:

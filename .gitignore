@@ -10,13 +10,11 @@ DerivedDataSim/
 .codex/config.toml
 .xcodebuildmcp/
 artifacts/device-derived/
-artifacts/test-derived/
 artifacts/device-build/
 artifacts/device-install/
 artifacts/signing-backup/
 build/
 .build/
-*.xcresult
 *.app.zip
 *.ipa
 *.dSYM/

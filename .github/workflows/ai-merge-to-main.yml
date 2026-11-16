@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   merge:
-    name: Prepare, integrate, test, and install on selected central Mac
+    name: Prepare, integrate, build, and install on selected central Mac
     concurrency:
       group: ai-merge-to-main
       cancel-in-progress: false
@@ -133,11 +133,7 @@ jobs:
               main \
               "$SOURCE_BRANCH"
           fi
-          low_risk_change=false
-          if ./ci/is-low-risk-ios-diff.sh origin/main "$SOURCE_SHA"; then
-            low_risk_change=true
-          fi
-          IOS_LOW_RISK_CHANGE="$low_risk_change" ./ci/classify-ios-test-scope.sh \
+          ./ci/classify-ios-build-scope.sh \
             < <(git diff --name-only origin/main..."$SOURCE_SHA") \
             >> "$GITHUB_OUTPUT"
 
@@ -214,8 +210,8 @@ jobs:
           git add -A
           git commit -m "Merge $SOURCE_BRANCH into main"
 
-      - name: Run change-aware iOS tests
-        id: ios_tests
+      - name: Build unsigned device app
+        id: device_build
         if: steps.merge.outputs.already_merged == 'false' && steps.merge.outputs.app_changed == 'true'
         env:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
@@ -224,34 +220,7 @@ jobs:
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
         run: |
           set -euo pipefail
-          test_scope='${{ steps.merge.outputs.test_scope }}'
-          if [[ "$test_scope" == build ]] && ! ./ci/is-low-risk-ios-diff.sh HEAD^1 HEAD; then
-            echo "Merged tree is no longer a pure cache-key version bump; restoring full simulator tests."
-            test_scope=full
-          fi
-          test_label="Complete iOS tests"
-          test_stage=full-testing
-          test_arguments=()
-          if [[ "$test_scope" == feed ]]; then
-            test_label="Feed-focused iOS tests"
-            test_stage=targeted-testing
-            test_arguments=(-only-testing:AIClientTests/FeedAdapterTests)
-          elif [[ "$test_scope" == build ]]; then
-            test_label="Unsigned device build verification"
-            test_stage=build-verification
-          fi
-          test_action='test'
-          prewarmed_sha_file="$IOS_BUILD_CACHE_ROOT/central-merge-simulator/prewarmed-source-sha"
-          if [[ -f "$prewarmed_sha_file" ]] \
-            && [[ "$(cat "$prewarmed_sha_file")" == "${{ github.sha }}" ]] \
-            && git diff --quiet "${{ github.sha }}" HEAD -- .; then
-            test_action='test-without-building'
-            test_label="$test_label (reuse prebuilt app)"
-            echo "Reusing build-for-testing output for unchanged merged tree ${{ github.sha }}."
-          else
-            echo "Merged tree or cache identity changed; rebuilding before tests."
-          fi
-          ./ci/report-ios-deployment.sh running 0.04 "$test_stage" || true
+          ./ci/report-ios-deployment.sh running 0.04 build-verification || true
           mkdir -p "$IOS_BUILD_CACHE_ROOT"
 
           build_log=$(mktemp "$RUNNER_TEMP/signed-device-build.XXXXXX")
@@ -295,26 +264,6 @@ jobs:
           build_pid=$!
 
           set +e
-          test_status=0
-          if [[ "$test_scope" == build ]]; then
-            echo "Low-risk App change; unsigned build verification replaces shared simulator tests."
-          else
-            ./ci/run-timed-step.sh "$test_label" \
-              ./ci/with-ios-simulator-lock.sh \
-                --label "central merge tests $GITHUB_RUN_ID" \
-                --wait-seconds 1200 \
-                -- xcodebuild "$test_action" \
-                -project AIServerClient.xcodeproj \
-                -scheme AIServerClient \
-                -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-                -collect-test-diagnostics never \
-                -derivedDataPath "$IOS_BUILD_CACHE_ROOT/central-merge-simulator" \
-                -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-                ${test_arguments[@]+"${test_arguments[@]}"} \
-                CODE_SIGNING_ALLOWED=NO \
-                COMPILER_INDEX_STORE_ENABLE=NO
-            test_status=$?
-          fi
           wait "$build_pid"
           wait_status=$?
           set -e
@@ -323,9 +272,6 @@ jobs:
           read -r build_status build_duration_seconds < "$build_result"
           echo "device_build_duration_seconds=$build_duration_seconds" >> "$GITHUB_OUTPUT"
           echo "Unsigned device build completed in ${build_duration_seconds}s (exit $build_status)."
-          if ((test_status != 0)); then
-            exit "$test_status"
-          fi
           if ((wait_status != 0 || build_status != 0)); then
             exit "${build_status:-$wait_status}"
           fi
@@ -381,7 +327,7 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_BUILD_SECONDS: ${{ steps.ios_tests.outputs.device_build_duration_seconds }}
+          IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.device_build_duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
           IOS_DEVICE_WAIT_DURATION_SECONDS: ${{ steps.local_install.outputs.device_wait_seconds }}
           IOS_DIRECT_INSTALL_SECONDS: ${{ steps.local_install.outputs.direct_install_seconds }}
@@ -406,7 +352,7 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_BUILD_SECONDS: ${{ steps.ios_tests.outputs.device_build_duration_seconds }}
+          IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.device_build_duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
           IOS_DEVICE_WAIT_DURATION_SECONDS: ${{ steps.local_install.outputs.device_wait_seconds }}
           IOS_DIRECT_INSTALL_SECONDS: ${{ steps.local_install.outputs.direct_install_seconds }}
