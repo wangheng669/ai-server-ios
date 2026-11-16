@@ -75,8 +75,9 @@ enum Sec13FFilter: String, CaseIterable, Identifiable {
     var id: Self { self }
     var color: Color {
         switch self {
-        case .new, .increased: HoldingsPalette.red
-        case .decreased, .exited: HoldingsPalette.green
+        case .increased: HoldingsPalette.red
+        case .decreased: HoldingsPalette.green
+        case .exited: Color.secondary
         default: HoldingsPalette.blue
         }
     }
@@ -195,7 +196,7 @@ struct Sec13FNotificationView: View {
                 Text(manager.positionsCount.map { "\($0) 项持仓" } ?? "查看").foregroundStyle(.secondary)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
             }.font(.subheadline).foregroundStyle(.primary).padding(.vertical, 20)
-        }.accessibilityIdentifier("sec13f-full-holdings")
+        }.buttonStyle(.plain).accessibilityIdentifier("sec13f-full-holdings")
         if let url = sec13FFilingURL(manager) {
             Button { browser = InAppBrowserDestination(url: url) } label: {
                 Label("SEC 原始申报", systemImage: "arrow.up.right").font(.caption)
@@ -269,6 +270,7 @@ private struct Sec13FHoldingsListView: View {
                     if let accession = manager.accession { Text("申报编号 \(accession)").font(.caption2).foregroundStyle(.tertiary).textSelection(.enabled).padding(.top, 6) }
                 }.padding(.horizontal, 22).padding(.bottom, 28)
             }
+            .accessibilityIdentifier("sec13f-holdings-list")
             .background(HoldingsPalette.card)
             .navigationTitle("持仓明细").navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索公司或 CUSIP")
