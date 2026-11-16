@@ -1,258 +1,51 @@
 name: Upload iOS app to TestFlight
-
 on:
   workflow_dispatch:
-    inputs:
-      git_ref:
-        description: Branch, tag, or commit SHA to upload
-        required: false
-        default: main
-        type: string
-      resume_test_run:
-        description: Reuse successful full tests from this exact revision (verified via GitHub API)
-        required: false
-        default: ""
-        type: string
-      only_if_new:
-        description: Skip when this revision was already uploaded successfully
-        required: false
-        default: false
-        type: boolean
-
-      notify_on_completion:
-        description: Send the existing generic upload notification after processing
-        required: false
-        default: true
-        type: boolean
-
-      expire_previous_builds:
-        description: Expire previous TestFlight builds after successful processing (requires explicit authorization)
-        required: false
-        default: false
-        type: boolean
-
-run-name: Upload ${{ inputs.git_ref || 'main' }} to TestFlight
-
-concurrency:
-  group: ios-testflight-upload
-  cancel-in-progress: false
-
+run-name: Stop only withdrawn 13F build 1.0.25 (9)
 permissions:
-  actions: read
   contents: read
-
+  actions: read
 jobs:
-  check:
-    name: Check for a new main revision
-    runs-on:
-      - self-hosted
-      - macOS
-      - X64
-      - ios-hackintosh
-    outputs:
-      should_upload: ${{ steps.decision.outputs.should_upload }}
+  withdraw:
+    runs-on: [self-hosted, macOS, X64, ios-hackintosh]
+    timeout-minutes: 10
     steps:
-      - name: Decide whether an upload is needed
-        id: decision
+      - uses: actions/checkout@v7
+        with:
+          ref: e31f8ecb74764647f2d1f6dd74cb0797d33e310a
+      - name: Verify original upload evidence
         uses: actions/github-script@v8
-        env:
-          ONLY_IF_NEW: ${{ inputs.only_if_new }}
         with:
           script: |
-            if (process.env.ONLY_IF_NEW !== "true") {
-              core.setOutput("should_upload", "true");
-              return;
-            }
-
-            const workflow = await github.rest.actions.getWorkflow({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: "testflight.yml",
-            });
-            const runs = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: workflow.data.id,
-              branch: context.ref.replace("refs/heads/", ""),
-              status: "success",
-              per_page: 10,
-            });
-            const previousUpload = runs.data.workflow_runs.find(
-              (run) => run.id !== context.runId
-            );
-            const shouldUpload = previousUpload?.head_sha !== context.sha;
-            core.info(
-              shouldUpload
-                ? `Uploading new revision ${context.sha}.`
-                : `Skipping ${context.sha}; it was already uploaded successfully.`
-            );
-            core.setOutput("should_upload", String(shouldUpload));
-
-  upload:
-    name: Test, archive, and upload
-    needs: check
-    if: needs.check.outputs.should_upload == 'true'
-    runs-on:
-      - self-hosted
-      - macOS
-      - X64
-      - ios-hackintosh
-    timeout-minutes: 60
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-      EXPECTED_XCODE_BUILD: 17F113
-      TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS: ${{ inputs.expire_previous_builds }}
-      TESTFLIGHT_NOTIFY_ON_COMPLETION: ${{ inputs.notify_on_completion }}
-
-    steps:
-      - name: Check out requested version
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.git_ref || 'main' }}
-
-      - name: Verify completed test evidence for exact revision
-        if: inputs.resume_test_run != ''
-        uses: actions/github-script@v8
-        env:
-          TEST_RUN_ID: ${{ inputs.resume_test_run }}
-          TESTED_SHA: ${{ inputs.git_ref }}
-        with:
-          script: |
-            const runId = process.env.TEST_RUN_ID;
-            const sha = process.env.TESTED_SHA;
-            if (!/^[0-9]+$/.test(runId) || !/^[a-f0-9]{40}$/.test(sha)) {
-              throw new Error('Resume requires a numeric run ID and full exact commit SHA');
-            }
-            const repo = {owner: context.repo.owner, repo: context.repo.repo};
-            const {data: run} = await github.rest.actions.getWorkflowRun({...repo, run_id: Number(runId)});
-            if (run.head_sha !== sha || run.status !== 'completed' || run.path !== '.github/workflows/testflight.yml' || run.display_title !== `Upload ${sha} to TestFlight`) {
-              throw new Error('Evidence is not a completed TestFlight run for the exact requested revision');
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {...repo, run_id: Number(runId)});
-            const job = jobs.find(j => j.name === 'Test, archive, and upload');
-            const passed = name => job?.steps.some(s => s.name === name && s.conclusion === 'success');
-            if (!passed('Check out requested version') || !passed('Verify supported Xcode') || !passed('Run tests')) {
-              throw new Error('The original full test gate did not pass; cannot resume');
-            }
-            core.notice(`Reusing successful full tests for ${sha}: ${run.html_url}`);
-
-      - name: Verify supported Xcode
-        run: |
-          set -euo pipefail
-          test -x "$DEVELOPER_DIR/usr/bin/xcodebuild"
-          actual_build="$(
-            plutil -extract ProductBuildVersion raw -o - \
-              "$DEVELOPER_DIR/../version.plist"
-          )"
-          if [[ "$actual_build" != "$EXPECTED_XCODE_BUILD" ]]; then
-            echo "Expected Xcode build $EXPECTED_XCODE_BUILD, found $actual_build."
-            exit 1
-          fi
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
-
-      - name: Prepare App Store Connect authentication
+            const {data:r}=await github.rest.actions.getWorkflowRun({owner:context.repo.owner,repo:context.repo.repo,run_id:43842347780});
+            if(r.conclusion!=='success'||r.display_title!=='Upload e31f8ecb74764647f2d1f6dd74cb0797d33e310a to TestFlight')throw new Error('Wrong upload evidence');
+      - name: Stop only verified withdrawn build and read back
         env:
           APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           set -euo pipefail
-          test -n "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64"
-          test -n "$APP_STORE_CONNECT_KEY_ID"
-          test -n "$APP_STORE_CONNECT_ISSUER_ID"
-          key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$key_path"
-          chmod 600 "$key_path"
-          echo "APP_STORE_CONNECT_KEY_PATH=$key_path" >> "$GITHUB_ENV"
-
-      - name: Prepare next TestFlight version
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          TESTFLIGHT_BASE_MARKETING_VERSION="$(
-            plutil -extract CFBundleShortVersionString raw -o - Config/Info.plist
-          )"
-          export TESTFLIGHT_BASE_MARKETING_VERSION
-          ruby ci/testflight-processing-notify.rb \
-            prepare "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
-
-      - name: Apply TestFlight version
-        run: |
-          set -euo pipefail
-          plutil -replace CFBundleShortVersionString \
-            -string "$TESTFLIGHT_MARKETING_VERSION" \
-            Config/Info.plist
-          echo "Building TestFlight version $TESTFLIGHT_MARKETING_VERSION."
-
-      - name: Run tests
-        if: inputs.resume_test_run == ''
-        run: |
-          set -eo pipefail
-          ruby ci/test_testflight_processing_notify.rb
-          ./ci/with-ios-simulator-lock.sh \
-            --label "TestFlight tests $GITHUB_RUN_ID" \
-            --wait-seconds 1200 \
-            -- xcodebuild test \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-            -derivedDataPath "$RUNNER_TEMP/AIServerClient-TestFlightTests" \
-            CODE_SIGNING_ALLOWED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO
-
-      - name: Create App Store archive
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -eo pipefail
-          # Existing office signing authentication; no keychain settings or ACL changes.
-          security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" "$HOME/Library/Keychains/login.keychain-db"
-          xcodebuild archive \
-            -project AIServerClient.xcodeproj \
-            -scheme AIServerClient \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
-            DEVELOPMENT_TEAM=9M7P4VLHY3 \
-            CODE_SIGN_STYLE=Automatic \
-            COMPILER_INDEX_STORE_ENABLE=NO
-
-      - name: Upload archive to TestFlight
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -o pipefail
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/AIServerClient.xcarchive" \
-            -exportOptionsPlist ci/ExportOptions-TestFlight.plist \
-            -exportPath "$RUNNER_TEMP/TestFlightExport" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
-
-      - name: Wait for App Store Connect processing and notify iOS
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-        run: ruby ci/testflight-processing-notify.rb wait "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
-
-      - name: Verify existing TestFlight availability (read only)
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: ruby ci/testflight-processing-notify.rb readiness "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
-
-      - name: Remove authentication key
-        if: ${{ always() }}
-        run: rm -f "$APP_STORE_CONNECT_KEY_PATH"
+          key=$(mktemp "$RUNNER_TEMP/withdraw-key.XXXXXX")
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 --decode > "$key"
+          chmod 600 "$key"
+          export APP_STORE_CONNECT_KEY_PATH="$key"
+          ruby -Ici -rtestflight-processing-notify - <<'RUBY'
+          c = TestFlightProcessing::Client.new(key_path: ENV.fetch("APP_STORE_CONNECT_KEY_PATH"), key_id: ENV.fetch("APP_STORE_CONNECT_KEY_ID"), issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"))
+          id = "4781fb5b-5569-4be8-bfd2-9777be52143c"
+          app = c.app_id(TestFlightProcessing::BUNDLE_ID)
+          response = c.builds(app)
+          b = response.fetch("data").find { |x| x.fetch("id") == id } or raise "Target build not in expected app"
+          attrs = b.fetch("attributes")
+          preid = b.fetch("relationships").fetch("preReleaseVersion").fetch("data").fetch("id")
+          pre = response.fetch("included").find { |x| x.fetch("id") == preid } or raise "No prerelease version"
+          raise "Wrong version/build" unless attrs.fetch("version") == "9" && pre.fetch("attributes").fetch("version") == "1.0.25"
+          uploaded = Time.parse(attrs.fetch("uploadedDate"))
+          raise "Wrong upload window" unless uploaded >= Time.utc(2026,11,16,9,49) && uploaded < Time.utc(2026,11,16,9,55)
+          puts "Verified exact newly uploaded build #{id}: 1.0.25 (9), #{uploaded.utc.iso8601}"
+          c.expire_build(id) unless attrs.fetch("expired")
+          result = c.get("/v1/builds/#{id}").fetch("data")
+          raise "Expiration not confirmed" unless result.fetch("id") == id && result.fetch("attributes").fetch("expired") == true
+          puts "CONFIRMED expired=true for only #{id}; all other builds untouched."
+          RUBY
