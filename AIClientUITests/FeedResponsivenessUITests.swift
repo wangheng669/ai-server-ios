@@ -238,7 +238,7 @@ final class FeedResponsivenessUITests: XCTestCase {
     }
 
     func testZhihuKeepsPositionWhenSwitchingSources() throws {
-        try exerciseSourceRoundtrip(source: "zhihu", title: "知乎", nextTitle: "雪球", rowPrefix: "feed-zhihu-question-")
+        try exerciseSourceRoundtrip(source: "zhihu", title: "知乎", nextTitle: "雪球", rowPrefix: "feed-post-")
     }
 
     func testXueqiuKeepsPositionWhenSwitchingSources() throws {
@@ -284,7 +284,7 @@ final class FeedResponsivenessUITests: XCTestCase {
         }
         let visiblePost = list.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", rowPrefix))
-            .allElementsBoundByIndex.first { $0.isHittable }
+            .allElementsBoundByIndex.first { $0.isHittable && $0.frame.width > 60 }
         XCTAssertNotNil(visiblePost)
         let identifier = visiblePost?.identifier ?? ""
         app.swipeLeft()
