@@ -143,9 +143,10 @@ struct PushNotificationDetails: Decodable {
     let body: String
     let links: [Link]?
     let imageURL: URL?
+    let sec13f: Sec13FNotificationSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case title, body, links
+        case title, body, links, sec13f
         case imageURL = "image_url"
     }
 }
@@ -162,7 +163,12 @@ private struct PushNotificationDetailsView: View {
     var body: some View {
         Group {
             if let details {
-                content(details)
+                if let snapshot = details.sec13f {
+                    Sec13FNotificationView(snapshot: snapshot)
+                        .presentationDetents([.large])
+                } else {
+                    content(details)
+                }
             } else if loadFailed {
                 ContentUnavailableView {
                     Label("无法打开通知", systemImage: "bell.slash")
@@ -181,9 +187,12 @@ private struct PushNotificationDetailsView: View {
         }
         .task(id: attempt) {
             loadFailed = false
+            expired = false
             do {
-                details = try await APIClient(baseURL: ServerConfiguration.currentURL)
+                let loaded = try await APIClient(baseURL: ServerConfiguration.currentURL)
                     .fetchPushNotification(id: destination.id)
+                guard !Task.isCancelled else { return }
+                details = loaded
             } catch {
                 guard !Task.isCancelled else { return }
                 if case APIError.httpStatus(404) = error { expired = true }
@@ -329,7 +338,19 @@ struct AIServerClientApp: App {
         URLCache.shared = URLCache(memoryCapacity: 48_000_000, diskCapacity: 240_000_000)
     }
 
-    var body: some Scene { WindowGroup { EditorialRootView() } }
+    var body: some Scene {
+        WindowGroup {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--sec13f-notification-preview") {
+                Sec13FNotificationPreview()
+            } else {
+                EditorialRootView()
+            }
+            #else
+            EditorialRootView()
+            #endif
+        }
+    }
 }
 
 private enum EditorialTab: Hashable {
@@ -554,6 +575,7 @@ private struct EditorialRootView: View {
         .inAppBrowserCover(item: $presentedExternalLink)
         .sheet(item: $presentedNotificationDetails) { details in
             PushNotificationDetailsView(destination: details)
+                .id(details.id)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }

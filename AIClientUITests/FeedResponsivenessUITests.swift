@@ -7,6 +7,41 @@ final class FeedResponsivenessUITests: XCTestCase {
         executionTimeAllowance = 90
     }
 
+    func testSec13FNativeSheetFiltersAndClosesRepeatedly() {
+        let app = XCUIApplication()
+        app.launchArguments += ["--sec13f-notification-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["13F 持仓更新"].waitForExistence(timeout: 8))
+        capture(app, name: "sec13f-native-summary")
+        app.buttons["sec13f-filter-增持"].tap()
+        XCTAssertTrue(app.staticTexts["AMERICAN EXPRESS CO"].exists)
+        XCTAssertFalse(app.staticTexts["APPLE INC"].exists)
+        app.buttons["sec13f-filter-清仓"].tap()
+        XCTAssertTrue(app.staticTexts["SOLD COMPANY"].exists)
+        capture(app, name: "sec13f-native-exited")
+        app.buttons["关闭持仓更新"].tap()
+        XCTAssertTrue(app.buttons["打开持仓更新"].waitForExistence(timeout: 3))
+        app.buttons["打开持仓更新"].tap()
+        XCTAssertTrue(app.staticTexts["APPLE INC"].waitForExistence(timeout: 3))
+        app.buttons["关闭持仓更新"].tap()
+        app.terminate()
+    }
+
+    func testSec13FNativeSheetDarkAccessibilityText() {
+        let app = XCUIApplication()
+        app.launchArguments += ["--sec13f-notification-preview", "-AppleInterfaceStyle", "Dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["13F 持仓更新"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["关闭持仓更新"].isHittable)
+        capture(app, name: "sec13f-native-dark-accessibility")
+        app.swipeUp()
+        capture(app, name: "sec13f-native-dark-accessibility-holdings")
+        app.swipeDown()
+        app.buttons["关闭持仓更新"].tap()
+        XCTAssertTrue(app.buttons["打开持仓更新"].waitForExistence(timeout: 3))
+        app.terminate()
+    }
+
     func testZhihuRemainsResponsiveAfterRepeatedScrolling() {
         let app = launchFeed("zhihu")
         exerciseScrolling(app, source: "zhihu")
