@@ -346,11 +346,13 @@ struct Sec13FNotificationPreview: View {
     var body: some View {
         Button("打开持仓更新") { presented = true }
             .sheet(isPresented: $presented) {
-                if let snapshot = try? JSONDecoder().decode(Sec13FNotificationSnapshot.self, from: Data(data.utf8)) {
-                    Sec13FNotificationView(snapshot: snapshot)
-                        .presentationDetents([.large])
-                        .presentationDragIndicator(.visible)
+                // Exercise the production fetch/loading/router container, not a sheet bypass.
+                PushNotificationDetailsView(destination: .init(id: UUID())) {
+                    try await Task.sleep(for: .milliseconds(200))
+                    let snapshot = try JSONDecoder().decode(Sec13FNotificationSnapshot.self, from: Data(data.utf8))
+                    return PushNotificationDetails(title: "13F", body: "示例数据", links: nil, imageURL: nil, sec13f: snapshot)
                 }
+                .presentationDragIndicator(.visible)
             }
     }
 }

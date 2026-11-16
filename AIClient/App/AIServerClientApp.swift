@@ -151,8 +151,9 @@ struct PushNotificationDetails: Decodable {
     }
 }
 
-private struct PushNotificationDetailsView: View {
+struct PushNotificationDetailsView: View {
     let destination: PushNotificationDestination
+    private let loadDetails: () async throws -> PushNotificationDetails
     @State private var details: PushNotificationDetails?
     @State private var loadFailed = false
     @State private var expired = false
@@ -160,12 +161,18 @@ private struct PushNotificationDetailsView: View {
     @State private var browser: InAppBrowserDestination?
     @State private var gallerySelection: ImageGallerySelection?
 
+    init(destination: PushNotificationDestination, loadDetails: (() async throws -> PushNotificationDetails)? = nil) {
+        self.destination = destination
+        self.loadDetails = loadDetails ?? {
+            try await APIClient(baseURL: ServerConfiguration.currentURL).fetchPushNotification(id: destination.id)
+        }
+    }
+
     var body: some View {
         Group {
             if let details {
                 if let snapshot = details.sec13f {
                     Sec13FNotificationView(snapshot: snapshot)
-                        .presentationDetents([.large])
                 } else {
                     content(details)
                 }
@@ -185,12 +192,12 @@ private struct PushNotificationDetailsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .presentationDetents(details?.sec13f == nil ? [.medium, .large] : [.large])
         .task(id: attempt) {
             loadFailed = false
             expired = false
             do {
-                let loaded = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                    .fetchPushNotification(id: destination.id)
+                let loaded = try await loadDetails()
                 guard !Task.isCancelled else { return }
                 details = loaded
             } catch {
@@ -576,7 +583,6 @@ private struct EditorialRootView: View {
         .sheet(item: $presentedNotificationDetails) { details in
             PushNotificationDetailsView(destination: details)
                 .id(details.id)
-                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .overlay(alignment: .topLeading) {

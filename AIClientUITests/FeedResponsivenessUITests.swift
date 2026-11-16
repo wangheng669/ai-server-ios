@@ -12,6 +12,10 @@ final class FeedResponsivenessUITests: XCTestCase {
         app.launchArguments += ["--sec13f-notification-preview"]
         app.launch()
         XCTAssertTrue(app.staticTexts["13F 披露"].waitForExistence(timeout: 8))
+        let header = app.staticTexts["13F 披露"]
+        let expanded = NSPredicate { _, _ in header.frame.minY < app.frame.height * 0.25 }
+        expectation(for: expanded, evaluatedWith: nil)
+        waitForExpectations(timeout: 3)
         capture(app, name: "sec13f-native-summary")
         app.buttons["sec13f-summary-增持"].tap()
         let list = app.scrollViews["sec13f-holdings-list"]
