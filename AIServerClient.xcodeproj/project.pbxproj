@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F13F00000000000000000001 /* Sec13FNotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13F00000000000000000002 /* Sec13FNotificationView.swift */; };
 		9348729849C84883BE34E3C6 /* FeedResponsivenessUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08060FA0B53C474B9BD85B35 /* FeedResponsivenessUITests.swift */; };
 		E90000000000000000000001 /* NotificationPresentationDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* NotificationPresentationDismissalTests.swift */; };
 		B23D04D5AA0940CD901A8871 /* RetailSentimentRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB43659990474DFA932089A0 /* RetailSentimentRefreshTests.swift */; };
@@ -122,6 +123,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F13F00000000000000000002 /* Sec13FNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sec13FNotificationView.swift; sourceTree = "<group>"; };
 		08060FA0B53C474B9BD85B35 /* FeedResponsivenessUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedResponsivenessUITests.swift; sourceTree = "<group>"; };
 		E90000000000000000000002 /* NotificationPresentationDismissalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPresentationDismissalTests.swift; sourceTree = "<group>"; };
 		AB43659990474DFA932089A0 /* RetailSentimentRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetailSentimentRefreshTests.swift; sourceTree = "<group>"; };
@@ -308,6 +310,7 @@
 			isa = PBXGroup;
 			children = (
 				4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */,
+				F13F00000000000000000002 /* Sec13FNotificationView.swift */,
 				69DC0C4FF5F713E3E9A116D6 /* DeploymentStatusTip.swift */,
 			);
 			path = App;
@@ -647,6 +650,7 @@
 				A11B22C33D44E55F66778890 /* GlobalAssetsRankingView.swift in Sources */,
 				0BB9A3475C0408092697FA60 /* DeploymentStatusTip.swift in Sources */,
 				912BA358792A0CF9208478FB /* FamousHoldingDetailView.swift in Sources */,
+				F13F00000000000000000001 /* Sec13FNotificationView.swift in Sources */,
 				92D94B2A4B1E251539E7F2AD /* FamousHoldingsModels.swift in Sources */,
 				801D06F0246D5D96D45CA002 /* FamousHoldingsStore.swift in Sources */,
 				F8D3287EB5936C8F9BA30ECB /* FamousHoldingsView.swift in Sources */,

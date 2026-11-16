@@ -2,6 +2,45 @@ import XCTest
 @testable import AIServerClient
 
 final class PostDecodingTests: XCTestCase {
+    func testSec13FSnapshotUsesSharesNotMarketValueAndPreservesFiling() throws {
+        let json = #"{"title":"13F","body":"摘要","sec13f":{"checkedAt":"2026-11-16T15:00:00Z","windowText":"披露窗口","checked":8,"failed":0,"errors":[],"items":[{"key":"manager","institutionName":"测试机构","accession":"new-filing","previousAccession":"old-filing","reportDate":"2026-09-30","positions":[{"nameOfIssuer":"Price rose only","valueUsd":200,"previousValueUsd":100},{"nameOfIssuer":"Added shares","sharesChange":10},{"nameOfIssuer":"Reduced shares","sharesChange":-1},{"nameOfIssuer":"New","isNew":true}],"exitedPositions":[{"nameOfIssuer":"Exited","isSoldOut":true}]}]}}"#
+        let details = try JSONDecoder().decode(PushNotificationDetails.self, from: Data(json.utf8))
+        let snapshot = try XCTUnwrap(details.sec13f)
+        let manager = try XCTUnwrap(snapshot.items.first)
+        XCTAssertEqual(manager.accession, "new-filing")
+        XCTAssertEqual(manager.reportDate, "2026-09-30")
+        XCTAssertEqual(manager.positions(matching: .unchanged, query: "").map(\.nameOfIssuer), ["Price rose only"])
+        XCTAssertEqual(manager.positions(matching: .increased, query: "added").count, 1)
+        XCTAssertEqual(manager.positions(matching: .decreased, query: "").count, 1)
+        XCTAssertEqual(manager.positions(matching: .new, query: "").count, 1)
+        XCTAssertEqual(manager.positions(matching: .exited, query: "").count, 1)
+        XCTAssertEqual(manager.positions(matching: .all, query: "missing").count, 0)
+        XCTAssertEqual(manager.positions(matching: .changed, query: "").count, 4)
+        XCTAssertEqual(manager.positions(matching: .all, query: "").count, 5)
+        XCTAssertNil(details.imageURL)
+    }
+
+    func testSec13FMissingComparisonIsNotReportedAsTrading() throws {
+        let json = #"{"checkedAt":"2026-11-16T15:00:00Z","windowText":"","checked":1,"failed":0,"errors":[],"items":[{"key":"a","institutionName":"A","positions":[{"nameOfIssuer":"Company","isNew":true,"sharesChange":99}]}]}"#
+        let snapshot = try JSONDecoder().decode(Sec13FNotificationSnapshot.self, from: Data(json.utf8))
+        XCTAssertEqual(snapshot.items[0].positions(matching: .uncompared, query: "").count, 1)
+        XCTAssertEqual(snapshot.items[0].positions(matching: .new, query: "").count, 0)
+        let generic = try JSONDecoder().decode(PushNotificationDetails.self, from: Data(#"{"title":"Other","body":"Content"}"#.utf8))
+        XCTAssertNil(generic.sec13f)
+    }
+
+    func testTodayPreviewHasSuccessfulReportAndEveryCitedSource() throws {
+        let report = try TodayWorldPreview.report()
+        let final = try XCTUnwrap(report.report.final)
+        XCTAssertEqual(final.status, "succeeded")
+        XCTAssertFalse(final.sections.isEmpty)
+        let ids = Set(final.sections.flatMap(\.systems).flatMap(\.postIDs))
+        let posts = try TodayWorldPreview.posts()
+        XCTAssertFalse(ids.isEmpty)
+        XCTAssertEqual(ids, Set(posts.map(\.id)))
+        XCTAssertTrue(posts.allSatisfy { !$0.displayContent.isEmpty })
+    }
+
     func testServerReplyTranslationReplacesEnglishContextAndStopsRefresh() throws {
         let original = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3328298,"source":"x","content_zh":"我以为你不是首席执行官。","meta":{"in_reply_to_status_id":"2098210210523295773","reply_context":{"id":"2098210210523295773","text":"i am hiring a chief of staff"}}}"#.utf8))
         let fresh = original.replacingXReplyContext(with: XReplyContext(

@@ -7,6 +7,64 @@ final class FeedResponsivenessUITests: XCTestCase {
         executionTimeAllowance = 90
     }
 
+    func testSec13FNativeSheetFiltersAndClosesRepeatedly() {
+        let app = XCUIApplication()
+        app.launchArguments += ["--sec13f-notification-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["13F 披露"].waitForExistence(timeout: 8))
+        let header = app.staticTexts["13F 披露"]
+        let expanded = NSPredicate { _, _ in header.frame.minY < app.frame.height * 0.25 }
+        expectation(for: expanded, evaluatedWith: nil)
+        waitForExpectations(timeout: 3)
+        capture(app, name: "sec13f-native-summary")
+        app.buttons["sec13f-summary-增持"].tap()
+        let list = app.scrollViews["sec13f-holdings-list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 3))
+        XCTAssertTrue(list.staticTexts["AMERICAN EXPRESS CO"].exists)
+        XCTAssertFalse(list.staticTexts["APPLE INC"].exists)
+        app.buttons["sec13f-filter-menu"].tap()
+        app.buttons["sec13f-filter-清仓"].tap()
+        XCTAssertTrue(list.staticTexts["SOLD COMPANY"].exists)
+        capture(app, name: "sec13f-native-exited")
+        app.buttons["sec13f-filter-menu"].tap()
+        app.buttons["sec13f-filter-全部"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        search.tap()
+        search.typeText("APPLE")
+        XCTAssertTrue(list.staticTexts["APPLE INC"].exists)
+        XCTAssertFalse(list.staticTexts["SOLD COMPANY"].exists)
+        // Native searchable replaces navigation items while editing; finish search first.
+        let cancelSearch = app.navigationBars["持仓明细"].buttons.matching(
+            NSPredicate(format: "label IN %@", ["Close", "Cancel", "关闭", "取消"])
+        ).firstMatch
+        XCTAssertTrue(cancelSearch.waitForExistence(timeout: 3))
+        cancelSearch.tap()
+        XCTAssertTrue(app.buttons["sec13f-detail-back"].waitForExistence(timeout: 3))
+        app.buttons["sec13f-detail-back"].tap()
+        app.buttons["关闭持仓更新"].tap()
+        XCTAssertTrue(app.buttons["打开持仓更新"].waitForExistence(timeout: 3))
+        app.buttons["打开持仓更新"].tap()
+        XCTAssertTrue(app.staticTexts["APPLE INC"].waitForExistence(timeout: 3))
+        app.buttons["关闭持仓更新"].tap()
+        app.terminate()
+    }
+
+    func testSec13FNativeSheetAccessibilityText() {
+        let app = XCUIApplication()
+        app.launchArguments += ["--sec13f-notification-preview", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["13F 披露"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["关闭持仓更新"].isHittable)
+        capture(app, name: "sec13f-native-dark-accessibility")
+        app.swipeUp()
+        capture(app, name: "sec13f-native-dark-accessibility-holdings")
+        app.swipeDown()
+        app.buttons["关闭持仓更新"].tap()
+        XCTAssertTrue(app.buttons["打开持仓更新"].waitForExistence(timeout: 3))
+        app.terminate()
+    }
+
     func testZhihuRemainsResponsiveAfterRepeatedScrolling() {
         let app = launchFeed("zhihu")
         exerciseScrolling(app, source: "zhihu")

@@ -187,7 +187,21 @@ module TestFlightProcessing
     build_ids.length
   end
 
+  def expire_previous_builds_if_requested(api, build_ids, enabled: ENV.fetch("TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS", "false"))
+    return 0 unless enabled == "true"
+
+    expire_builds(api, build_ids)
+  end
+
+  def notifications_enabled?(value = ENV.fetch("TESTFLIGHT_NOTIFY_ON_COMPLETION", "true"))
+    value == "true"
+  end
+
   def notify_server(status:, details:, error: nil)
+    unless notifications_enabled?
+      puts "Generic TestFlight notification suppressed for this run."
+      return
+    end
     base_url = ENV.fetch("DEPLOYMENT_STATUS_BASE_URL", "https://api.wanghengai.xin")
     api_key = required_env("DEPLOYMENT_STATUS_API_KEY")
     uri = URI.join("#{base_url.sub(%r{/*$}, "")}/", "api/ios/v1/system/ios-testflight-notification")
@@ -310,11 +324,11 @@ module TestFlightProcessing
         puts "Build #{details["version"]} (#{details["build"]}) processing state: #{state}"
         if state == "VALID"
           old_build_ids = baseline.fetch("activeBuildIds", baseline_ids)
-          expired_count = expire_builds(api, old_build_ids)
-          puts "Expired #{expired_count} previous TestFlight builds."
+          expired_count = expire_previous_builds_if_requested(api, old_build_ids)
+          puts "Previous TestFlight builds: #{expired_count} expired; preservation is the default."
           notify_server(status: "completed", details: details)
           mark_notified
-          puts "TestFlight processing completed and iOS notification was accepted."
+          puts "TestFlight processing completed; notification policy applied."
           return
         end
         if %w[FAILED INVALID].include?(state)
@@ -336,6 +350,37 @@ module TestFlightProcessing
     raise "Timed out after #{timeout_seconds} seconds waiting for TestFlight processing"
   end
 
+  def readiness_details(response)
+    included = response.fetch("included", [])
+    beta = included.find { |item| item["type"] == "buildBetaDetails" }
+    groups = included.select { |item| item["type"] == "betaGroups" }.map do |item|
+      attributes = item.fetch("attributes", {})
+      {
+        "name" => attributes["name"],
+        "internal" => attributes["isInternalGroup"],
+        "publicLink" => attributes["publicLinkEnabled"] ? attributes["publicLink"] : nil
+      }.compact
+    end
+    {
+      "buildId" => response.dig("data", "id"),
+      "internalBuildState" => beta&.dig("attributes", "internalBuildState"),
+      "externalBuildState" => beta&.dig("attributes", "externalBuildState"),
+      "groups" => groups
+    }
+  end
+
+  # Read-only verification: this never adds testers/groups or submits beta review.
+  def readiness(path)
+    baseline = JSON.parse(File.read(path))
+    api = client
+    details = fetch_new_build(api, baseline.fetch("appId"), baseline.fetch("buildIds"))
+    raise "Uploaded build not found for readiness verification" unless details
+
+    response = api.get("/v1/builds/#{details.fetch('id')}", "include" => "buildBetaDetail,betaGroups")
+    puts "TestFlight read-only availability:"
+    puts JSON.pretty_generate(readiness_details(response).merge("version" => details["version"], "build" => details["build"]))
+  end
+
   def fetch_new_build(api, app_id, baseline_ids)
     api.builds(app_id).then { |response| build_details(response, baseline_ids) }
   rescue StandardError => e
@@ -346,8 +391,8 @@ end
 
 if $PROGRAM_NAME == __FILE__
   command, path = ARGV
-  commands = %w[prepare snapshot wait]
-  abort "Usage: #{$PROGRAM_NAME} prepare|snapshot|wait SNAPSHOT_PATH" unless commands.include?(command) && path
+  commands = %w[prepare snapshot wait readiness]
+  abort "Usage: #{$PROGRAM_NAME} prepare|snapshot|wait|readiness SNAPSHOT_PATH" unless commands.include?(command) && path
 
   TestFlightProcessing.public_send(command, path)
 end

@@ -112,6 +112,59 @@ class TestFlightProcessingNotifyTest < Minitest::Test
     assert_equal ["available"], TestFlightProcessing.active_build_ids(response)
   end
 
+  def test_preserves_old_builds_unless_explicitly_enabled
+    api = Object.new
+    expired_ids = []
+    api.define_singleton_method(:expire_build) { |build_id| expired_ids << build_id }
+    ["false", "", "TRUE", "1"].each do |flag|
+      assert_equal 0, TestFlightProcessing.expire_previous_builds_if_requested(api, ["old"], enabled: flag)
+    end
+    assert_empty expired_ids
+    assert_equal 1, TestFlightProcessing.expire_previous_builds_if_requested(api, ["old"], enabled: "true")
+    assert_equal ["old"], expired_ids
+  end
+
+  def test_preserves_old_builds_by_default
+    api = Object.new
+    api.define_singleton_method(:expire_build) { |_| flunk "Default must not expire builds" }
+    previous = ENV.delete("TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS")
+    assert_equal 0, TestFlightProcessing.expire_previous_builds_if_requested(api, ["old"])
+  ensure
+    ENV["TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS"] = previous if previous
+  end
+
+  def test_readiness_reports_states_and_only_enabled_public_links
+    response = {
+      "data" => { "id" => "build" },
+      "included" => [
+        { "type" => "buildBetaDetails", "attributes" => { "internalBuildState" => "IN_BETA_TESTING", "externalBuildState" => "READY_FOR_BETA_SUBMISSION" } },
+        { "type" => "betaGroups", "attributes" => { "name" => "Existing internal group", "isInternalGroup" => true, "publicLinkEnabled" => false, "publicLink" => "hidden" } },
+        { "type" => "betaGroups", "attributes" => { "name" => "Existing external group", "isInternalGroup" => false, "publicLinkEnabled" => true, "publicLink" => "https://testflight.apple.com/join/example" } }
+      ]
+    }
+    result = TestFlightProcessing.readiness_details(response)
+    assert_equal "IN_BETA_TESTING", result.fetch("internalBuildState")
+    assert_equal "READY_FOR_BETA_SUBMISSION", result.fetch("externalBuildState")
+    refute result.fetch("groups")[0].key?("publicLink")
+    assert_equal "https://testflight.apple.com/join/example", result.fetch("groups")[1].fetch("publicLink")
+    assert_equal [], TestFlightProcessing.readiness_details({ "data" => { "id" => "empty" } }).fetch("groups")
+  end
+
+  def test_notification_default_is_preserved_but_run_can_suppress_it
+    previous = ENV.delete("TESTFLIGHT_NOTIFY_ON_COMPLETION")
+    assert TestFlightProcessing.notifications_enabled?
+    ENV["TESTFLIGHT_NOTIFY_ON_COMPLETION"] = "false"
+    refute TestFlightProcessing.notifications_enabled?
+    # Must return before credential lookup or HTTP transmission.
+    assert_nil TestFlightProcessing.notify_server(status: "completed", details: {})
+  ensure
+    if previous
+      ENV["TESTFLIGHT_NOTIFY_ON_COMPLETION"] = previous
+    else
+      ENV.delete("TESTFLIGHT_NOTIFY_ON_COMPLETION")
+    end
+  end
+
   def test_expires_each_previous_build
     api = Object.new
     expired_ids = []

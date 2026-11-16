@@ -143,15 +143,17 @@ struct PushNotificationDetails: Decodable {
     let body: String
     let links: [Link]?
     let imageURL: URL?
+    let sec13f: Sec13FNotificationSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case title, body, links
+        case title, body, links, sec13f
         case imageURL = "image_url"
     }
 }
 
-private struct PushNotificationDetailsView: View {
+struct PushNotificationDetailsView: View {
     let destination: PushNotificationDestination
+    private let loadDetails: () async throws -> PushNotificationDetails
     @State private var details: PushNotificationDetails?
     @State private var loadFailed = false
     @State private var expired = false
@@ -159,10 +161,21 @@ private struct PushNotificationDetailsView: View {
     @State private var browser: InAppBrowserDestination?
     @State private var gallerySelection: ImageGallerySelection?
 
+    init(destination: PushNotificationDestination, loadDetails: (() async throws -> PushNotificationDetails)? = nil) {
+        self.destination = destination
+        self.loadDetails = loadDetails ?? {
+            try await APIClient(baseURL: ServerConfiguration.currentURL).fetchPushNotification(id: destination.id)
+        }
+    }
+
     var body: some View {
         Group {
             if let details {
-                content(details)
+                if let snapshot = details.sec13f {
+                    Sec13FNotificationView(snapshot: snapshot)
+                } else {
+                    content(details)
+                }
             } else if loadFailed {
                 ContentUnavailableView {
                     Label("无法打开通知", systemImage: "bell.slash")
@@ -179,11 +192,14 @@ private struct PushNotificationDetailsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .presentationDetents(details?.sec13f == nil ? [.medium, .large] : [.large])
         .task(id: attempt) {
             loadFailed = false
+            expired = false
             do {
-                details = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                    .fetchPushNotification(id: destination.id)
+                let loaded = try await loadDetails()
+                guard !Task.isCancelled else { return }
+                details = loaded
             } catch {
                 guard !Task.isCancelled else { return }
                 if case APIError.httpStatus(404) = error { expired = true }
@@ -329,7 +345,19 @@ struct AIServerClientApp: App {
         URLCache.shared = URLCache(memoryCapacity: 48_000_000, diskCapacity: 240_000_000)
     }
 
-    var body: some Scene { WindowGroup { EditorialRootView() } }
+    var body: some Scene {
+        WindowGroup {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--sec13f-notification-preview") {
+                Sec13FNotificationPreview()
+            } else {
+                EditorialRootView()
+            }
+            #else
+            EditorialRootView()
+            #endif
+        }
+    }
 }
 
 private enum EditorialTab: Hashable {
@@ -554,7 +582,7 @@ private struct EditorialRootView: View {
         .inAppBrowserCover(item: $presentedExternalLink)
         .sheet(item: $presentedNotificationDetails) { details in
             PushNotificationDetailsView(destination: details)
-                .presentationDetents([.medium, .large])
+                .id(details.id)
                 .presentationDragIndicator(.visible)
         }
         .overlay(alignment: .topLeading) {
@@ -847,6 +875,26 @@ private struct RootNavigationBar: View {
     }
 }
 
+#if DEBUG
+/// Deterministic report and cited source for the existing Today UI preview.
+/// Production requests are never replaced with sample data.
+enum TodayWorldPreview {
+    static var isEnabled: Bool { ProcessInfo.processInfo.arguments.contains("--today-world-preview") }
+
+    static func report() throws -> TodayWorldYesterdayReportPayload {
+        let json = #"""
+        {"date":"2026-11-15","timezone":"Asia/Shanghai","status":"succeeded","stage":"completed","progress":100,"source_count":1,"post_count":1,"total_tokens":0,"cost_cny":0,"report":{"final":{"status":"succeeded","overview":{"headline":"示例日报","highlights":[],"watch_items":[]},"sections":[{"section_key":"companies","section_name":"公司动态","groups":[{"group_key":"preview","group_name":"示例公司","systems":[{"system_key":"preview-company","system_name":"示例公司","headline":"示例公司发布季度经营更新","signal_level":"normal","facts":[{"category":"经营","text":"季度收入增长，管理层公布下一阶段产品计划。","source_keys":["preview-source"],"post_ids":[900000001]}],"source_keys":["preview-source"],"source_names":["示例来源"],"post_ids":[900000001]}]}]}]}}}
+        """#
+        return try JSONDecoder().decode(TodayWorldYesterdayReportPayload.self, from: Data(json.utf8))
+    }
+
+    static func posts() throws -> [Post] {
+        let json = #"[{"id":900000001,"source":"x","content":"这是用于界面测试的示例原文。公司公布季度经营表现，并说明了下一阶段的产品计划。","user":{"name":"示例来源"}}]"#
+        return try JSONDecoder().decode([Post].self, from: Data(json.utf8))
+    }
+}
+#endif
+
 @MainActor
 private final class TodayWorldStore: ObservableObject {
     @Published private(set) var report: TodayWorldYesterdayReportPayload?
@@ -860,6 +908,18 @@ private final class TodayWorldStore: ObservableObject {
         defer { isLoading = false }
 
         do {
+            #if DEBUG
+            if TodayWorldPreview.isEnabled {
+                // Seed the normal source cache before displaying the report so inline
+                // expansion and Chinese preparation stay offline and deterministic.
+                await TodayWorldPostMemoryCache.shared.store(
+                    posts: try TodayWorldPreview.posts(), baseURL: ServerConfiguration.currentURL
+                )
+                report = try TodayWorldPreview.report()
+                errorMessage = nil
+                return
+            }
+            #endif
             report = try await APIClient(baseURL: ServerConfiguration.currentURL)
                 .fetchTodayWorldYesterdayReport()
             errorMessage = nil

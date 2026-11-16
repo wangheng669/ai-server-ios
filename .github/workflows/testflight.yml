@@ -14,6 +14,18 @@ on:
         default: false
         type: boolean
 
+      notify_on_completion:
+        description: Send the existing generic upload notification after processing
+        required: false
+        default: true
+        type: boolean
+
+      expire_previous_builds:
+        description: Expire previous TestFlight builds after successful processing (requires explicit authorization)
+        required: false
+        default: false
+        type: boolean
+
 run-name: Upload ${{ inputs.git_ref || 'main' }} to TestFlight
 
 concurrency:
@@ -84,6 +96,8 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       EXPECTED_XCODE_BUILD: 17F113
+      TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS: ${{ inputs.expire_previous_builds }}
+      TESTFLIGHT_NOTIFY_ON_COMPLETION: ${{ inputs.notify_on_completion }}
 
     steps:
       - name: Check out requested version
@@ -144,7 +158,8 @@ jobs:
 
       - name: Run tests
         run: |
-          set -o pipefail
+          set -eo pipefail
+          ruby ci/test_testflight_processing_notify.rb
           ./ci/with-ios-simulator-lock.sh \
             --label "TestFlight tests $GITHUB_RUN_ID" \
             --wait-seconds 1200 \
@@ -197,6 +212,12 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ruby ci/testflight-processing-notify.rb wait "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
+
+      - name: Verify existing TestFlight availability (read only)
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: ruby ci/testflight-processing-notify.rb readiness "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
 
       - name: Remove authentication key
         if: ${{ always() }}
