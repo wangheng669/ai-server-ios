@@ -8,6 +8,11 @@ on:
         required: false
         default: main
         type: string
+      resume_test_run:
+        description: Reuse successful full tests from this exact revision (verified via GitHub API)
+        required: false
+        default: ""
+        type: string
       only_if_new:
         description: Skip when this revision was already uploaded successfully
         required: false
@@ -105,6 +110,32 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || 'main' }}
 
+      - name: Verify completed test evidence for exact revision
+        if: inputs.resume_test_run != ''
+        uses: actions/github-script@v8
+        env:
+          TEST_RUN_ID: ${{ inputs.resume_test_run }}
+          TESTED_SHA: ${{ inputs.git_ref }}
+        with:
+          script: |
+            const runId = process.env.TEST_RUN_ID;
+            const sha = process.env.TESTED_SHA;
+            if (!/^[0-9]+$/.test(runId) || !/^[a-f0-9]{40}$/.test(sha)) {
+              throw new Error('Resume requires a numeric run ID and full exact commit SHA');
+            }
+            const repo = {owner: context.repo.owner, repo: context.repo.repo};
+            const {data: run} = await github.rest.actions.getWorkflowRun({...repo, run_id: Number(runId)});
+            if (run.head_sha !== sha || run.status !== 'completed' || run.path !== '.github/workflows/testflight.yml' || run.display_title !== `Upload ${sha} to TestFlight`) {
+              throw new Error('Evidence is not a completed TestFlight run for the exact requested revision');
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {...repo, run_id: Number(runId)});
+            const job = jobs.find(j => j.name === 'Test, archive, and upload');
+            const passed = name => job?.steps.some(s => s.name === name && s.conclusion === 'success');
+            if (!passed('Check out requested version') || !passed('Verify supported Xcode') || !passed('Run tests')) {
+              throw new Error('The original full test gate did not pass; cannot resume');
+            }
+            core.notice(`Reusing successful full tests for ${sha}: ${run.html_url}`);
+
       - name: Verify supported Xcode
         run: |
           set -euo pipefail
@@ -157,6 +188,7 @@ jobs:
           echo "Building TestFlight version $TESTFLIGHT_MARKETING_VERSION."
 
       - name: Run tests
+        if: inputs.resume_test_run == ''
         run: |
           set -eo pipefail
           ruby ci/test_testflight_processing_notify.rb
@@ -176,7 +208,9 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          set -o pipefail
+          set -eo pipefail
+          # Existing office signing authentication; no keychain settings or ACL changes.
+          security unlock-keychain -p "${IOS_KEYCHAIN_PASSWORD:-}" "$HOME/Library/Keychains/login.keychain-db"
           xcodebuild archive \
             -project AIServerClient.xcodeproj \
             -scheme AIServerClient \
