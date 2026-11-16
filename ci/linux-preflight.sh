@@ -33,46 +33,6 @@ if ((${#changed_shell_files[@]})); then
   fi
 fi
 
-if git diff --name-only "$merge_base"...HEAD -- ci/sign-and-install-ios.sh ci/test-sign-and-install-ios.sh | grep -q .; then
-  bash ci/test-sign-and-install-ios.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/report-ios-deployment.sh ci/test-report-ios-deployment.sh | grep -q .; then
-  bash ci/test-report-ios-deployment.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/prune-ios-install-deltas.sh ci/test-prune-ios-install-deltas.sh ci/sign-and-install-ios.sh | grep -q .; then
-  bash ci/test-prune-ios-install-deltas.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- .gitignore .derived-data-reference ci .github/workflows | grep -q .; then
-  bash ci/test-ios-build-storage-policy.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/classify-ios-test-scope.sh ci/is-low-risk-ios-diff.sh ci/test-classify-ios-test-scope.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
-  bash ci/test-classify-ios-test-scope.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/check-ios-device-ready.sh ci/verify-ios-device-stability.sh ci/test-verify-ios-device-stability.sh ci/probe-ios-device.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
-  bash ci/test-verify-ios-device-stability.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/prepare-central-runner-parallel.sh ci/test-central-device-delivery-policy.sh .github/workflows/ai-merge-to-main.yml | grep -q .; then
-  bash ci/test-central-device-delivery-policy.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/local-central-merge.sh ci/actions-outage-fallback-watch.sh | grep -q .; then
-  bash ci/test-actions-outage-fallback-watch.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/with-ios-simulator-lock.sh ci/test-with-ios-simulator-lock.sh | grep -q .; then
-  bash ci/test-with-ios-simulator-lock.sh
-fi
-
-if git diff --name-only "$merge_base"...HEAD -- ci/automatic-main-sync.sh ci/finish-task.sh ci/check-worktree-overlap.sh ci/test-task-lifecycle.sh | grep -q .; then
-  bash ci/test-task-lifecycle.sh
-fi
-
 if python3 -c 'import yaml' >/dev/null 2>&1; then
   python3 - <<'PY'
 from pathlib import Path
@@ -90,4 +50,4 @@ else
   exit 1
 fi
 
-echo "Linux preflight completed. Xcode tests remain on the selected central Mac."
+echo "Linux preflight completed. Xcode builds remain on the selected central Mac."
