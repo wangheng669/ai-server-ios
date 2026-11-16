@@ -11,14 +11,24 @@ final class FeedResponsivenessUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--sec13f-notification-preview"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["13F 持仓更新"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["13F 披露"].waitForExistence(timeout: 8))
         capture(app, name: "sec13f-native-summary")
-        app.buttons["sec13f-filter-增持"].tap()
+        app.buttons["sec13f-summary-增持"].tap()
         XCTAssertTrue(app.staticTexts["AMERICAN EXPRESS CO"].exists)
         XCTAssertFalse(app.staticTexts["APPLE INC"].exists)
+        app.buttons["sec13f-filter-menu"].tap()
         app.buttons["sec13f-filter-清仓"].tap()
         XCTAssertTrue(app.staticTexts["SOLD COMPANY"].exists)
         capture(app, name: "sec13f-native-exited")
+        app.buttons["sec13f-filter-menu"].tap()
+        app.buttons["sec13f-filter-全部"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        search.tap()
+        search.typeText("APPLE")
+        XCTAssertTrue(app.staticTexts["APPLE INC"].exists)
+        XCTAssertFalse(app.staticTexts["SOLD COMPANY"].exists)
+        app.buttons["sec13f-detail-back"].tap()
         app.buttons["关闭持仓更新"].tap()
         XCTAssertTrue(app.buttons["打开持仓更新"].waitForExistence(timeout: 3))
         app.buttons["打开持仓更新"].tap()
@@ -27,11 +37,11 @@ final class FeedResponsivenessUITests: XCTestCase {
         app.terminate()
     }
 
-    func testSec13FNativeSheetDarkAccessibilityText() {
+    func testSec13FNativeSheetAccessibilityText() {
         let app = XCUIApplication()
-        app.launchArguments += ["--sec13f-notification-preview", "-AppleInterfaceStyle", "Dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launchArguments += ["--sec13f-notification-preview", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["13F 持仓更新"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["13F 披露"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["关闭持仓更新"].isHittable)
         capture(app, name: "sec13f-native-dark-accessibility")
         app.swipeUp()

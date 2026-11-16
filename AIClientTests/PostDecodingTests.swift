@@ -15,6 +15,8 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertEqual(manager.positions(matching: .new, query: "").count, 1)
         XCTAssertEqual(manager.positions(matching: .exited, query: "").count, 1)
         XCTAssertEqual(manager.positions(matching: .all, query: "missing").count, 0)
+        XCTAssertEqual(manager.positions(matching: .changed, query: "").count, 4)
+        XCTAssertEqual(manager.positions(matching: .all, query: "").count, 5)
         XCTAssertNil(details.imageURL)
     }
 

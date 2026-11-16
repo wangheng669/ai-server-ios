@@ -112,6 +112,27 @@ class TestFlightProcessingNotifyTest < Minitest::Test
     assert_equal ["available"], TestFlightProcessing.active_build_ids(response)
   end
 
+  def test_preserves_old_builds_unless_explicitly_enabled
+    api = Object.new
+    expired_ids = []
+    api.define_singleton_method(:expire_build) { |build_id| expired_ids << build_id }
+    ["false", "", "TRUE", "1"].each do |flag|
+      assert_equal 0, TestFlightProcessing.expire_previous_builds_if_requested(api, ["old"], enabled: flag)
+    end
+    assert_empty expired_ids
+    assert_equal 1, TestFlightProcessing.expire_previous_builds_if_requested(api, ["old"], enabled: "true")
+    assert_equal ["old"], expired_ids
+  end
+
+  def test_preserves_old_builds_by_default
+    api = Object.new
+    api.define_singleton_method(:expire_build) { |_| flunk "Default must not expire builds" }
+    previous = ENV.delete("TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS")
+    assert_equal 0, TestFlightProcessing.expire_previous_builds_if_requested(api, ["old"])
+  ensure
+    ENV["TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS"] = previous if previous
+  end
+
   def test_expires_each_previous_build
     api = Object.new
     expired_ids = []

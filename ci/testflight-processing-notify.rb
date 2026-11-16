@@ -187,6 +187,12 @@ module TestFlightProcessing
     build_ids.length
   end
 
+  def expire_previous_builds_if_requested(api, build_ids, enabled: ENV.fetch("TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS", "false"))
+    return 0 unless enabled == "true"
+
+    expire_builds(api, build_ids)
+  end
+
   def notify_server(status:, details:, error: nil)
     base_url = ENV.fetch("DEPLOYMENT_STATUS_BASE_URL", "https://api.wanghengai.xin")
     api_key = required_env("DEPLOYMENT_STATUS_API_KEY")
@@ -310,8 +316,8 @@ module TestFlightProcessing
         puts "Build #{details["version"]} (#{details["build"]}) processing state: #{state}"
         if state == "VALID"
           old_build_ids = baseline.fetch("activeBuildIds", baseline_ids)
-          expired_count = expire_builds(api, old_build_ids)
-          puts "Expired #{expired_count} previous TestFlight builds."
+          expired_count = expire_previous_builds_if_requested(api, old_build_ids)
+          puts "Previous TestFlight builds: #{expired_count} expired; preservation is the default."
           notify_server(status: "completed", details: details)
           mark_notified
           puts "TestFlight processing completed and iOS notification was accepted."
