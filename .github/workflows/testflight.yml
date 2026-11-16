@@ -206,6 +206,12 @@ jobs:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
         run: ruby ci/testflight-processing-notify.rb wait "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
 
+      - name: Verify existing TestFlight availability (read only)
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: ruby ci/testflight-processing-notify.rb readiness "$RUNNER_TEMP/TestFlightBuildsBeforeUpload.json"
+
       - name: Remove authentication key
         if: ${{ always() }}
         run: rm -f "$APP_STORE_CONNECT_KEY_PATH"

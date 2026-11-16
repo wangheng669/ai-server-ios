@@ -133,6 +133,23 @@ class TestFlightProcessingNotifyTest < Minitest::Test
     ENV["TESTFLIGHT_EXPIRE_PREVIOUS_BUILDS"] = previous if previous
   end
 
+  def test_readiness_reports_states_and_only_enabled_public_links
+    response = {
+      "data" => { "id" => "build" },
+      "included" => [
+        { "type" => "buildBetaDetails", "attributes" => { "internalBuildState" => "IN_BETA_TESTING", "externalBuildState" => "READY_FOR_BETA_SUBMISSION" } },
+        { "type" => "betaGroups", "attributes" => { "name" => "Existing internal group", "isInternalGroup" => true, "publicLinkEnabled" => false, "publicLink" => "hidden" } },
+        { "type" => "betaGroups", "attributes" => { "name" => "Existing external group", "isInternalGroup" => false, "publicLinkEnabled" => true, "publicLink" => "https://testflight.apple.com/join/example" } }
+      ]
+    }
+    result = TestFlightProcessing.readiness_details(response)
+    assert_equal "IN_BETA_TESTING", result.fetch("internalBuildState")
+    assert_equal "READY_FOR_BETA_SUBMISSION", result.fetch("externalBuildState")
+    refute result.fetch("groups")[0].key?("publicLink")
+    assert_equal "https://testflight.apple.com/join/example", result.fetch("groups")[1].fetch("publicLink")
+    assert_equal [], TestFlightProcessing.readiness_details({ "data" => { "id" => "empty" } }).fetch("groups")
+  end
+
   def test_expires_each_previous_build
     api = Object.new
     expired_ids = []
