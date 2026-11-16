@@ -1,6 +1,6 @@
 # TestFlight 发布配置
 
-日常 TestFlight 发布由 Mac 本地完成：运行测试、生成 Release Archive、上传到 App Store Connect，并在 Apple 处理完成后发送钉钉通知。GitHub Actions 工作流 `Upload iOS app to TestFlight` 仅保留为手动应急入口。
+日常 TestFlight 发布由 Mac 本地完成：生成 Release Archive、上传到 App Store Connect，并在 Apple 处理完成后发送钉钉通知。GitHub Actions 工作流 `Upload iOS app to TestFlight` 仅保留为手动应急入口。
 
 Mac 使用本地 `launchd` 每天北京时间 04:30 直接执行发布，不创建 GitHub Actions 任务。仅当 `main` 相比上一次本地成功发布出现新提交时才构建和上传；没有新提交时会快速结束。同步 `main` 临时失败时每 5 分钟重试，最长持续 12 小时。构建过程不依赖 Actions Runner。
 

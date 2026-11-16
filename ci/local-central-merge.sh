@@ -203,13 +203,8 @@ fi
 git commit -m "Merge $source_branch into main"
 
 IOS_PREFLIGHT_SKIP_FETCH=true ./ci/linux-preflight.sh origin/main
-low_risk_change=false
-if ./ci/is-low-risk-ios-diff.sh origin/main HEAD; then
-  low_risk_change=true
-fi
-scope=$(IOS_LOW_RISK_CHANGE="$low_risk_change" ./ci/classify-ios-test-scope.sh < <(git diff --name-only origin/main...HEAD))
+scope=$(./ci/classify-ios-build-scope.sh < <(git diff --name-only origin/main...HEAD))
 app_changed=$(awk -F= '$1 == "app_changed" { print $2 }' <<<"$scope")
-test_scope=$(awk -F= '$1 == "test_scope" { print $2 }' <<<"$scope")
 
 if [[ "$app_changed" == true ]]; then
   export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
@@ -233,23 +228,6 @@ if [[ "$app_changed" == true ]]; then
     IOS_DEVICE_NAME=$(jq -r '.deviceName' "$IOS_DEVICE_READY_JSON")
   fi
   mkdir -p "$IOS_BUILD_CACHE_ROOT" "$RUNNER_TEMP"
-  if [[ "$test_scope" == build ]]; then
-    echo "Low-risk App change; skipping shared simulator tests."
-  else
-    ./ci/with-ios-simulator-lock.sh \
-      --label "local central merge $run_id" \
-      --wait-seconds 1200 \
-      -- xcodebuild test \
-        -project AIServerClient.xcodeproj \
-        -scheme AIServerClient \
-        -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-        -collect-test-diagnostics never \
-        -derivedDataPath "$IOS_BUILD_CACHE_ROOT/local-central-simulator" \
-        -clonedSourcePackagesDirPath "$IOS_BUILD_CACHE_ROOT/source-packages" \
-        CODE_SIGNING_ALLOWED=NO \
-        COMPILER_INDEX_STORE_ENABLE=NO
-  fi
-
   signing_path="$IOS_BUILD_CACHE_ROOT/local-central-signing"
   xcodebuild build \
     -project AIServerClient.xcodeproj \

@@ -126,15 +126,17 @@ struct PushNotificationDetails: Decodable {
     let body: String
     let links: [Link]?
     let imageURL: URL?
+    let sec13f: Sec13FNotificationSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case title, body, links
+        case title, body, links, sec13f
         case imageURL = "image_url"
     }
 }
 
-private struct PushNotificationDetailsView: View {
+struct PushNotificationDetailsView: View {
     let destination: PushNotificationDestination
+    private let loadDetails: () async throws -> PushNotificationDetails
     @State private var details: PushNotificationDetails?
     @State private var loadFailed = false
     @State private var expired = false
@@ -142,10 +144,21 @@ private struct PushNotificationDetailsView: View {
     @State private var browser: InAppBrowserDestination?
     @State private var gallerySelection: ImageGallerySelection?
 
+    init(destination: PushNotificationDestination, loadDetails: (() async throws -> PushNotificationDetails)? = nil) {
+        self.destination = destination
+        self.loadDetails = loadDetails ?? {
+            try await APIClient(baseURL: ServerConfiguration.currentURL).fetchPushNotification(id: destination.id)
+        }
+    }
+
     var body: some View {
         Group {
             if let details {
-                content(details)
+                if let snapshot = details.sec13f {
+                    Sec13FNotificationView(snapshot: snapshot)
+                } else {
+                    content(details)
+                }
             } else if loadFailed {
                 ContentUnavailableView {
                     Label("无法打开通知", systemImage: "bell.slash")
@@ -162,11 +175,14 @@ private struct PushNotificationDetailsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .presentationDetents(details?.sec13f == nil ? [.medium, .large] : [.large])
         .task(id: attempt) {
             loadFailed = false
+            expired = false
             do {
-                details = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                    .fetchPushNotification(id: destination.id)
+                let loaded = try await loadDetails()
+                guard !Task.isCancelled else { return }
+                details = loaded
             } catch {
                 guard !Task.isCancelled else { return }
                 if case APIError.httpStatus(404) = error { expired = true }
@@ -312,7 +328,9 @@ struct AIServerClientApp: App {
         WindowGroup {
             Group {
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--modal-contract-preview") {
+                if ProcessInfo.processInfo.arguments.contains("--sec13f-notification-preview") {
+                    Sec13FNotificationPreview()
+                } else if ProcessInfo.processInfo.arguments.contains("--modal-contract-preview") {
                     AppModalContractPreview()
                 } else {
                     EditorialRootView()
@@ -517,7 +535,7 @@ private struct EditorialRootView: View {
         .inAppBrowserCover(item: $presentedExternalLink)
         .sheet(item: $presentedNotificationDetails) { details in
             PushNotificationDetailsView(destination: details)
-                .presentationDetents([.medium, .large])
+                .id(details.id)
                 .presentationDragIndicator(.visible)
         }
         .overlay(alignment: .topLeading) {
