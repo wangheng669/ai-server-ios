@@ -29,6 +29,18 @@ final class PostDecodingTests: XCTestCase {
         XCTAssertNil(generic.sec13f)
     }
 
+    func testTodayPreviewHasSuccessfulReportAndEveryCitedSource() throws {
+        let report = try TodayWorldPreview.report()
+        let final = try XCTUnwrap(report.report.final)
+        XCTAssertEqual(final.status, "succeeded")
+        XCTAssertFalse(final.sections.isEmpty)
+        let ids = Set(final.sections.flatMap(\.systems).flatMap(\.postIDs))
+        let posts = try TodayWorldPreview.posts()
+        XCTAssertFalse(ids.isEmpty)
+        XCTAssertEqual(ids, Set(posts.map(\.id)))
+        XCTAssertTrue(posts.allSatisfy { !$0.displayContent.isEmpty })
+    }
+
     func testServerReplyTranslationReplacesEnglishContextAndStopsRefresh() throws {
         let original = try JSONDecoder().decode(Post.self, from: Data(#"{"id":3328298,"source":"x","content_zh":"我以为你不是首席执行官。","meta":{"in_reply_to_status_id":"2098210210523295773","reply_context":{"id":"2098210210523295773","text":"i am hiring a chief of staff"}}}"#.utf8))
         let fresh = original.replacingXReplyContext(with: XReplyContext(

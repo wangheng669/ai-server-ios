@@ -68,8 +68,16 @@ final class KnowledgeCityFlowUITests: XCTestCase {
 
     func testFullReportExpandsSourcesInlineAndReturnsToList() {
         let app = XCUIApplication()
+        addUIInterruptionMonitor(withDescription: "通知权限") { alert in
+            for title in ["不允许", "Don’t Allow", "Don't Allow"] where alert.buttons[title].exists {
+                alert.buttons[title].tap()
+                return true
+            }
+            return false
+        }
         app.launchArguments = ["--today-world-preview"]
         app.launch()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.02)).tap()
         let details = app.buttons["today-full-report"]
         XCTAssertTrue(details.waitForExistence(timeout: 30))
         details.tap()

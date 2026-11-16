@@ -869,6 +869,26 @@ private struct RootNavigationBar: View {
     }
 }
 
+#if DEBUG
+/// Deterministic report and cited source for the existing Today UI preview.
+/// Production requests are never replaced with sample data.
+enum TodayWorldPreview {
+    static var isEnabled: Bool { ProcessInfo.processInfo.arguments.contains("--today-world-preview") }
+
+    static func report() throws -> TodayWorldYesterdayReportPayload {
+        let json = #"""
+        {"date":"2026-11-15","timezone":"Asia/Shanghai","status":"succeeded","stage":"completed","progress":100,"source_count":1,"post_count":1,"total_tokens":0,"cost_cny":0,"report":{"final":{"status":"succeeded","overview":{"headline":"示例日报","highlights":[],"watch_items":[]},"sections":[{"section_key":"companies","section_name":"公司动态","groups":[{"group_key":"preview","group_name":"示例公司","systems":[{"system_key":"preview-company","system_name":"示例公司","headline":"示例公司发布季度经营更新","signal_level":"normal","facts":[{"category":"经营","text":"季度收入增长，管理层公布下一阶段产品计划。","source_keys":["preview-source"],"post_ids":[900000001]}],"source_keys":["preview-source"],"source_names":["示例来源"],"post_ids":[900000001]}]}]}]}}}
+        """#
+        return try JSONDecoder().decode(TodayWorldYesterdayReportPayload.self, from: Data(json.utf8))
+    }
+
+    static func posts() throws -> [Post] {
+        let json = #"[{"id":900000001,"source":"x","content":"这是用于界面测试的示例原文。公司公布季度经营表现，并说明了下一阶段的产品计划。","user":{"name":"示例来源"}}]"#
+        return try JSONDecoder().decode([Post].self, from: Data(json.utf8))
+    }
+}
+#endif
+
 @MainActor
 private final class TodayWorldStore: ObservableObject {
     @Published private(set) var report: TodayWorldYesterdayReportPayload?
@@ -882,6 +902,18 @@ private final class TodayWorldStore: ObservableObject {
         defer { isLoading = false }
 
         do {
+            #if DEBUG
+            if TodayWorldPreview.isEnabled {
+                // Seed the normal source cache before displaying the report so inline
+                // expansion and Chinese preparation stay offline and deterministic.
+                await TodayWorldPostMemoryCache.shared.store(
+                    posts: try TodayWorldPreview.posts(), baseURL: ServerConfiguration.currentURL
+                )
+                report = try TodayWorldPreview.report()
+                errorMessage = nil
+                return
+            }
+            #endif
             report = try await APIClient(baseURL: ServerConfiguration.currentURL)
                 .fetchTodayWorldYesterdayReport()
             errorMessage = nil
