@@ -30,6 +30,13 @@ final class FeedResponsivenessUITests: XCTestCase {
         search.typeText("APPLE")
         XCTAssertTrue(list.staticTexts["APPLE INC"].exists)
         XCTAssertFalse(list.staticTexts["SOLD COMPANY"].exists)
+        // Native searchable replaces navigation items while editing; finish search first.
+        let cancelSearch = app.navigationBars["持仓明细"].buttons.matching(
+            NSPredicate(format: "label IN %@", ["Close", "Cancel", "关闭", "取消"])
+        ).firstMatch
+        XCTAssertTrue(cancelSearch.waitForExistence(timeout: 3))
+        cancelSearch.tap()
+        XCTAssertTrue(app.buttons["sec13f-detail-back"].waitForExistence(timeout: 3))
         app.buttons["sec13f-detail-back"].tap()
         app.buttons["关闭持仓更新"].tap()
         XCTAssertTrue(app.buttons["打开持仓更新"].waitForExistence(timeout: 3))

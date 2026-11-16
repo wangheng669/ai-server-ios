@@ -150,6 +150,21 @@ class TestFlightProcessingNotifyTest < Minitest::Test
     assert_equal [], TestFlightProcessing.readiness_details({ "data" => { "id" => "empty" } }).fetch("groups")
   end
 
+  def test_notification_default_is_preserved_but_run_can_suppress_it
+    previous = ENV.delete("TESTFLIGHT_NOTIFY_ON_COMPLETION")
+    assert TestFlightProcessing.notifications_enabled?
+    ENV["TESTFLIGHT_NOTIFY_ON_COMPLETION"] = "false"
+    refute TestFlightProcessing.notifications_enabled?
+    # Must return before credential lookup or HTTP transmission.
+    assert_nil TestFlightProcessing.notify_server(status: "completed", details: {})
+  ensure
+    if previous
+      ENV["TESTFLIGHT_NOTIFY_ON_COMPLETION"] = previous
+    else
+      ENV.delete("TESTFLIGHT_NOTIFY_ON_COMPLETION")
+    end
+  end
+
   def test_expires_each_previous_build
     api = Object.new
     expired_ids = []

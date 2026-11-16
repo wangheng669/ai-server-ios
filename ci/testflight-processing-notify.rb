@@ -193,7 +193,15 @@ module TestFlightProcessing
     expire_builds(api, build_ids)
   end
 
+  def notifications_enabled?(value = ENV.fetch("TESTFLIGHT_NOTIFY_ON_COMPLETION", "true"))
+    value == "true"
+  end
+
   def notify_server(status:, details:, error: nil)
+    unless notifications_enabled?
+      puts "Generic TestFlight notification suppressed for this run."
+      return
+    end
     base_url = ENV.fetch("DEPLOYMENT_STATUS_BASE_URL", "https://api.wanghengai.xin")
     api_key = required_env("DEPLOYMENT_STATUS_API_KEY")
     uri = URI.join("#{base_url.sub(%r{/*$}, "")}/", "api/ios/v1/system/ios-testflight-notification")
@@ -320,7 +328,7 @@ module TestFlightProcessing
           puts "Previous TestFlight builds: #{expired_count} expired; preservation is the default."
           notify_server(status: "completed", details: details)
           mark_notified
-          puts "TestFlight processing completed and iOS notification was accepted."
+          puts "TestFlight processing completed; notification policy applied."
           return
         end
         if %w[FAILED INVALID].include?(state)
