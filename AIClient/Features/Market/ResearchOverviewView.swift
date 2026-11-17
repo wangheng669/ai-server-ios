@@ -137,8 +137,8 @@ private struct ResearchOverviewView: View {
             VStack(spacing: 8) {
                 globalMarkets
                 environment
-                industries
                 coreStocks
+                industries
                 utilities
                 if let message = store.errorMessage {
                     Button { Task { await store.refresh() } } label: {
@@ -378,7 +378,7 @@ private struct ResearchOverviewView: View {
                                 .font(.subheadline).monospacedDigit()
                                 .fixedSize(horizontal: true, vertical: false)
                             }
-                            .padding(.horizontal, 4).padding(.vertical, 7)
+                            .padding(.horizontal, 4).padding(.vertical, 3)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
                         }
