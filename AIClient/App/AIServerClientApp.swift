@@ -454,8 +454,6 @@ private struct EditorialRootView: View {
     @State private var learningStore = LearningStore()
     @State private var pageStores = EditorialPageStores()
     @State private var selectedTab = EditorialPreview.initialTab
-    @State private var learningShowsDetail = false
-    @State private var feedHidesTabBar = false
     @State private var notificationPostID: Int?
     @State private var notificationPresentationAnchor: UIView?
     @State private var presentedNotificationDetails: PushNotificationDestination?
@@ -477,15 +475,6 @@ private struct EditorialRootView: View {
         return value
     }
 
-    // Native sheets cover root navigation without changing its layout underneath.
-    private var hidesRootTabBar: Bool {
-        switch selectedTab {
-        case .observation: feedHidesTabBar
-        case .learning: learningShowsDetail
-        case .world, .signal, .investment: false
-        }
-    }
-
     var body: some View {
         ZStack {
             tabContent(.world) {
@@ -497,7 +486,6 @@ private struct EditorialRootView: View {
             tabContent(.observation) {
                 NewsFeedView(
                     model: pageStores.feed,
-                    hidesTabBar: $feedHidesTabBar,
                     notificationPostID: $notificationPostID
                 )
             }
@@ -511,8 +499,7 @@ private struct EditorialRootView: View {
             tabContent(.learning) {
                 LearningView(
                     peopleStore: peopleStore,
-                    store: learningStore,
-                    showsDetail: $learningShowsDetail
+                    store: learningStore
                 )
             }
         }
@@ -566,12 +553,12 @@ private struct EditorialRootView: View {
                     )
                 }
 
-                if !hidesRootTabBar {
-                    RootNavigationBar(
-                        selection: $selectedTab,
-                        dynamicTarget: lastDynamicTab
-                    )
-                }
+                // Root navigation stays visible regardless of page scrolling or detail state.
+                // The inset reserves content space and follows the keyboard safe area.
+                RootNavigationBar(
+                    selection: $selectedTab,
+                    dynamicTarget: lastDynamicTab
+                )
             }
             .padding(.bottom, 4)
             .background {
@@ -731,14 +718,13 @@ private struct RootNavigationBar: View {
             item(.investment, title: "研究", icon: "chart.bar.fill")
             item(.learning, title: "知识", icon: "book")
         }
-        .frame(height: 52)
         .padding(4)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: 440)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
         .overlay {
             Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
         }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 12, y: 5)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 8, y: 3)
         .padding(.horizontal, 16)
         .padding(.top, 8)
     }
@@ -773,6 +759,8 @@ private struct RootNavigationBar: View {
             selection = destination
         }
         .menuOrder(.fixed)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("root-tab-情报")
         .accessibilityLabel("情报，当前\(currentTitle)")
         .accessibilityHint(isSelected ? "轻点切换动态和信号，长按选择" : "轻点打开，长按选择动态或信号")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -797,24 +785,29 @@ private struct RootNavigationBar: View {
     }
 
     private func itemLabel(title: String, icon: String, isSelected: Bool) -> some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon)
-                .resizable()
-                .scaledToFit()
-                .font(.system(size: 21, weight: isSelected ? .semibold : .regular))
-                .symbolRenderingMode(.monochrome)
-                .frame(width: 22, height: 22)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                Text(title)
+            }
+            .fixedSize(horizontal: true, vertical: false)
 
-            Text(title)
-                .font(.system(size: 11, weight: isSelected ? .medium : .regular))
-
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                Text(title)
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
+        .font(.subheadline.weight(isSelected ? .semibold : .medium))
+        .symbolRenderingMode(.monochrome)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
         .foregroundStyle(
             isSelected
                 ? selectedForeground
                 : Color.secondary
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 44)
         .background {
             if isSelected {
                 Capsule().fill(accent)

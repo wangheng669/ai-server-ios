@@ -176,7 +176,6 @@ struct NewsFeedView: View {
         let notFound: Bool
     }
 
-    @Binding private var hidesTabBar: Bool
     @Binding private var notificationPostID: Int?
     @StateObject private var model: NewsFeedViewModel
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
@@ -209,11 +208,9 @@ struct NewsFeedView: View {
     @MainActor
     init(
         model: NewsFeedViewModel? = nil,
-        hidesTabBar: Binding<Bool> = .constant(false),
         notificationPostID: Binding<Int?> = .constant(nil)
     ) {
         _model = StateObject(wrappedValue: model ?? NewsFeedViewModel())
-        _hidesTabBar = hidesTabBar
         _notificationPostID = notificationPostID
         WeiboSessionCookieStore.importFromEnvironmentIfPresent()
     }
@@ -301,7 +298,6 @@ struct NewsFeedView: View {
         .onChange(of: selectedPost, initial: true) { _, post in
             if post == nil {
                 isFeedChromeHidden = false
-                hidesTabBar = false
             }
         }
         .task(id: notificationPostID) {
@@ -348,16 +344,6 @@ struct NewsFeedView: View {
         }
         .onChange(of: isFeedEntitySelectorExpanded) { _, expanded in
             if !expanded { feedEntitySearchIsFocused = false }
-        }
-        .onChange(of: isFeedChromeHidden, initial: true) { _, isHidden in
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                hidesTabBar = isHidden
-            }
-        }
-        .onDisappear {
-            hidesTabBar = false
         }
         .task(id: rootTabIsActive ? model.source : nil) {
             guard rootTabIsActive else { return }

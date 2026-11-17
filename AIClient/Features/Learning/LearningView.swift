@@ -10,7 +10,6 @@ private let learningImageLogger = Logger(
 )
 
 struct LearningView: View {
-    @Binding private var showsDetail: Bool
     @Environment(\.openURL) private var openURL
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     private let peopleStore: PeopleStore
@@ -69,12 +68,10 @@ struct LearningView: View {
     @MainActor
     init(
         peopleStore: PeopleStore,
-        store: LearningStore,
-        showsDetail: Binding<Bool>
+        store: LearningStore
     ) {
         self.peopleStore = peopleStore
         _store = State(initialValue: store)
-        _showsDetail = showsDetail
     }
 
     var body: some View {
@@ -175,10 +172,6 @@ struct LearningView: View {
                 .wikipediaReaderPresentation()
             }
         }
-        .onChange(of: presentedSection, initial: true) { _, section in
-            // The in-page overlay controls root chrome. Native sheets cover it themselves.
-            showsDetail = section != nil
-        }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await peopleStore.load()
@@ -194,7 +187,6 @@ struct LearningView: View {
             }
             await KnowledgeConceptImageLoading.prefetch(Array(concepts.prefix(3)))
         }
-        .onDisappear { showsDetail = false }
     }
 
     private var conceptImagePrefetchKey: String {
