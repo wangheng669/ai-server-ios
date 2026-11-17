@@ -144,9 +144,6 @@ struct MarketView: View {
             onOpenInvestors: {
                 showsInvestors = true
             },
-            onOpenInstitutionResearch: {
-                showsInstitutionResearch = true
-            },
             onOpenIndustries: {
                 showsIndustries = true
             },

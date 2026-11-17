@@ -35,7 +35,6 @@ struct ResearchHomeView: View {
     let onOpenMacro: () -> Void
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
-    let onOpenInstitutionResearch: () -> Void
     let onOpenIndustries: () -> Void
     let onOpenMarketQuotes: (MarketRegion) -> Void
     let onOpenMarketDetail: (String) -> Void
@@ -72,9 +71,9 @@ struct ResearchHomeView: View {
             ZStack {
                 sectionContent(.overview) {
                     ResearchOverviewView(
-                        store: store, researchStore: researchStore,
+                        store: store,
                         onOpenMacro: onOpenMacro, onOpenGlobalRanking: onOpenGlobalRanking,
-                        onOpenInvestors: onOpenInvestors, onOpenInstitutionResearch: onOpenInstitutionResearch,
+                        onOpenInvestors: onOpenInvestors,
                         onOpenIndustries: onOpenIndustries, onOpenMarketQuotes: onOpenMarketQuotes,
                         onOpenMarketDetail: onOpenMarketDetail, onOpenRetailInvestors: onOpenRetailInvestors
                     )
@@ -108,24 +107,26 @@ struct ResearchHomeView: View {
 
 private struct ResearchOverviewView: View {
     let store: MarketStore
-    @ObservedObject var researchStore: InstitutionResearchStore
     let onOpenMacro: () -> Void
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
-    let onOpenInstitutionResearch: () -> Void
     let onOpenIndustries: () -> Void
     let onOpenMarketQuotes: (MarketRegion) -> Void
     let onOpenMarketDetail: (String) -> Void
     let onOpenRetailInvestors: () -> Void
     @Environment(\.rootTabIsActive) private var rootTabIsActive
-    @State private var selectedReport: InstitutionResearchItem?
+    @State private var stockRegion: MarketRegion = .unitedStates
     @Environment(\.scenePhase) private var scenePhase
 
     private let primaryMarkets = ResearchHomeContent.primaryMarkets
     // These are explicitly identified as representative companies, rather than invented sector indices.
     private let sectors = ResearchHomeContent.sectors
     private var chartSymbols: [String] { ResearchHomeContent.chartSymbols }
-    private var reports: [InstitutionResearchItem] { Array((researchStore.payload?.items ?? []).prefix(2)) }
+    private let stockRegions: [MarketRegion] = [.unitedStates, .china, .japan, .korea, .europe]
+    private var stocks: [MarketQuote] {
+        // Keep the server's existing membership and ordering, with no synthetic quotes.
+        Array((store.dashboard?.componentsByRegion[stockRegion.dashboardID] ?? []).prefix(6))
+    }
 
     var body: some View {
         ScrollView {
@@ -137,7 +138,7 @@ private struct ResearchOverviewView: View {
                 globalMarkets
                 environment
                 industries
-                research
+                coreStocks
                 utilities
                 if let message = store.errorMessage {
                     Button { Task { await store.refresh() } } label: {
@@ -161,17 +162,6 @@ private struct ResearchOverviewView: View {
                 do { try await Task.sleep(for: .seconds(30)) }
                 catch { return }
             }
-        }
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
-            await researchStore.load()
-        }
-        .appSheet(item: $selectedReport) { item in
-            InstitutionResearchDetail(item: item)
-                .overlay(alignment: .bottomTrailing) {
-                    DetailSheetControls(closeLabel: "关闭", onClose: { selectedReport = nil })
-                        .padding(12)
-                }
         }
     }
 
@@ -350,37 +340,54 @@ private struct ResearchOverviewView: View {
         .accessibilityIdentifier("research-sector-\(symbol)")
     }
 
-    private var research: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeading("研究动态", trailing: "全部", action: onOpenInstitutionResearch)
-            if reports.isEmpty {
-                VStack(spacing: 9) {
-                    if researchStore.isLoading { ProgressView() }
-                    Text(researchStore.isLoading ? "正在加载研究" : researchStore.errorMessage ?? "暂无研究动态")
-                        .font(.subheadline).foregroundStyle(ResearchStyle.muted)
-                    if !researchStore.isLoading {
-                        Button("重新加载") { Task { await researchStore.load(force: true) } }
-                            .font(.caption).tint(ResearchStyle.blue)
-                    }
-                }.frame(maxWidth: .infinity, minHeight: 120)
+    private var coreStocks: some View {
+        VStack(spacing: 8) {
+            sectionHeading(store.dashboard?.componentsMeta?.label ?? "核心股票", trailing: "全部") {
+                onOpenMarketQuotes(stockRegion)
+            }
+            Picker("股票市场", selection: $stockRegion) {
+                ForEach(stockRegions) { region in
+                    Text(region.rawValue).tag(region)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("research-stock-region")
+
+            if stocks.isEmpty {
+                Text("暂无股票行情")
+                    .font(.subheadline).foregroundStyle(ResearchStyle.muted)
+                    .frame(maxWidth: .infinity, minHeight: 60)
             } else {
-                ForEach(Array(reports.enumerated()), id: \.element.id) { index, item in
-                    if index > 0 { ResearchStyle.divider.frame(height: 0.5).padding(.horizontal, 5) }
-                    Button { selectedReport = item } label: {
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("机构观点 · \(institutionChineseName(item.institutionShortName)) · \(reportDate(item.publishedOn))")
-                                    .font(.system(size: 10)).foregroundStyle(ResearchStyle.muted).lineLimit(1)
-                                Text(item.displayTitle).font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.primary).lineLimit(1)
-                                Text(item.summary).font(.system(size: 11.5))
-                                    .foregroundStyle(ResearchStyle.muted).lineLimit(1)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(ResearchStyle.muted)
+                LazyVStack(spacing: 0) {
+                    ForEach(stocks, id: \.symbol) { quote in
+                        Button { onOpenMarketDetail(quote.symbol) } label: {
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(quote.presentationName)
+                                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                                    Text(quote.symbol)
+                                        .font(.caption2).foregroundStyle(ResearchStyle.muted)
+                                }
+                                .lineLimit(1)
+                                Spacer(minLength: 4)
+                                VStack(alignment: .trailing, spacing: 3) {
+                                    Text(price(quote)).foregroundStyle(.primary)
+                                    Text(quote.marketDisplayFormattedPercent)
+                                        .foregroundStyle(ResearchStyle.tint(quote))
+                                }
+                                .font(.subheadline).monospacedDigit()
+                                .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .padding(.horizontal, 4).padding(.vertical, 7)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.horizontal, 5).padding(.vertical, 9).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityIdentifier("research-report-\(item.id)")
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("research-stock-\(quote.symbol)")
+                        if quote.symbol != stocks.last?.symbol {
+                            ResearchStyle.divider.frame(height: 0.5)
+                        }
+                    }
                 }
             }
         }
@@ -431,16 +438,7 @@ private struct ResearchOverviewView: View {
         return quote.marketDisplayPrice.formatted(.number.precision(.fractionLength(2)))
     }
 
-    private func reportDate(_ value: String) -> String {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: value) else { return value }
-        let display = DateFormatter()
-        display.locale = Locale(identifier: "zh_CN")
-        display.dateFormat = "M月d日"
-        return display.string(from: date)
-    }
+
 
     private var marketDate: String {
         // Markets close in different time zones; identify the displayed snapshot as an update.
