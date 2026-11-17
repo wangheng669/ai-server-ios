@@ -123,11 +123,6 @@ enum FeedPaginationLayout {
     }
 }
 
-enum FeedSourceTransitionPolicy {
-    static let fadeOutDuration = 0.10
-    static let fadeInDuration = 0.22
-}
-
 enum FeedEntitySelectorPositionPolicy {
     static let allAccountsID = "feed-entity:all"
 
@@ -195,7 +190,6 @@ struct NewsFeedView: View {
     @State private var isFeedEntitySelectorExpanded = false
     @State private var feedEntitySearch = ""
     @FocusState private var feedEntitySearchIsFocused: Bool
-    @State private var isSourceContentVisible = true
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.rootBottomChromeHeight) private var rootBottomChromeHeight
@@ -219,8 +213,6 @@ struct NewsFeedView: View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
                 content
-                    .opacity(isSourceContentVisible ? 1 : 0.15)
-                    .scaleEffect(isSourceContentVisible ? 1 : 0.997)
 
                 if isSourceSelectorExpanded || isYouTubePersonSelectorExpanded || isFeedEntitySelectorExpanded {
                     Color.black.opacity(0.045)
@@ -1659,34 +1651,11 @@ struct NewsFeedView: View {
     }
 
     private func selectSourceFromTap(_ source: FeedSource) {
-        guard source != model.source else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-
-        guard !reduceMotion else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                selectSource(source)
-                isSourceSelectorExpanded = false
-            }
-            return
-        }
-
-        withAnimation(.easeOut(duration: FeedSourceTransitionPolicy.fadeOutDuration)) {
-            isSourceContentVisible = false
-            isSourceSelectorExpanded = false
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + FeedSourceTransitionPolicy.fadeOutDuration) {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                selectSource(source)
-            }
-
-            withAnimation(.easeInOut(duration: FeedSourceTransitionPolicy.fadeInDuration)) {
-                isSourceContentVisible = true
-            }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectSource(source)
         }
     }
 
