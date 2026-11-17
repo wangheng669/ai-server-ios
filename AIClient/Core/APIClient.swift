@@ -314,7 +314,7 @@ struct APIClient {
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: PostListResponse = try await get(
             url,
-            cachePolicy: bypassCache ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
+            cachePolicy: (bypassCache || source == .truth) ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy
         )
         return response.data
     }
@@ -345,7 +345,7 @@ struct APIClient {
         xUserID: String? = nil
     ) -> [URLQueryItem] {
         let isSpecialRSS = source == .laozhong || source == .youtube
-        let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube || source == .bilibili
+        let includesAllScores = source == .newYorkTimes || source == .wechat || source == .youtube || source == .bilibili || source == .truth
         let normalizedXUserID = source == .x
             ? xUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
             : nil
@@ -357,7 +357,10 @@ struct APIClient {
             .init(name: "source", value: isSpecialRSS ? "rss" : source.rawValue),
             .init(name: "include_zero_score", value: includesAllScores || filtersXUser ? "true" : "false")
         ]
-        if !includesAllScores && !filtersXUser {
+        if source == .truth {
+            // Browsing Truth is a chronological source feed, not a scored notification feed.
+            queryItems.append(.init(name: "final_score", value: "0"))
+        } else if !includesAllScores && !filtersXUser {
             let minimumScore = source == .rss ? 6 : Post.minimumFeedScore
             queryItems.append(.init(name: "final_score", value: String(minimumScore)))
         }
