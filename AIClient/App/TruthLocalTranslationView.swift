@@ -110,8 +110,8 @@ private struct TruthDeviceTranslatedText: View {
         }
         .task(id: key) { await prepare() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await prepare() } }
-            else { configuration = nil }
+            if phase == .active, configuration == nil { Task { await prepare() } }
+            else if phase == .background { configuration = nil }
         }
         .translationTask(configuration) { session in
             let requestKey = key
@@ -119,7 +119,7 @@ private struct TruthDeviceTranslatedText: View {
             do {
                 try await cache.acquire()
                 defer { cache.release() }
-                guard cache.text(requestKey) == nil, serverChinese == nil,
+                guard cache.text(requestKey) == nil, cache.canAttempt(requestKey), serverChinese == nil,
                       scenePhase == .active else { return }
                 // A language download can only be requested by the explicit detail button.
                 if permitDownload { try await session.prepareTranslation() }
