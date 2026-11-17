@@ -445,6 +445,14 @@ struct TodayHeaderView: View {
     @Environment(\.openURL) private var openURL
     @State private var rechargeUnavailable = false
     @State private var updateUnavailable = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var updateCheck: UpdateCheck = .unchecked
+    @State private var checkingUpdate = false
+    @State private var knownUpdateAvailable = false
+    @State private var showsUpdateCheckError = false
+    private enum UpdateCheck { case unchecked, current, available, failed }
+    private struct PublishedVersion: Decodable { let version: String; let build: Int }
+
     @Binding var waitingForRechargeReturn: Bool
     let balance: AliyunAccountBalance?
     let isLoading: Bool
@@ -456,13 +464,13 @@ struct TodayHeaderView: View {
                 Spacer(minLength: 0)
                 costs
                 Spacer(minLength: 0)
-                updateButton
+                updateControl
             }
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     rechargeButton
                     Spacer(minLength: 8)
-                    updateButton
+                    updateControl
                 }
                 ViewThatFits(in: .horizontal) {
                     costs
@@ -487,6 +495,97 @@ struct TodayHeaderView: View {
             Button("知道了", role: .cancel) {}
         } message: {
             Text("请确认当前构建已配置直装入口，或稍后再试。")
+        }
+        .alert("未能检查更新", isPresented: $showsUpdateCheckError) {
+            Button("重试") { Task { await checkForUpdate() } }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("无法确认是否有新版本，请检查网络后重试。已确认可用的更新入口会继续保留。")
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                if checkingUpdate {
+                    do { try await Task.sleep(for: .milliseconds(150)) }
+                    catch { return }
+                    continue
+                }
+                await checkForUpdate()
+                do { try await Task.sleep(for: .seconds(300)) }
+                catch { return }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var updateControl: some View {
+        HStack(spacing: 4) {
+            if knownUpdateAvailable { updateButton }
+            if updateCheck == .failed {
+                Button { showsUpdateCheckError = true } label: {
+                    Label("检查失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("today-update-check-failed")
+            } else if !knownUpdateAvailable && updateCheck == .unchecked {
+                if checkingUpdate {
+                    ProgressView().accessibilityLabel("正在检查更新")
+                } else {
+                    Button("检查更新") { Task { await checkForUpdate() } }
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    private var installEntryURL: URL? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "FocusDirectInstallURL") as? String,
+              let url = URL(string: value), url.scheme == "https", url.host != nil else { return nil }
+        return url
+    }
+
+    private func numericVersion(_ version: String, build: Int) -> [Int]? {
+        let fields = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard (2...3).contains(fields.count), build > 0,
+              fields.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
+        let numbers = fields.compactMap { Int($0) }
+        guard numbers.count == fields.count else { return nil }
+        return numbers + Array(repeating: 0, count: 3 - numbers.count) + [build]
+    }
+
+    @MainActor
+    private func checkForUpdate() async {
+        guard !checkingUpdate else { return }
+        checkingUpdate = true
+        defer { checkingUpdate = false }
+        do {
+            guard let entry = installEntryURL,
+                  let localVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                  let localBuildString = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+                  let localBuild = Int(localBuildString),
+                  let local = numericVersion(localVersion, build: localBuild),
+                  var components = URLComponents(url: entry.deletingLastPathComponent().appendingPathComponent("latest.json"), resolvingAgainstBaseURL: false) else {
+                throw URLError(.badURL)
+            }
+            components.queryItems = [.init(name: "check", value: UUID().uuidString)]
+            guard let url = components.url else { throw URLError(.badURL) }
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try Task.checkCancellation()
+            guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let published = try JSONDecoder().decode(PublishedVersion.self, from: data)
+            guard let remote = numericVersion(published.version, build: published.build) else {
+                throw URLError(.cannotParseResponse)
+            }
+            knownUpdateAvailable = local.lexicographicallyPrecedes(remote)
+            updateCheck = knownUpdateAvailable ? .available : .current
+        } catch {
+            guard !Task.isCancelled else { return }
+            // A failed request never turns a previously verified update into “up to date”.
+            updateCheck = .failed
         }
     }
 
