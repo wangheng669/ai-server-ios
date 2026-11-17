@@ -417,6 +417,7 @@ struct GoogleSignalView: View {
 private struct CompanyNewsDetail: View {
     let item: CompanyNewsItem
     let companies: [CompanyNewsCompany]
+    @State private var originalArticle: String?
     @State private var translated = ""
     @State private var translating = false
     @State private var translationError: String?
@@ -432,7 +433,7 @@ private struct CompanyNewsDetail: View {
                         Text("\(company.name) · \(GoogleSignalSentimentFilter(rawValue: item.companies[company.id] ?? "uncertain")?.title ?? "待判断")").font(.caption)
                     } }
                     if item.source != "x" {
-                        LocalTranslatedText(original: item.originalContent, serverChinese: item.contentZH, detail: true)
+                        LocalTranslatedText(original: originalArticle ?? item.originalContent, serverChinese: originalArticle == nil ? item.contentZH : nil, detail: true)
                             .textSelection(.enabled)
                         if !item.quoteContent.isEmpty { LocalTranslatedText(original: item.quoteContent, detail: true) }
                         if !item.replyContent.isEmpty { LocalTranslatedText(original: item.replyContent, detail: true) }
@@ -456,6 +457,15 @@ private struct CompanyNewsDetail: View {
             DetailSheetControls(closeLabel: "完成", onClose: dismiss.callAsFunction).padding(12)
         }
         .inAppBrowserCover(item: $browser)
+        .task(id: item.id) {
+            guard item.source != "x", let url = URL(string: item.sourceURL),
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  let payload = try? await APIClient(baseURL: ServerConfiguration.currentURL)
+                    .fetchArticlePreview(url: url, preferRemote: true).data,
+                  !Task.isCancelled else { return }
+            let original = payload.textContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            if original.count > item.originalContent.count { originalArticle = original }
+        }
     }
     @MainActor private func translate() async {
         guard item.source == "x" else { return }
