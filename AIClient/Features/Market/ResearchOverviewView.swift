@@ -5,9 +5,9 @@ private enum ResearchSection: String, CaseIterable {
 }
 
 enum ResearchHomeContent {
-    static let primaryMarkets = [("美国 · 标普500", "^GSPC"), ("中国 · 沪深300", "000300.SS"), ("日本 · 日经225", "^N225")]
+    static let primaryMarkets = [("标普500", "^GSPC"), ("沪深300", "000300.SS"), ("日经225", "^N225")]
     static let sectors = [("半导体", "NVDA"), ("软件云", "MSFT"), ("能源", "SHEL"), ("消费", "AMZN")]
-    static var chartSymbols: [String] { primaryMarkets.map(\.1) + sectors.map(\.1) }
+    static var chartSymbols: [String] { primaryMarkets.map(\.1) }
 }
 
 private enum ResearchStyle {
@@ -125,7 +125,7 @@ private struct ResearchOverviewView: View {
     private let stockRegions: [MarketRegion] = [.unitedStates, .china, .japan, .korea, .europe]
     private var stocks: [MarketQuote] {
         // Keep the server's existing membership and ordering, with no synthetic quotes.
-        Array((store.dashboard?.componentsByRegion[stockRegion.dashboardID] ?? []).prefix(6))
+        Array((store.dashboard?.componentsByRegion[stockRegion.dashboardID] ?? []).prefix(4))
     }
 
     var body: some View {
@@ -166,13 +166,15 @@ private struct ResearchOverviewView: View {
     }
 
     private var globalMarkets: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 4) {
             sectionHeading("全球市场", trailing: marketDate) { onOpenMarketQuotes(.unitedStates) }
-            HStack(spacing: 7) {
+            VStack(spacing: 0) {
                 ForEach(primaryMarkets, id: \.1) { title, symbol in
-                    marketCard(title: title, symbol: symbol)
+                    ResearchStyle.divider.frame(height: 0.5)
+                    marketRow(title: title, symbol: symbol)
                 }
             }
+            ResearchStyle.divider.frame(height: 0.5)
             HStack(spacing: 0) {
                 ticker("欧洲 STOXX50", symbol: "^STOXX50E", showsPrice: false)
                 separator(height: 16)
@@ -180,34 +182,39 @@ private struct ResearchOverviewView: View {
                 separator(height: 16)
                 ticker("比特币", symbol: "BINANCE:BTCUSDT", showsPrice: true)
             }
-            .padding(.vertical, 6)
-            .background(ResearchStyle.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
         }
         .padding(8)
         .background(ResearchStyle.surface, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func marketCard(title: String, symbol: String) -> some View {
+    private func marketRow(title: String, symbol: String) -> some View {
         let quote = store.quote(symbol: symbol)
         let color = ResearchStyle.tint(quote)
         return Button { onOpenMarketDetail(symbol) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 10.5)).foregroundStyle(ResearchStyle.muted)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                Text(price(quote)).font(.system(size: 20, weight: .semibold))
-                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.65)
-                    .foregroundStyle(.primary)
-                Text(quote?.marketDisplayFormattedPercent ?? "—")
-                    .font(.system(size: 14, weight: .medium)).monospacedDigit().foregroundStyle(color)
-                ResearchSparkline(values: store.listTrendValues(for: quote), color: color, filled: true)
-                    .frame(height: 27).padding(.top, 2)
-                if quote?.stale == true {
-                    Text("行情待更新").font(.system(size: 9)).foregroundStyle(ResearchStyle.muted)
+            HStack(spacing: 9) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline).foregroundStyle(ResearchStyle.muted)
+                    if quote?.stale == true {
+                        Text("行情待更新").font(.caption2).foregroundStyle(ResearchStyle.muted)
+                    }
                 }
+                .lineLimit(1).minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                ResearchSparkline(values: store.listTrendValues(for: quote), color: color)
+                    .frame(maxWidth: .infinity).frame(height: 24)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(price(quote)).font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(quote?.marketDisplayFormattedPercent ?? "—")
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(color)
+                }
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+                .frame(width: 100, alignment: .trailing)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(ResearchStyle.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 4)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -246,34 +253,25 @@ private struct ResearchOverviewView: View {
     private var environment: some View {
         HStack(alignment: .top, spacing: 0) {
             metric("VIX", symbol: "^VIX", yield: false)
-            separator(height: 60)
+            separator(height: 48)
             metric("美债10Y", symbol: "^TNX", yield: true)
-            separator(height: 60)
+            separator(height: 48)
             Button(action: onOpenRetailInvestors) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("市场情绪").font(.system(size: 11)).foregroundStyle(ResearchStyle.muted)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("市场情绪").font(.caption).foregroundStyle(ResearchStyle.muted)
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(sentiment.map { String(format: "%.1f", $0.score) } ?? "—")
-                            .font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary)
-                        Text("/100").font(.system(size: 13)).foregroundStyle(ResearchStyle.muted)
+                            .font(.system(size: 19, weight: .semibold)).foregroundStyle(.primary)
+                        Text("/100").font(.caption).foregroundStyle(ResearchStyle.muted)
                     }.monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
-                    GeometryReader { proxy in
-                        Capsule().fill(ResearchStyle.canvas)
-                            .overlay(alignment: .leading) {
-                                if let score = sentiment?.score {
-                                    Capsule().fill(InvestmentDesign.loss.opacity(0.75))
-                                        .frame(width: proxy.size.width * min(max(score, 0), 100) / 100)
-                                }
-                            }
-                    }.frame(height: 6)
-                    Text(sentiment?.ratingZh ?? "暂无数据").font(.system(size: 10)).foregroundStyle(ResearchStyle.muted)
+                    Text(sentiment?.ratingZh ?? "暂无数据").font(.caption2).foregroundStyle(ResearchStyle.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("research-sentiment")
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .background(ResearchStyle.surface, in: RoundedRectangle(cornerRadius: 12))
     }
 
@@ -286,24 +284,25 @@ private struct ResearchOverviewView: View {
         let quote = store.quote(symbol: symbol)
         let change = quote?.marketDisplayChangeValue
         return Button { onOpenMarketDetail(symbol) } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.system(size: 11)).foregroundStyle(ResearchStyle.muted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption).foregroundStyle(ResearchStyle.muted)
                 Text(quote.map { String(format: yield ? "%.2f%%" : "%.2f", $0.marketDisplayPrice) } ?? "—")
-                    .font(.system(size: 21, weight: .semibold)).foregroundStyle(.primary)
+                    .font(.system(size: 19, weight: .semibold)).foregroundStyle(.primary)
                     .lineLimit(1).minimumScaleFactor(0.7)
                 Text(change.map { String(format: yield ? "%+.0f bp" : "%+.2f 点", $0 * (yield ? 100 : 1)) } ?? "—")
-                    .font(.system(size: 13)).foregroundStyle(ResearchStyle.tint(quote))
+                    .font(.caption2).foregroundStyle(ResearchStyle.tint(quote))
             }
             .monospacedDigit().frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 17).contentShape(Rectangle())
+            .padding(.horizontal, 12).contentShape(Rectangle())
         }
         .buttonStyle(.plain).accessibilityIdentifier("research-market-\(symbol)")
     }
 
     private var industries: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 5) {
             sectionHeading("行业表现", trailing: "代表公司 · 全部", action: onOpenIndustries)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7)], spacing: 7) {
+            ResearchStyle.divider.frame(height: 0.5)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
                 ForEach(sectors, id: \.1) { title, symbol in
                     sectorCard(title, symbol: symbol)
                 }
@@ -315,24 +314,19 @@ private struct ResearchOverviewView: View {
 
     private func sectorCard(_ title: String, symbol: String) -> some View {
         let quote = store.quote(symbol: symbol)
-        let color = ResearchStyle.tint(quote)
         return Button { onOpenMarketDetail(symbol) } label: {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 3) {
-                        Text(title).font(.system(size: 12)).foregroundStyle(.primary)
-                        Text(symbol).font(.system(size: 8)).foregroundStyle(ResearchStyle.muted)
-                    }
-                    Text(quote?.marketDisplayFormattedPercent ?? "—")
-                        .font(.system(size: 16, weight: .medium)).foregroundStyle(color)
-                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.65)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    Text(symbol).font(.caption2).foregroundStyle(ResearchStyle.muted)
                 }
-                ResearchSparkline(values: store.listTrendValues(for: quote), color: color, filled: false)
-                    .frame(maxWidth: .infinity).frame(height: 30)
+                Text(quote?.marketDisplayFormattedPercent ?? "—")
+                    .font(.system(size: 16, weight: .medium)).foregroundStyle(ResearchStyle.tint(quote))
+                    .monospacedDigit()
             }
-            .padding(.horizontal, 11).padding(.vertical, 9)
-            .frame(maxWidth: .infinity, minHeight: 54)
-            .background(color.opacity(0.045), in: RoundedRectangle(cornerRadius: 9))
+            .lineLimit(1).minimumScaleFactor(0.75)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -341,7 +335,7 @@ private struct ResearchOverviewView: View {
     }
 
     private var coreStocks: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 5) {
             sectionHeading(store.dashboard?.componentsMeta?.label ?? "核心股票", trailing: "全部") {
                 onOpenMarketQuotes(stockRegion)
             }
@@ -362,27 +356,22 @@ private struct ResearchOverviewView: View {
                     ForEach(stocks, id: \.symbol) { quote in
                         Button { onOpenMarketDetail(quote.symbol) } label: {
                             HStack(spacing: 8) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(quote.presentationName)
-                                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                                    Text(quote.symbol)
-                                        .font(.caption2).foregroundStyle(ResearchStyle.muted)
-                                }
-                                .lineLimit(1)
-                                Spacer(minLength: 4)
-                                VStack(alignment: .trailing, spacing: 3) {
-                                    Text(price(quote)).foregroundStyle(.primary)
-                                    Text(quote.marketDisplayFormattedPercent)
-                                        .foregroundStyle(ResearchStyle.tint(quote))
-                                }
-                                .font(.subheadline).monospacedDigit()
-                                .fixedSize(horizontal: true, vertical: false)
+                                Text(quote.presentationName)
+                                    .fontWeight(.medium).foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(price(quote)).foregroundStyle(.primary)
+                                    .monospacedDigit().frame(width: 92, alignment: .trailing)
+                                Text(quote.marketDisplayFormattedPercent)
+                                    .foregroundStyle(ResearchStyle.tint(quote))
+                                    .monospacedDigit().frame(width: 74, alignment: .trailing)
                             }
-                            .padding(.horizontal, 4).padding(.vertical, 3)
+                            .font(.subheadline).lineLimit(1).minimumScaleFactor(0.75)
+                            .padding(.horizontal, 4)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("\(quote.presentationName)，\(quote.symbol)，\(price(quote))，\(quote.marketDisplayFormattedPercent)")
                         .accessibilityIdentifier("research-stock-\(quote.symbol)")
                         if quote.symbol != stocks.last?.symbol {
                             ResearchStyle.divider.frame(height: 0.5)
@@ -454,22 +443,12 @@ private struct ResearchOverviewView: View {
 private struct ResearchSparkline: View {
     let values: [Double]
     let color: Color
-    let filled: Bool
 
     var body: some View {
         GeometryReader { proxy in
             let points = normalizedPoints(in: proxy.size)
             if points.count > 1 {
-                if filled {
-                    Path { path in
-                        path.addLines(points)
-                        path.addLine(to: CGPoint(x: proxy.size.width, y: proxy.size.height))
-                        path.addLine(to: CGPoint(x: 0, y: proxy.size.height))
-                        path.closeSubpath()
-                    }
-                    .fill(LinearGradient(colors: [color.opacity(0.12), color.opacity(0)], startPoint: .top, endPoint: .bottom))
-                }
-                Path { $0.addLines(points) }.stroke(color, style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round))
+                Path { $0.addLines(points) }.stroke(color, style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
             } else {
                 Text("暂无走势").font(.system(size: 9)).foregroundStyle(ResearchStyle.muted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
