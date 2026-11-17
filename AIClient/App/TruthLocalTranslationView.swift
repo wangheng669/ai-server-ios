@@ -22,8 +22,8 @@ private final class TruthTranslationCache: ObservableObject {
         }
     }
 
-    static func key(_ source: String) -> String {
-        SHA256.hash(data: Data(("en→zh-Hans:v1:" + source).utf8))
+    static func key(_ source: String, language: String) -> String {
+        SHA256.hash(data: Data((language + "→zh-Hans:v1:" + source).utf8))
             .map { String(format: "%02x", $0) }.joined()
     }
     func text(_ key: String) -> String? { entries[key]?.text }
@@ -56,13 +56,42 @@ struct TruthLocalTranslationView: View {
     let post: Post
     var detail = false
     var body: some View {
-        if #available(iOS 18.0, *) {
-            TruthDeviceTranslatedText(original: post.originalDisplayContent,
-                                      serverChinese: post.truthChineseContent, detail: detail)
+        LocalTranslatedText(original: post.originalDisplayContent,
+                            serverChinese: post.truthChineseContent, detail: detail)
+    }
+}
+
+/// Translation is presentation-only: the original Post, links and article blocks stay intact.
+struct LocalTranslatedText: View {
+    let original: String
+    var serverChinese: String? = nil
+    var detail = false
+    var enabled = true
+
+    static func sourceLanguage(_ text: String) -> String? {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        guard let language = recognizer.dominantLanguage,
+              language != .simplifiedChinese, language != .traditionalChinese,
+              language != .undetermined else { return nil }
+        return language.rawValue
+    }
+
+    private var existingChinese: String? {
+        guard let serverChinese,
+              serverChinese.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) else { return nil }
+        return serverChinese
+    }
+
+    var body: some View {
+        if #available(iOS 18.0, *), enabled, let language = Self.sourceLanguage(original) {
+            TruthDeviceTranslatedText(original: original, serverChinese: existingChinese,
+                                      detail: detail, sourceIdentifier: language)
+                .id(language + ":" + original)
         } else {
-            Text(post.truthChineseContent ?? post.originalDisplayContent)
-            if detail, post.truthChineseContent != nil {
-                DisclosureGroup("查看原文") { Text(post.originalDisplayContent).textSelection(.enabled) }
+            Text(existingChinese ?? original)
+            if detail, existingChinese != nil, existingChinese != original {
+                DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
                     .font(.callout)
             }
         }
@@ -74,15 +103,16 @@ private struct TruthDeviceTranslatedText: View {
     let original: String
     let serverChinese: String?
     let detail: Bool
+    let sourceIdentifier: String
     @ObservedObject private var cache = TruthTranslationCache.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var configuration: TranslationSession.Configuration?
     @State private var needsDownload = false
     @State private var failed = false
     @State private var permitDownload = false
-    private let source = Locale.Language(identifier: "en")
+    private var source: Locale.Language { Locale.Language(identifier: sourceIdentifier) }
     private let target = Locale.Language(identifier: "zh-Hans")
-    private var key: String { TruthTranslationCache.key(original) }
+    private var key: String { TruthTranslationCache.key(original, language: sourceIdentifier) }
     private var translated: String? { serverChinese ?? cache.text(key) }
 
     var body: some View {
@@ -155,9 +185,6 @@ private struct TruthDeviceTranslatedText: View {
     private func prepare() async {
         guard scenePhase == .active, translated == nil, !original.isEmpty else { return }
         guard cache.canAttempt(key) else { failed = true; return }
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(original)
-        guard recognizer.dominantLanguage == .english else { return }
         let status = await LanguageAvailability().status(from: source, to: target)
         guard !Task.isCancelled else { return }
         switch status {

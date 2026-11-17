@@ -285,12 +285,12 @@ struct PostDetailView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle)
+                        LocalTranslatedText(original: post.rssOriginalTitle ?? post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle, detail: true)
                             .font(.system(size: 30, weight: .bold, design: .serif))
                             .lineSpacing(3)
 
                         if let lead = post.newYorkTimesLead, lead != post.displayTitle {
-                            Text(lead)
+                            LocalTranslatedText(original: lead, detail: true)
                                 .font(.system(size: 18, design: .serif))
                                 .foregroundStyle(.secondary)
                                 .lineSpacing(5)
@@ -317,6 +317,9 @@ struct PostDetailView: View {
                                     switch block {
                                     case .paragraph(let text):
                                         VStack(alignment: .leading, spacing: 12) {
+                                            if LocalTranslatedText.sourceLanguage(text) != nil {
+                                                LocalTranslatedText(original: text, detail: true)
+                                            }
                                             WikipediaLinkedParagraph(
                                                 text: text,
                                                 entities: wikipediaEntitiesByParagraph[index] ?? []
@@ -341,6 +344,9 @@ struct PostDetailView: View {
                                         }
                                     case .linkedParagraph(let text, let links):
                                         VStack(alignment: .leading, spacing: 12) {
+                                            if LocalTranslatedText.sourceLanguage(text) != nil {
+                                                LocalTranslatedText(original: text, detail: true)
+                                            }
                                             WikipediaLinkedParagraph(
                                                 text: text,
                                                 entities: wikipediaEntitiesByParagraph[index] ?? [],
@@ -399,7 +405,7 @@ struct PostDetailView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 PostAuthorHeader(post: post)
                 if post.displayTitle != post.displayContent {
-                    Text(post.displayTitle).font(.title3.bold())
+                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS).font(.title3.bold())
                 }
                 Text(post.displayContent).font(.system(size: 17, weight: .regular)).lineSpacing(2).textSelection(.enabled)
 
@@ -432,7 +438,7 @@ struct PostDetailView: View {
 
                     rssSourceHeader
 
-                    Text(post.displayTitle)
+                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS)
                         .font(.system(size: 24, weight: .bold))
                         .tracking(-0.25)
                         .lineSpacing(3)
@@ -440,7 +446,7 @@ struct PostDetailView: View {
                         .padding(.top, 18)
 
                     if let summary = rssDetailSummary {
-                        Text(summary)
+                        LocalTranslatedText(original: summary, detail: true)
                             .font(.system(size: 16.5))
                             .foregroundStyle(.secondary)
                             .lineSpacing(5)
@@ -501,7 +507,7 @@ struct PostDetailView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    Text(post.displayTitle)
+                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS)
                         .font(.system(size: 25, weight: .semibold))
                         .tracking(-0.25)
                         .lineSpacing(4)
@@ -552,7 +558,7 @@ struct PostDetailView: View {
         switch block {
         case .paragraph(let text, let emojis):
             if emojis.isEmpty {
-                Text(rssReaderParagraphText(text))
+                LocalTranslatedText(original: rssReaderParagraphText(text), detail: true, enabled: !isWeChat)
                     .font(.system(size: isWeChat ? 17 : 18))
                     .foregroundStyle(isWeChat ? Color(uiColor: .label).opacity(0.9) : .primary)
                     .lineSpacing(isWeChat ? 8 : 8)

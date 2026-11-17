@@ -216,7 +216,6 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var xQuotedTranslations: [Int: String] = [:]
     @Published private(set) var xReplyContexts: [Int: XReplyContext] = [:]
     @Published private(set) var xLiveDetails: [Int: XTweetDetailItem] = [:]
-    @Published private(set) var rssCardTranslations: [Int: RSSCardTranslation] = [:]
     @Published private(set) var rssFeeds: [RSSFeedSource] = []
     @Published private(set) var selectedRSSFeedID: Int?
     @Published private(set) var selectedRSSPosts: [Post] = []
@@ -249,8 +248,6 @@ final class NewsFeedViewModel: ObservableObject {
     private var xueqiuPagination: XueqiuPagination?
     private var pendingXTranslations: [Int: String] = [:]
     private var xTranslationPublishTask: Task<Void, Never>?
-    private var pendingRSSCardTranslations: [Int: RSSCardTranslation] = [:]
-    private var rssTranslationPublishTask: Task<Void, Never>?
     private var page = 1
     private let defaultPageSize = 5
     private var realtimeClient: RealtimeFeedClient?
@@ -266,7 +263,6 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchXTranslation: (String) async throws -> XTranslation
     private let translateXFallback: (String) async throws -> String
     private let fetchXTweetDetail: (String) async throws -> XTweetDetailItem
-    private let translateRSSCard: (String, String?) async throws -> RSSCardTranslation
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchWeChatFeedPosts: (Int, Int, Int) async throws -> [Post]
@@ -276,7 +272,6 @@ final class NewsFeedViewModel: ObservableObject {
     private var loadingXQuotedTranslationIDs: Set<Int> = []
     private var loadingXReplyContextIDs: Set<Int> = []
     private var loadingXLiveDetailIDs: Set<Int> = []
-    private var loadingRSSTranslationIDs: Set<Int> = []
     private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
     private var newYorkTimesPrefetchTask: Task<Void, Never>?
     private var rssSelectionGeneration = UUID()
@@ -303,7 +298,6 @@ final class NewsFeedViewModel: ObservableObject {
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
         translateXFallback: ((String) async throws -> String)? = nil,
         fetchXTweetDetail: ((String) async throws -> XTweetDetailItem)? = nil,
-        translateRSSCard: ((String, String?) async throws -> RSSCardTranslation)? = nil,
         fetchRSSFeeds: (() async throws -> [RSSFeedSource])? = nil,
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchWeChatFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
@@ -377,12 +371,6 @@ final class NewsFeedViewModel: ObservableObject {
                     xUserID: author,
                     bypassCache: bypassCache
                 )
-            }
-        }
-        self.translateRSSCard = translateRSSCard ?? { title, excerpt in
-            let service = PersonArticleTranslationService.shared
-            return try await RSSCardTranslation.translated(title: title, excerpt: excerpt) {
-                try await service.translate($0)
             }
         }
         self.fetchRSSFeeds = fetchRSSFeeds ?? { try await client.fetchRSSFeeds() }
@@ -495,7 +483,6 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             schedulePresentationPrewarm(for: result)
             scheduleSelectedRSSNewYorkTimesPrefetch(for: result, feedID: feedID)
-            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError {
             return
         } catch {
@@ -524,7 +511,6 @@ final class NewsFeedViewModel: ObservableObject {
             errorMessage = nil
             schedulePresentationPrewarm(for: result)
             scheduleSelectedRSSNewYorkTimesPrefetch(for: result, feedID: feedID)
-            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError {
             return
         } catch {
@@ -694,12 +680,6 @@ final class NewsFeedViewModel: ObservableObject {
         }
         if let reply = xReplyContexts[post.id] {
             displayed = displayed.replacingXReplyContext(with: reply)
-        }
-        if let translation = rssCardTranslations[post.id] ?? pendingRSSCardTranslations[post.id] {
-            displayed = displayed.replacingRSSCardTranslation(
-                title: translation.title,
-                excerpt: translation.excerpt
-            )
         }
         return displayed
     }
@@ -880,95 +860,6 @@ final class NewsFeedViewModel: ObservableObject {
         return try await translateXFallback(sourceText)
     }
 
-    func translateRSSPostIfNeeded(_ post: Post) async {
-        guard post.needsRSSCardTranslation,
-              let title = post.rssTranslationTitle,
-              rssCardTranslations[post.id] == nil,
-              pendingRSSCardTranslations[post.id] == nil,
-              !loadingRSSTranslationIDs.contains(post.id) else { return }
-        if let cached = Self.cachedRSSCardTranslation(for: post, sourceTitle: title) {
-            pendingRSSCardTranslations[post.id] = cached
-            scheduleRSSTranslationPublish()
-            return
-        }
-        loadingRSSTranslationIDs.insert(post.id)
-        defer { loadingRSSTranslationIDs.remove(post.id) }
-        do {
-            let translation = try await translateRSSCard(title, post.rssTranslationExcerpt)
-            guard !Task.isCancelled else { return }
-            let translatedTitle = translation.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !translatedTitle.isEmpty,
-                  translatedTitle != title,
-                  Self.containsHanCharacters(translatedTitle) else { return }
-            let value = RSSCardTranslation(
-                title: translatedTitle,
-                excerpt: translation.excerpt?.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-            pendingRSSCardTranslations[post.id] = value
-            scheduleRSSTranslationPublish()
-            Self.cacheRSSCardTranslation(value, for: post, sourceTitle: title)
-        } catch is CancellationError {
-            return
-        } catch {
-            // Translation is best-effort. Keep the source card visible on failure.
-        }
-    }
-
-    /// Starts translation independently of SwiftUI row lifetime, so quick
-    /// scrolling cannot cancel headlines that have already been fetched.
-    private func scheduleRSSCardTranslations(for posts: [Post]) {
-        let candidates = posts.filter(\.needsRSSCardTranslation)
-        guard !candidates.isEmpty else { return }
-        for post in candidates {
-            Task { @MainActor [weak self] in
-                guard let self, !Task.isCancelled else { return }
-                await translateRSSPostIfNeeded(post)
-            }
-        }
-    }
-
-    private struct CachedRSSCardTranslation: Codable {
-        let sourceTitle: String
-        let translatedTitle: String
-        let translatedExcerpt: String?
-    }
-
-    private static func cachedRSSCardTranslation(for post: Post, sourceTitle: String) -> RSSCardTranslation? {
-        guard let data = UserDefaults.standard.data(forKey: rssCardTranslationCacheKey(postID: post.id)),
-              let cached = try? JSONDecoder().decode(CachedRSSCardTranslation.self, from: data),
-              cached.sourceTitle == sourceTitle,
-              containsHanCharacters(cached.translatedTitle) else { return nil }
-        return RSSCardTranslation(title: cached.translatedTitle, excerpt: cached.translatedExcerpt)
-    }
-
-    private static func cacheRSSCardTranslation(_ value: RSSCardTranslation, for post: Post, sourceTitle: String) {
-        let cached = CachedRSSCardTranslation(
-            sourceTitle: sourceTitle,
-            translatedTitle: value.title,
-            translatedExcerpt: value.excerpt
-        )
-        guard let data = try? JSONEncoder().encode(cached) else { return }
-        let defaults = UserDefaults.standard
-        let key = rssCardTranslationCacheKey(postID: post.id)
-        defaults.set(data, forKey: key)
-        var keys = defaults.stringArray(forKey: rssCardTranslationCacheIndexKey) ?? []
-        keys.removeAll { $0 == key }
-        keys.append(key)
-        if keys.count > 600 {
-            for expiredKey in keys.prefix(keys.count - 600) {
-                defaults.removeObject(forKey: expiredKey)
-            }
-            keys = Array(keys.suffix(600))
-        }
-        defaults.set(keys, forKey: rssCardTranslationCacheIndexKey)
-    }
-
-    private static let rssCardTranslationCacheIndexKey = "feed.rss-card-translation.v2.index"
-
-    private static func rssCardTranslationCacheKey(postID: Int) -> String {
-        "feed.rss-card-translation.v2.\(postID)"
-    }
-
     private static func containsHanCharacters(_ value: String) -> Bool {
         value.unicodeScalars.contains { (0x4E00...0x9FFF).contains(Int($0.value)) }
     }
@@ -983,19 +874,6 @@ final class NewsFeedViewModel: ObservableObject {
             xTranslationPublishTask = nil
             guard !updates.isEmpty else { return }
             xTranslations.merge(updates) { _, latest in latest }
-        }
-    }
-
-    private func scheduleRSSTranslationPublish() {
-        guard rssTranslationPublishTask == nil else { return }
-        rssTranslationPublishTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
-            guard let self else { return }
-            let updates = pendingRSSCardTranslations
-            pendingRSSCardTranslations.removeAll(keepingCapacity: true)
-            rssTranslationPublishTask = nil
-            guard !updates.isEmpty else { return }
-            rssCardTranslations.merge(updates) { _, latest in latest }
         }
     }
 
@@ -1239,7 +1117,6 @@ final class NewsFeedViewModel: ObservableObject {
             if requestedSource == .newYorkTimes {
                 scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: true)
             }
-            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             guard !Task.isCancelled, requestGeneration == generation else { return }
             isSwitchingSource = false
@@ -1293,7 +1170,6 @@ final class NewsFeedViewModel: ObservableObject {
             if requestedSource == .newYorkTimes {
                 scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: false)
             }
-            scheduleRSSCardTranslations(for: result)
         } catch is CancellationError { } catch {
             guard !Task.isCancelled, requestGeneration == generation else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
@@ -1446,7 +1322,6 @@ final class NewsFeedViewModel: ObservableObject {
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         isSwitchingSource = false
         schedulePresentationPrewarm(for: posts)
-        scheduleRSSCardTranslations(for: posts)
     }
 
     private func persistCurrentSnapshot() {

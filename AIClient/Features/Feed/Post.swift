@@ -653,6 +653,7 @@ struct Post: Codable, Identifiable, Hashable {
     let videos: [PostVideo]?
     let feedRank: Int?
     let meta: PostMeta?
+    var rssOriginalTitle: String? = nil
     // Runtime-only card translations. The backend payload and offline cache remain unchanged.
     var rssTitleZH: String? = nil
     var rssExcerptZH: String? = nil
@@ -1895,6 +1896,7 @@ struct Post: Codable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, text, summary, content, source, weight, user, images, videos, feedRank, meta
+        case rssOriginalTitle = "original_title"
         case contentZH = "content_zh"
         case formattedTime = "formatted_time"
         case weightReason = "weight_reason"

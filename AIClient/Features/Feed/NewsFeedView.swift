@@ -1513,10 +1513,6 @@ struct NewsFeedView: View {
             guard rootTabIsActive, source == .x, source == model.source else { return }
             await model.translateXPostIfNeeded(post)
         }
-        .task(id: "\(rootTabIsActive)-\(source == model.source)-rss-translate-\(post.id)") {
-            guard rootTabIsActive, source == model.source else { return }
-            await model.translateRSSPostIfNeeded(post)
-        }
         .task(id: "\(rootTabIsActive)-youtube-prewarm-\(post.id)") {
             guard rootTabIsActive,
                   source == .youtube,
@@ -3663,7 +3659,7 @@ struct NewsCardView: View {
                 .foregroundStyle((post.feedRank ?? 99) <= 3 ? .orange : .secondary)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: 3) {
-                Text(post.displayTitle).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
                 if post.source != FeedSource.douyin.rawValue,
                    let summary = post.displaySummary,
                    !summary.isEmpty {
@@ -3963,7 +3959,7 @@ struct NewsCardView: View {
                 )
             }
 
-            Text(post.displayTitle)
+            LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                 .font(.system(size: 15, weight: .semibold))
                 .lineSpacing(2)
                 .lineLimit(2)
@@ -4019,7 +4015,7 @@ struct NewsCardView: View {
                 }
             }
 
-            Text(post.displayTitle)
+            LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineSpacing(1)
@@ -4027,7 +4023,7 @@ struct NewsCardView: View {
                 .multilineTextAlignment(.leading)
 
             if post.rssListContent != post.displayTitle {
-                Text(post.rssListContent)
+                LocalTranslatedText(original: post.rssListContent)
                     .font(.system(size: 14.5, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)
@@ -4058,7 +4054,7 @@ struct NewsCardView: View {
                     }
                 }
 
-                Text(post.displayTitle)
+                LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.primary)
                     .lineSpacing(3)
@@ -4086,13 +4082,13 @@ struct NewsCardView: View {
 
     private var newYorkTimesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(post.displayTitle)
+            LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                 .font(.system(size: 21, weight: .bold, design: .serif))
                 .lineSpacing(2)
                 .multilineTextAlignment(.leading)
 
             if post.newYorkTimesFeedExcerpt != post.displayTitle {
-                Text(post.newYorkTimesFeedExcerpt)
+                LocalTranslatedText(original: post.newYorkTimesFeedExcerpt)
                     .font(.system(size: 15, weight: .regular, design: .serif))
                     .foregroundStyle(.secondary)
                     .lineSpacing(4)
