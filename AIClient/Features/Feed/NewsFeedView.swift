@@ -3460,26 +3460,10 @@ struct NewsCardView: View {
         ) != nil
 
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image("TruthMark")
-                    .resizable()
-                    .renderingMode(.original)
-                    .scaledToFill()
-                    .frame(width: 34, height: 34)
-                    .clipShape(Circle())
-
-                HStack(spacing: 5) {
-                    Text("特朗普")
-                        .font(.system(size: 15.5, weight: .bold))
-                    if let time = post.formattedTime {
-                        Text(time)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer(minLength: 6)
-
+            if let time = post.formattedTime {
+                Text(time)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
 
             if !isImagePlaceholder {
