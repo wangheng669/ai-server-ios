@@ -90,6 +90,7 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretationTask: Task<Void, Never>?
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
+    @State private var rssOriginalArticleHTML: String?
     @State private var qbitAIArticleBlocks: [RSSArticleBlock]?
     @State private var isLoadingQbitAIArticle: Bool
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
@@ -318,7 +319,7 @@ struct PostDetailView: View {
                                     case .paragraph(let text):
                                         VStack(alignment: .leading, spacing: 12) {
                                             if LocalTranslatedText.sourceLanguage(text) != nil {
-                                                LocalTranslatedText(original: text, detail: true)
+                                                LocalTranslatedText(original: text, detail: true, translationOnly: true)
                                             }
                                             WikipediaLinkedParagraph(
                                                 text: text,
@@ -345,7 +346,7 @@ struct PostDetailView: View {
                                     case .linkedParagraph(let text, let links):
                                         VStack(alignment: .leading, spacing: 12) {
                                             if LocalTranslatedText.sourceLanguage(text) != nil {
-                                                LocalTranslatedText(original: text, detail: true)
+                                                LocalTranslatedText(original: text, detail: true, translationOnly: true)
                                             }
                                             WikipediaLinkedParagraph(
                                                 text: text,
@@ -461,7 +462,7 @@ struct PostDetailView: View {
                         .padding(.vertical, 22)
 
                     LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
+                        ForEach(Array(post.rssArticleBlocks(overridingContent: rssOriginalArticleHTML).enumerated()), id: \.offset) { _, block in
                             rssArticleBlock(block, isWeChat: false)
                         }
                     }
@@ -565,6 +566,7 @@ struct PostDetailView: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
+                LocalTranslatedText(original: rssReaderParagraphText(text), detail: true, enabled: !isWeChat, translationOnly: true)
                 InlineEmojiText(
                     text: rssReaderParagraphText(text),
                     emojis: emojis,
@@ -1192,7 +1194,8 @@ struct PostDetailView: View {
                 originalURL: post.linkURL
             ),
             presentedAsSheet: true,
-            startsAutomatically: true
+            startsAutomatically: true,
+            translatesRSSLocally: true
         )
     }
 
@@ -2492,6 +2495,8 @@ struct PostDetailView: View {
         }
         if post.isQbitAIArticle {
             await loadQbitAIArticle(using: client)
+        } else if isGenericRSSDetail {
+            await loadRSSOriginalArticle(using: client)
         }
         let replyContextTask: Task<Void, Never>? = if post.sourceName == "X" {
             Task { await loadXReplyContext(using: client) }
@@ -2576,6 +2581,18 @@ struct PostDetailView: View {
         } catch {
             // The existing "回复 @用户" label remains as a useful fallback.
         }
+    }
+
+    private func loadRSSOriginalArticle(using client: APIClient) async {
+        // Read the original article only. This endpoint does not enqueue a cloud translation.
+        guard let link = post.linkURL,
+              let payload = try? await client.fetchArticlePreview(url: link, preferRemote: true).data,
+              !Task.isCancelled else { return }
+        let html = payload.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !html.isEmpty, payload.textContent.count >= post.originalDisplayContent.count {
+            rssOriginalArticleHTML = html
+        }
+        // A failed/empty preview leaves the complete stored RSS content and original link available.
     }
 
     private func loadQbitAIArticle(using client: APIClient) async {

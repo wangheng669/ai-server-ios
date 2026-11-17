@@ -300,7 +300,7 @@ struct GoogleSignalView: View {
                             Button { selected = item } label: {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack(alignment: .top) {
-                                        Text(item.displayTitle).font(.body.weight(.medium)).multilineTextAlignment(.leading)
+                                        LocalTranslatedText(original: item.displayTitle, enabled: item.source != "x").font(.body.weight(.medium)).multilineTextAlignment(.leading)
                                         Spacer(minLength: 8)
                                         Text(item.sentimentTitle).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -426,11 +426,17 @@ private struct CompanyNewsDetail: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(item.displayTitle).font(.title2.bold())
+                    LocalTranslatedText(original: item.displayTitle, enabled: item.source != "x").font(.title2.bold())
                     Text(item.displayAuthor).foregroundStyle(.secondary)
                     HStack { ForEach(companies.filter { item.companies[$0.id] != "unrelated" }) { company in
                         Text("\(company.name) · \(GoogleSignalSentimentFilter(rawValue: item.companies[company.id] ?? "uncertain")?.title ?? "待判断")").font(.caption)
                     } }
+                    if item.source != "x" {
+                        LocalTranslatedText(original: item.originalContent, serverChinese: item.contentZH, detail: true)
+                            .textSelection(.enabled)
+                        if !item.quoteContent.isEmpty { LocalTranslatedText(original: item.quoteContent, detail: true) }
+                        if !item.replyContent.isEmpty { LocalTranslatedText(original: item.replyContent, detail: true) }
+                    } else {
                     Text(item.originalContent).textSelection(.enabled)
                     if !item.quoteContent.isEmpty { Text("引用原文").font(.headline); Text(item.quoteContent).textSelection(.enabled) }
                     if !item.replyContent.isEmpty { Text("回复上下文").font(.headline); Text(item.replyContent).textSelection(.enabled) }
@@ -438,6 +444,7 @@ private struct CompanyNewsDetail: View {
                         Divider(); Text("译文").font(.headline); Text(translated.isEmpty ? item.contentZH : translated).textSelection(.enabled)
                     } else {
                         Button(translating ? "正在翻译…" : "翻译正文") { Task { await translate() } }.disabled(translating)
+                    }
                     }
                     if let translationError { Text(translationError).font(.caption).foregroundStyle(.red) }
                     if let url = URL(string: item.sourceURL) { Button("阅读来源网页") { browser = InAppBrowserDestination(url: url) } }
@@ -451,9 +458,10 @@ private struct CompanyNewsDetail: View {
         .inAppBrowserCover(item: $browser)
     }
     @MainActor private func translate() async {
+        guard item.source == "x" else { return }
         translating = true; translationError = nil; defer { translating = false }
         do {
-            translated = try await GoogleSignalService().translate(postID: item.translationPostID, source: item.source == "x" ? .x : .rss)
+            translated = try await GoogleSignalService().translate(postID: item.translationPostID, source: .x)
         } catch { if !Task.isCancelled { translationError = "翻译暂不可用，请重试" } }
     }
 }

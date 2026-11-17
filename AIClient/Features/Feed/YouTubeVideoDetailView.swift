@@ -81,6 +81,7 @@ struct YouTubeVideoDetailView: View {
     let video: YouTubeVideoDetailModel
     var presentedAsSheet = true
     var startsAutomatically = false
+    var translatesRSSLocally = false
 
     @State private var cues: [VideoSubtitleCue] = []
     @State private var subtitleStatus = "loading"
@@ -157,7 +158,7 @@ struct YouTubeVideoDetailView: View {
 
     private var metadata: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(video.title)
+            LocalTranslatedText(original: video.title, detail: true, enabled: translatesRSSLocally)
                 .font(.system(size: 20, weight: .bold))
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -225,7 +226,7 @@ struct YouTubeVideoDetailView: View {
     private func descriptionCard(_ description: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("简介").font(.system(size: 15, weight: .bold))
-            Text(description)
+            LocalTranslatedText(original: description, detail: isDescriptionExpanded, enabled: translatesRSSLocally)
                 .font(.system(size: 14.5))
                 .lineSpacing(4)
                 .lineLimit(isDescriptionExpanded ? nil : 3)

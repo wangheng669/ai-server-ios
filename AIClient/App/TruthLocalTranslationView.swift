@@ -67,6 +67,7 @@ struct LocalTranslatedText: View {
     var serverChinese: String? = nil
     var detail = false
     var enabled = true
+    var translationOnly = false
 
     static func sourceLanguage(_ text: String) -> String? {
         let recognizer = NLLanguageRecognizer()
@@ -78,19 +79,21 @@ struct LocalTranslatedText: View {
     }
 
     private var existingChinese: String? {
-        guard let serverChinese,
-              serverChinese.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) else { return nil }
+        guard let serverChinese else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(serverChinese)
+        guard recognizer.dominantLanguage == .simplifiedChinese || recognizer.dominantLanguage == .traditionalChinese else { return nil }
         return serverChinese
     }
 
     var body: some View {
         if #available(iOS 18.0, *), enabled, let language = Self.sourceLanguage(original) {
             TruthDeviceTranslatedText(original: original, serverChinese: existingChinese,
-                                      detail: detail, sourceIdentifier: language)
+                                      detail: detail, sourceIdentifier: language, translationOnly: translationOnly)
                 .id(language + ":" + original)
         } else {
-            Text(existingChinese ?? original)
-            if detail, existingChinese != nil, existingChinese != original {
+            if !translationOnly { Text(existingChinese ?? original) }
+            if !translationOnly, detail, existingChinese != nil, existingChinese != original {
                 DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
                     .font(.callout)
             }
@@ -104,6 +107,7 @@ private struct TruthDeviceTranslatedText: View {
     let serverChinese: String?
     let detail: Bool
     let sourceIdentifier: String
+    let translationOnly: Bool
     @ObservedObject private var cache = TruthTranslationCache.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var configuration: TranslationSession.Configuration?
@@ -117,9 +121,10 @@ private struct TruthDeviceTranslatedText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: detail ? 12 : 0) {
-            Text(translated ?? original)
+            if let translated { Text(translated) }
+            else if !translationOnly { Text(original) }
             if detail {
-                if translated != nil {
+                if translated != nil, !translationOnly {
                     DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
                         .font(.callout)
                 } else if needsDownload {
