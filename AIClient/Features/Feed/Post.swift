@@ -964,8 +964,9 @@ struct Post: Codable, Identifiable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         return ["in this article", "comments", "comment"].contains(normalized)
     }
+    var truthChineseContent: String? { htmlText(contentZH) }
     var truthFeedContent: String {
-        guard let translated = htmlText(contentZH) else { return "翻译处理中" }
+        guard let translated = truthChineseContent else { return originalDisplayContent }
         let markers = ["https://", "http://", "https：//", "http：//"]
         let firstLink = markers.compactMap { translated.range(of: $0, options: .caseInsensitive) }.min { $0.lowerBound < $1.lowerBound }
         guard let firstLink else { return translated }

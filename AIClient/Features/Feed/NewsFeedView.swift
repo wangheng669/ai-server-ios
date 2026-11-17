@@ -3529,7 +3529,7 @@ struct NewsCardView: View {
 
             }
 
-            Text(post.truthFeedContent)
+            TruthLocalTranslationView(post: post)
                 .font(.system(size: 15, weight: .regular))
                 .lineSpacing(3)
                 .lineLimit(post.imageURLs.isEmpty ? 3 : 2)

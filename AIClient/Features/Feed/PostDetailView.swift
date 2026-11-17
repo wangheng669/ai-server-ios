@@ -1210,7 +1210,7 @@ struct PostDetailView: View {
                         .opacity(0.55)
                         .padding(.top, 18)
 
-                    Text(post.truthFeedContent)
+                    TruthLocalTranslationView(post: post, detail: true)
                         .font(.system(size: 18, weight: .regular))
                         .lineSpacing(6)
                         .fixedSize(horizontal: false, vertical: true)
