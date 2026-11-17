@@ -127,9 +127,10 @@ struct PushNotificationDetails: Decodable {
     let links: [Link]?
     let imageURL: URL?
     let sec13f: Sec13FNotificationSnapshot?
+    var report: NativeNotificationReport? = nil
 
     enum CodingKeys: String, CodingKey {
-        case title, body, links, sec13f
+        case title, body, links, sec13f, report
         case imageURL = "image_url"
     }
 }
@@ -156,6 +157,8 @@ struct PushNotificationDetailsView: View {
             if let details {
                 if let snapshot = details.sec13f {
                     Sec13FNotificationView(snapshot: snapshot)
+                } else if let report = details.report, report.version == 1 {
+                    NativeReportNotificationView(report: report, links: details.links ?? [])
                 } else {
                     content(details)
                 }
@@ -175,7 +178,7 @@ struct PushNotificationDetailsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .presentationDetents(details?.sec13f == nil ? [.medium, .large] : [.large])
+        .presentationDetents(details?.sec13f != nil || details?.report != nil ? [.large] : [.medium, .large])
         .task(id: attempt) {
             loadFailed = false
             expired = false
