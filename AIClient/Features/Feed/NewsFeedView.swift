@@ -3454,7 +3454,12 @@ struct NewsCardView: View {
     }
 
     private var truthCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let hasImages = !post.imageURLs.isEmpty
+        let isImagePlaceholder = hasImages && post.originalDisplayContent.wholeMatch(
+            of: #/\[图片帖子: [1-9][0-9]*张图片\]/#
+        ) != nil
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image("TruthMark")
                     .resizable()
@@ -3466,9 +3471,6 @@ struct NewsCardView: View {
                 HStack(spacing: 5) {
                     Text("特朗普")
                         .font(.system(size: 15.5, weight: .bold))
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.red)
                     if let time = post.formattedTime {
                         Text(time)
                             .font(.system(size: 13))
@@ -3480,12 +3482,14 @@ struct NewsCardView: View {
 
             }
 
-            TruthLocalTranslationView(post: post)
-                .font(.system(size: 15, weight: .regular))
-                .lineSpacing(3)
-                .lineLimit(post.imageURLs.isEmpty ? 3 : 2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if !isImagePlaceholder {
+                TruthLocalTranslationView(post: post)
+                    .font(.system(size: 15, weight: .regular))
+                    .lineSpacing(3)
+                    .lineLimit(hasImages ? 2 : 3)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             PostMediaGrid(
                 post: post,
