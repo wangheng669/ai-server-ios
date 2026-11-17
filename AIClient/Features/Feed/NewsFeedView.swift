@@ -3455,8 +3455,9 @@ struct NewsCardView: View {
 
     private var truthCard: some View {
         let hasImages = !post.imageURLs.isEmpty
-        let isImagePlaceholder = hasImages && post.originalDisplayContent.wholeMatch(
-            of: #/\[图片帖子: [1-9][0-9]*张图片\]/#
+        let hasMedia = hasImages || !post.videoURLs.isEmpty || post.previewURL != nil
+        let isMediaPlaceholder = hasMedia && post.originalDisplayContent.wholeMatch(
+            of: #/\[(?:图片帖子: [1-9][0-9]*张图片|视频帖子: [1-9][0-9]*个视频|媒体帖子(?:: [1-9][0-9]*张图片, [1-9][0-9]*个视频)?)\]/#
         ) != nil
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -3466,7 +3467,7 @@ struct NewsCardView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if !isImagePlaceholder {
+            if !isMediaPlaceholder {
                 TruthLocalTranslationView(post: post)
                     .font(.system(size: 15, weight: .regular))
                     .lineSpacing(3)
