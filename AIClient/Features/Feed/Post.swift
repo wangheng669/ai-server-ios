@@ -846,6 +846,7 @@ struct Post: Codable, Identifiable, Hashable {
             postLink: postLink, articlePostAt: articlePostAt, user: user,
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
         )
+        replaced.rssOriginalTitle = rssOriginalTitle
         replaced.xReposterName = xReposterName
         return replaced
     }
