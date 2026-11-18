@@ -962,17 +962,20 @@ struct RemoteImage: View {
     var cornerRadius: CGFloat = 0
     var contentMode: ContentMode = .fill
     var onImageLoaded: ((UIImage) -> Void)? = nil
-    @State private var image: UIImage?
-    @State private var finished = false
+    @State private var result: (request: ImageLoader.Request, image: UIImage?)?
 
     var body: some View {
+        let screen = UIScreen.main
+        let size = CGSize(width: targetWidth ?? screen.bounds.width, height: height ?? screen.bounds.height)
+        let request = ImageLoader.request(for: url, targetSize: size, scale: screen.scale)
+        let loaded = result?.request == request ? result?.image : nil
         ZStack {
             Color.clear
-            if let image {
+            if let image = loaded ?? ImageLoader.shared.cachedImage(for: request) {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
-            } else if finished {
+            } else if result?.request == request {
                 Image(systemName: "photo").foregroundStyle(.secondary)
             } else {
                 ProgressView().foregroundStyle(.secondary)
@@ -985,20 +988,11 @@ struct RemoteImage: View {
             transaction.animation = nil
             transaction.disablesAnimations = true
         }
-        .task(id: url) {
-            finished = false
-            let targetHeight = height ?? UIScreen.main.bounds.height
-            let loadedImage = await ImageLoader.load(
-                url,
-                targetSize: CGSize(
-                    width: targetWidth ?? UIScreen.main.bounds.width,
-                    height: targetHeight
-                )
-            )
+        .task(id: request) {
+            let loadedImage = await ImageLoader.shared.image(for: request)
             guard !Task.isCancelled else { return }
-            image = loadedImage
+            result = (request, loadedImage)
             if let loadedImage { onImageLoaded?(loadedImage) }
-            finished = true
         }
     }
 
@@ -1267,17 +1261,16 @@ actor ImageLoader {
         targetSize: CGSize? = nil
     ) async -> UIImage? {
         guard let url else { return nil }
-        for sourceURL in avatarCandidateURLs(url) {
-            let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
-            if let image = await shared.image(
-                for: relayedURL,
-                targetSize: targetSize,
-                scale: UIScreen.main.scale
-            ) {
-                return image
-            }
-        }
-        return nil
+        return await shared.image(for: request(for: url, targetSize: targetSize, scale: UIScreen.main.scale))
+    }
+
+    static func request(for url: URL, targetSize: CGSize?, scale: CGFloat) -> Request {
+        let source = highResolutionAvatarURL(sourceImageURL(from: url))
+        let relay = MediaURL.image(source.absoluteString) ?? source
+        // A timeline rendition is already bounded. Prewarming and every card layout
+        // can share one decoded image, including while the download is in flight.
+        let limit = MediaURL.feedPhotoSize(for: source)?.maxPixels ?? cachePixelLimit(targetSize: targetSize, scale: scale)
+        return Request(url: relay, pixelLimit: limit, scale: scale)
     }
 
     @MainActor
@@ -1310,7 +1303,7 @@ actor ImageLoader {
             if socialTimeline, post.videoURLs.isEmpty {
                 mediaURLs = Array(post.feedImageURLs.prefix(4))
             } else {
-                mediaURLs = [post.previewURL].compactMap { $0 }
+                mediaURLs = [post.source == "x" ? post.xFeedVideoPoster : post.previewURL].compactMap { $0 }
             }
             for mediaURL in mediaURLs.prefix(8 - requests.count) {
                 requests.append(.init(
@@ -1320,9 +1313,8 @@ actor ImageLoader {
                     prefersCompactXAvatar: false
                 ))
             }
-            if requests.count < 8, let quoteImageURL = post.xQuotedPost?.media?
-                .first(where: { !$0.isVideo })?
-                .feedDisplayURL {
+            let quoteURLs = (post.xQuotedPost?.media ?? []).compactMap(\.feedDisplayURL)
+            for quoteImageURL in quoteURLs.prefix(8 - requests.count) {
                 requests.append(.init(
                     url: quoteImageURL,
                     width: max(screenWidth - 102, 220),
@@ -1344,10 +1336,6 @@ actor ImageLoader {
             PrefetchRequest(url: $0, width: 44, height: 44, prefersCompactXAvatar: true)
         }
         await prefetch(requests, maximumConcurrentLoads: 4)
-    }
-
-    static func avatarCandidateURLs(_ url: URL) -> [URL] {
-        [highResolutionAvatarURL(sourceImageURL(from: url))]
     }
 
     static func compactAvatarCandidateURLs(_ url: URL) -> [URL] {
@@ -1927,7 +1915,7 @@ struct XFeedMediaView: View {
                 XVideoPlayerView(
                     url: videoURL,
                     fallbackURL: post.feedPlaybackFallbackURL,
-                    thumbnailURL: post.previewURL,
+                    thumbnailURL: post.xFeedVideoPoster,
                     reportsPlaybackEvents: true,
                     observationSurface: "x-feed"
                 )
@@ -2059,7 +2047,7 @@ struct XFeedQuotedPostCard: View {
             XVideoPlayerView(
                 url: videoURL,
                 fallbackURL: nil,
-                thumbnailURL: media.previewURL,
+                thumbnailURL: isDetail ? media.previewURL : media.feedDisplayURL,
                 generatesThumbnailWhenMissing: false,
                 reportsPlaybackEvents: true,
                 observationSurface: "x-quoted"

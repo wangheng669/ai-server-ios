@@ -1193,7 +1193,7 @@ struct Post: Codable, Identifiable, Hashable {
         if source == "truth" {
             return feedContentImages.compactMap { MediaURL.image(clean($0.preview) ?? $0.url) }
         }
-        let variant = feedContentImages.count == 1 ? "medium" : "small"
+        let variant: MediaURL.XPhotoSize = feedContentImages.count == 1 ? .single : .tile
         return feedContentImages.compactMap { MediaURL.feedImage($0.url, variant: variant) }
     }
     private var feedContentImages: [PostImage] {
@@ -1538,6 +1538,12 @@ struct Post: Codable, Identifiable, Hashable {
     }
     var previewURL: URL? {
         imageURLs.first ?? (videos ?? []).compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.compactMap(MediaURL.image).first
+    }
+    var xFeedVideoPoster: URL? {
+        let raw = feedContentImages.first?.url ?? (videos ?? []).lazy.compactMap {
+            $0.coverURL ?? $0.previewImageURL ?? $0.preview
+        }.first
+        return raw.flatMap { MediaURL.feedImage($0, variant: .tile) }
     }
     var youtubeCoverURL: URL? {
         if let previewURL { return previewURL }
@@ -2181,7 +2187,8 @@ struct XQuotedMedia: Codable, Hashable {
 
     var displayURL: URL? { (thumbnailURL ?? url).flatMap(MediaURL.image) }
     var feedDisplayURL: URL? {
-        (thumbnailURL ?? url).flatMap { MediaURL.feedImage($0, variant: "medium") }
+        let raw = isVideo ? thumbnailURL : (thumbnailURL ?? url)
+        return raw.flatMap { MediaURL.feedImage($0, variant: isVideo ? .tile : .single) }
     }
     var isVideo: Bool {
         ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
@@ -2412,7 +2419,7 @@ enum MediaURL {
         return resolvedImage(decoded)
     }
 
-    static func feedImage(_ raw: String, variant: String = "small") -> URL? {
+    static func feedImage(_ raw: String, variant: XPhotoSize) -> URL? {
         let decoded = feedSizedXMediaURL(highResolutionXueqiuImageURL(
             raw.replacingOccurrences(of: "&amp;", with: "&")
         ), variant: variant)
@@ -2441,16 +2448,44 @@ enum MediaURL {
         return resolved(decoded, proxy: "image-proxy")
     }
 
-    private static func feedSizedXMediaURL(_ raw: String, variant: String) -> String {
+    enum XPhotoSize: String {
+        case single = "900x900"
+        case tile = "small"
+
+        var maxPixels: CGFloat { self == .single ? 900 : 680 }
+    }
+
+    private static func isXTimelineMediaPath(_ path: String) -> Bool {
+        ["/media/", "/amplify_video_thumb/", "/ext_tw_video_thumb/", "/tweet_video_thumb/"].contains {
+            path.hasPrefix($0)
+        }
+    }
+
+    private static func feedSizedXMediaURL(_ raw: String, variant: XPhotoSize) -> String {
         guard var components = URLComponents(string: raw),
               components.host?.lowercased() == "pbs.twimg.com",
-              components.path.hasPrefix("/media/") else { return raw }
+              isXTimelineMediaPath(components.path) else { return raw }
 
-        var queryItems = components.queryItems ?? []
-        queryItems.removeAll { $0.name.caseInsensitiveCompare("name") == .orderedSame }
-        queryItems.append(URLQueryItem(name: "name", value: variant == "medium" ? "medium" : "small"))
-        components.queryItems = queryItems
+        let path = components.path as NSString
+        if !path.pathExtension.isEmpty {
+            guard ["jpg", "jpeg", "png", "webp"].contains(path.pathExtension.lowercased()) else { return raw }
+            components.path = path.deletingPathExtension
+        }
+        var items = (components.queryItems ?? []).filter {
+            !["name", "format"].contains($0.name.lowercased())
+        }
+        items.append(URLQueryItem(name: "format", value: "webp"))
+        items.append(URLQueryItem(name: "name", value: variant.rawValue))
+        components.queryItems = items
         return components.string ?? raw
+    }
+
+    static func feedPhotoSize(for source: URL) -> XPhotoSize? {
+        guard source.host?.lowercased() == "pbs.twimg.com", isXTimelineMediaPath(source.path),
+              let items = URLComponents(url: source, resolvingAgainstBaseURL: false)?.queryItems,
+              items.contains(URLQueryItem(name: "format", value: "webp")),
+              let name = items.first(where: { $0.name == "name" })?.value else { return nil }
+        return XPhotoSize(rawValue: name)
     }
 
     private static func highResolutionXueqiuImageURL(_ raw: String) -> String {

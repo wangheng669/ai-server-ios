@@ -1281,7 +1281,6 @@ final class NewsFeedViewModel: ObservableObject {
         case .post(let post):
             Task { @MainActor [weak self] in
                 self?.receiveRealtimePost(post)
-                await FeedPresentationPrewarmer.shared.warm([post])
             }
         case .taskCompleted(let name):
             guard task(name, updates: source) else { return }
@@ -1303,6 +1302,7 @@ final class NewsFeedViewModel: ObservableObject {
         if source == .xueqiu, let selectedXueqiuFeedID {
             guard post.source?.lowercased() == "rss:\(selectedXueqiuFeedID)" else { return }
         }
+        schedulePresentationPrewarm(for: [post])
         errorMessage = nil
         if let index = posts.firstIndex(where: { $0.id == post.id }) {
             posts[index] = post
