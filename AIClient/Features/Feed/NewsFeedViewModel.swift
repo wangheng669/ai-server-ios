@@ -193,6 +193,7 @@ actor FeedPresentationPrewarmer {
     static let shared = FeedPresentationPrewarmer()
 
     func warm(_ posts: [Post]) async {
+        async let warmImages: Void = ImageLoader.prefetchFeedImages(for: posts)
         for post in posts {
             if post.isXueqiu {
                 _ = post.xueqiuPresentation
@@ -200,7 +201,7 @@ actor FeedPresentationPrewarmer {
                 _ = post.htmlInlineAssetURLs
             }
         }
-        await ImageLoader.prefetchFeedImages(for: posts)
+        await warmImages
     }
 }
 
@@ -539,6 +540,7 @@ final class NewsFeedViewModel: ObservableObject {
             selectedWeChatPosts = result
             canLoadMoreWeChatSelection = !result.isEmpty
             errorMessage = nil
+            schedulePresentationPrewarm(for: result)
         } catch is CancellationError {
             return
         } catch {
@@ -565,6 +567,7 @@ final class NewsFeedViewModel: ObservableObject {
             selectedWeChatPage = nextPage
             canLoadMoreWeChatSelection = !result.isEmpty
             errorMessage = nil
+            schedulePresentationPrewarm(for: result)
         } catch is CancellationError {
             return
         } catch {

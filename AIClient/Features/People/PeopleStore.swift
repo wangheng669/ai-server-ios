@@ -50,6 +50,10 @@ final class PeopleStore {
                 let payload = try await service.specialPeople()
                 people = payload.users
                 loadedAt = Date()
+                let avatars = payload.users.lazy.filter { $0.avatarAssetName == nil }
+                    .compactMap { $0.avatarURL(baseURL: self.baseURL) }.prefix(12)
+                let avatarURLs = Array(avatars)
+                Task(priority: .utility) { await ImageLoader.prefetchAvatars(avatarURLs) }
             } catch {
                 errorMessage = NetworkErrorPresentation.message(for: error)
             }

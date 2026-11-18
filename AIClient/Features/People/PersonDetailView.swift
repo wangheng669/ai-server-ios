@@ -129,10 +129,9 @@ enum PeopleImagePreheater {
     @MainActor
     static func preheatDetail(for person: SpecialPerson, baseURL: URL, includesPhotos: Bool = true) async {
         let avatarURL = person.avatarAssetName == nil ? person.avatarURL(baseURL: baseURL) : nil
-        _ = await ImageLoader.load(
-            avatarURL,
-            targetSize: CGSize(width: 66, height: 66)
-        )
+        if let request = ImageLoader.avatarRequest(avatarURL, size: 82) {
+            _ = await ImageLoader.shared.image(for: request)
+        }
 
         guard includesPhotos, !Task.isCancelled else { return }
         let thumbnailSize = CGSize(width: 154, height: 96)
@@ -1662,9 +1661,7 @@ struct XReplyContextCard: View {
                 .foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 9) {
                 if let avatar = reply.avatarURL.flatMap(MediaURL.image) {
-                    RemoteImage(url: avatar, targetWidth: 28, height: 28, cornerRadius: 14)
-                        .frame(width: 28, height: 28)
-                        .clipped()
+                    AvatarView(url: avatar, name: reply.authorName ?? reply.handle ?? "回复", size: 28)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
@@ -1914,8 +1911,7 @@ private struct XQuotedPostCard: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 if let avatar = quote.author?.profileImageURL.flatMap(MediaURL.image) {
-                    RemoteImage(url: avatar, targetWidth: 24, height: 24, cornerRadius: 12)
-                        .frame(width: 24, height: 24).clipped()
+                    AvatarView(url: avatar, name: quote.author?.name ?? "引用动态", size: 24)
                 }
                 Text(quote.author?.name ?? "引用动态").font(.subheadline.weight(.semibold)).lineLimit(1)
                 if let handle = quote.author?.handle {

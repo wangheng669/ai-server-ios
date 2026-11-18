@@ -2704,7 +2704,7 @@ struct PostDetailView: View {
                 .fetchXComments(tweetID: tweetID)
             guard !Task.isCancelled else { return }
             xComments = comments
-            await ImageLoader.prefetchCommentAvatars(comments.prefix(4).compactMap(\.author.avatarURL))
+            await ImageLoader.prefetchAvatars(comments.prefix(4).compactMap(\.author.avatarURL))
         } catch is CancellationError {
             return
         } catch {
@@ -2727,7 +2727,7 @@ struct PostDetailView: View {
             guard !Task.isCancelled else { return }
             weiboComments = payload.items
             weiboCommentCount = payload.commentCount
-            await ImageLoader.prefetchCommentAvatars(payload.items.prefix(4).compactMap(\.avatarURL))
+            await ImageLoader.prefetchAvatars(payload.items.prefix(4).compactMap(\.avatarURL))
         } catch is CancellationError {
             return
         } catch {

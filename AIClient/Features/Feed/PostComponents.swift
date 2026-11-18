@@ -896,6 +896,7 @@ struct AvatarView: View {
     var assetName: String? = nil
     var cornerRadius: CGFloat? = nil
     var rejectsUpscaledImages = false
+    var placeholderSymbol: String? = nil
     @State private var loadedAvatar: (request: ImageLoader.Request, image: UIImage)?
 
     private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
@@ -918,8 +919,16 @@ struct AvatarView: View {
             }
             else {
                 RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
-                    .fill(Color.blue.opacity(0.11))
-                    .overlay { Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue) }
+                    .fill(placeholderSymbol == nil ? Color.blue.opacity(0.11) : Color(uiColor: .secondarySystemBackground))
+                    .overlay {
+                        if let placeholderSymbol {
+                            Image(systemName: placeholderSymbol)
+                                .font(.system(size: size * 0.42, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue)
+                        }
+                    }
             }
         }
         .frame(width: size, height: size)
@@ -1198,9 +1207,17 @@ actor ImageLoader {
         let url: URL
         let pixelLimit: CGFloat?
         let scale: CGFloat
+        let isAvatar: Bool
+
+        init(url: URL, pixelLimit: CGFloat?, scale: CGFloat, isAvatar: Bool = false) {
+            self.url = url
+            self.pixelLimit = pixelLimit
+            self.scale = scale
+            self.isAvatar = isAvatar
+        }
 
         fileprivate var cacheKey: String {
-            "\(url.absoluteString)|\(Int(pixelLimit ?? 0))|\(scale)"
+            "\(url.absoluteString)|\(Int(pixelLimit ?? 0))|\(scale)|\(isAvatar)"
         }
     }
 
@@ -1218,7 +1235,9 @@ actor ImageLoader {
 
     // NSCache synchronizes its own access, so views can read decoded images during rendering.
     nonisolated(unsafe) private let cache = NSCache<NSString, UIImage>()
+    nonisolated(unsafe) private let avatarCache = NSCache<NSString, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
+    private let avatarDataCache = NSCache<NSURL, NSData>()
     private var downloads: [URL: Download] = [:]
     private var imageTasks: [String: Task<UIImage?, Never>] = [:]
 
@@ -1228,13 +1247,19 @@ actor ImageLoader {
         self.imageDataLoader = imageDataLoader ?? { await Self.download($0) }
         cache.totalCostLimit = 48 * 1024 * 1024
         cache.countLimit = 120
+        avatarCache.totalCostLimit = 24 * 1024 * 1024
+        avatarCache.countLimit = 200
         dataCache.totalCostLimit = 12 * 1024 * 1024
         dataCache.countLimit = 80
+        avatarDataCache.totalCostLimit = 4 * 1024 * 1024
+        avatarDataCache.countLimit = 120
     }
 
     func removeCachedImages() {
         cache.removeAllObjects()
+        avatarCache.removeAllObjects()
         dataCache.removeAllObjects()
+        avatarDataCache.removeAllObjects()
     }
 
     static func load(
@@ -1262,34 +1287,21 @@ actor ImageLoader {
         let targetSize = CGSize(width: size, height: size)
         // Standard avatar sizes share a decoded thumbnail up to the compact X image size.
         let pixelLimit = size * scale <= 200 ? 200 : cachePixelLimit(targetSize: targetSize, scale: scale)
-        return Request(url: MediaURL.image(source.absoluteString) ?? source, pixelLimit: pixelLimit, scale: scale)
+        return Request(url: MediaURL.image(source.absoluteString) ?? source, pixelLimit: pixelLimit, scale: scale, isAvatar: true)
     }
 
     static func prefetchFeedImages(for posts: [Post]) async {
-        let visiblePosts = Array(posts.prefix(6))
+        let visiblePosts = posts.prefix(12)
         guard !visiblePosts.isEmpty else { return }
 
-        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
         var requests: [PrefetchRequest] = []
-
-        for post in visiblePosts {
-            if let avatarURL = post.avatarURL {
-                requests.append(.init(
-                    url: avatarURL,
-                    width: 44,
-                    height: 44,
-                    prefersCompactXAvatar: true
-                ))
-            }
-            if let quoteAvatarURL = post.xQuotedPost?.author?.profileImageURL.flatMap(URL.init(string:)) {
-                requests.append(.init(
-                    url: quoteAvatarURL,
-                    width: 28,
-                    height: 28,
-                    prefersCompactXAvatar: true
-                ))
-            }
+        let authors = visiblePosts.compactMap { post in
+            post.isRSS ? post.rssCardAvatarURL : post.zhihuAnswerAvatarURL
         }
+        let quotedAuthors = visiblePosts.compactMap { $0.xQuotedPost?.author?.profileImageURL.flatMap(URL.init(string:)) }
+
+        async let avatarWarmup: Void = prefetchAvatars(authors + quotedAuthors)
+        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
 
         for post in visiblePosts.prefix(4) {
             let mediaURL = post.sourceName == "X"
@@ -1318,11 +1330,13 @@ actor ImageLoader {
         var seen = Set<URL>()
         let uniqueRequests = requests.filter { seen.insert($0.url).inserted }
         await prefetch(uniqueRequests, maximumConcurrentLoads: 4)
+        await avatarWarmup
     }
 
-    static func prefetchCommentAvatars(_ urls: [URL]) async {
-        let requests = Set(urls).map {
-            PrefetchRequest(url: $0, width: 40, height: 40, prefersCompactXAvatar: true)
+    static func prefetchAvatars(_ urls: [URL]) async {
+        var seen = Set<URL>()
+        let requests = urls.filter { seen.insert($0).inserted }.prefix(12).map {
+            PrefetchRequest(url: $0, width: 44, height: 44, prefersCompactXAvatar: true)
         }
         await prefetch(requests, maximumConcurrentLoads: 4)
     }
@@ -1378,7 +1392,8 @@ actor ImageLoader {
     }
 
     nonisolated func cachedImage(for request: Request) -> UIImage? {
-        cache.object(forKey: request.cacheKey as NSString)
+        let decodedCache = request.isAvatar ? avatarCache : cache
+        return decodedCache.object(forKey: request.cacheKey as NSString)
     }
 
     func image(for request: Request) async -> UIImage? {
@@ -1403,15 +1418,18 @@ actor ImageLoader {
 
     private func loadImage(for request: Request) async -> UIImage? {
         let url = request.url
+        let rawCache = request.isAvatar ? avatarDataCache : dataCache
+        let diskCache = request.isAvatar ? ImageDiskCache.avatars : ImageDiskCache.shared
+        let decodedCache = request.isAvatar ? avatarCache : cache
         let data: Data?
         var downloadedData = false
         var loadedFromDisk = false
-        if let cachedData = dataCache.object(forKey: url as NSURL) {
+        if let cachedData = rawCache.object(forKey: url as NSURL) {
             data = cachedData as Data
-        } else if let cachedData = await ImageDiskCache.shared.data(for: url) {
+        } else if let cachedData = await diskCache.data(for: url) {
             data = cachedData
             loadedFromDisk = true
-            dataCache.setObject(cachedData as NSData, forKey: url as NSURL, cost: cachedData.count)
+            rawCache.setObject(cachedData as NSData, forKey: url as NSURL, cost: cachedData.count)
         } else {
             let download: Download
             if let existing = downloads[url] {
@@ -1426,7 +1444,7 @@ actor ImageLoader {
             if downloads[url]?.id == download.id { downloads[url] = nil }
             if let data {
                 downloadedData = true
-                dataCache.setObject(data as NSData, forKey: url as NSURL, cost: data.count)
+                rawCache.setObject(data as NSData, forKey: url as NSURL, cost: data.count)
             }
         }
 
@@ -1437,18 +1455,18 @@ actor ImageLoader {
             Self.decode(data, pixelLimit: request.pixelLimit, scale: request.scale)
         }.value
         guard let decodedImage else {
+            rawCache.removeObject(forKey: url as NSURL)
             if loadedFromDisk {
-                dataCache.removeObject(forKey: url as NSURL)
-                await ImageDiskCache.shared.removeData(for: url)
+                await diskCache.removeData(for: url)
                 return await loadImage(for: request)
             }
             return nil
         }
         let cost = max(1, decodedImage.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(decodedImage.size.width * decodedImage.size.height * request.scale * request.scale * 4))
-        cache.setObject(decodedImage, forKey: request.cacheKey as NSString, cost: cost)
+        decodedCache.setObject(decodedImage, forKey: request.cacheKey as NSString, cost: cost)
         if downloadedData {
             Task(priority: .utility) {
-                await ImageDiskCache.shared.store(data, for: url)
+                await diskCache.store(data, for: url)
             }
         }
         return decodedImage
@@ -1518,9 +1536,14 @@ actor ImageLoader {
 
 actor ImageDiskCache {
     static let shared = ImageDiskCache(
-        directory: ImageDiskCache.defaultDirectory,
+        directory: ImageDiskCache.directory(named: "FeedImageCache"),
         maxBytes: 256 * 1024 * 1024,
         maxFileCount: 1_200
+    )
+    static let avatars = ImageDiskCache(
+        directory: ImageDiskCache.directory(named: "AvatarCache"),
+        maxBytes: 64 * 1024 * 1024,
+        maxFileCount: 1_800
     )
 
     private let directory: URL
@@ -1614,10 +1637,10 @@ actor ImageDiskCache {
         return directory.appendingPathComponent(filename, isDirectory: false)
     }
 
-    private static var defaultDirectory: URL {
+    private static func directory(named name: String) -> URL {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        return root.appendingPathComponent("FeedImageCache", isDirectory: true)
+        return root.appendingPathComponent(name, isDirectory: true)
     }
 }
 

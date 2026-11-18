@@ -59,9 +59,6 @@ private enum YouTubePersonFilter: String, CaseIterable, Identifiable {
     }
     var person: String? { self == .all ? nil : rawValue }
     var avatarURL: URL? {
-        if self == .xiaodao {
-            return URL(string: "https://yt3.googleusercontent.com/ytc/AIdro_mb2vZI-xznESM1CQpzVUOQFe1h9DVsghEWhCHPWfpt7ss=s900-c-k-c0x00ffffff-no-rj")
-        }
         guard let feedID else { return nil }
         return URL(string: "/api/ios/v1/rss/feeds/\(feedID)/avatar", relativeTo: ServerConfiguration.currentURL)?.absoluteURL
     }
@@ -949,20 +946,8 @@ struct NewsFeedView: View {
     }
 
     private func youtubeRemoteAvatar(_ option: YouTubePersonFilter, size: CGFloat) -> some View {
-        AsyncImage(url: option.avatarURL) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                Image(systemName: "person.fill")
-                    .font(.system(size: size * 0.42, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(uiColor: .secondarySystemBackground))
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: max(1, size * 0.045)))
+        AvatarView(url: option.avatarURL, name: option.title, size: size, placeholderSymbol: "person.fill")
+            .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: max(1, size * 0.045)))
     }
 
     private func sourceOption(_ source: FeedSource) -> some View {
@@ -1812,13 +1797,12 @@ private struct EmbeddedWebPage: View {
 
     @ViewBuilder private var weiboAccountButtonLabel: some View {
         if let avatarURL = model.weiboAvatarURL {
-            AsyncImage(url: MediaURL.image(avatarURL.absoluteString) ?? avatarURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Image(systemName: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle")
-            }
-            .frame(width: 30, height: 30)
-            .clipShape(Circle())
+            AvatarView(
+                url: avatarURL,
+                name: model.weiboDisplayName ?? "微博",
+                size: 30,
+                placeholderSymbol: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle"
+            )
             .overlay { Circle().stroke(.quaternary, lineWidth: 0.5) }
         } else if let initial = model.weiboAccountInitial {
             Text(initial)
