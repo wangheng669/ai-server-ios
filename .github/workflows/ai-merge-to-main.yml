@@ -207,6 +207,7 @@ jobs:
             echo "$unmerged" >&2
             exit 1
           fi
+          ruby ci/check-no-tests.rb
           git add -A
           git commit -m "Merge $SOURCE_BRANCH into main"
 

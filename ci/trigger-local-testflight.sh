@@ -133,6 +133,8 @@ work_dir="$(mktemp -d "$work_root/release.XXXXXX")"
 git --git-dir="$mirror_dir" archive "$main_sha" | tar -x -C "$work_dir"
 cd "$work_dir"
 
+ruby ci/check-no-tests.rb
+
 export DEVELOPER_DIR="$developer_dir"
 export GITHUB_SHA="$main_sha"
 GITHUB_RUN_ID="local-$(date +%Y%m%d%H%M%S)"

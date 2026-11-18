@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ruby "$(dirname "${BASH_SOURCE[0]}")/check-no-tests.rb"
+
 base_ref="${1:-origin/main}"
 
 if [[ "${IOS_PREFLIGHT_SKIP_FETCH:-false}" != true ]]; then
