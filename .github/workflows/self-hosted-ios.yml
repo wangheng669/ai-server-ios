@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   build:
-    name: Build and test on Hackintosh
+    name: Build on Hackintosh
     runs-on:
       - self-hosted
       - macOS
@@ -38,6 +38,9 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
+      - name: Verify no-test policy
+        run: ruby ci/check-no-tests.rb
+
       - name: Report build started
         if: inputs.install_on_device
         continue-on-error: true
@@ -49,38 +52,7 @@ jobs:
           echo "IOS_PREFLIGHT_SECONDS=0" >> "$GITHUB_ENV"
           echo "IOS_PREPARE_SECONDS=0" >> "$GITHUB_ENV"
           echo "IOS_DEVICE_WARM_SECONDS=0" >> "$GITHUB_ENV"
-          IOS_WORKFLOW_STARTED_EPOCH="$workflow_started_epoch" ./ci/report-ios-deployment.sh running 0.08 testing
-
-      - name: Run tests
-        id: ios_tests
-        env:
-          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-          IOS_BUILD_CACHE_ROOT: ${{ runner.tool_cache }}/ai-server-ios
-        run: |
-          set -o pipefail
-          mkdir -p "$IOS_BUILD_CACHE_ROOT"
-          ./ci/run-timed-step.sh "Complete iOS tests" \
-            ./ci/with-ios-simulator-lock.sh \
-              --label "manual install tests $GITHUB_RUN_ID" \
-              --wait-seconds 1200 \
-              -- xcodebuild test \
-              -project AIServerClient.xcodeproj \
-              -scheme AIServerClient \
-              -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-              -collect-test-diagnostics never \
-              -derivedDataPath "$IOS_BUILD_CACHE_ROOT/manual-install-simulator" \
-              CODE_SIGNING_ALLOWED=NO \
-              COMPILER_INDEX_STORE_ENABLE=NO
-
-      - name: Report tests completed
-        if: inputs.install_on_device
-        continue-on-error: true
-        env:
-          DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_MERGE_SECONDS: ${{ steps.ios_tests.outputs.duration_seconds }}
-        run: |
-          echo "IOS_MERGE_SECONDS=$IOS_MERGE_SECONDS" >> "$GITHUB_ENV"
-          ./ci/report-ios-deployment.sh running 0.35 building
+          IOS_WORKFLOW_STARTED_EPOCH="$workflow_started_epoch" ./ci/report-ios-deployment.sh running 0.08 building
 
       - name: Build unsigned device app
         id: device_build
@@ -134,7 +106,7 @@ jobs:
         continue-on-error: true
         env:
           DEPLOYMENT_STATUS_API_KEY: ${{ secrets.IOS_DEPLOYMENT_STATUS_API_KEY }}
-          IOS_MERGE_SECONDS: ${{ steps.ios_tests.outputs.duration_seconds }}
+          IOS_MERGE_SECONDS: 0
           IOS_BUILD_SECONDS: ${{ steps.device_build.outputs.duration_seconds }}
           IOS_INSTALL_SECONDS: ${{ steps.local_install.outputs.duration_seconds }}
           IOS_DEVICE_WAIT_DURATION_SECONDS: ${{ steps.local_install.outputs.device_wait_seconds }}

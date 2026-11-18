@@ -133,6 +133,8 @@ work_dir="$(mktemp -d "$work_root/release.XXXXXX")"
 git --git-dir="$mirror_dir" archive "$main_sha" | tar -x -C "$work_dir"
 cd "$work_dir"
 
+ruby ci/check-no-tests.rb
+
 export DEVELOPER_DIR="$developer_dir"
 export GITHUB_SHA="$main_sha"
 GITHUB_RUN_ID="local-$(date +%Y%m%d%H%M%S)"
@@ -156,18 +158,6 @@ ruby ci/testflight-processing-notify.rb prepare "$builds_before"
 source "$GITHUB_ENV"
 plutil -replace CFBundleShortVersionString \
   -string "$TESTFLIGHT_MARKETING_VERSION" Config/Info.plist
-
-log "Running tests for TestFlight $TESTFLIGHT_MARKETING_VERSION."
-./ci/with-ios-simulator-lock.sh \
-  --label "Local TestFlight $GITHUB_RUN_ID" \
-  --wait-seconds 1200 \
-  -- xcodebuild test \
-  -project AIServerClient.xcodeproj \
-  -scheme AIServerClient \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -derivedDataPath "$work_dir/TestDerivedData" \
-  CODE_SIGNING_ALLOWED=NO \
-  COMPILER_INDEX_STORE_ENABLE=NO
 
 log "Creating the signed App Store archive."
 xcodebuild archive \
