@@ -1303,11 +1303,16 @@ actor ImageLoader {
         async let avatarWarmup: Void = prefetchAvatars(authors + quotedAuthors)
         let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
 
-        for post in visiblePosts.prefix(4) {
-            let mediaURL = post.sourceName == "X"
-                ? post.feedImageURLs.first ?? post.previewURL
-                : post.previewURL
-            if let mediaURL {
+        let socialTimeline = visiblePosts.first.map { $0.source == "x" || $0.source == "truth" } ?? false
+        for post in visiblePosts.prefix(socialTimeline ? 12 : 4) {
+            guard requests.count < 8 else { break }
+            let mediaURLs: [URL]
+            if socialTimeline, post.videoURLs.isEmpty {
+                mediaURLs = Array(post.feedImageURLs.prefix(4))
+            } else {
+                mediaURLs = [post.previewURL].compactMap { $0 }
+            }
+            for mediaURL in mediaURLs.prefix(8 - requests.count) {
                 requests.append(.init(
                     url: mediaURL,
                     width: screenWidth,
@@ -1315,7 +1320,7 @@ actor ImageLoader {
                     prefersCompactXAvatar: false
                 ))
             }
-            if let quoteImageURL = post.xQuotedPost?.media?
+            if requests.count < 8, let quoteImageURL = post.xQuotedPost?.media?
                 .first(where: { !$0.isVideo })?
                 .feedDisplayURL {
                 requests.append(.init(

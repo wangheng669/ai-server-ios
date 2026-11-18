@@ -3464,6 +3464,7 @@ struct NewsCardView: View {
 
             PostMediaGrid(
                 post: post,
+                usesFeedSizedImages: true,
                 singleImageMaxHeight: 210,
                 singleImageContentMode: .fill,
                 multiImageHeight: 126,

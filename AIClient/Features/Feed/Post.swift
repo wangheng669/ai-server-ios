@@ -1190,6 +1190,9 @@ struct Post: Codable, Identifiable, Hashable {
         feedContentImages.compactMap { MediaURL.image($0.url) }
     }
     var feedImageURLs: [URL] {
+        if source == "truth" {
+            return feedContentImages.compactMap { MediaURL.image(clean($0.preview) ?? $0.url) }
+        }
         let variant = feedContentImages.count == 1 ? "medium" : "small"
         return feedContentImages.compactMap { MediaURL.feedImage($0.url, variant: variant) }
     }
@@ -2327,6 +2330,7 @@ struct PostUser: Codable, Hashable {
 struct PostTag: Codable, Hashable { let id: Int; let name: String }
 struct PostImage: Codable, Hashable {
     let url: String
+    var preview: String? = nil
     let width, height: Int?
     let altText: String?
     let kind: String?
@@ -2358,7 +2362,7 @@ struct PostImage: Codable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case url, width, height, kind
+        case url, preview, width, height, kind
         case altText = "alt_text"
     }
 
@@ -2373,6 +2377,7 @@ struct PostImage: Codable, Hashable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         url = try container.decode(String.self, forKey: .url)
+        preview = try container.decodeIfPresent(String.self, forKey: .preview)
         width = Self.decodeDimension(.width, from: container)
         height = Self.decodeDimension(.height, from: container)
         altText = try container.decodeIfPresent(String.self, forKey: .altText)

@@ -849,6 +849,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func resolvedXTranslation(tweetID: String, sourceText: String) async throws -> String {
+        let cache = FeedTranslationCache.shared
+        let key = FeedTranslationCache.key(sourceText, language: "x/" + tweetID)
+        if let saved = cache.text(key) { return saved }
         let primary: String?
         do {
             primary = try await fetchXTranslation(tweetID).text
@@ -858,9 +861,14 @@ final class NewsFeedViewModel: ObservableObject {
             primary = nil
         }
         if let primary, Self.containsHanCharacters(primary) {
+            cache.save(primary, key: key)
             return primary
         }
-        return try await translateXFallback(sourceText)
+        let translated = try await translateXFallback(sourceText)
+        if translated != sourceText, Self.containsHanCharacters(translated) {
+            cache.save(translated, key: key)
+        }
+        return translated
     }
 
     private static func containsHanCharacters(_ value: String) -> Bool {
@@ -953,6 +961,7 @@ final class NewsFeedViewModel: ObservableObject {
         let saved = cache[next]
         if let saved {
             posts = saved.posts
+            pretranslateTimeline(saved.posts)
             page = saved.page
             canLoadMore = saved.canLoadMore
             isSwitchingSource = false
@@ -1119,6 +1128,7 @@ final class NewsFeedViewModel: ObservableObject {
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
             schedulePresentationPrewarm(for: result)
+            pretranslateTimeline(result)
             if requestedSource == .newYorkTimes {
                 scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: true)
             }
@@ -1173,6 +1183,7 @@ final class NewsFeedViewModel: ObservableObject {
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
             schedulePresentationPrewarm(for: result)
+            pretranslateTimeline(result)
             if requestedSource == .newYorkTimes {
                 scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: false)
             }
@@ -1209,6 +1220,16 @@ final class NewsFeedViewModel: ObservableObject {
             result = try await fetchPosts(page, limit, source)
         }
         return FetchedPage(posts: result)
+    }
+
+    private func pretranslateTimeline(_ posts: [Post]) {
+        if source == .truth, posts.first?.source == "truth", #available(iOS 26.0, *) {
+            Task { await FeedTranslationCache.shared.pretranslateTruth(posts) }
+        } else if source == .x {
+            for post in posts.prefix(5) where post.needsXTranslation && !post.isXRetweetWrapper {
+                Task { await translateXMainPostIfNeeded(post) }
+            }
+        }
     }
 
     private func schedulePresentationPrewarm(for posts: [Post]) {
@@ -1317,6 +1338,7 @@ final class NewsFeedViewModel: ObservableObject {
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         isSwitchingSource = false
         schedulePresentationPrewarm(for: posts)
+        pretranslateTimeline(posts)
     }
 
     private func persistCurrentSnapshot() {
