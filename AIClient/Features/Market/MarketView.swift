@@ -3512,33 +3512,72 @@ private struct MarketIndexDetailView: View {
                     .lineLimit(1)
             }
             .padding(.bottom, 8)
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    detailPrice
-                    detailChange
+            if let quote, showsStockSessionQuotes {
+                stockSessionHeader(quote)
+                if selectedRange != .day { detailChange }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        detailPrice
+                        detailChange
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 4) {
+                        detailPrice
+                        detailChange
+                    }
                 }
-                .fixedSize(horizontal: true, vertical: false)
-                VStack(alignment: .leading, spacing: 4) {
-                    detailPrice
-                    detailChange
+                HStack(spacing: 6) {
+                    Text(quote?.marketAsOfLabel ?? "行情更新中")
+                    Text("·")
+                    Text(sessionText)
                 }
-            }
-            HStack(spacing: 6) {
-                Text(quote?.marketAsOfLabel ?? "行情更新中")
-                Text("·")
-                Text(sessionText)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            if selectedRange == .day, let quote, quote.hasActiveExtendedSessionQuote {
-                Text("较最近常规收盘 · \(number(quote.price, digits: marketPriceDigits(quote.price, symbol: quote.symbol)))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                if selectedRange == .day, let quote, quote.hasActiveExtendedSessionQuote {
+                    Text("较最近常规收盘 · \(number(quote.price, digits: marketPriceDigits(quote.price, symbol: quote.symbol)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.horizontal, 20)
         .padding(.top, 4)
         .padding(.bottom, 14)
+    }
+
+    private var showsStockSessionQuotes: Bool {
+        guard !isIndex, !isCrypto, !isCommodity else { return false }
+        let usStocks = store.dashboard?.componentsByRegion[MarketRegion.unitedStates.dashboardID]
+        return usStocks?.contains(where: { $0.symbol == symbol }) == true
+            || (showsCompanyProfile && store.chart(symbol: chartSymbol, range: .day)?.market == "US")
+    }
+
+    private func stockSessionHeader(_ quote: MarketQuote) -> some View {
+        let extended: MarketTradingSession = quote.tradingSession == .premarket ? .premarket : .overnight
+        let sessions = StockSessionQuotes(quote: quote, chart: store.chart(symbol: chartSymbol, range: .day),
+                                          extendedSession: extended,
+                                          isCurrent: quote.stale != true && !store.isShowingCachedSnapshot)
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(sessions.columns) { column in
+                    StockSessionPriceCell(column: column, symbol: quote.symbol, showsTitle: true)
+                }
+            }
+            .padding(3)
+            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("market-detail-stock-sessions")
+
+            Text(StockSessionQuotes.sourceNote(indicative: quote.hasIndicativeOvernightPrice))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if quote.stale == true || store.isShowingCachedSnapshot {
+                Text(quote.marketAsOfLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var detailPrice: some View {

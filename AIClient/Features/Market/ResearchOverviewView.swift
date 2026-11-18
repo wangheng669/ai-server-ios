@@ -168,7 +168,7 @@ private struct ResearchOverviewView: View {
             while !Task.isCancelled {
                 let missing = symbols.filter { symbol in
                     guard let quote = store.quote(symbol: symbol) else { return false }
-                    return store.chart(symbol: symbol, range: .day)?.researchAfterHoursEnd(for: quote) == nil
+                    return store.chart(symbol: symbol, range: .day)?.stockAfterHoursEnd(for: quote) == nil
                 }
                 guard !missing.isEmpty else { return }
                 await store.preloadListCharts(symbols: missing)
@@ -447,10 +447,10 @@ private struct ResearchStockQuotes: View {
     let store: MarketStore
     let onOpen: (String) -> Void
 
-    private var showsPremarket: Bool { quotes.contains { $0.tradingSession == .premarket } }
-    private var showsIndicative: Bool {
-        quotes.contains { $0.tradingSession == .overnight && $0.sessionDataSource == "AlpacaOvernightIndicative" }
+    private var extendedSession: MarketTradingSession {
+        quotes.contains { $0.tradingSession == .premarket } ? .premarket : .overnight
     }
+    private var showsIndicative: Bool { quotes.contains(where: \.hasIndicativeOvernightPrice) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -460,7 +460,7 @@ private struct ResearchStockQuotes: View {
                 if showsExtendedHours {
                     columnTitle(quotes.contains { $0.tradingSession == .regular } ? "常规盘" : "常规收盘")
                     columnTitle("盘后")
-                    columnTitle(showsPremarket ? "盘前" : showsIndicative ? "夜盘参考" : "夜盘")
+                    columnTitle(StockSessionQuotes.extendedTitle(extendedSession, indicative: showsIndicative))
                 } else {
                     columnTitle("报价")
                     columnTitle("涨跌幅")
@@ -480,7 +480,7 @@ private struct ResearchStockQuotes: View {
             }
 
             if showsExtendedHours {
-                Text(showsIndicative ? "盘后末价取已确认分钟线 · 夜盘参考取买卖中间价" : "盘后末价取已确认分钟线")
+                Text(StockSessionQuotes.sourceNote(indicative: showsIndicative))
                     .font(.caption2)
                     .foregroundStyle(ResearchStyle.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -498,10 +498,6 @@ private struct ResearchStockQuotes: View {
     }
 
     private func stockRow(_ quote: MarketQuote) -> some View {
-        let regular = ResearchStockPrice(price: quote.price, percent: quote.percentValue)
-        let post = afterHoursPrice(quote, regular: regular)
-        let extendedSession: MarketTradingSession = showsPremarket ? .premarket : .overnight
-        let extended = activePrice(quote, session: extendedSession)
         let active = quote.stale != true && !store.isShowingCachedSnapshot
         return Button { onOpen(quote.symbol) } label: {
             HStack(spacing: 6) {
@@ -520,13 +516,11 @@ private struct ResearchStockQuotes: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if showsExtendedHours {
-                    priceCell(regular, symbol: quote.symbol, label: quote.tradingSession == .regular ? "常规盘" : "常规收盘",
-                              highlighted: active && quote.tradingSession == .regular)
-                    priceCell(post, symbol: quote.symbol, label: "盘后",
-                              highlighted: active && quote.tradingSession == .postmarket)
-                    priceCell(extended, symbol: quote.symbol,
-                              label: showsPremarket ? "盘前" : showsIndicative ? "夜盘参考" : "夜盘",
-                              highlighted: active && extended != nil)
+                    let sessions = StockSessionQuotes(quote: quote, chart: store.chart(symbol: quote.symbol, range: .day),
+                                                      extendedSession: extendedSession, isCurrent: active)
+                    ForEach(sessions.columns) { column in
+                        StockSessionPriceCell(column: column, symbol: quote.symbol, muted: ResearchStyle.muted)
+                    }
                 } else {
                     Text(quote.marketDisplayPrice.formatted(.number.precision(.fractionLength(
                         marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)
@@ -552,75 +546,6 @@ private struct ResearchStockQuotes: View {
         .accessibilityIdentifier("research-stock-\(quote.symbol)")
     }
 
-    private func priceCell(
-        _ quote: ResearchStockPrice?, symbol: String, label: String, highlighted: Bool
-    ) -> some View {
-        let time = quote?.timestamp.map(marketShortTimestamp)
-        let price = quote.map {
-            $0.price.formatted(.number.precision(.fractionLength(marketPriceDigits($0.price, symbol: symbol))))
-        } ?? "—"
-        let percent = quote.map {
-            String(format: "%@%.2f%%", $0.percent >= 0 ? "+" : "−", abs($0.percent))
-        }
-        let tint = quote.map { $0.percent >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss } ?? ResearchStyle.muted
-        return VStack(alignment: .trailing, spacing: 2) {
-            Text(price)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(quote == nil ? ResearchStyle.muted : .primary)
-            if let percent {
-                Text(percent).font(.caption2.weight(.medium)).foregroundStyle(tint)
-            }
-            if let time {
-                Text(time).font(.system(size: 9)).foregroundStyle(ResearchStyle.muted)
-            }
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.72)
-        .padding(.vertical, 4)
-        .padding(.horizontal, 4)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .background(alignment: .trailing) {
-            if highlighted {
-                RoundedRectangle(cornerRadius: 6).fill(ResearchStyle.blue.opacity(0.08))
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel([label, quote == nil ? "暂无行情" : price, percent, time].compactMap { $0 }.joined(separator: "，"))
-    }
-
-    private func activePrice(_ quote: MarketQuote, session: MarketTradingSession) -> ResearchStockPrice? {
-        guard quote.tradingSession == session, let price = quote.sessionPrice, price.isFinite, price > 0 else { return nil }
-        return ResearchStockPrice(price: price, percent: quote.marketDisplayPercentValue, timestamp: quote.marketAsOfTimestamp)
-    }
-
-    private func afterHoursPrice(_ quote: MarketQuote, regular: ResearchStockPrice) -> ResearchStockPrice? {
-        if quote.tradingSession == .postmarket { return activePrice(quote, session: .postmarket) }
-        guard showsExtendedHours, quote.tradingSession != .regular,
-              let point = store.chart(symbol: quote.symbol, range: .day)?.researchAfterHoursEnd(for: quote),
-              regular.price > 0 else { return nil }
-        return ResearchStockPrice(price: point.close, percent: (point.close / regular.price - 1) * 100,
-                                  timestamp: point.timestamp)
-    }
-}
-
-private struct ResearchStockPrice {
-    let price: Double
-    let percent: Double
-    var timestamp: Int64?
-}
-
-private extension MarketChart {
-    func researchAfterHoursEnd(for quote: MarketQuote) -> MarketChartPoint? {
-        guard market == "US", interval == "1m", self.quote.price == quote.price,
-              let window = analysis.sessionWindows.last(where: { $0.session == "post" && $0.tradingDate == tradingDate }),
-              let regular = analysis.sessionWindows.last(where: { $0.session == "regular" && $0.tradingDate == tradingDate }),
-              candles.contains(where: { $0.session == "regular" && regular.contains($0.timestamp, convention: analysis.candleTimestamp) })
-        else { return nil }
-        return candles.last {
-            $0.session == "post" && $0.state == "confirmed" && ($0.volume ?? 0) > 0 &&
-                $0.close.isFinite && $0.close > 0 && window.contains($0.timestamp, convention: analysis.candleTimestamp)
-        }
-    }
 }
 
 private struct ResearchSparkline: View {
