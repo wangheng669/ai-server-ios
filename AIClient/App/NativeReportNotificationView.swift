@@ -54,6 +54,14 @@ struct NativeReportNotificationView: View {
     private var style: ReportStyle { ReportStyle(kind: report.kind) }
 
     var body: some View {
+        if report.kind == "market-sentiment" {
+            MarketSentimentNotificationView(report: report, links: links)
+        } else {
+            standardReport
+        }
+    }
+
+    private var standardReport: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
@@ -234,7 +242,6 @@ private struct ReportStyle {
         switch kind {
         case "memory-price": (label, symbol, color) = ("存储价格", "memorychip", HoldingsPalette.blue)
         case "ashare": (label, symbol, color) = ("A 股市场", "chart.line.uptrend.xyaxis", HoldingsPalette.blue)
-        case "market-sentiment": (label, symbol, color) = ("市场情绪", "gauge.with.dots.needle.50percent", HoldingsPalette.orange)
         case "arxiv": (label, symbol, color) = ("论文日报", "doc.text.magnifyingglass", HoldingsPalette.purple)
         case "reading": (label, symbol, color) = ("每日读书", "book", HoldingsPalette.teal)
         case "ai-usage", "translation-cost": (label, symbol, color) = ("模型费用", "chart.bar.doc.horizontal", HoldingsPalette.orange)
