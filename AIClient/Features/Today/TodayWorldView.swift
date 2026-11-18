@@ -176,7 +176,7 @@ struct TodayWorldView: View {
                 TodayHeaderView(
                     waitingForRechargeReturn: $waitingForRechargeReturn,
                     balance: store.balance,
-                    isLoading: store.isLoading
+                    isLoading: store.isLoading, reportDate: store.report?.date
                 )
                 Group {
                     if let brief = store.brief {
@@ -233,16 +233,89 @@ struct TodayWorldView: View {
 
     private var emptyReportView: some View {
         ScrollView {
-            if let reason = store.report?.report.final?.error, !reason.isEmpty {
-                ContentUnavailableView("暂无可读日报", systemImage: "doc.text", description: Text(reason))
-            } else if let error = store.errorMessage {
-                ContentUnavailableView("日报加载失败", systemImage: "wifi.exclamationmark", description: Text(error))
-            } else if store.isLoading {
-                ProgressView("正在加载日报").padding(.top, 28)
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("本期日报", systemImage: "newspaper")
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.82))
+                    Text(reportStatusTitle)
+                        .font(.system(.title, design: .serif, weight: .bold))
+                    if let reason = reportStatusReason, !reason.isEmpty {
+                        Text(reason).font(.subheadline).lineSpacing(3)
+                    }
+                    if let report = store.report {
+                        Divider().overlay(.white.opacity(0.3))
+                        HStack(spacing: 24) {
+                            reportMetric(report.postCount, "条动态")
+                            reportMetric(report.sourceCount, "个信息源")
+                        }
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                .background(TodayBriefStyle.ink, in: RoundedRectangle(cornerRadius: 18))
+
+                if let sections = store.report?.report.sections, !sections.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("栏目收录").font(.title3.bold()).accessibilityAddTraits(.isHeader)
+                            .padding(.bottom, 6)
+                        ForEach(sections, id: \.section_key) { section in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(section.section_name).font(.headline)
+                                    Spacer()
+                                    Text("\(section.postCount) 条").font(.subheadline.monospacedDigit())
+                                        .foregroundStyle(TodayBriefStyle.accent)
+                                }
+                                Text(section.groups.map(\.group_name).joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 12)
+                            Divider()
+                        }
+                    }
+                }
+                Button {
+                    Task { await store.load(force: true) }
+                } label: {
+                    Label(store.isLoading ? "刷新中…" : "刷新日报", systemImage: "arrow.clockwise")
+                        .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                }
+                .disabled(store.isLoading)
+                .tint(TodayBriefStyle.accent)
             }
+            .padding(.horizontal, 20).padding(.top, 6)
+            .padding(.bottom, bottomChromeHeight + 12)
         }
         .refreshable { await store.load(force: true) }
         .accessibilityIdentifier("today-status-scroll")
+    }
+
+    private func reportMetric(_ count: Int, _ unit: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("\(count)").font(.title2.monospacedDigit().weight(.semibold))
+            Text(unit).font(.caption)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var reportStatusTitle: String {
+        if store.errorMessage != nil { return "日报加载失败" }
+        guard let report = store.report else { return store.isLoading ? "正在加载日报" : "暂无日报" }
+        if report.admission?.state == "paused" { return "生成已暂停" }
+        if report.report.final?.status == "failed" { return "日报生成失败" }
+        if report.isGenerating { return "正在生成日报" }
+        return "本期日报尚未发布"
+    }
+
+    private var reportStatusReason: String? {
+        if let error = store.errorMessage { return error }
+        if let admission = store.report?.admission, admission.state == "paused" {
+            if admission.reason_codes.contains("edition_cost_limit") {
+                return "预计生成费用超出本期预算。"
+            }
+            return admission.reason
+        }
+        return store.report?.report.final?.error
     }
 
     @ViewBuilder

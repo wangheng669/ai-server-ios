@@ -1128,6 +1128,12 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     let progress: Int
     let sourceCount: Int
     let postCount: Int
+    struct Admission: Decodable, Equatable {
+        let state: String
+        let reason_codes: [String]
+        let reason: String?
+    }
+    let admission: Admission?
     let report: TodayWorldYesterdayReportContent
     let model: String?
     let totalTokens: Int
@@ -1135,7 +1141,7 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     let completedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case date, timezone, status, stage, progress, report, model
+        case date, timezone, status, stage, progress, report, model, admission
         case sourceCount = "source_count"
         case postCount = "post_count"
         case totalTokens = "total_tokens"
@@ -1150,6 +1156,26 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
 }
 
 struct TodayWorldYesterdayReportContent: Decodable, Equatable {
+    struct SourceSection: Decodable, Equatable {
+        struct Group: Decodable, Equatable {
+            struct System: Decodable, Equatable {
+                struct Account: Decodable, Equatable {
+                    let post_ids: [Int]
+                }
+                let accounts: [Account]
+            }
+            let group_name: String
+            let systems: [System]
+        }
+        let section_key: String
+        let section_name: String
+        let groups: [Group]
+
+        var postCount: Int {
+            Set(groups.flatMap(\.systems).flatMap(\.accounts).flatMap(\.post_ids)).count
+        }
+    }
+    let sections: [SourceSection]?
     let final: TodayWorldFinalReport?
 }
 
