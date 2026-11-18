@@ -601,6 +601,10 @@ private struct EditorialRootView: View {
                 deploymentStore.stop()
             }
         }
+        .task(id: scenePhase == .active, priority: .utility) {
+            guard scenePhase == .active, selectedTab != .world else { return }
+            await pageStores.today.loadReport()
+        }
         .task(id: NotificationNavigationTaskID(
             requestID: personPushNavigation.request?.id,
             isActive: scenePhase == .active,

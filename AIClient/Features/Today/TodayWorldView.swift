@@ -25,6 +25,7 @@ final class TodayWorldStore: ObservableObject {
     @Published private(set) var brief: TodayBriefProjection?
     @Published private(set) var isShowingCachedEdition = false
     private var isLoadingBalance = false
+    private var balanceCheckedAt: Date?
     private var hasRestoredEdition = false
     private let usesPublishedSnapshots: Bool
     private let fetchReport: () async throws -> TodayWorldYesterdayReportPayload
@@ -59,14 +60,14 @@ final class TodayWorldStore: ObservableObject {
     }
 
     func load(force: Bool = false) async {
-        let isStale = checkedAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
-        guard !isLoading, force || report == nil || isStale else { return }
         async let balanceRequest: Void = loadBalance(force: force)
-        await loadEdition()
+        await loadReport(force: force)
         await balanceRequest
     }
 
-    private func loadEdition() async {
+    func loadReport(force: Bool = false) async {
+        let isStale = checkedAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
+        guard !Task.isCancelled, !isLoading, force || report == nil || isStale else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -121,18 +122,21 @@ final class TodayWorldStore: ObservableObject {
     }
 
     private func loadBalance(force: Bool) async {
-        guard !isLoadingBalance else { return }
+        let isStale = balanceCheckedAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
+        guard !Task.isCancelled, !isLoadingBalance, force || isStale else { return }
         isLoadingBalance = true
         defer { isLoadingBalance = false }
         do {
             let loadedBalance = try await fetchBalance(force)
             guard !Task.isCancelled else { return }
             balance = loadedBalance
+            balanceCheckedAt = Date()
         } catch is CancellationError {
             return
         } catch {
             guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
             balance = nil
+            balanceCheckedAt = Date()
         }
     }
 
