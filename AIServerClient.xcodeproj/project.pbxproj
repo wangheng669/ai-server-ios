@@ -32,6 +32,7 @@
 		212E02E9454406B9CEE36D72 /* MarketStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E95DF23DE2CBD0DEEC463B /* MarketStore.swift */; };
 		233ACCCB8DEA01858D633D98 /* CountryGDPDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */; };
 		260E90A29878D779265564DE /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */; };
+		837F96D7A10C4DD7BCCF8DE3 /* DisplaySnapshotCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198EDA66B17E4ED0B50960DD /* DisplaySnapshotCache.swift */; };
 		FB6100000000000000000001 /* ContentFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6100000000000000000002; };
 		A4B802000000000000000001 /* BoundedConcurrency.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B802000000000000000002 /* BoundedConcurrency.swift */; };
 		FA5700000000000000000001 /* AppModalPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5700000000000000000002; };
@@ -138,6 +139,7 @@
 		47A27D7E08363D8510FC627D /* YouTubeVideoDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeVideoDetailView.swift; sourceTree = "<group>"; };
 		4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServerClientApp.swift; sourceTree = "<group>"; };
 		50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		198EDA66B17E4ED0B50960DD /* DisplaySnapshotCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaySnapshotCache.swift; sourceTree = "<group>"; };
 		FB6100000000000000000002 /* ContentFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentFeedback.swift; sourceTree = "<group>"; };
 		A4B802000000000000000002 /* BoundedConcurrency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedConcurrency.swift; sourceTree = "<group>"; };
 		FA5700000000000000000002 /* AppModalPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModalPresentation.swift; sourceTree = "<group>"; };
@@ -254,6 +256,7 @@
 			isa = PBXGroup;
 			children = (
 				50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */,
+				198EDA66B17E4ED0B50960DD /* DisplaySnapshotCache.swift */,
 				FB6100000000000000000002 /* ContentFeedback.swift */,
 				A4B802000000000000000002 /* BoundedConcurrency.swift */,
 				FA5700000000000000000002 /* AppModalPresentation.swift */,
@@ -538,6 +541,7 @@
 				A4B801000000000000000001 /* TodayWorldView.swift in Sources */,
 				AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
+				837F96D7A10C4DD7BCCF8DE3 /* DisplaySnapshotCache.swift in Sources */,
 				FB6100000000000000000001 /* ContentFeedback.swift in Sources */,
 				A4B802000000000000000001 /* BoundedConcurrency.swift in Sources */,
 				FA5700000000000000000001 /* AppModalPresentation.swift in Sources */,

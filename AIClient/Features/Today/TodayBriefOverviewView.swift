@@ -95,13 +95,13 @@ struct TodayBriefProjection {
     let overviewHeadline: String?
     private let highlightPostIDs: [Int]
 
-    init?(payload: TodayWorldYesterdayReportPayload) {
-        guard let report = payload.report.final, report.status == "succeeded" else { return nil }
+    init?(edition: TodayPublishedEdition) {
+        let report = edition.report
         let systems = report.systems
         guard !systems.isEmpty else { return nil }
-        date = payload.date
-        postCount = payload.postCount
-        sourceCount = payload.sourceCount
+        date = edition.date
+        postCount = edition.postCount
+        sourceCount = edition.sourceCount
         let highlights = report.overview.highlights
         self.highlights = highlights
         watchItems = report.overview.watchItems

@@ -3385,6 +3385,9 @@ private struct MarketIndexDetailView: View {
     private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
     private var chartSymbol: String { quote?.symbol ?? symbol }
     private var selectedRangeChart: MarketChart? {
+        if selectedPeriod == .intraday {
+            return store.chartSnapshot(symbol: chartSymbol, range: .day)?.artifacts.intradayDisplay?.chart
+        }
         guard displayedChart?.period == selectedPeriod,
               displayedChart?.symbol == chartSymbol else { return nil }
         return displayedChart?.artifacts.chart
@@ -3471,6 +3474,8 @@ private struct MarketIndexDetailView: View {
                 .appPresentationCornerRadius(28)
         }
         .task(id: historicalSymbol) {
+            await store.loadChart(symbol: chartSymbol, range: selectedRange)
+            guard !Task.isCancelled else { return }
             async let yearChart: Void = store.loadChart(symbol: chartSymbol, range: .year)
             if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol) }
             await yearChart
@@ -3596,7 +3601,7 @@ private struct MarketIndexDetailView: View {
 
     private func stockSessionHeader(_ quote: MarketQuote) -> some View {
         let extended: MarketTradingSession = quote.tradingSession == .premarket ? .premarket : .overnight
-        let sessions = StockSessionQuotes(quote: quote, chart: store.chart(symbol: chartSymbol, range: .day),
+        let sessions = StockSessionQuotes(quote: quote, chart: store.dayChartForSessionQuotes(symbol: chartSymbol),
                                           extendedSession: extended,
                                           isCurrent: quote.stale != true && !store.isShowingCachedSnapshot)
         return VStack(alignment: .leading, spacing: 5) {
@@ -4421,6 +4426,9 @@ private struct MarketDetailChart: View {
     private var selectedRange: MarketRange { selectedPeriod.sourceRange }
     private var sourceSnapshot: MarketChartSnapshot? { store.chartSnapshot(symbol: symbol, range: selectedRange) }
     private var currentRender: MarketDetailChartRender? {
+        if selectedPeriod == .intraday, let artifacts = sourceSnapshot?.artifacts.intradayDisplay {
+            return MarketDetailChartRender(symbol: symbol, period: .intraday, artifacts: artifacts)
+        }
         guard renderedChart?.period == selectedPeriod,
               renderedChart?.symbol == symbol else { return nil }
         return renderedChart
@@ -4488,6 +4496,21 @@ private struct MarketDetailChart: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if sourceSnapshot?.isRestored == true, currentRender != nil {
+                if store.chartError(symbol: symbol, range: selectedRange) != nil {
+                    Button {
+                        Task { await reloadChart() }
+                    } label: {
+                        Label("上次图表 · 更新失败，重试", systemImage: "arrow.clockwise")
+                    }
+                    .font(.caption)
+                } else {
+                    Text("上次图表 · 正在更新")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("market-chart-cached-snapshot")
+                }
+            }
             if let coverageMessage {
                 Text(coverageMessage)
                     .font(.caption)
@@ -4524,6 +4547,11 @@ private struct MarketDetailChart: View {
             guard let source else {
                 renderedChart = nil
                 unsupportedPeriod = nil
+                return
+            }
+            if renderKey.period == .intraday {
+                renderedChart = nil
+                unsupportedPeriod = source.artifacts.intradayDisplay == nil ? .intraday : nil
                 return
             }
             let artifacts = try? await marketChartDisplayArtifacts(for: source.chart, period: renderKey.period)

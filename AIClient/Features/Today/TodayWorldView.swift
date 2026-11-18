@@ -1,5 +1,20 @@
 import SwiftUI
 
+struct TodayPublishedEdition: Codable, Sendable {
+    let date: String
+    let postCount: Int
+    let sourceCount: Int
+    let report: TodayWorldFinalReport
+
+    init?(payload: TodayWorldYesterdayReportPayload) {
+        guard let report = payload.report.final, report.status == "succeeded", !report.systems.isEmpty else { return nil }
+        date = payload.date
+        postCount = payload.postCount
+        sourceCount = payload.sourceCount
+        self.report = report
+    }
+}
+
 @MainActor
 final class TodayWorldStore: ObservableObject {
     @Published private(set) var report: TodayWorldYesterdayReportPayload?
@@ -7,15 +22,17 @@ final class TodayWorldStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var checkedAt: Date?
-    private(set) var brief: TodayBriefProjection?
+    @Published private(set) var brief: TodayBriefProjection?
+    @Published private(set) var isShowingCachedEdition = false
+    private var isLoadingBalance = false
+    private var hasRestoredEdition = false
+    private let usesPublishedSnapshots: Bool
     private let fetchReport: () async throws -> TodayWorldYesterdayReportPayload
     private let fetchBalance: (Bool) async throws -> AliyunAccountBalance
 
     init(fetchBalance: @escaping (Bool) async throws -> AliyunAccountBalance = { refresh in
         try await APIClient(baseURL: ServerConfiguration.currentURL).fetchAliyunBalance(refresh: refresh)
-    }, fetchReport: @escaping () async throws -> TodayWorldYesterdayReportPayload = {
-        try await APIClient(baseURL: ServerConfiguration.currentURL).fetchTodayWorldYesterdayReport()
-    }) {
+    }, fetchReport: (() async throws -> TodayWorldYesterdayReportPayload)? = nil) {
         #if DEBUG
         if let fixture = ProcessInfo.processInfo.environment["TODAY_BALANCE_TEST_RESPONSE"] {
             self.fetchBalance = { _ in try JSONDecoder().decode(AliyunAccountBalance.self, from: Data(fixture.utf8)) }
@@ -23,33 +40,66 @@ final class TodayWorldStore: ObservableObject {
             self.fetchBalance = fetchBalance
         }
         if let fixture = ProcessInfo.processInfo.environment["TODAY_REPORT_TEST_RESPONSE"] {
+            usesPublishedSnapshots = false
             self.fetchReport = { try JSONDecoder().decode(TodayWorldYesterdayReportPayload.self, from: Data(fixture.utf8)) }
             return
         }
         if ProcessInfo.processInfo.environment["TODAY_REPORT_TEST_OFFLINE"] == "1" {
+            usesPublishedSnapshots = false
             self.fetchReport = { throw URLError(.notConnectedToInternet) }
             return
         }
         #else
         self.fetchBalance = fetchBalance
         #endif
-        self.fetchReport = fetchReport
+        usesPublishedSnapshots = fetchReport == nil
+        self.fetchReport = fetchReport ?? {
+            try await APIClient(baseURL: ServerConfiguration.currentURL).fetchTodayWorldYesterdayReport()
+        }
     }
 
     func load(force: Bool = false) async {
         let isStale = checkedAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
         guard !isLoading, force || report == nil || isStale else { return }
-        isLoading = true
-        defer { isLoading = false }
         async let balanceRequest: Void = loadBalance(force: force)
+        await loadEdition()
+        await balanceRequest
+    }
+
+    private func loadEdition() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        let snapshotKey = ServerConfiguration.currentURL.absoluteString
+        async let request = fetchReport()
+
+        if usesPublishedSnapshots, !hasRestoredEdition {
+            let saved = await DisplaySnapshotCache.editions.load(TodayPublishedEdition.self, key: snapshotKey, maximumAge: 48 * 60 * 60)
+            guard !Task.isCancelled else { return }
+            hasRestoredEdition = true
+            if let saved, saved.value.date == Self.yesterday, let cachedBrief = TodayBriefProjection(edition: saved.value) {
+                isShowingCachedEdition = true
+                brief = cachedBrief
+            }
+        }
 
         do {
-            let loadedReport = try await fetchReport()
+            let loadedReport = try await request
             guard !Task.isCancelled else { return }
-            errorMessage = nil
-            brief = TodayBriefProjection(payload: loadedReport)
-            report = loadedReport
+            let edition = TodayPublishedEdition(payload: loadedReport)
+            if loadedReport != report || isShowingCachedEdition {
+                brief = edition.flatMap { TodayBriefProjection(edition: $0) }
+                report = loadedReport
+            }
+            isShowingCachedEdition = false
             checkedAt = Date()
+            if usesPublishedSnapshots {
+                if let edition {
+                    await DisplaySnapshotCache.editions.save(edition, key: snapshotKey, at: Date())
+                } else {
+                    await DisplaySnapshotCache.editions.remove(key: snapshotKey)
+                }
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -57,10 +107,23 @@ final class TodayWorldStore: ObservableObject {
             errorMessage = NetworkErrorPresentation.message(for: error)
             checkedAt = Date()
         }
-        await balanceRequest
+    }
+
+    private static var yesterday: String {
+        let timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let date = calendar.date(byAdding: .day, value: -1, to: Date())!
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = timeZone
+        formatter.formatOptions = [.withFullDate]
+        return formatter.string(from: date)
     }
 
     private func loadBalance(force: Bool) async {
+        guard !isLoadingBalance else { return }
+        isLoadingBalance = true
+        defer { isLoadingBalance = false }
         do {
             let loadedBalance = try await fetchBalance(force)
             guard !Task.isCancelled else { return }
@@ -176,10 +239,25 @@ struct TodayWorldView: View {
                 TodayHeaderView(
                     waitingForRechargeReturn: $waitingForRechargeReturn,
                     balance: store.balance,
-                    isLoading: store.isLoading, reportDate: store.report?.date
+                    isLoading: store.isLoading, reportDate: store.brief?.date ?? store.report?.date
                 )
                 Group {
                     if let brief = store.brief {
+                        if let error = store.errorMessage {
+                            Button {
+                                Task { await store.load(force: true) }
+                            } label: {
+                                Label("已显示上次日报 · \(error) · 重试", systemImage: "arrow.clockwise")
+                            }
+                            .font(.caption2)
+                            .padding(.bottom, 5)
+                        } else if store.isShowingCachedEdition {
+                            Text(store.isLoading ? "已显示上次日报 · 更新中" : "已显示上次日报")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(.bottom, 5)
+                                .accessibilityIdentifier("today-cached-edition")
+                        }
                         reportView(brief)
                     } else {
                         emptyReportView
@@ -198,8 +276,8 @@ struct TodayWorldView: View {
             guard rootTabIsActive else { return }
             await loadReport()
         }
-        .task(id: preparation) {
-            await TodayChinesePreparation.warm(ids: preparation.ids, baseURL: preparation.baseURL)
+        .task(id: preparation, priority: .utility) {
+            await TodayChinesePreparation.preloadPosts(ids: preparation.ids, baseURL: preparation.baseURL)
         }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
@@ -214,7 +292,7 @@ struct TodayWorldView: View {
     }
 
     private var preparationIDs: [Int] {
-        guard rootTabIsActive, scenePhase == .active else { return [] }
+        guard rootTabIsActive, scenePhase == .active, !store.isShowingCachedEdition, store.errorMessage == nil else { return [] }
         return store.brief?.preparationIDs(sectionKey: selectedSectionKey) ?? []
     }
 
@@ -587,24 +665,14 @@ enum TodayChinesePreparation {
         ].compactMap { $0 })
     }
 
-    static func warm(ids: [Int], baseURL: URL) async {
+    static func preloadPosts(ids: [Int], baseURL: URL) async {
         guard !ids.isEmpty, !Task.isCancelled else { return }
         let cached = await TodayWorldPostMemoryCache.shared.cachedPosts(ids: ids, baseURL: baseURL)
-        var posts = Dictionary(uniqueKeysWithValues: cached.map { ($0.id, $0) })
-        let missing = ids.filter { posts[$0] == nil }
-        if !missing.isEmpty, let fetched = try? await fetchTodayWorldPostBatch(ids: missing, baseURL: baseURL) {
-            await TodayWorldPostMemoryCache.shared.store(posts: fetched, baseURL: baseURL)
-            for post in fetched { posts[post.id] = post }
-        }
-        for id in ids {
-            guard !Task.isCancelled else { return }
-            guard let post = posts[id] else { continue }
-            let candidates = texts(post)
-            for text in candidates where !isChinese(text) {
-                guard !Task.isCancelled else { return }
-                _ = try? await TodayChineseTextCache.shared.text(text, tweetID: text == candidates.first ? post.xTweetID : nil, baseURL: baseURL)
-            }
-        }
+        let cachedIDs = Set(cached.map(\.id))
+        let missing = ids.filter { !cachedIDs.contains($0) }
+        guard !missing.isEmpty, !Task.isCancelled,
+              let fetched = try? await fetchTodayWorldPostBatch(ids: missing, baseURL: baseURL) else { return }
+        await TodayWorldPostMemoryCache.shared.store(posts: fetched, baseURL: baseURL)
     }
 }
 

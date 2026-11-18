@@ -117,3 +117,10 @@ extension MarketChart {
         }
     }
 }
+
+extension MarketStore {
+    func dayChartForSessionQuotes(symbol: String) -> MarketChart? {
+        guard let snapshot = chartSnapshot(symbol: symbol, range: .day), !snapshot.isRestored else { return nil }
+        return snapshot.chart
+    }
+}

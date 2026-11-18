@@ -128,7 +128,7 @@ final class MarketStore {
     func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
         guard !Task.isCancelled else { return }
         let key = ChartKey(symbol: symbol, range: range)
-        if !force, let snapshot = chartSnapshots[key],
+        if !force, let snapshot = chartSnapshots[key], !snapshot.isRestored,
            marketChartCanUseCache(snapshot.chart, loadedAt: snapshot.loadedAt) { return }
         if let task = chartLoadTasks[key] {
             await task.value
@@ -148,17 +148,34 @@ final class MarketStore {
     private func fetchChart(for key: ChartKey, force: Bool) async {
         chartErrors[key] = nil
         defer { chartLoadTasks[key] = nil }
+        let cacheKey = "\(service.baseURL.absoluteString)|\(key.symbol)|\(key.range.apiRange)|\(key.range.apiInterval)"
+        async let response = service.chart(symbol: key.symbol, range: key.range, refresh: force)
         do {
-            let value = try await service.chart(symbol: key.symbol, range: key.range, refresh: force)
+            if chartSnapshots[key] == nil,
+               let entry = await DisplaySnapshotCache.charts.load(MarketChart.self, key: cacheKey, maximumAge: 7 * 24 * 60 * 60),
+               entry.value.symbol == key.symbol, entry.value.interval == key.range.apiInterval {
+                let artifacts = try await marketChartArtifacts(for: entry.value)
+                try Task.checkCancellation()
+                chartSnapshots[key] = MarketChartSnapshot(chart: entry.value, artifacts: artifacts,
+                                                          loadedAt: entry.savedAt, isRestored: true)
+            }
+
+            let value = try await response
             let artifacts = try await marketChartArtifacts(for: value)
             guard !Task.isCancelled else { return }
-            chartSnapshots[key] = MarketChartSnapshot(chart: value, artifacts: artifacts, loadedAt: Date())
+            let loadedAt = Date()
+            chartSnapshots[key] = MarketChartSnapshot(chart: value, artifacts: artifacts, loadedAt: loadedAt, isRestored: false)
             if marketChartNeedsRetry(value) {
                 scheduleChartRetry(symbol: key.symbol, range: key.range, key: key)
             } else {
                 chartRetryTasks[key]?.cancel()
                 chartRetryTasks[key] = nil
                 chartRetryAttempts[key] = nil
+            }
+            if artifacts.presentation.points.isEmpty {
+                await DisplaySnapshotCache.charts.remove(key: cacheKey)
+            } else {
+                await DisplaySnapshotCache.charts.save(value, key: cacheKey, at: loadedAt, minimumInterval: 90)
             }
         } catch is CancellationError {
             return
@@ -592,6 +609,7 @@ struct MarketChartSnapshot {
     let chart: MarketChart
     let artifacts: MarketChartArtifacts
     let loadedAt: Date
+    let isRestored: Bool
 }
 
 private actor MarketSnapshotCache {

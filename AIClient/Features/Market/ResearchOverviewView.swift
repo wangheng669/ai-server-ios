@@ -168,7 +168,7 @@ private struct ResearchOverviewView: View {
             while !Task.isCancelled {
                 let missing = symbols.filter { symbol in
                     guard let quote = store.quote(symbol: symbol) else { return false }
-                    return store.chart(symbol: symbol, range: .day)?.stockAfterHoursEnd(for: quote) == nil
+                    return store.dayChartForSessionQuotes(symbol: symbol)?.stockAfterHoursEnd(for: quote) == nil
                 }
                 guard !missing.isEmpty else { return }
                 await store.preloadListCharts(symbols: missing)
@@ -516,7 +516,7 @@ private struct ResearchStockQuotes: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if showsExtendedHours {
-                    let sessions = StockSessionQuotes(quote: quote, chart: store.chart(symbol: quote.symbol, range: .day),
+                    let sessions = StockSessionQuotes(quote: quote, chart: store.dayChartForSessionQuotes(symbol: quote.symbol),
                                                       extendedSession: extendedSession, isCurrent: active)
                     ForEach(sessions.columns) { column in
                         StockSessionPriceCell(column: column, symbol: quote.symbol, muted: ResearchStyle.muted)

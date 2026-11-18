@@ -1179,7 +1179,7 @@ struct TodayWorldYesterdayReportContent: Decodable, Equatable {
     let final: TodayWorldFinalReport?
 }
 
-struct TodayWorldFinalReport: Decodable, Equatable {
+struct TodayWorldFinalReport: Codable, Sendable, Equatable {
     let status: String
     let stage: String?
     let error: String?
@@ -1241,7 +1241,7 @@ struct TodayWorldFinalReport: Decodable, Equatable {
     }
 }
 
-struct TodayWorldFinalReportSection: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportSection: Codable, Sendable, Equatable, Identifiable {
     let sectionKey: String
     let sectionName: String
     let groups: [TodayWorldFinalReportGroup]
@@ -1258,7 +1258,7 @@ struct TodayWorldFinalReportSection: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldFinalReportGroup: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportGroup: Codable, Sendable, Equatable, Identifiable {
     let groupKey: String
     let groupName: String
     let systems: [TodayWorldFinalReportSystem]
@@ -1271,7 +1271,7 @@ struct TodayWorldFinalReportGroup: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldFinalReportSystem: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportSystem: Codable, Sendable, Equatable, Identifiable {
     let systemKey: String
     let systemName: String
     let headline: String
@@ -1308,7 +1308,7 @@ struct TodayWorldFinalReportSystem: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldFinalReportOverview: Decodable, Equatable {
+struct TodayWorldFinalReportOverview: Codable, Sendable, Equatable {
     let headline: String
     let highlights: [TodayWorldFinalReportOverviewItem]
     let watchItems: [TodayWorldFinalReportOverviewItem]
@@ -1321,7 +1321,7 @@ struct TodayWorldFinalReportOverview: Decodable, Equatable {
     }
 }
 
-struct TodayWorldFinalReportOverviewItem: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportOverviewItem: Codable, Sendable, Equatable, Identifiable {
     let title: String?
     let text: String
     let context: String?
@@ -1344,7 +1344,7 @@ struct TodayWorldFinalReportOverviewItem: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldFinalReportFact: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportFact: Codable, Sendable, Equatable, Identifiable {
     let category: String
     let text: String
     let sourceKeys: [String]

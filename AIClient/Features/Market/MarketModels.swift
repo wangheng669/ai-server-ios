@@ -1046,7 +1046,7 @@ struct MarketChartResponse: Decodable {
     let data: MarketChart
 }
 
-struct MarketChart: Decodable, Sendable {
+struct MarketChart: Codable, Sendable {
     let symbol: String
     let market: String
     let tradingDate: String
@@ -1080,13 +1080,13 @@ struct MarketChart: Decodable, Sendable {
     }
 }
 
-enum MarketChartTimestampConvention: String, Decodable, Sendable {
+enum MarketChartTimestampConvention: String, Codable, Sendable {
     case intervalEnd = "interval-end"
     case intervalStart = "interval-start"
     case tradingDate = "trading-date"
 }
 
-struct MarketChartSessionWindow: Decodable, Equatable, Sendable {
+struct MarketChartSessionWindow: Codable, Equatable, Sendable {
     let startTimestamp: Int64
     let endTimestamp: Int64
     let tradingDate: String
@@ -1101,13 +1101,13 @@ struct MarketChartSessionWindow: Decodable, Equatable, Sendable {
     }
 }
 
-struct MarketChartAnalysis: Decodable, Sendable {
+struct MarketChartAnalysis: Codable, Sendable {
     let aggregation: String
     let candleTimestamp: MarketChartTimestampConvention
     let sessionWindows: [MarketChartSessionWindow]
 }
 
-struct MarketChartPeriodReturn: Decodable, Sendable {
+struct MarketChartPeriodReturn: Codable, Sendable {
     let range: String
     let basis: String
     let startPrice: Double?
@@ -1118,7 +1118,7 @@ struct MarketChartPeriodReturn: Decodable, Sendable {
     let endTimestamp: Int64?
 }
 
-struct MarketChartPeriodVolatility: Decodable, Sendable {
+struct MarketChartPeriodVolatility: Codable, Sendable {
     let range: String
     let basis: String
     let percent: Double?
@@ -1126,11 +1126,11 @@ struct MarketChartPeriodVolatility: Decodable, Sendable {
     let annualizationPeriods: Int
 }
 
-enum MarketChartQualityStatus: String, Decodable, Sendable {
+enum MarketChartQualityStatus: String, Codable, Sendable {
     case complete, repairing, partial, unavailable
 }
 
-struct MarketChartQuality: Decodable, Sendable {
+struct MarketChartQuality: Codable, Sendable {
     let status: MarketChartQualityStatus
     let expected: Int
     let actual: Int
@@ -1139,12 +1139,12 @@ struct MarketChartQuality: Decodable, Sendable {
     let isFinal: Bool
 }
 
-struct MarketChartGap: Decodable, Equatable, Sendable {
+struct MarketChartGap: Codable, Equatable, Sendable {
     let startTimestamp: Int64
     let endTimestamp: Int64
 }
 
-struct MarketChartQuote: Decodable, Sendable {
+struct MarketChartQuote: Codable, Sendable {
     let price: Double?
     let previousClose: Double?
     let change: Double?
@@ -1154,7 +1154,7 @@ struct MarketChartQuote: Decodable, Sendable {
     let source: String
 }
 
-struct MarketChartPoint: Decodable, Identifiable, Equatable, Sendable {
+struct MarketChartPoint: Codable, Identifiable, Equatable, Sendable {
     var id: Int64 { timestamp }
     let timestamp: Int64
     let open: Double
@@ -1257,15 +1257,20 @@ struct MarketChartPresentation: Sendable {
 struct MarketChartArtifacts: Sendable {
     let presentation: MarketChartPresentation
     let listTrend: [Double]
+    let intradayDisplay: MarketChartDisplayArtifacts?
 }
 
 func marketChartArtifacts(for chart: MarketChart) async throws -> MarketChartArtifacts {
     try Task.checkCancellation()
-    let presentation = MarketChartPresentation(chart: chart)
+    let intradayDisplay = chart.interval == "1m"
+        ? try await marketChartDisplayArtifacts(for: chart, period: .intraday)
+        : nil
+    let presentation = intradayDisplay?.presentation ?? MarketChartPresentation(chart: chart)
     try Task.checkCancellation()
     return MarketChartArtifacts(
         presentation: presentation,
-        listTrend: marketSampledChartTrend(displayPoints: presentation.points)
+        listTrend: marketSampledChartTrend(displayPoints: presentation.points),
+        intradayDisplay: intradayDisplay
     )
 }
 
