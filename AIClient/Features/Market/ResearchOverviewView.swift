@@ -128,6 +128,13 @@ private struct ResearchOverviewView: View {
         Array((store.dashboard?.componentsByRegion[stockRegion.dashboardID] ?? []).prefix(4))
     }
 
+    private var afterHoursSymbols: [String] {
+        guard rootTabIsActive, scenePhase == .active, stockRegion == .unitedStates else { return [] }
+        return stocks.filter {
+            $0.tradingSession == .overnight || $0.tradingSession == .premarket || $0.tradingSession == .closed
+        }.map(\.symbol)
+    }
+
     var body: some View {
         ScrollView {
             if store.dashboard == nil && store.errorMessage == nil {
@@ -155,6 +162,20 @@ private struct ResearchOverviewView: View {
         }
         .accessibilityIdentifier("research-overview")
         .scrollIndicators(.hidden)
+        .task(id: afterHoursSymbols) {
+            let symbols = afterHoursSymbols
+            guard !symbols.isEmpty else { return }
+            while !Task.isCancelled {
+                let missing = symbols.filter { symbol in
+                    guard let quote = store.quote(symbol: symbol) else { return false }
+                    return store.chart(symbol: symbol, range: .day)?.researchAfterHoursEnd(for: quote) == nil
+                }
+                guard !missing.isEmpty else { return }
+                await store.preloadListCharts(symbols: missing)
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
+            }
+        }
         .task(id: "\(rootTabIsActive):\(scenePhase):\(store.dashboard != nil)") {
             guard rootTabIsActive, scenePhase == .active, store.dashboard != nil else { return }
             while !Task.isCancelled {
@@ -352,32 +373,12 @@ private struct ResearchOverviewView: View {
                     .font(.subheadline).foregroundStyle(ResearchStyle.muted)
                     .frame(maxWidth: .infinity, minHeight: 60)
             } else {
-                LazyVStack(spacing: 0) {
-                    ForEach(stocks, id: \.symbol) { quote in
-                        Button { onOpenMarketDetail(quote.symbol) } label: {
-                            HStack(spacing: 8) {
-                                Text(quote.presentationName)
-                                    .fontWeight(.medium).foregroundStyle(.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Text(price(quote)).foregroundStyle(.primary)
-                                    .monospacedDigit().frame(width: 92, alignment: .trailing)
-                                Text(quote.marketDisplayFormattedPercent)
-                                    .foregroundStyle(ResearchStyle.tint(quote))
-                                    .monospacedDigit().frame(width: 74, alignment: .trailing)
-                            }
-                            .font(.subheadline).lineLimit(1).minimumScaleFactor(0.75)
-                            .padding(.horizontal, 4)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(quote.presentationName)，\(quote.symbol)，\(price(quote))，\(quote.marketDisplayFormattedPercent)")
-                        .accessibilityIdentifier("research-stock-\(quote.symbol)")
-                        if quote.symbol != stocks.last?.symbol {
-                            ResearchStyle.divider.frame(height: 0.5)
-                        }
-                    }
-                }
+                ResearchStockQuotes(
+                    quotes: stocks,
+                    showsExtendedHours: stockRegion == .unitedStates,
+                    store: store,
+                    onOpen: onOpenMarketDetail
+                )
             }
         }
         .padding(8)
@@ -437,6 +438,188 @@ private struct ResearchOverviewView: View {
         display.locale = Locale(identifier: "zh_CN")
         display.dateFormat = "M月d日"
         return display.string(from: date) + "更新"
+    }
+}
+
+private struct ResearchStockQuotes: View {
+    let quotes: [MarketQuote]
+    let showsExtendedHours: Bool
+    let store: MarketStore
+    let onOpen: (String) -> Void
+
+    private var showsPremarket: Bool { quotes.contains { $0.tradingSession == .premarket } }
+    private var showsIndicative: Bool {
+        quotes.contains { $0.tradingSession == .overnight && $0.sessionDataSource == "AlpacaOvernightIndicative" }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text(showsExtendedHours ? "股票 · USD" : "股票")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if showsExtendedHours {
+                    columnTitle(quotes.contains { $0.tradingSession == .regular } ? "常规盘" : "常规收盘")
+                    columnTitle("盘后")
+                    columnTitle(showsPremarket ? "盘前" : showsIndicative ? "夜盘参考" : "夜盘")
+                } else {
+                    columnTitle("报价")
+                    columnTitle("涨跌幅")
+                }
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(ResearchStyle.muted)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 7)
+            .background(ResearchStyle.canvas, in: RoundedRectangle(cornerRadius: 6))
+
+            ForEach(quotes) { quote in
+                if quote.id != quotes.first?.id {
+                    ResearchStyle.divider.frame(height: 0.5)
+                }
+                stockRow(quote)
+            }
+
+            if showsExtendedHours {
+                Text(showsIndicative ? "盘后末价取已确认分钟线 · 夜盘参考取买卖中间价" : "盘后末价取已确认分钟线")
+                    .font(.caption2)
+                    .foregroundStyle(ResearchStyle.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 5)
+            }
+        }
+    }
+
+    private func columnTitle(_ title: String) -> some View {
+        Text(title)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func stockRow(_ quote: MarketQuote) -> some View {
+        let regular = ResearchStockPrice(price: quote.price, percent: quote.percentValue)
+        let post = afterHoursPrice(quote, regular: regular)
+        let extendedSession: MarketTradingSession = showsPremarket ? .premarket : .overnight
+        let extended = activePrice(quote, session: extendedSession)
+        let active = quote.stale != true && !store.isShowingCachedSnapshot
+        return Button { onOpen(quote.symbol) } label: {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(quote.presentationName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(active ? quote.displayCode : "\(quote.displayCode) · 待更新")
+                        .font(.caption2)
+                        .foregroundStyle(ResearchStyle.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if showsExtendedHours {
+                    priceCell(regular, symbol: quote.symbol, label: quote.tradingSession == .regular ? "常规盘" : "常规收盘",
+                              highlighted: active && quote.tradingSession == .regular)
+                    priceCell(post, symbol: quote.symbol, label: "盘后",
+                              highlighted: active && quote.tradingSession == .postmarket)
+                    priceCell(extended, symbol: quote.symbol,
+                              label: showsPremarket ? "盘前" : showsIndicative ? "夜盘参考" : "夜盘",
+                              highlighted: active && extended != nil)
+                } else {
+                    Text(quote.marketDisplayPrice.formatted(.number.precision(.fractionLength(
+                        marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)
+                    ))))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    Text(quote.marketDisplayFormattedPercent)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(ResearchStyle.tint(quote))
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .frame(minHeight: showsExtendedHours ? 54 : 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("research-stock-\(quote.symbol)")
+    }
+
+    private func priceCell(
+        _ quote: ResearchStockPrice?, symbol: String, label: String, highlighted: Bool
+    ) -> some View {
+        let time = quote?.timestamp.map(marketShortTimestamp)
+        let price = quote.map {
+            $0.price.formatted(.number.precision(.fractionLength(marketPriceDigits($0.price, symbol: symbol))))
+        } ?? "—"
+        let percent = quote.map {
+            String(format: "%@%.2f%%", $0.percent >= 0 ? "+" : "−", abs($0.percent))
+        }
+        let tint = quote.map { $0.percent >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss } ?? ResearchStyle.muted
+        return VStack(alignment: .trailing, spacing: 2) {
+            Text(price)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(quote == nil ? ResearchStyle.muted : .primary)
+            if let percent {
+                Text(percent).font(.caption2.weight(.medium)).foregroundStyle(tint)
+            }
+            if let time {
+                Text(time).font(.system(size: 9)).foregroundStyle(ResearchStyle.muted)
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .background(alignment: .trailing) {
+            if highlighted {
+                RoundedRectangle(cornerRadius: 6).fill(ResearchStyle.blue.opacity(0.08))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([label, quote == nil ? "暂无行情" : price, percent, time].compactMap { $0 }.joined(separator: "，"))
+    }
+
+    private func activePrice(_ quote: MarketQuote, session: MarketTradingSession) -> ResearchStockPrice? {
+        guard quote.tradingSession == session, let price = quote.sessionPrice, price.isFinite, price > 0 else { return nil }
+        return ResearchStockPrice(price: price, percent: quote.marketDisplayPercentValue, timestamp: quote.marketAsOfTimestamp)
+    }
+
+    private func afterHoursPrice(_ quote: MarketQuote, regular: ResearchStockPrice) -> ResearchStockPrice? {
+        if quote.tradingSession == .postmarket { return activePrice(quote, session: .postmarket) }
+        guard showsExtendedHours, quote.tradingSession != .regular,
+              let point = store.chart(symbol: quote.symbol, range: .day)?.researchAfterHoursEnd(for: quote),
+              regular.price > 0 else { return nil }
+        return ResearchStockPrice(price: point.close, percent: (point.close / regular.price - 1) * 100,
+                                  timestamp: point.timestamp)
+    }
+}
+
+private struct ResearchStockPrice {
+    let price: Double
+    let percent: Double
+    var timestamp: Int64?
+}
+
+private extension MarketChart {
+    func researchAfterHoursEnd(for quote: MarketQuote) -> MarketChartPoint? {
+        guard market == "US", interval == "1m", self.quote.price == quote.price,
+              let window = analysis.sessionWindows.last(where: { $0.session == "post" && $0.tradingDate == tradingDate }),
+              let regular = analysis.sessionWindows.last(where: { $0.session == "regular" && $0.tradingDate == tradingDate }),
+              candles.contains(where: { $0.session == "regular" && regular.contains($0.timestamp, convention: analysis.candleTimestamp) })
+        else { return nil }
+        return candles.last {
+            $0.session == "post" && $0.state == "confirmed" && ($0.volume ?? 0) > 0 &&
+                $0.close.isFinite && $0.close > 0 && window.contains($0.timestamp, convention: analysis.candleTimestamp)
+        }
     }
 }
 
