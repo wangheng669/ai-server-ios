@@ -51,21 +51,24 @@ final class TodayWorldStore: ObservableObject {
         if let fixture = ProcessInfo.processInfo.environment["TODAY_REPORT_TEST_RESPONSE"] {
             usesPublishedSnapshots = false
             self.fetchReport = { try JSONDecoder().decode(TodayWorldYesterdayReportPayload.self, from: Data(fixture.utf8)) }
-            return
-        }
-        if ProcessInfo.processInfo.environment["TODAY_REPORT_TEST_OFFLINE"] == "1" {
+        } else if ProcessInfo.processInfo.environment["TODAY_REPORT_TEST_OFFLINE"] == "1" {
             usesPublishedSnapshots = false
             self.fetchReport = { throw URLError(.notConnectedToInternet) }
-            return
+        } else {
+            usesPublishedSnapshots = fetchReport == nil
+            self.fetchReport = fetchReport ?? Self.fetchCurrentReport
         }
         #else
         usesCostSnapshots = fetchBalance == nil
         self.fetchBalance = networkBalance
-        #endif
         usesPublishedSnapshots = fetchReport == nil
-        self.fetchReport = fetchReport ?? {
-            try await APIClient(baseURL: ServerConfiguration.currentURL).fetchTodayWorldYesterdayReport()
-        }
+        self.fetchReport = fetchReport ?? Self.fetchCurrentReport
+        #endif
+        restoreBalanceIfNeeded()
+    }
+
+    private static func fetchCurrentReport() async throws -> TodayWorldYesterdayReportPayload {
+        try await APIClient(baseURL: ServerConfiguration.currentURL).fetchTodayWorldYesterdayReport()
     }
 
     func load(force: Bool = false) async {
@@ -130,16 +133,32 @@ final class TodayWorldStore: ObservableObject {
         return formatter.string(from: date)
     }
 
-    func loadBalance(force: Bool = false) async {
-        let key = ServerConfiguration.currentURL.absoluteString + "|" + Self.billingDate()
-        if balanceKey != key {
-            balanceRequest?.task.cancel()
-            balanceRequest = nil
-            balanceKey = key
+    @discardableResult
+    private func restoreBalanceIfNeeded() -> String {
+        let date = Self.billingDate()
+        let key = ServerConfiguration.currentURL.absoluteString + "|" + date
+        guard balanceKey != key else { return key }
+        balanceRequest?.task.cancel()
+        balanceRequest = nil
+        balanceKey = key
+        let saved = usesCostSnapshots
+            ? DisplaySnapshotCache.billing.read(AliyunAccountBalance.self, key: key, maximumAge: 86400)
+            : nil
+        if let saved, saved.value.usage.date == date,
+           saved.value.usage.yesterdayDate == Self.billingDate(daysAgo: 1) {
+            balance = saved.value
+            dailyCosts = .init(value: saved.value.usage, savedAt: saved.savedAt)
+            balanceNeedsRetry = saved.value.hasMissingFigures
+        } else {
             balance = nil
             dailyCosts = nil
             balanceNeedsRetry = false
         }
+        return key
+    }
+
+    func loadBalance(force: Bool = false) async {
+        let key = restoreBalanceIfNeeded()
         if let request = balanceRequest {
             await request.task.value
             if force && !request.forced { await loadBalance(force: true) }
@@ -154,22 +173,15 @@ final class TodayWorldStore: ObservableObject {
 
     private func queryBalance(key: String, force: Bool) async {
         defer { if balanceKey == key && !Task.isCancelled { balanceRequest = nil } }
-        async let request = fetchBalance(force)
-        if usesCostSnapshots, dailyCosts == nil,
-           let saved = await DisplaySnapshotCache.billing.load(AliyunAccountBalance.self, key: key, maximumAge: 86400),
-           !Task.isCancelled, saved.value.usage.date == Self.billingDate() {
-            balance = saved.value
-            dailyCosts = .init(value: saved.value.usage, savedAt: saved.savedAt)
-        }
         do {
-            let loaded = try await request
+            let loaded = try await fetchBalance(force)
             guard !Task.isCancelled else { return }
             guard loaded.usage.date == Self.billingDate(),
                   loaded.usage.yesterdayDate == Self.billingDate(daysAgo: 1) else { throw APIError.invalidResponse }
             let receivedAt = Date()
             balance = loaded
             dailyCosts = .init(value: loaded.usage, savedAt: receivedAt)
-            balanceNeedsRetry = loaded.formattedAmount == nil || loaded.usage.todayCostCNY == nil || loaded.usage.yesterdayCostCNY == nil
+            balanceNeedsRetry = loaded.hasMissingFigures
             if usesCostSnapshots { await DisplaySnapshotCache.billing.save(loaded, key: key, at: receivedAt) }
         } catch {
             guard !Task.isCancelled else { return }

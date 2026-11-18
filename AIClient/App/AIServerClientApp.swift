@@ -603,7 +603,7 @@ private struct EditorialRootView: View {
         }
         .task(id: scenePhase == .active, priority: .utility) {
             guard scenePhase == .active, selectedTab != .world else { return }
-            await pageStores.today.loadReport()
+            await pageStores.today.load()
         }
         .task(id: scenePhase == .active, priority: .utility) {
             guard scenePhase == .active, selectedTab == .world else { return }

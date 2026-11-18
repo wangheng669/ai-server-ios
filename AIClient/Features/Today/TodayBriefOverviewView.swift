@@ -487,10 +487,12 @@ struct TodayHeaderView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 2)
             .background(TodayBriefStyle.accent.opacity(0.075), in: RoundedRectangle(cornerRadius: 12))
-            if needsRetry || (dailyCosts != nil && isLoading) {
+            if needsRetry || isLoading {
                 HStack {
                     if let dailyCosts {
                         Text("账务上次查询于 \(dailyCosts.savedAt, style: .time)")
+                    } else if isLoading {
+                        Text("正在获取账务数据…")
                     }
                     if needsRetry && !isLoading {
                         Button("重新查询") { Task { await retry() } }
@@ -673,7 +675,7 @@ struct TodayHeaderView: View {
     private func costItem(_ title: String, amount: Double?, identifier: String) -> some View {
         billingMetric(
             label: Text(title),
-            value: Text(AIUsageDailyCosts.formattedCost(amount) ?? (isLoading ? "查询中…" : "暂不可用"))
+            value: Text(AIUsageDailyCosts.formattedCost(amount) ?? (dailyCosts == nil && !needsRetry ? "—" : "暂不可用"))
                 .accessibilityIdentifier(identifier)
                 .accessibilityHint("AI Server 模型调用费用，按北京时间统计")
         )
@@ -703,7 +705,7 @@ struct TodayHeaderView: View {
                         .font(.caption2.weight(.semibold))
                         .accessibilityHidden(true)
                 },
-                value: Text(balance?.formattedAmount ?? (isLoading ? "查询中…" : "暂不可用"))
+                value: Text(balance?.formattedAmount ?? (dailyCosts == nil && !needsRetry ? "—" : "暂不可用"))
                     .accessibilityIdentifier("today-aliyun-balance")
             )
             .frame(minHeight: 44)

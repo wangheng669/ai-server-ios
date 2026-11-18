@@ -26,6 +26,13 @@ actor DisplaySnapshotCache {
     func load<Value: Codable & Sendable>(
         _ type: Value.Type, key: String, maximumAge: TimeInterval
     ) -> Entry<Value>? {
+        read(type, key: key, maximumAge: maximumAge)
+    }
+
+    // Billing reads one small, atomically written snapshot before the first frame.
+    nonisolated func read<Value: Codable & Sendable>(
+        _ type: Value.Type, key: String, maximumAge: TimeInterval
+    ) -> Entry<Value>? {
         let url = fileURL(key)
         guard let data = try? Data(contentsOf: url),
               let entry = try? JSONDecoder().decode(Entry<Value>.self, from: data),
@@ -71,7 +78,7 @@ actor DisplaySnapshotCache {
         try? FileManager.default.removeItem(at: fileURL(key))
     }
 
-    private func fileURL(_ key: String) -> URL {
+    nonisolated private func fileURL(_ key: String) -> URL {
         let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
         return directory.appending(path: digest + ".json")
     }

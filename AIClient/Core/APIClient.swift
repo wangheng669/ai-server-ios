@@ -1060,6 +1060,10 @@ struct AliyunAccountBalance: Codable, Equatable {
     let availableAmount: String?
     let usage: AIUsageDailyCosts
 
+    var hasMissingFigures: Bool {
+        formattedAmount == nil || usage.todayCostCNY == nil || usage.yesterdayCostCNY == nil
+    }
+
     var formattedAmount: String? {
         guard ok, let availableAmount,
               let amount = Decimal(string: availableAmount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
