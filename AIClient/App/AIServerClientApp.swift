@@ -611,6 +611,10 @@ private struct EditorialRootView: View {
             await pageStores.feed.loadInitial()
             await signal
         }
+        .task(id: scenePhase == .active, priority: .utility) {
+            guard scenePhase == .active else { return }
+            await pageStores.feed.prepareXueqiuForOpening()
+        }
         .task(id: NotificationNavigationTaskID(
             requestID: personPushNavigation.request?.id,
             isActive: scenePhase == .active,
