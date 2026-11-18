@@ -25,7 +25,7 @@ struct CompanyNewsPage: Decodable {
     let nextCursor: String
     enum CodingKeys: String, CodingKey { case items; case hasMore = "has_more"; case nextCursor = "next_cursor" }
 }
-struct CompanyNewsItem: Decodable, Identifiable, Equatable {
+struct CompanyNewsItem: Decodable, Sendable, Identifiable, Equatable {
     let id: Int64
     let quoteContent: String
     let replyContent: String
@@ -67,7 +67,7 @@ struct CompanyNewsItem: Decodable, Identifiable, Equatable {
 
 }
 
-struct CompanyNewsDisplayList {
+struct CompanyNewsDisplayList: Sendable {
     private(set) var items: [CompanyNewsItem] = []
     private var ids = Set<Int64>()
     private var urls = Set<String>()
@@ -84,6 +84,12 @@ struct CompanyNewsDisplayList {
             items.append(item)
         }
     }
+    func appending(_ candidates: [CompanyNewsItem]) async -> Self {
+        var updated = self
+        updated.append(candidates)
+        return updated
+    }
+
 }
 
 private struct CompanyNewsEnvelope<Value: Decodable>: Decodable { let success: Bool; let data: Value }
@@ -214,7 +220,7 @@ actor CompanyNewsRequestCache {
 }
 
 struct GoogleSignalView: View {
-    private struct Filter: Equatable {
+    private struct Filter: Hashable {
         let company: String
         let sentiment: GoogleSignalSentimentFilter
     }
@@ -225,7 +231,15 @@ struct GoogleSignalView: View {
         let retry: Int
     }
 
+    private struct ListSnapshot {
+        let list: CompanyNewsDisplayList
+        let loadedAt: Date
+        let hasMore: Bool
+        let cursor: String
+    }
+
     let sentiment: GoogleSignalSentimentFilter
+    @State private var snapshots: [Filter: ListSnapshot] = [:]
     @State private var companies: [CompanyNewsCompany] = []
     @State private var catalogLoaded = false
     @State private var company = ""
@@ -247,7 +261,9 @@ struct GoogleSignalView: View {
     private var filter: Filter { Filter(company: company, sentiment: sentiment) }
     private var isActive: Bool { rootTabIsActive && scenePhase == .active }
     private var requestKey: RequestKey { RequestKey(isActive: isActive, filter: filter, retry: retry) }
-    private var items: [CompanyNewsItem] { displayList.items }
+    private var items: [CompanyNewsItem] {
+        loadedFilter == filter ? displayList.items : snapshots[filter]?.list.items ?? []
+    }
     private var paginationTaskCursor: String? {
         guard isActive, loadingFilter == nil, loadedFilter == filter,
               hasMore, !paginationFailed, error == nil else { return nil }
@@ -260,7 +276,11 @@ struct GoogleSignalView: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(companies) { entry in
-                            Button { company = entry.id } label: {
+                            Button {
+                                guard company != entry.id else { return }
+                                error = nil
+                                company = entry.id
+                            } label: {
                                 Text(entry.name)
                                     .font(.system(size: 14, weight: company == entry.id ? .semibold : .medium))
                                     .padding(.horizontal, 16)
@@ -278,7 +298,8 @@ struct GoogleSignalView: View {
                 .scrollIndicators(.hidden)
                 .padding(.vertical, 8)
             }
-            if (!catalogLoaded && error == nil) || (loadingFilter != nil && items.isEmpty) {
+            if error == nil && (!catalogLoaded || (!company.isEmpty && loadedFilter != filter && items.isEmpty)
+                                || (loadingFilter == filter && items.isEmpty)) {
                 ContentLoadingPlaceholder(title: "正在读取资讯", rowCount: 5)
                     .frame(maxHeight: .infinity, alignment: .top)
             }
@@ -290,6 +311,13 @@ struct GoogleSignalView: View {
                                 if paginationFailed { Task { await load(reset: false) } }
                                 else { retry += 1 }
                             }) { self.error = nil }
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 8)
+                        }
+                        if loadingFilter == filter && !items.isEmpty {
+                            Text("正在更新资讯")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 8)
                         }
@@ -334,11 +362,13 @@ struct GoogleSignalView: View {
                         }
                     }.padding(.bottom, 100)
                 }
+                .id(filter)
                 .accessibilityIdentifier("signal-news-list")
                 .refreshable { await load(reset: true, force: true) }
             }
         }
         .appSheet(item: $selected) { item in CompanyNewsDetail(item: item, companies: companies) }
+        .onChange(of: sentiment) { _, _ in error = nil }
         .task(id: requestKey) {
             guard isActive, !Task.isCancelled else { return }
             if !catalogLoaded {
@@ -371,10 +401,16 @@ struct GoogleSignalView: View {
             error = nil
             paginationFailed = false
             if loadedFilter != requestedFilter {
-                displayList = CompanyNewsDisplayList()
-                loadedFilter = nil
-                hasMore = false
-                cursor = ""
+                let saved = snapshots[requestedFilter]
+                displayList = saved?.list ?? CompanyNewsDisplayList()
+                loadedFilter = saved == nil ? nil : requestedFilter
+                loadedAt = saved?.loadedAt
+                hasMore = saved?.hasMore ?? false
+                cursor = saved?.cursor ?? ""
+                if !force, let saved, Date().timeIntervalSince(saved.loadedAt) < 60 {
+                    loadingFilter = nil
+                    return
+                }
             }
         } else {
             guard loadedFilter == requestedFilter, hasMore, !cursor.isEmpty,
@@ -398,14 +434,22 @@ struct GoogleSignalView: View {
                 refresh: force
             )
             guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
-            if reset { displayList = CompanyNewsDisplayList() }
-            displayList.append(page.items)
+            let prepared = await (reset ? CompanyNewsDisplayList() : displayList).appending(page.items)
+            guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
+            displayList = prepared
             loadedFilter = requestedFilter
             if reset { loadedAt = Date() }
             paginationFailed = false
             cursor = page.nextCursor
             hasMore = page.hasMore && !cursor.isEmpty && cursor != requestedCursor
             error = nil
+            if let loadedAt, reset || prepared.items.count <= 60 {
+                snapshots[requestedFilter] = ListSnapshot(list: prepared, loadedAt: loadedAt, hasMore: hasMore, cursor: cursor)
+                if snapshots.count > 6,
+                   let oldest = snapshots.filter({ $0.key != requestedFilter }).min(by: { $0.value.loadedAt < $1.value.loadedAt }) {
+                    snapshots.removeValue(forKey: oldest.key)
+                }
+            }
         } catch {
             guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
             self.error = "资讯读取失败，请重试"

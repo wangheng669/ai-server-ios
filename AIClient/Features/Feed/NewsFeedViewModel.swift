@@ -1067,18 +1067,19 @@ final class NewsFeedViewModel: ObservableObject {
         let requestedYouTubePerson = selectedYouTubePerson
         let requestedXUserID = selectedXUserID
 
-        if restoringSnapshot,
-           (requestedSource != .youtube || requestedYouTubePerson == nil),
-           (requestedSource != .x || requestedXUserID == nil),
-           (requestedSource != .xueqiu || selectedXueqiuFeedID == nil) {
-            await restoreDiskSnapshot(source: requestedSource, flashCategory: requestedFlashCategory, generation: generation)
-        }
-        guard !Task.isCancelled, requestGeneration == generation else { return }
+        let canRestore = restoringSnapshot
+            && (requestedSource != .youtube || requestedYouTubePerson == nil)
+            && (requestedSource != .x || requestedXUserID == nil)
+            && (requestedSource != .xueqiu || selectedXueqiuFeedID == nil)
+        async let restoration: Void = canRestore
+            ? restoreDiskSnapshot(source: requestedSource, flashCategory: requestedFlashCategory, generation: generation)
+            : ()
 
         do {
             var pagination: XueqiuPagination?
             if requestedSource == .xueqiu {
                 let feeds = try await fetchXueqiuFeeds()
+                await restoration
                 guard !Task.isCancelled, requestGeneration == generation else { return }
                 xueqiuFeeds = feeds
                 let ids = feeds.map(\.id)
@@ -1103,6 +1104,7 @@ final class NewsFeedViewModel: ObservableObject {
                 xueqiuPagination: pagination,
                 bypassCache: true
             )
+            await restoration
             guard !Task.isCancelled, requestGeneration == generation else { return }
             let result = fetched.posts
             posts = result
@@ -1118,6 +1120,7 @@ final class NewsFeedViewModel: ObservableObject {
                 scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: true)
             }
         } catch is CancellationError { } catch {
+            await restoration
             guard !Task.isCancelled, requestGeneration == generation else { return }
             isSwitchingSource = false
             errorMessage = NetworkErrorPresentation.message(for: error)
@@ -1186,34 +1189,23 @@ final class NewsFeedViewModel: ObservableObject {
         xueqiuPagination: XueqiuPagination? = nil,
         bypassCache: Bool = false
     ) async throws -> FetchedPage {
-        var lastError: Error?
-        for attempt in 0..<2 {
-            do {
-                let result: [Post]
-                if source == .flash {
-                    result = try await fetchFlashPosts(page, limit, flashCategory)
-                } else if source == .youtube {
-                    result = try await fetchYouTubePosts(page, limit, youtubePerson)
-                } else if source == .x {
-                    result = try await fetchXPosts(page, limit, xAuthor, bypassCache)
-                } else if source == .xueqiu {
-                    guard var pagination = xueqiuPagination else { throw APIError.invalidResponse }
-                    let posts = try await pagination.takePage(limit: limit, fetch: fetchRSSFeedPosts)
-                    return FetchedPage(posts: posts, xueqiuPagination: pagination)
-                } else {
-                    result = try await fetchPosts(page, limit, source)
-                }
-                if source == .x { XAuthorVerificationStore.shared.record(posts: result) }
-                return FetchedPage(posts: result)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                lastError = error
-                guard attempt == 0 else { break }
-                try await Task.sleep(for: .milliseconds(450))
-            }
+        let result: [Post]
+        switch source {
+        case .flash:
+            result = try await fetchFlashPosts(page, limit, flashCategory)
+        case .youtube:
+            result = try await fetchYouTubePosts(page, limit, youtubePerson)
+        case .x:
+            result = try await fetchXPosts(page, limit, xAuthor, bypassCache)
+            XAuthorVerificationStore.shared.record(posts: result)
+        case .xueqiu:
+            guard var pagination = xueqiuPagination else { throw APIError.invalidResponse }
+            let posts = try await pagination.takePage(limit: limit, fetch: fetchRSSFeedPosts)
+            return FetchedPage(posts: posts, xueqiuPagination: pagination)
+        default:
+            result = try await fetchPosts(page, limit, source)
         }
-        throw lastError ?? APIError.invalidResponse
+        return FetchedPage(posts: result)
     }
 
     private func schedulePresentationPrewarm(for posts: [Post]) {

@@ -1764,16 +1764,8 @@ struct PostMediaGrid: View {
 
     @MainActor
     private func loadVideoAspectRatio(for url: URL) async {
-        let asset = AVURLAsset(url: url)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let naturalSize = try? await track.load(.naturalSize),
-              let preferredTransform = try? await track.load(.preferredTransform),
-              !Task.isCancelled else { return }
-        let displayedSize = naturalSize.applying(preferredTransform)
-        let width = abs(displayedSize.width)
-        let height = abs(displayedSize.height)
-        guard width > 0, height > 0 else { return }
-        loadedVideoAspectRatio = width / height
+        guard let aspectRatio = await videoTrackAspectRatio(for: url) else { return }
+        loadedVideoAspectRatio = aspectRatio
     }
 
     var body: some View {
@@ -2484,16 +2476,8 @@ struct XVideoPlayerView: View {
 
     @MainActor
     private func loadVideoAspectRatio() async {
-        let asset = AVURLAsset(url: playbackURL)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let naturalSize = try? await track.load(.naturalSize),
-              let preferredTransform = try? await track.load(.preferredTransform),
-              !Task.isCancelled else { return }
-        let displayedSize = naturalSize.applying(preferredTransform)
-        let width = abs(displayedSize.width)
-        let height = abs(displayedSize.height)
-        guard width > 0, height > 0 else { return }
-        onAspectRatioResolved?(width / height)
+        guard let aspectRatio = await videoTrackAspectRatio(for: playbackURL) else { return }
+        onAspectRatioResolved?(aspectRatio)
     }
 }
 
@@ -3312,4 +3296,17 @@ struct PostActionRow: View {
     private func action(_ icon: String, _ text: String) -> some View {
         Label(text, systemImage: icon).font(.caption).foregroundStyle(.secondary)
     }
+}
+
+func videoTrackAspectRatio(for url: URL) async -> CGFloat? {
+    let asset = AVURLAsset(url: url)
+    guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+          let naturalSize = try? await track.load(.naturalSize),
+          let preferredTransform = try? await track.load(.preferredTransform),
+          !Task.isCancelled else { return nil }
+    let displayedSize = naturalSize.applying(preferredTransform)
+    let width = abs(displayedSize.width)
+    let height = abs(displayedSize.height)
+    guard width > 0, height > 0 else { return nil }
+    return width / height
 }

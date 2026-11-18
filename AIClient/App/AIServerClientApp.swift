@@ -594,15 +594,6 @@ private struct EditorialRootView: View {
             if case .succeeded = deploymentStatus?.phase { return true }
             return false
         }
-        .task(id: scenePhase == .active, priority: .utility) {
-            guard scenePhase == .active else { return }
-            do { try await Task.sleep(for: .milliseconds(800)) }
-            catch { return }
-            let tabs: [EditorialTab] = [.learning, .investment, .observation, .signal, .world]
-            await runWithLimitedConcurrency(tabs, maximumConcurrentRequests: 2) { tab in
-                await prepareTab(tab)
-            }
-        }
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 deploymentStore.start()
@@ -660,30 +651,6 @@ private struct EditorialRootView: View {
                 .accessibilityHidden(!isSelected)
                 .zIndex(isSelected ? 1 : 0)
                 .transition(.identity)
-        }
-    }
-
-    private func prepareTab(_ tab: EditorialTab) async {
-        guard !Task.isCancelled, selectedTab != tab else { return }
-        switch tab {
-        case .learning:
-            async let overview: Void = learningStore.loadOverview()
-            async let people: Void = peopleStore.load()
-            _ = await (overview, people)
-        case .investment:
-            async let dashboard: Void = marketStore.preloadDashboard()
-            async let research: Void = pageStores.research.load()
-            _ = await (dashboard, research)
-            await marketStore.preloadListCharts(symbols: ResearchHomeContent.chartSymbols)
-        case .observation:
-            await pageStores.feed.loadInitial()
-        case .signal:
-            let service = GoogleSignalService()
-            if let company = try? await service.fetchCompanies().first {
-                _ = try? await service.fetchNews(company: company.id, sentiment: .all)
-            }
-        case .world:
-            await pageStores.today.load()
         }
     }
 }

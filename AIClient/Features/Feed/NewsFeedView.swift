@@ -371,6 +371,8 @@ struct NewsFeedView: View {
             }
             #endif
             if shouldWarmAdjacentSources {
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
                 await model.warmSourceCache()
             }
         }

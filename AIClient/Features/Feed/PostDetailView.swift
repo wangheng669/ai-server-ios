@@ -2465,19 +2465,8 @@ struct PostDetailView: View {
             return
         }
 
-        if !post.isYouTube,
-           !post.isBilibili,
-           !post.isWeiboRSS,
-           post.sourceName != "X",
-           player == nil,
-           let video = post.videoURLs.first {
-            startVideoPlayback(url: video)
-            await detectVideoAspectRatio(url: video)
-        } else if post.sourceName == "X",
-                  xVideoMetadataAspectRatio == nil,
-                  let video = post.videoURLs.first {
-            await detectVideoAspectRatio(url: video)
-        }
+        let initialPost = post
+        async let initialVideoLayout: Void = prepareInitialVideoLayout(for: initialPost)
 
         if loadsStoredDetail, post.sourceName != "X" || post.needsXStoredDetailRefresh,
            let detail = try? await client.fetchPost(id: post.id) {
@@ -2540,6 +2529,8 @@ struct PostDetailView: View {
             isLoadingXFullText = false
         }
         await replyContextTask?.value
+        await initialVideoLayout
+        guard !Task.isCancelled else { return }
         if post.isYouTube || post.isBilibili || post.isWeiboRSS {
             player?.pause()
             player = nil
@@ -2549,6 +2540,22 @@ struct PostDetailView: View {
             startVideoPlayback(url: video)
             await detectVideoAspectRatio(url: video)
         } else if let video = post.videoURLs.first, detectedVideoAspectRatio == nil {
+            await detectVideoAspectRatio(url: video)
+        }
+    }
+
+    private func prepareInitialVideoLayout(for post: Post) async {
+        if !post.isYouTube,
+           !post.isBilibili,
+           !post.isWeiboRSS,
+           post.sourceName != "X",
+           player == nil,
+           let video = post.videoURLs.first {
+            startVideoPlayback(url: video)
+            await detectVideoAspectRatio(url: video)
+        } else if post.sourceName == "X",
+                  xVideoMetadataAspectRatio == nil,
+                  let video = post.videoURLs.first {
             await detectVideoAspectRatio(url: video)
         }
     }
@@ -2673,14 +2680,9 @@ struct PostDetailView: View {
 
     @MainActor
     private func detectVideoAspectRatio(url: URL) async {
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 1_200, height: 1_200)
-        guard let (image, _) = try? await generator.image(at: .zero),
-              image.width > 0,
-              image.height > 0,
-              !Task.isCancelled else { return }
-        detectedVideoAspectRatio = CGFloat(image.width) / CGFloat(image.height)
+        guard let aspectRatio = await videoTrackAspectRatio(for: url), !Task.isCancelled,
+              post.videoURLs.contains(url) || xLiveDetail?.videoURL == url else { return }
+        detectedVideoAspectRatio = aspectRatio
     }
 
     @MainActor

@@ -111,12 +111,6 @@ final class MarketStore {
         }
     }
 
-    func preloadDashboard() async {
-        await loadCacheIfNeeded()
-        guard !Task.isCancelled else { return }
-        await refresh(force: false)
-    }
-
     func preloadListCharts(symbols: [String]) async {
         var seen = Set<String>()
         let uniqueSymbols = symbols.filter { seen.insert($0).inserted }

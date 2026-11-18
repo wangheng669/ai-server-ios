@@ -172,8 +172,8 @@ struct LearningView: View {
                 .wikipediaReaderPresentation()
             }
         }
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
+        .task(id: rootTabIsActive && (store.hasOverviewContent || store.hasLoadedOverview), priority: .utility) {
+            guard rootTabIsActive, store.hasOverviewContent || store.hasLoadedOverview else { return }
             await peopleStore.load()
         }
         .task(id: "books-\(rootTabIsActive)") {
@@ -227,6 +227,13 @@ struct LearningView: View {
 
     private var knowledgeEditorialFeed: some View {
         LazyVStack(spacing: 14) {
+            if let notice = store.savedContentNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("knowledge-saved-content")
+            }
             knowledgeInvestmentFeature
             knowledgeBooksRow
             knowledgeConceptRow

@@ -4,6 +4,8 @@ import Foundation
 actor DisplaySnapshotCache {
     static let editions = DisplaySnapshotCache(name: "today-editions", capacity: 4)
     static let charts = DisplaySnapshotCache(name: "market-charts", capacity: 24)
+    static let knowledge = DisplaySnapshotCache(name: "knowledge-overview", capacity: 12)
+    static let companies = DisplaySnapshotCache(name: "company-research", capacity: 4)
 
     struct Entry<Value: Codable & Sendable>: Codable, Sendable {
         let value: Value

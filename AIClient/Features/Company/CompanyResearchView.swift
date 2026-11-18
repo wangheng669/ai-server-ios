@@ -192,14 +192,36 @@ struct CompanyResearchService {
     var baseURL: URL = ServerConfiguration.currentURL
     var session: URLSession = .shared
 
-    func fetch() async throws -> CompanyResearchPayload {
+    func fetch(onCached: (@MainActor (CompanyResearchPayload) -> Void)? = nil) async throws -> CompanyResearchPayload {
         let url = baseURL.appending(path: "api/ios/v1/market/company-research")
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let (data, response) = try await session.data(for: request)
+        let usesSnapshot = onCached != nil && session === URLSession.shared
+        let key = url.absoluteString
+        let preparedRequest = request
+        async let reply = session.data(for: preparedRequest)
+        if usesSnapshot, let onCached,
+           let saved = await DisplaySnapshotCache.companies.load(Data.self, key: key, maximumAge: 2 * 86_400),
+           let cached = try? decode(saved.value), !cached.companies.isEmpty {
+            try Task.checkCancellation()
+            await onCached(cached)
+        }
+        let (data, response) = try await reply
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
+        let value = try decode(data)
+        if usesSnapshot {
+            if value.companies.isEmpty {
+                await DisplaySnapshotCache.companies.remove(key: key)
+            } else {
+                await DisplaySnapshotCache.companies.save(data, key: key, at: Date())
+            }
+        }
+        return value
+    }
+
+    private func decode(_ data: Data) throws -> CompanyResearchPayload {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(CompanyResearchResponse.self, from: data).data
@@ -211,15 +233,16 @@ final class CompanyResearchStore: ObservableObject {
     @Published private(set) var companies: [CompanyResearchProfile] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var isShowingSavedCompanies = false
     private(set) var lastLoadedAt: Date?
-    private let fetch: () async throws -> CompanyResearchPayload
+    private let fetch: ((@MainActor (CompanyResearchPayload) -> Void)?) async throws -> CompanyResearchPayload
     private let refreshInterval: TimeInterval
 
     init(
         service: CompanyResearchService = CompanyResearchService(),
         refreshInterval: TimeInterval = 5 * 60
     ) {
-        fetch = { try await service.fetch() }
+        fetch = { restore in try await service.fetch(onCached: restore) }
         self.refreshInterval = refreshInterval
     }
 
@@ -227,7 +250,7 @@ final class CompanyResearchStore: ObservableObject {
         refreshInterval: TimeInterval = 5 * 60,
         fetch: @escaping () async throws -> CompanyResearchPayload
     ) {
-        self.fetch = fetch
+        self.fetch = { _ in try await fetch() }
         self.refreshInterval = refreshInterval
     }
 
@@ -237,7 +260,14 @@ final class CompanyResearchStore: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            companies = try await fetch().companies
+            let payload = try await fetch { cached in
+                guard self.companies.isEmpty else { return }
+                self.isShowingSavedCompanies = true
+                self.companies = cached.companies
+            }
+            try Task.checkCancellation()
+            companies = payload.companies
+            isShowingSavedCompanies = false
             lastLoadedAt = now
         } catch is CancellationError {
             return
@@ -287,7 +317,7 @@ struct CompanyResearchView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if store.isLoading && store.companies.isEmpty {
+                if store.companies.isEmpty, store.errorMessage == nil, store.lastLoadedAt == nil {
                     companyLoadingState
                         .accessibilityIdentifier("company-home-loading")
                 } else if !store.companies.isEmpty {
@@ -319,6 +349,19 @@ struct CompanyResearchView: View {
     private var companyHub: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
+                if let error = store.errorMessage {
+                    Button {
+                        Task { await store.load(force: true) }
+                    } label: {
+                        Label("\(error) · 重试", systemImage: "arrow.clockwise")
+                    }
+                    .font(.caption)
+                } else if store.isShowingSavedCompanies {
+                    Text(store.isLoading ? "已显示上次保存的公司数据 · 正在更新" : "已显示上次保存的公司数据")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("company-saved-content")
+                }
                 ForEach(store.companies) { company in
                     companyHubCard(company)
                 }
