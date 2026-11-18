@@ -24,21 +24,29 @@ final class TodayWorldStore: ObservableObject {
     @Published private(set) var checkedAt: Date?
     @Published private(set) var brief: TodayBriefProjection?
     @Published private(set) var isShowingCachedEdition = false
-    private var isLoadingBalance = false
-    private var balanceCheckedAt: Date?
+    @Published private(set) var dailyCosts: DisplaySnapshotCache.Entry<AIUsageDailyCosts>?
+    @Published private(set) var balanceNeedsRetry = false
+    @Published private var balanceRequest: (task: Task<Void, Never>, forced: Bool)?
+    var isLoadingBalance: Bool { balanceRequest != nil }
+    private var balanceKey: String?
+    private let usesCostSnapshots: Bool
     private var hasRestoredEdition = false
     private let usesPublishedSnapshots: Bool
     private let fetchReport: () async throws -> TodayWorldYesterdayReportPayload
     private let fetchBalance: (Bool) async throws -> AliyunAccountBalance
 
-    init(fetchBalance: @escaping (Bool) async throws -> AliyunAccountBalance = { refresh in
-        try await APIClient(baseURL: ServerConfiguration.currentURL).fetchAliyunBalance(refresh: refresh)
-    }, fetchReport: (() async throws -> TodayWorldYesterdayReportPayload)? = nil) {
+    init(fetchBalance: ((Bool) async throws -> AliyunAccountBalance)? = nil,
+         fetchReport: (() async throws -> TodayWorldYesterdayReportPayload)? = nil) {
+        let networkBalance = fetchBalance ?? { refresh in
+            try await APIClient(baseURL: ServerConfiguration.currentURL).fetchAliyunBalance(refresh: refresh)
+        }
         #if DEBUG
         if let fixture = ProcessInfo.processInfo.environment["TODAY_BALANCE_TEST_RESPONSE"] {
+            usesCostSnapshots = false
             self.fetchBalance = { _ in try JSONDecoder().decode(AliyunAccountBalance.self, from: Data(fixture.utf8)) }
         } else {
-            self.fetchBalance = fetchBalance
+            usesCostSnapshots = fetchBalance == nil
+            self.fetchBalance = networkBalance
         }
         if let fixture = ProcessInfo.processInfo.environment["TODAY_REPORT_TEST_RESPONSE"] {
             usesPublishedSnapshots = false
@@ -51,7 +59,8 @@ final class TodayWorldStore: ObservableObject {
             return
         }
         #else
-        self.fetchBalance = fetchBalance
+        usesCostSnapshots = fetchBalance == nil
+        self.fetchBalance = networkBalance
         #endif
         usesPublishedSnapshots = fetchReport == nil
         self.fetchReport = fetchReport ?? {
@@ -78,7 +87,7 @@ final class TodayWorldStore: ObservableObject {
             let saved = await DisplaySnapshotCache.editions.load(TodayPublishedEdition.self, key: snapshotKey, maximumAge: 48 * 60 * 60)
             guard !Task.isCancelled else { return }
             hasRestoredEdition = true
-            if let saved, saved.value.date == Self.yesterday, let cachedBrief = TodayBriefProjection(edition: saved.value) {
+            if let saved, saved.value.date == Self.billingDate(daysAgo: 1), let cachedBrief = TodayBriefProjection(edition: saved.value) {
                 isShowingCachedEdition = true
                 brief = cachedBrief
             }
@@ -110,33 +119,62 @@ final class TodayWorldStore: ObservableObject {
         }
     }
 
-    private static var yesterday: String {
+    private static func billingDate(daysAgo: Int = 0) -> String {
         let timeZone = TimeZone(identifier: "Asia/Shanghai")!
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let date = calendar.date(byAdding: .day, value: -1, to: Date())!
+        let date = calendar.date(byAdding: .day, value: -daysAgo, to: Date())!
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = timeZone
         formatter.formatOptions = [.withFullDate]
         return formatter.string(from: date)
     }
 
-    private func loadBalance(force: Bool) async {
-        let isStale = balanceCheckedAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
-        guard !Task.isCancelled, !isLoadingBalance, force || isStale else { return }
-        isLoadingBalance = true
-        defer { isLoadingBalance = false }
-        do {
-            let loadedBalance = try await fetchBalance(force)
-            guard !Task.isCancelled else { return }
-            balance = loadedBalance
-            balanceCheckedAt = Date()
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
+    func loadBalance(force: Bool = false) async {
+        let key = ServerConfiguration.currentURL.absoluteString + "|" + Self.billingDate()
+        if balanceKey != key {
+            balanceRequest?.task.cancel()
+            balanceRequest = nil
+            balanceKey = key
             balance = nil
-            balanceCheckedAt = Date()
+            dailyCosts = nil
+            balanceNeedsRetry = false
+        }
+        if let request = balanceRequest {
+            await request.task.value
+            if force && !request.forced { await loadBalance(force: true) }
+            return
+        }
+        if !force, !balanceNeedsRetry, let savedAt = dailyCosts?.savedAt, balance != nil,
+           Date().timeIntervalSince(savedAt) < 60 { return }
+        let task = Task { await queryBalance(key: key, force: force) }
+        balanceRequest = (task, force)
+        await task.value
+    }
+
+    private func queryBalance(key: String, force: Bool) async {
+        defer { if balanceKey == key && !Task.isCancelled { balanceRequest = nil } }
+        async let request = fetchBalance(force)
+        if usesCostSnapshots, dailyCosts == nil,
+           let saved = await DisplaySnapshotCache.dailyCosts.load(AIUsageDailyCosts.self, key: key, maximumAge: 86400),
+           !Task.isCancelled, saved.value.date == Self.billingDate() {
+            dailyCosts = saved
+        }
+        do {
+            let loaded = try await request
+            guard !Task.isCancelled else { return }
+            guard loaded.usage.date == Self.billingDate(),
+                  loaded.usage.yesterdayDate == Self.billingDate(daysAgo: 1) else { throw APIError.invalidResponse }
+            let receivedAt = Date()
+            balance = loaded
+            dailyCosts = .init(value: loaded.usage, savedAt: receivedAt)
+            balanceNeedsRetry = loaded.formattedAmount == nil || loaded.usage.todayCostCNY == nil || loaded.usage.yesterdayCostCNY == nil
+            if usesCostSnapshots { await DisplaySnapshotCache.dailyCosts.save(loaded.usage, key: key, at: receivedAt) }
+        } catch {
+            guard !Task.isCancelled else { return }
+            balance = nil
+            if dailyCosts?.value.date != Self.billingDate() { dailyCosts = nil }
+            balanceNeedsRetry = true
         }
     }
 
@@ -243,7 +281,9 @@ struct TodayWorldView: View {
                 TodayHeaderView(
                     waitingForRechargeReturn: $waitingForRechargeReturn,
                     balance: store.balance,
-                    isLoading: store.isLoading, reportDate: store.brief?.date ?? store.report?.date
+                    dailyCosts: store.dailyCosts, isLoading: store.isLoadingBalance,
+                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) },
+                    reportDate: store.brief?.date ?? store.report?.date
                 )
                 Group {
                     if let brief = store.brief {
@@ -282,6 +322,16 @@ struct TodayWorldView: View {
         }
         .task(id: preparation, priority: .utility) {
             await TodayChinesePreparation.preloadPosts(ids: preparation.ids, baseURL: preparation.baseURL)
+        }
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            while let day = calendar.dateInterval(of: .day, for: Date()) {
+                do { try await Task.sleep(for: .seconds(max(0, day.end.timeIntervalSinceNow))) }
+                catch { return }
+                await store.loadBalance()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }

@@ -24,8 +24,8 @@ struct APIClient {
         if refresh { components?.queryItems = [URLQueryItem(name: "refresh", value: "1")] }
         guard let url = components?.url else { throw APIError.invalidURL }
         let response: AliyunBalanceResponse = try await get(
-            url,
-            cachePolicy: .reloadIgnoringLocalCacheData
+            url, retriesTransientFailures: false,
+            cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20
         )
         guard response.success else { throw APIError.invalidResponse }
         return response.data
@@ -1092,7 +1092,7 @@ struct AliyunAccountBalance: Decodable, Equatable {
     }
 }
 
-struct AIUsageDailyCosts: Decodable, Equatable {
+struct AIUsageDailyCosts: Codable, Equatable, Sendable {
     let date: String
     let yesterdayDate: String
     let timezone: String

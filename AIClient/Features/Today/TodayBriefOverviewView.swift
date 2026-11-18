@@ -454,7 +454,10 @@ struct TodayHeaderView: View {
 
     @Binding var waitingForRechargeReturn: Bool
     let balance: AliyunAccountBalance?
+    let dailyCosts: DisplaySnapshotCache.Entry<AIUsageDailyCosts>?
     let isLoading: Bool
+    let needsRetry: Bool
+    let retry: () async -> Void
 
     let reportDate: String?
 
@@ -477,13 +480,24 @@ struct TodayHeaderView: View {
                 }
                 VStack(alignment: .leading) {
                     rechargeButton
-                    costItem("今日花费", amount: balance?.usage.todayCostCNY, identifier: "today-model-cost")
-                    costItem("昨日花费", amount: balance?.usage.yesterdayCostCNY, identifier: "yesterday-model-cost")
+                    costItem("今日花费", amount: dailyCosts?.value.todayCostCNY, identifier: "today-model-cost")
+                    costItem("昨日花费", amount: dailyCosts?.value.yesterdayCostCNY, identifier: "yesterday-model-cost")
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 2)
             .background(TodayBriefStyle.accent.opacity(0.075), in: RoundedRectangle(cornerRadius: 12))
+            if needsRetry || (dailyCosts != nil && isLoading) {
+                HStack {
+                    if let dailyCosts {
+                        Text("花费上次查询于 \(dailyCosts.savedAt, style: .time)")
+                    }
+                    if needsRetry && !isLoading {
+                        Button("重新查询") { Task { await retry() } }
+                    }
+                }
+                .font(.caption)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
@@ -650,8 +664,8 @@ struct TodayHeaderView: View {
 
     private var costs: some View {
         HStack(spacing: 20) {
-            costItem("今日花费", amount: balance?.usage.todayCostCNY, identifier: "today-model-cost")
-            costItem("昨日花费", amount: balance?.usage.yesterdayCostCNY, identifier: "yesterday-model-cost")
+            costItem("今日花费", amount: dailyCosts?.value.todayCostCNY, identifier: "today-model-cost")
+            costItem("昨日花费", amount: dailyCosts?.value.yesterdayCostCNY, identifier: "yesterday-model-cost")
         }
         .fixedSize(horizontal: true, vertical: false)
     }

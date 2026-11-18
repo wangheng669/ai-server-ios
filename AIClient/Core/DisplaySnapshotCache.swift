@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 
 actor DisplaySnapshotCache {
+    static let dailyCosts = DisplaySnapshotCache(name: "today-daily-costs", capacity: 4)
     static let editions = DisplaySnapshotCache(name: "today-editions", capacity: 4)
     static let charts = DisplaySnapshotCache(name: "market-charts", capacity: 24)
     static let knowledge = DisplaySnapshotCache(name: "knowledge-overview", capacity: 12)
