@@ -334,6 +334,10 @@ struct NewsFeedView: View {
         .onChange(of: isFeedEntitySelectorExpanded) { _, expanded in
             if !expanded { feedEntitySearchIsFocused = false }
         }
+        .task(id: rootTabIsActive && model.source == .xueqiu) {
+            guard rootTabIsActive, model.source == .xueqiu else { return }
+            await model.loadXueqiuDirectory()
+        }
         .task(id: rootTabIsActive ? model.source : nil) {
             guard rootTabIsActive else { return }
             let shouldWarmAdjacentSources = !hasLoadedFeedOnce
@@ -1293,7 +1297,7 @@ struct NewsFeedView: View {
                     LazyVStack(spacing: 0) {
                         Color.clear.frame(height: topInset).id("feed-top")
                         if source == .rss {
-                            if model.isLoadingRSSSelection {
+                            if model.isLoadingRSSSelection && model.selectedRSSPosts.isEmpty {
                                 HStack(spacing: 8) {
                                     ProgressView().controlSize(.small)
                                     Text("正在加载该来源")
@@ -1305,7 +1309,7 @@ struct NewsFeedView: View {
                             }
                         }
                         if source == .wechat {
-                            if model.isLoadingWeChatSelection {
+                            if model.isLoadingWeChatSelection && model.selectedWeChatPosts.isEmpty {
                                 HStack(spacing: 8) {
                                     ProgressView().controlSize(.small)
                                     Text("正在加载该来源")

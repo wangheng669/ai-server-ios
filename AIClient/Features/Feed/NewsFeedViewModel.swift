@@ -12,56 +12,6 @@ struct FeedDiskSnapshot: Codable {
     let canLoadMore: Bool
 }
 
-private struct XueqiuPagination {
-    private struct FeedPage {
-        var nextPage: Int? = 1
-        var remaining: [Post] = []
-    }
-
-    private var feeds: [Int: FeedPage]
-
-    init(feedIDs: [Int]) {
-        feeds = Dictionary(uniqueKeysWithValues: feedIDs.map { ($0, FeedPage()) })
-    }
-
-    var hasMore: Bool {
-        feeds.values.contains { $0.nextPage != nil || !$0.remaining.isEmpty }
-    }
-
-    mutating func takePage(
-        limit: Int,
-        fetch: @escaping (Int, Int, Int) async throws -> [Post]
-    ) async throws -> [Post] {
-        // A feed can fill the next mixed page on its own. Keep enough candidates
-        // from each feed and carry every undisplayed post into the following page.
-        let pending = feeds.compactMap { id, feed -> (id: Int, page: Int)? in
-            guard feed.remaining.count < limit, let page = feed.nextPage else { return nil }
-            return (id, page)
-        }
-        try await withThrowingTaskGroup(of: (Int, Int, [Post]).self) { group in
-            for (id, page) in pending {
-                group.addTask { (id, page, try await fetch(id, page, limit)) }
-            }
-            for try await (id, page, posts) in group {
-                feeds[id]?.remaining += posts
-                feeds[id]?.nextPage = posts.count == limit ? page + 1 : nil
-            }
-        }
-        let posts = feeds.values.flatMap(\.remaining).sorted {
-            let lhs = $0.articlePostAt ?? ""
-            let rhs = $1.articlePostAt ?? ""
-            return lhs == rhs ? $0.id > $1.id : lhs > rhs
-        }
-        var ids = Set<Int>()
-        let result = Array(posts.filter { ids.insert($0.id).inserted }.prefix(limit))
-        let displayedIDs = Set(result.map(\.id))
-        for id in feeds.keys {
-            feeds[id]?.remaining.removeAll { displayedIDs.contains($0.id) }
-        }
-        return result
-    }
-}
-
 struct RSSCardTranslation: Equatable {
     let title: String
     let excerpt: String?
@@ -241,12 +191,7 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private struct Snapshot { var posts: [Post]; var page: Int; var canLoadMore: Bool }
-    private struct FetchedPage {
-        let posts: [Post]
-        var xueqiuPagination: XueqiuPagination?
-    }
     private var cache: [FeedSource: Snapshot] = [:]
-    private var xueqiuPagination: XueqiuPagination?
     private var pendingXTranslations: [Int: String] = [:]
     private var xTranslationPublishTask: Task<Void, Never>?
     private var page = 1
@@ -477,9 +422,17 @@ final class NewsFeedViewModel: ObservableObject {
         isLoadingRSSSelection = true
         defer { if rssSelectionGeneration == generation { isLoadingRSSSelection = false } }
         do {
-            let result = try await fetchRSSFeedPosts(feedID, 1, selectedRSSPageSize)
+            let key = "\(serverURL.absoluteString)|rss-account|\(feedID)"
+            async let fresh = fetchRSSFeedPosts(feedID, 1, selectedRSSPageSize)
+            if let saved = await DisplaySnapshotCache.pages.load([Post].self, key: key, maximumAge: 86400),
+               !Task.isCancelled, rssSelectionGeneration == generation {
+                selectedRSSPosts = saved.value
+            }
+            let result = try await fresh
             guard !Task.isCancelled, rssSelectionGeneration == generation else { return }
             selectedRSSPosts = result
+            await DisplaySnapshotCache.pages.save(result, key: key, at: Date())
+            guard !Task.isCancelled, rssSelectionGeneration == generation else { return }
             canLoadMoreRSSSelection = !result.isEmpty
             errorMessage = nil
             schedulePresentationPrewarm(for: result)
@@ -535,9 +488,17 @@ final class NewsFeedViewModel: ObservableObject {
         isLoadingWeChatSelection = true
         defer { if weChatSelectionGeneration == generation { isLoadingWeChatSelection = false } }
         do {
-            let result = try await fetchWeChatFeedPosts(feedID, 1, selectedWeChatPageSize)
+            let key = "\(serverURL.absoluteString)|weChat-account|\(feedID)"
+            async let fresh = fetchWeChatFeedPosts(feedID, 1, selectedWeChatPageSize)
+            if let saved = await DisplaySnapshotCache.pages.load([Post].self, key: key, maximumAge: 86400),
+               !Task.isCancelled, weChatSelectionGeneration == generation {
+                selectedWeChatPosts = saved.value
+            }
+            let result = try await fresh
             guard !Task.isCancelled, weChatSelectionGeneration == generation else { return }
             selectedWeChatPosts = result
+            await DisplaySnapshotCache.pages.save(result, key: key, at: Date())
+            guard !Task.isCancelled, weChatSelectionGeneration == generation else { return }
             canLoadMoreWeChatSelection = !result.isEmpty
             errorMessage = nil
             schedulePresentationPrewarm(for: result)
@@ -622,6 +583,19 @@ final class NewsFeedViewModel: ObservableObject {
         await refresh()
     }
 
+    func loadXueqiuDirectory() async {
+        do {
+            let feeds = try await fetchXueqiuFeeds()
+            guard !Task.isCancelled else { return }
+            xueqiuFeeds = feeds
+            if let selection = selectedXueqiuFeedID, !feeds.contains(where: { $0.id == selection }) {
+                await selectXueqiuFeed(nil)
+            }
+        } catch {
+            if !Task.isCancelled { errorMessage = NetworkErrorPresentation.message(for: error) }
+        }
+    }
+
     func selectXueqiuFeed(_ feedID: Int?) async {
         guard source == .xueqiu, selectedXueqiuFeedID != feedID else { return }
         if let feedID, !xueqiuFeeds.contains(where: { $0.id == feedID }) { return }
@@ -630,7 +604,6 @@ final class NewsFeedViewModel: ObservableObject {
         pendingRealtimePosts = []
         page = 1
         canLoadMore = false
-        xueqiuPagination = nil
         cache[.xueqiu] = nil
         await refresh()
     }
@@ -878,7 +851,7 @@ final class NewsFeedViewModel: ObservableObject {
     private func scheduleXTranslationPublish() {
         guard xTranslationPublishTask == nil else { return }
         xTranslationPublishTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
+            await Task.yield()
             guard let self else { return }
             let updates = pendingXTranslations
             pendingXTranslations.removeAll(keepingCapacity: true)
@@ -984,7 +957,7 @@ final class NewsFeedViewModel: ObservableObject {
         }
         // Returning to a cached channel must preserve the exact feed snapshot.
         // Pull-to-refresh remains available when the user wants fresh content.
-        guard posts.isEmpty || isSwitchingSource || (source == .xueqiu && xueqiuPagination == nil) else { return }
+        guard posts.isEmpty || isSwitchingSource else { return }
         await startFirstPage(restoringSnapshot: true)
     }
 
@@ -996,23 +969,15 @@ final class NewsFeedViewModel: ObservableObject {
             let candidate = sources[index]
             guard cache[candidate] == nil else { continue }
             do {
-                let generation = requestGeneration
                 let pageSize = pageSize(for: candidate)
-                let feeds = candidate == .xueqiu ? try await fetchXueqiuFeeds() : []
-                let pagination = candidate == .xueqiu ? XueqiuPagination(feedIDs: feeds.map(\.id)) : nil
-                let fetched = try await fetchPage(1, limit: pageSize, source: candidate, xueqiuPagination: pagination)
-                guard !Task.isCancelled, cache[candidate] == nil else { continue }
-                if candidate == .xueqiu {
-                    guard requestGeneration == generation, selectedXueqiuFeedID == nil else { continue }
-                    xueqiuFeeds = feeds
-                    xueqiuPagination = fetched.xueqiuPagination
-                }
+                let fetched = try await fetchPage(1, limit: pageSize, source: candidate)
+                guard !Task.isCancelled, cache[candidate] == nil, source != candidate else { continue }
                 cache[candidate] = .init(
-                    posts: fetched.posts,
+                    posts: fetched,
                     page: 1,
-                    canLoadMore: fetched.xueqiuPagination?.hasMore ?? !fetched.posts.isEmpty
+                    canLoadMore: candidate == .wechat || candidate == .xueqiu ? fetched.count == pageSize : !fetched.isEmpty
                 )
-                schedulePresentationPrewarm(for: fetched.posts)
+                schedulePresentationPrewarm(for: fetched)
             } catch is CancellationError {
                 return
             } catch {
@@ -1088,42 +1053,23 @@ final class NewsFeedViewModel: ObservableObject {
             : ()
 
         do {
-            var pagination: XueqiuPagination?
-            if requestedSource == .xueqiu {
-                let feeds = try await fetchXueqiuFeeds()
-                await restoration
-                guard !Task.isCancelled, requestGeneration == generation else { return }
-                xueqiuFeeds = feeds
-                let ids = feeds.map(\.id)
-                let sources = Set(ids.map { "rss:\($0)" })
-                posts.removeAll { !sources.contains($0.source ?? "") }
-                pendingRealtimePosts.removeAll { !sources.contains($0.source ?? "") }
-                if let selection = selectedXueqiuFeedID, !ids.contains(selection) {
-                    selectedXueqiuFeedID = nil
-                }
-                pagination = XueqiuPagination(feedIDs: selectedXueqiuFeedID.map { [$0] } ?? ids)
-                xueqiuPagination = nil
-                canLoadMore = false
-            }
             let pageSize = pageSize(for: requestedSource)
-            let fetched = try await fetchPage(
+            let result = try await fetchPage(
                 1,
                 limit: pageSize,
                 source: requestedSource,
                 flashCategory: requestedFlashCategory,
                 youtubePerson: requestedYouTubePerson,
                 xAuthor: requestedXUserID,
-                xueqiuPagination: pagination,
+                xueqiuFeedID: selectedXueqiuFeedID,
                 bypassCache: true
             )
             await restoration
             guard !Task.isCancelled, requestGeneration == generation else { return }
-            let result = fetched.posts
             posts = result
-            if requestedSource == .xueqiu { xueqiuPagination = fetched.xueqiuPagination }
             pendingRealtimePosts = []
             page = 1
-            canLoadMore = fetched.xueqiuPagination?.hasMore ?? !result.isEmpty
+            canLoadMore = requestedSource == .xueqiu || requestedSource == .wechat ? result.count == pageSize : !result.isEmpty
             isSwitchingSource = false
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
@@ -1163,22 +1109,20 @@ final class NewsFeedViewModel: ObservableObject {
         isLoadingMore = true
         defer { if requestGeneration == generation { isLoadingMore = false } }
         do {
-            let fetched = try await fetchPage(
+            let result = try await fetchPage(
                 page + 1,
                 limit: pageSize,
                 source: requestedSource,
                 flashCategory: requestedFlashCategory,
                 youtubePerson: requestedYouTubePerson,
                 xAuthor: requestedXUserID,
-                xueqiuPagination: requestedSource == .xueqiu ? xueqiuPagination : nil
+                xueqiuFeedID: selectedXueqiuFeedID
             )
             guard !Task.isCancelled, requestGeneration == generation else { return }
-            let result = fetched.posts
             var ids = Set(posts.map(\.id))
             posts += result.filter { ids.insert($0.id).inserted }
-            if requestedSource == .xueqiu { xueqiuPagination = fetched.xueqiuPagination }
             page += 1
-            canLoadMore = fetched.xueqiuPagination?.hasMore ?? !result.isEmpty
+            canLoadMore = requestedSource == .xueqiu || requestedSource == .wechat ? result.count == pageSize : !result.isEmpty
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
@@ -1200,9 +1144,9 @@ final class NewsFeedViewModel: ObservableObject {
         flashCategory: String? = nil,
         youtubePerson: String? = nil,
         xAuthor: String? = nil,
-        xueqiuPagination: XueqiuPagination? = nil,
+        xueqiuFeedID: Int? = nil,
         bypassCache: Bool = false
-    ) async throws -> FetchedPage {
+    ) async throws -> [Post] {
         let result: [Post]
         switch source {
         case .flash:
@@ -1213,21 +1157,31 @@ final class NewsFeedViewModel: ObservableObject {
             result = try await fetchXPosts(page, limit, xAuthor, bypassCache)
             XAuthorVerificationStore.shared.record(posts: result)
         case .xueqiu:
-            guard var pagination = xueqiuPagination else { throw APIError.invalidResponse }
-            let posts = try await pagination.takePage(limit: limit, fetch: fetchRSSFeedPosts)
-            return FetchedPage(posts: posts, xueqiuPagination: pagination)
+            if let xueqiuFeedID {
+                result = try await fetchRSSFeedPosts(xueqiuFeedID, page, limit)
+            } else {
+                result = try await fetchPosts(page, limit, source)
+            }
         default:
             result = try await fetchPosts(page, limit, source)
         }
-        return FetchedPage(posts: result)
+        return result
     }
 
     private func pretranslateTimeline(_ posts: [Post]) {
         if source == .truth, posts.first?.source == "truth", #available(iOS 26.0, *) {
             Task { await FeedTranslationCache.shared.pretranslateTruth(posts) }
         } else if source == .x {
-            for post in posts.prefix(5) where post.needsXTranslation && !post.isXRetweetWrapper {
-                Task { await translateXMainPostIfNeeded(post) }
+            let visible = Array(posts.prefix(10))
+            for post in visible where post.needsXTranslation && xTranslations[post.id] == nil {
+                guard let tweetID = post.xTweetID else { continue }
+                let key = FeedTranslationCache.key(post.xStoredOriginalContent, language: "x/" + tweetID)
+                if let saved = FeedTranslationCache.shared.text(key) { xTranslations[post.id] = saved }
+            }
+            Task {
+                await runWithLimitedConcurrency(visible, maximumConcurrentRequests: 2) { post in
+                    await self.translateXPostIfNeeded(post)
+                }
             }
         }
     }
@@ -1334,7 +1288,7 @@ final class NewsFeedViewModel: ObservableObject {
         ), !Task.isCancelled, requestGeneration == generation else { return }
         posts = snapshot.posts
         page = snapshot.page
-        canLoadMore = source != .xueqiu && snapshot.canLoadMore
+        canLoadMore = snapshot.canLoadMore
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         isSwitchingSource = false
         schedulePresentationPrewarm(for: posts)
@@ -1361,7 +1315,8 @@ final class NewsFeedViewModel: ObservableObject {
 
     func matchesCurrentSource(_ post: Post) -> Bool {
         switch source {
-        case .newYorkTimes, .wechat: return post.source == source.rawValue
+        case .newYorkTimes: return post.source == source.rawValue
+        case .wechat: return APIClient.weChatFeedIDs.contains { post.source == "rss:\($0)" }
         case .x: return post.sourceName == "X"
         case .bilibili: return post.isBilibili
         case .zhihu: return post.sourceName == "知乎"

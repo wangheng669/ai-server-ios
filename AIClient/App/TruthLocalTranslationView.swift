@@ -43,7 +43,7 @@ final class FeedTranslationCache: ObservableObject {
         let language = "en"
         var requests: [TranslationSession.Request] = []
         var seen = Set<String>()
-        for post in posts.prefix(5) where post.source == "truth" && LocalTranslatedText.chineseText(post.truthChineseContent) == nil {
+        for post in posts.prefix(20) where post.source == "truth" && LocalTranslatedText.chineseText(post.truthChineseContent) == nil {
             let text = post.originalDisplayContent
             let key = Self.key(text, language: language)
             if seen.insert(key).inserted, entries[key] == nil, canAttempt(key),
@@ -61,11 +61,14 @@ final class FeedTranslationCache: ObservableObject {
             requests.removeAll { request in request.clientIdentifier.flatMap { entries[$0] } != nil }
             guard !requests.isEmpty else { return }
             let session = TranslationSession(installedSource: source, target: target)
+            var changed = false
+            defer { if changed { persistEntries() } }
             for try await response in session.translate(batch: requests) {
                 try Task.checkCancellation()
                 let value = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let key = response.clientIdentifier, !value.isEmpty, value != response.sourceText {
-                    save(value, key: key)
+                    entries[key] = Entry(text: value, date: Date())
+                    changed = true
                 }
             }
         } catch {
@@ -75,6 +78,10 @@ final class FeedTranslationCache: ObservableObject {
 
     func save(_ text: String, key: String) {
         entries[key] = Entry(text: text, date: Date())
+        persistEntries()
+    }
+
+    private func persistEntries() {
         if entries.count > 400 {
             for key in entries.sorted(by: { $0.value.date > $1.value.date }).dropFirst(400).map(\.key) {
                 entries[key] = nil

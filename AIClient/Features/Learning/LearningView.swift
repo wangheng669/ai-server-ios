@@ -172,8 +172,8 @@ struct LearningView: View {
                 .wikipediaReaderPresentation()
             }
         }
-        .task(id: rootTabIsActive && (store.hasOverviewContent || store.hasLoadedOverview), priority: .utility) {
-            guard rootTabIsActive, store.hasOverviewContent || store.hasLoadedOverview else { return }
+        .task(id: rootTabIsActive, priority: .utility) {
+            guard rootTabIsActive else { return }
             await peopleStore.load()
         }
         .task(id: "books-\(rootTabIsActive)") {

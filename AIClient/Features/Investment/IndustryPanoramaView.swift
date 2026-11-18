@@ -133,18 +133,15 @@ private struct IndustryPanoramaService {
         self.session = session
     }
 
-    func industries() async throws -> [IndustryPayload] {
+    func industries(onCached: @escaping @MainActor ([IndustryPayload]) -> Void) async throws -> [IndustryPayload] {
         let url = baseURL.appending(path: "api/ios/v1/industries/panorama")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
-        let payload = try JSONDecoder().decode(IndustryPanoramaResponse.self, from: data)
-        guard payload.success, !payload.data.industries.isEmpty else {
-            throw URLError(.cannotParseResponse)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let payload = try JSONDecoder().decode(IndustryPanoramaResponse.self, from: data)
+            guard payload.success, !payload.data.industries.isEmpty else { throw APIError.invalidResponse }
+            return payload.data.industries
         }
-        return payload.data.industries
     }
 }
 
@@ -414,7 +411,11 @@ struct IndustryPanoramaView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let loaded = try await IndustryPanoramaService().industries()
+            let loaded = try await IndustryPanoramaService().industries { cached in
+                guard industries.isEmpty else { return }
+                industries = cached
+                selectedID = cached.first?.id
+            }
             guard !Task.isCancelled else { return }
             industries = loaded
             if selectedID == nil || !loaded.contains(where: { $0.id == selectedID }) { selectedID = loaded.first?.id }

@@ -490,7 +490,7 @@ struct TodayHeaderView: View {
             if needsRetry || (dailyCosts != nil && isLoading) {
                 HStack {
                     if let dailyCosts {
-                        Text("花费上次查询于 \(dailyCosts.savedAt, style: .time)")
+                        Text("账务上次查询于 \(dailyCosts.savedAt, style: .time)")
                     }
                     if needsRetry && !isLoading {
                         Button("重新查询") { Task { await retry() } }

@@ -73,19 +73,17 @@ struct CountryGDPService {
         self.session = session
     }
 
-    func ranking() async throws -> CountryGDPRanking {
+    func ranking(onCached: @escaping @MainActor (CountryGDPRanking) -> Void) async throws -> CountryGDPRanking {
         let url = baseURL.appending(path: "api/ios/v1/economy/gdp-ranking")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let payload = try JSONDecoder().decode(CountryGDPRankingResponse.self, from: data)
+            guard payload.success, !payload.data.countries.isEmpty else {
+                throw URLError(.cannotParseResponse)
+            }
+            return payload.data
         }
-        let payload = try JSONDecoder().decode(CountryGDPRankingResponse.self, from: data)
-        guard payload.success, !payload.data.countries.isEmpty else {
-            throw URLError(.cannotParseResponse)
-        }
-        return payload.data
     }
 
     func history(countryCode: String) async throws -> CountryGDPHistory {
@@ -160,19 +158,17 @@ struct GlobalAssetsService {
         self.session = session
     }
 
-    func ranking() async throws -> GlobalAssetsRanking {
+    func ranking(onCached: @escaping @MainActor (GlobalAssetsRanking) -> Void) async throws -> GlobalAssetsRanking {
         let url = baseURL.appending(path: "api/ios/v1/economy/global-assets")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: data)
+            guard payload.success, !payload.data.assets.isEmpty else {
+                throw URLError(.cannotParseResponse)
+            }
+            return payload.data
         }
-        let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: data)
-        guard payload.success, !payload.data.assets.isEmpty else {
-            throw URLError(.cannotParseResponse)
-        }
-        return payload.data
     }
 }
 
@@ -200,7 +196,9 @@ final class GlobalRankingStore {
         countryGDPLoadFailed = false
         defer { isLoadingCountryGDP = false }
         do {
-            countryGDP = try await countryGDPService.ranking()
+            countryGDP = try await countryGDPService.ranking { cached in
+                if self.countryGDP == nil { self.countryGDP = cached }
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -214,7 +212,9 @@ final class GlobalRankingStore {
         globalAssetsLoadFailed = false
         defer { isLoadingGlobalAssets = false }
         do {
-            globalAssets = try await globalAssetsService.ranking()
+            globalAssets = try await globalAssetsService.ranking { cached in
+                if self.globalAssets == nil { self.globalAssets = cached }
+            }
         } catch is CancellationError {
             return
         } catch {

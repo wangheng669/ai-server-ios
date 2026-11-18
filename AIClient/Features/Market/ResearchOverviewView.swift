@@ -176,8 +176,8 @@ private struct ResearchOverviewView: View {
                 catch { return }
             }
         }
-        .task(id: "\(rootTabIsActive):\(scenePhase):\(store.dashboard != nil)") {
-            guard rootTabIsActive, scenePhase == .active, store.dashboard != nil else { return }
+        .task(id: "\(rootTabIsActive):\(scenePhase)") {
+            guard rootTabIsActive, scenePhase == .active else { return }
             while !Task.isCancelled {
                 await store.preloadListCharts(symbols: chartSymbols)
                 do { try await Task.sleep(for: .seconds(30)) }

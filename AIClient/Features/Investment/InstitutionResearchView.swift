@@ -159,18 +159,16 @@ struct InstitutionResearchService {
     var baseURL: URL = ServerConfiguration.currentURL
     var session: URLSession = .shared
 
-    func fetch() async throws -> InstitutionResearchPayload {
+    func fetch(onCached: @escaping @MainActor (InstitutionResearchPayload) -> Void) async throws -> InstitutionResearchPayload {
         let url = baseURL.appending(path: "api/ios/v1/market/institution-research")
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(InstitutionResearchResponse.self, from: data).data
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(InstitutionResearchResponse.self, from: data).data
     }
 }
 
@@ -181,14 +179,10 @@ final class InstitutionResearchStore: ObservableObject {
     @Published private(set) var errorMessage: String?
 
     private var lastLoadedAt: Date?
-    private let fetch: () async throws -> InstitutionResearchPayload
+    private let service: InstitutionResearchService
 
     init(service: InstitutionResearchService = InstitutionResearchService()) {
-        fetch = { try await service.fetch() }
-    }
-
-    init(fetch: @escaping () async throws -> InstitutionResearchPayload) {
-        self.fetch = fetch
+        self.service = service
     }
 
     func load(force: Bool = false) async {
@@ -198,7 +192,9 @@ final class InstitutionResearchStore: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            payload = try await fetch()
+            payload = try await service.fetch { cached in
+                if self.payload == nil { self.payload = cached }
+            }
             lastLoadedAt = Date()
         } catch is CancellationError {
             return

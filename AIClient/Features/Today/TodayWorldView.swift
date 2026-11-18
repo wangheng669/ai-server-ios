@@ -156,9 +156,10 @@ final class TodayWorldStore: ObservableObject {
         defer { if balanceKey == key && !Task.isCancelled { balanceRequest = nil } }
         async let request = fetchBalance(force)
         if usesCostSnapshots, dailyCosts == nil,
-           let saved = await DisplaySnapshotCache.dailyCosts.load(AIUsageDailyCosts.self, key: key, maximumAge: 86400),
-           !Task.isCancelled, saved.value.date == Self.billingDate() {
-            dailyCosts = saved
+           let saved = await DisplaySnapshotCache.billing.load(AliyunAccountBalance.self, key: key, maximumAge: 86400),
+           !Task.isCancelled, saved.value.usage.date == Self.billingDate() {
+            balance = saved.value
+            dailyCosts = .init(value: saved.value.usage, savedAt: saved.savedAt)
         }
         do {
             let loaded = try await request
@@ -169,19 +170,21 @@ final class TodayWorldStore: ObservableObject {
             balance = loaded
             dailyCosts = .init(value: loaded.usage, savedAt: receivedAt)
             balanceNeedsRetry = loaded.formattedAmount == nil || loaded.usage.todayCostCNY == nil || loaded.usage.yesterdayCostCNY == nil
-            if usesCostSnapshots { await DisplaySnapshotCache.dailyCosts.save(loaded.usage, key: key, at: receivedAt) }
+            if usesCostSnapshots { await DisplaySnapshotCache.billing.save(loaded, key: key, at: receivedAt) }
         } catch {
             guard !Task.isCancelled else { return }
-            balance = nil
-            if dailyCosts?.value.date != Self.billingDate() { dailyCosts = nil }
+            if dailyCosts?.value.date != Self.billingDate() {
+                dailyCosts = nil
+                balance = nil
+            }
             balanceNeedsRetry = true
         }
     }
 
 }
 
-private actor TodayWorldPostMemoryCache {
-    static let shared = TodayWorldPostMemoryCache()
+private actor TodayWorldPostCache {
+    static let shared = TodayWorldPostCache()
 
     private struct Entry {
         let post: Post
@@ -191,15 +194,24 @@ private actor TodayWorldPostMemoryCache {
     private let lifetime: TimeInterval = 6 * 60 * 60
     private var entries: [String: Entry] = [:]
 
-    func cachedPosts(ids: [Int], baseURL: URL) -> [Post] {
+    func cachedPosts(ids: [Int], baseURL: URL) async -> [Post] {
         discardExpiredEntries()
+        for id in ids where entries[key(id: id, baseURL: baseURL)] == nil {
+            let cacheKey = key(id: id, baseURL: baseURL)
+            if let saved = await DisplaySnapshotCache.pages.load(Post.self, key: cacheKey, maximumAge: lifetime),
+               entries[cacheKey] == nil {
+                entries[cacheKey] = Entry(post: saved.value, loadedAt: saved.savedAt)
+            }
+        }
         return ids.compactMap { entries[key(id: $0, baseURL: baseURL)]?.post }
     }
 
-    func store(posts: [Post], baseURL: URL) {
+    func store(posts: [Post], baseURL: URL) async {
         let loadedAt = Date()
         for post in posts {
-            entries[key(id: post.id, baseURL: baseURL)] = Entry(post: post, loadedAt: loadedAt)
+            let cacheKey = key(id: post.id, baseURL: baseURL)
+            entries[cacheKey] = Entry(post: post, loadedAt: loadedAt)
+            await DisplaySnapshotCache.pages.save(post, key: cacheKey, at: loadedAt)
         }
     }
 
@@ -676,7 +688,7 @@ private struct TodayEventDetailView: View {
         defer { isLoading = false }
         let url = ServerConfiguration.currentURL
         var loaded = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
-        let cached = await TodayWorldPostMemoryCache.shared.cachedPosts(ids: event.postIDs, baseURL: url)
+        let cached = await TodayWorldPostCache.shared.cachedPosts(ids: event.postIDs, baseURL: url)
         for post in cached { loaded[post.id] = post }
         posts = event.postIDs.compactMap { loaded[$0] }
         let missing = event.postIDs.filter { loaded[$0] == nil }
@@ -685,7 +697,7 @@ private struct TodayEventDetailView: View {
             let ids = Array(missing[start..<min(start + 50, missing.count)])
             do {
                 let batch = try await fetchTodayWorldPostBatch(ids: ids, baseURL: url)
-                await TodayWorldPostMemoryCache.shared.store(posts: batch, baseURL: url)
+                await TodayWorldPostCache.shared.store(posts: batch, baseURL: url)
                 for post in batch where event.postIDs.contains(post.id) { loaded[post.id] = post }
                 guard !Task.isCancelled else { return }
                 posts = event.postIDs.compactMap { loaded[$0] }
@@ -721,12 +733,12 @@ enum TodayChinesePreparation {
 
     static func preloadPosts(ids: [Int], baseURL: URL) async {
         guard !ids.isEmpty, !Task.isCancelled else { return }
-        let cached = await TodayWorldPostMemoryCache.shared.cachedPosts(ids: ids, baseURL: baseURL)
+        let cached = await TodayWorldPostCache.shared.cachedPosts(ids: ids, baseURL: baseURL)
         let cachedIDs = Set(cached.map(\.id))
         let missing = ids.filter { !cachedIDs.contains($0) }
         guard !missing.isEmpty, !Task.isCancelled,
               let fetched = try? await fetchTodayWorldPostBatch(ids: missing, baseURL: baseURL) else { return }
-        await TodayWorldPostMemoryCache.shared.store(posts: fetched, baseURL: baseURL)
+        await TodayWorldPostCache.shared.store(posts: fetched, baseURL: baseURL)
     }
 }
 

@@ -605,6 +605,12 @@ private struct EditorialRootView: View {
             guard scenePhase == .active, selectedTab != .world else { return }
             await pageStores.today.loadReport()
         }
+        .task(id: scenePhase == .active, priority: .utility) {
+            guard scenePhase == .active, selectedTab == .world else { return }
+            async let signal: Void = GoogleSignalService().prepareFirstPage()
+            await pageStores.feed.loadInitial()
+            await signal
+        }
         .task(id: NotificationNavigationTaskID(
             requestID: personPushNavigation.request?.id,
             isActive: scenePhase == .active,

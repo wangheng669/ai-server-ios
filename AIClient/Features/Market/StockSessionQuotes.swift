@@ -120,7 +120,13 @@ extension MarketChart {
 
 extension MarketStore {
     func dayChartForSessionQuotes(symbol: String) -> MarketChart? {
-        guard let snapshot = chartSnapshot(symbol: symbol, range: .day), !snapshot.isRestored else { return nil }
+        guard let snapshot = chartSnapshot(symbol: symbol, range: .day) else { return nil }
+        if snapshot.isRestored {
+            guard let quote = quote(symbol: symbol),
+                  quote.quality?.tradingDate == snapshot.chart.tradingDate,
+                  let timestamp = quote.timestamp, timestamp == snapshot.chart.quote.providerTimestamp,
+                  quote.price == snapshot.chart.quote.price else { return nil }
+        }
         return snapshot.chart
     }
 }

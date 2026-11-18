@@ -15,17 +15,17 @@ enum GoogleSignalSentimentFilter: String, CaseIterable, Identifiable {
     }
 }
 
-struct CompanyNewsCompany: Decodable, Identifiable, Equatable {
+struct CompanyNewsCompany: Codable, Identifiable, Equatable {
     let id: String
     let name: String
 }
-struct CompanyNewsPage: Decodable {
+struct CompanyNewsPage: Codable {
     let items: [CompanyNewsItem]
     let hasMore: Bool
     let nextCursor: String
     enum CodingKeys: String, CodingKey { case items; case hasMore = "has_more"; case nextCursor = "next_cursor" }
 }
-struct CompanyNewsItem: Decodable, Sendable, Identifiable, Equatable {
+struct CompanyNewsItem: Codable, Sendable, Identifiable, Equatable {
     let id: Int64
     let quoteContent: String
     let replyContent: String
@@ -130,6 +130,17 @@ struct GoogleSignalService {
         }
         return try await get(url, as: CompanyNewsPage.self)
     }
+    func prepareFirstPage() async {
+        do {
+            let catalog = try await fetchCompanies()
+            let preferred = UserDefaults.standard.string(forKey: baseURL.absoluteString + "|signal-company")
+            guard !Task.isCancelled, let company = catalog.first(where: { $0.id == preferred }) ?? catalog.first else { return }
+            _ = try await fetchNews(company: company.id, sentiment: .all)
+        } catch {
+            // The foreground view owns errors and retry.
+        }
+    }
+
     func fetchCompanies() async throws -> [CompanyNewsCompany] {
         struct Catalog: Decodable { let companies: [CompanyNewsCompany] }
         let url = baseURL.appending(path: "api/ios/v1/company-news/catalog")
@@ -242,6 +253,7 @@ struct GoogleSignalView: View {
     @State private var snapshots: [Filter: ListSnapshot] = [:]
     @State private var companies: [CompanyNewsCompany] = []
     @State private var catalogLoaded = false
+    @State private var catalogError: String?
     @State private var company = ""
     @State private var displayList = CompanyNewsDisplayList()
     @State private var selected: CompanyNewsItem?
@@ -279,6 +291,7 @@ struct GoogleSignalView: View {
                             Button {
                                 guard company != entry.id else { return }
                                 error = nil
+                                UserDefaults.standard.set(entry.id, forKey: companyPreference)
                                 company = entry.id
                             } label: {
                                 Text(entry.name)
@@ -298,7 +311,7 @@ struct GoogleSignalView: View {
                 .scrollIndicators(.hidden)
                 .padding(.vertical, 8)
             }
-            if error == nil && (!catalogLoaded || (!company.isEmpty && loadedFilter != filter && items.isEmpty)
+            if error == nil && catalogError == nil && (!catalogLoaded || (!company.isEmpty && loadedFilter != filter && items.isEmpty)
                                 || (loadingFilter == filter && items.isEmpty)) {
                 ContentLoadingPlaceholder(title: "正在读取资讯", rowCount: 5)
                     .frame(maxHeight: .infinity, alignment: .top)
@@ -306,11 +319,11 @@ struct GoogleSignalView: View {
             else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if let error {
+                        if let error = catalogError ?? error {
                             InlineActionNotice(message: error, retry: {
                                 if paginationFailed { Task { await load(reset: false) } }
                                 else { retry += 1 }
-                            }) { self.error = nil }
+                            }) { self.error = nil; catalogError = nil }
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 8)
                         }
@@ -369,26 +382,39 @@ struct GoogleSignalView: View {
         }
         .appSheet(item: $selected) { item in CompanyNewsDetail(item: item, companies: companies) }
         .onChange(of: sentiment) { _, _ in error = nil }
-        .task(id: requestKey) {
-            guard isActive, !Task.isCancelled else { return }
-            if !catalogLoaded {
-                do {
-                    let catalog = try await GoogleSignalService().fetchCompanies()
-                    guard !Task.isCancelled else { return }
-                    companies = catalog
-                    catalogLoaded = true
-                    company = catalog.first?.id ?? ""
-                    error = nil
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    self.error = "公司目录读取失败，请重试"
-                }
-                return
+        .task(id: "\(isActive)-\(retry)") {
+            guard isActive else { return }
+            let service = GoogleSignalService()
+            let key = service.baseURL.absoluteString + "|signal-catalog"
+            async let network = service.fetchCompanies()
+            if !catalogLoaded, let saved = await DisplaySnapshotCache.pages.load([CompanyNewsCompany].self, key: key, maximumAge: 86400),
+               !Task.isCancelled {
+                applyCatalog(saved.value)
             }
-            guard !company.isEmpty else { return }
+            do {
+                let catalog = try await network
+                guard !Task.isCancelled else { return }
+                applyCatalog(catalog)
+                catalogError = nil
+                await DisplaySnapshotCache.pages.save(catalog, key: key, at: Date())
+            } catch {
+                if !Task.isCancelled { catalogError = "公司目录读取失败，请重试" }
+            }
+        }
+        .task(id: requestKey) {
+            guard isActive, !company.isEmpty else { return }
             await load(reset: true, force: retry != lastRequestRetry)
         }
     }
+    private var companyPreference: String { ServerConfiguration.currentURL.absoluteString + "|signal-company" }
+
+    private func applyCatalog(_ catalog: [CompanyNewsCompany]) {
+        let preferred = company.isEmpty ? UserDefaults.standard.string(forKey: companyPreference) : company
+        companies = catalog
+        catalogLoaded = true
+        company = catalog.first(where: { $0.id == preferred })?.id ?? catalog.first?.id ?? ""
+    }
+
     @MainActor private func load(reset: Bool, force: Bool = false) async {
         let requestedFilter = filter
         guard isActive, !Task.isCancelled, !requestedFilter.company.isEmpty else { return }
@@ -427,12 +453,25 @@ struct GoogleSignalView: View {
             }
         }
         do {
-            let page = try await GoogleSignalService().fetchNews(
+            let service = GoogleSignalService()
+            let key = try service.newsURL(company: requestedFilter.company, sentiment: requestedFilter.sentiment).absoluteString
+            async let network = service.fetchNews(
                 company: requestedFilter.company,
                 sentiment: requestedFilter.sentiment,
                 cursor: requestedCursor,
                 refresh: force
             )
+            if reset, loadedFilter != requestedFilter,
+               let saved = await DisplaySnapshotCache.pages.load(CompanyNewsPage.self, key: key, maximumAge: 86400) {
+                let restored = await CompanyNewsDisplayList().appending(saved.value.items)
+                guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
+                displayList = restored
+                loadedFilter = requestedFilter
+                loadedAt = saved.savedAt
+                cursor = saved.value.nextCursor
+                hasMore = saved.value.hasMore && !cursor.isEmpty
+            }
+            let page = try await network
             guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
             let prepared = await (reset ? CompanyNewsDisplayList() : displayList).appending(page.items)
             guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
@@ -450,6 +489,7 @@ struct GoogleSignalView: View {
                     snapshots.removeValue(forKey: oldest.key)
                 }
             }
+            if reset { await DisplaySnapshotCache.pages.save(page, key: key, at: Date()) }
         } catch {
             guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
             self.error = "资讯读取失败，请重试"

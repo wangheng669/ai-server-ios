@@ -47,7 +47,9 @@ final class PeopleStore {
                 isLoading = false
             }
             do {
-                let payload = try await service.specialPeople()
+                let payload = try await service.specialPeople { cached in
+                    if self.loadedAt == nil { self.people = cached.users }
+                }
                 people = payload.users
                 loadedAt = Date()
                 let avatars = payload.users.lazy.filter { $0.avatarAssetName == nil }

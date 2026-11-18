@@ -9,15 +9,14 @@ struct PeopleService {
         self.session = session ?? .shared
     }
 
-    func specialPeople() async throws -> SpecialPeopleResponse {
+    func specialPeople(onCached: @escaping @MainActor (SpecialPeopleResponse) -> Void) async throws -> SpecialPeopleResponse {
         let url = baseURL.appending(path: "api/ios/v1/people/directory")
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw PeopleServiceError.invalidResponse
+        let request = URLRequest(url: url)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let payload = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data)
+            guard payload.success else { throw PeopleServiceError.invalidResponse }
+            return payload
         }
-        let payload = try JSONDecoder().decode(SpecialPeopleResponse.self, from: data)
-        guard payload.success else { throw PeopleServiceError.invalidResponse }
-        return payload
     }
 
     func searchXPeople(query: String, limit: Int = 8) async throws -> [XPersonSearchResult] {

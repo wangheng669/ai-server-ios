@@ -204,20 +204,18 @@ struct ChinaMacroService {
         self.appBaseURL = appBaseURL
     }
 
-    func history() async throws -> (years: [ChinaMacroYear], generatedAt: Date) {
+    func history(onCached: @escaping @MainActor ((years: [ChinaMacroYear], generatedAt: Date)) -> Void) async throws -> (years: [ChinaMacroYear], generatedAt: Date) {
         let url = appBaseURL.appending(path: "api/ios/v1/economy/china-macro")
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let snapshot = try JSONDecoder().decode(ChinaMacroAPIEnvelope.self, from: data).data
+            let years = Self.merge(snapshot.observations)
+            guard !years.isEmpty, let generatedAt = Self.parseServerTimestamp(snapshot.generatedAt) else {
+                throw URLError(.cannotParseResponse)
+            }
+            return (years, generatedAt)
         }
-        let snapshot = try JSONDecoder().decode(ChinaMacroAPIEnvelope.self, from: data).data
-        let years = Self.merge(snapshot.observations)
-        guard !years.isEmpty, let generatedAt = Self.parseServerTimestamp(snapshot.generatedAt) else {
-            throw URLError(.cannotParseResponse)
-        }
-        return (years, generatedAt)
     }
 
     static func parseServerTimestamp(_ value: String) -> Date? {
@@ -302,7 +300,11 @@ final class ChinaMacroStore {
         loadError = false
         defer { isLoading = false }
         do {
-            let snapshot = try await service.history()
+            let snapshot = try await service.history { cached in
+                guard self.years.isEmpty else { return }
+                self.years = cached.years
+                self.lastUpdatedAt = cached.generatedAt
+            }
             years = snapshot.years
             loadError = years.isEmpty
             lastUpdatedAt = snapshot.generatedAt

@@ -33,7 +33,7 @@ struct APIClient {
 
     func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
         let response: TodayWorldYesterdayReportResponse = try await get(
-            baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
+            baseURL.appending(path: "api/ios/v1/today-world/yesterday-report").appending(queryItems: [.init(name: "view", value: "edition")]),
             cachePolicy: .reloadIgnoringLocalCacheData
         )
         guard response.success else { throw APIError.invalidResponse }
@@ -66,8 +66,14 @@ struct APIClient {
                 category: flashCategory,
                 importantOnly: flashCategory == nil
             ).map(Post.flash)
-        case .wechat:
-            return try await fetchWeChatPosts(page: page, limit: limit)
+        case .wechat, .xueqiu:
+            let url = baseURL.appending(path: "api/ios/v1/post/list").appending(queryItems: [
+                .init(name: "page", value: String(page)), .init(name: "limit", value: String(limit)),
+                .init(name: "source", value: "rss"), .init(name: "rss_platform", value: source == .wechat ? "wechat" : "xueqiu"),
+                .init(name: "sort", value: "time_desc"), .init(name: "include_zero_score", value: "true")
+            ])
+            let response: PostListResponse = try await get(url)
+            return response.data
         case .youtube:
             return try await fetchYouTubePosts(page: page, limit: limit, person: youtubePerson)
         default:
@@ -259,37 +265,6 @@ struct APIClient {
     }
 
     static let weChatFeedIDs = [57, 2373, 19]
-
-    private func fetchWeChatPosts(page: Int, limit: Int) async throws -> [Post] {
-        let requestedCount = page * limit
-        let posts = try await withThrowingTaskGroup(of: [Post].self) { group in
-            for feedID in Self.weChatFeedIDs {
-                group.addTask {
-                    try await self.fetchRSSFeedPosts(
-                        feedID: feedID,
-                        page: 1,
-                        limit: requestedCount,
-                        includesAllScores: true
-                    )
-                }
-            }
-
-            var posts: [Post] = []
-            for try await result in group { posts += result }
-            return posts
-        }
-        let merged = Self.mergeChronologicalRSSPosts(posts)
-        let start = (page - 1) * limit
-        guard start < merged.count else { return [] }
-        return Array(merged.dropFirst(start).prefix(limit))
-    }
-
-    static func mergeChronologicalRSSPosts(_ posts: [Post]) -> [Post] {
-        var seen = Set<Int>()
-        return posts
-            .sorted { ($0.articlePostAt ?? "") > ($1.articlePostAt ?? "") }
-            .filter { seen.insert($0.id).inserted }
-    }
 
     private func fetchRegularPosts(
         page: Int,
@@ -1079,7 +1054,7 @@ private struct AliyunBalanceResponse: Decodable {
     let data: AliyunAccountBalance
 }
 
-struct AliyunAccountBalance: Decodable, Equatable {
+struct AliyunAccountBalance: Codable, Equatable {
     let ok: Bool
     let currency: String
     let availableAmount: String?
