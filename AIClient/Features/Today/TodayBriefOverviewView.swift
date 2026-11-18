@@ -422,10 +422,33 @@ struct TodayHeaderView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var updateCheck: UpdateCheck = .unchecked
     @State private var checkingUpdate = false
-    @State private var knownUpdateAvailable = false
+    @State private var availableUpdate: AvailableUpdate?
     @State private var showsUpdateCheckError = false
     private enum UpdateCheck { case unchecked, current, available, failed }
-    private struct PublishedVersion: Decodable { let version: String; let build: Int }
+    private struct AvailableUpdate {
+        let version: String
+        let installURL: URL
+    }
+
+    private struct PublishedVersion: Decodable {
+        let version: String
+        let build: Int
+        let package: String
+
+        func installURL(in channel: URL) -> URL? {
+            let prefix = "build-\(version)-\(build)-"
+            let identifier = package.dropFirst(prefix.count)
+            guard package.hasPrefix(prefix), identifier.utf8.count == 16,
+                  identifier.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  var components = URLComponents(string: "itms-services://") else { return nil }
+            let manifest = channel.appendingPathComponent(package, isDirectory: true).appendingPathComponent("manifest.plist")
+            components.queryItems = [
+                URLQueryItem(name: "action", value: "download-manifest"),
+                URLQueryItem(name: "url", value: manifest.absoluteString)
+            ]
+            return components.url
+        }
+    }
 
     @Binding var waitingForRechargeReturn: Bool
     let balance: AliyunAccountBalance?
@@ -467,10 +490,10 @@ struct TodayHeaderView: View {
         } message: {
             Text("请在已安装支付宝的 iPhone 上点击余额，前往阿里云官方充值页。")
         }
-        .alert("直装入口暂不可用", isPresented: $updateUnavailable) {
+        .alert("无法发起安装", isPresented: $updateUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("请确认当前构建已配置直装入口，或稍后再试。")
+            Text("iOS 没有接受安装请求。请稍后再点「更新」。")
         }
         .alert("未能检查更新", isPresented: $showsUpdateCheckError) {
             Button("重试") { Task { await checkForUpdate() } }
@@ -496,14 +519,14 @@ struct TodayHeaderView: View {
     @ViewBuilder
     private var updateControl: some View {
         HStack(spacing: 4) {
-            if knownUpdateAvailable { updateButton }
+            if let availableUpdate { updateButton(availableUpdate) }
             if updateCheck == .failed {
                 Button { showsUpdateCheckError = true } label: {
                     Label("检查失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier("today-update-check-failed")
-            } else if !knownUpdateAvailable && updateCheck == .unchecked {
+            } else if availableUpdate == nil && updateCheck == .unchecked {
                 if checkingUpdate {
                     ProgressView().accessibilityLabel("正在检查更新")
                 } else {
@@ -539,8 +562,11 @@ struct TodayHeaderView: View {
                   let localVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                   let localBuildString = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
                   let localBuild = Int(localBuildString),
-                  let local = numericVersion(localVersion, build: localBuild),
-                  var components = URLComponents(url: entry.deletingLastPathComponent().appendingPathComponent("latest.json"), resolvingAgainstBaseURL: false) else {
+                  let local = numericVersion(localVersion, build: localBuild) else {
+                throw URLError(.badURL)
+            }
+            let channel = entry.deletingLastPathComponent()
+            guard var components = URLComponents(url: channel.appendingPathComponent("latest.json"), resolvingAgainstBaseURL: false) else {
                 throw URLError(.badURL)
             }
             components.queryItems = [.init(name: "check", value: UUID().uuidString)]
@@ -553,11 +579,17 @@ struct TodayHeaderView: View {
                 throw URLError(.badServerResponse)
             }
             let published = try JSONDecoder().decode(PublishedVersion.self, from: data)
-            guard let remote = numericVersion(published.version, build: published.build) else {
+            guard let remote = numericVersion(published.version, build: published.build),
+                  let installURL = published.installURL(in: channel) else {
                 throw URLError(.cannotParseResponse)
             }
-            knownUpdateAvailable = local.lexicographicallyPrecedes(remote)
-            updateCheck = knownUpdateAvailable ? .available : .current
+            if local.lexicographicallyPrecedes(remote) {
+                availableUpdate = AvailableUpdate(version: published.version, installURL: installURL)
+                updateCheck = .available
+            } else {
+                availableUpdate = nil
+                updateCheck = .current
+            }
         } catch {
             guard !Task.isCancelled else { return }
             // A failed request never turns a previously verified update into “up to date”.
@@ -565,20 +597,9 @@ struct TodayHeaderView: View {
         }
     }
 
-    private var updateButton: some View {
+    private func updateButton(_ update: AvailableUpdate) -> some View {
         Button {
-            guard let value = Bundle.main.object(forInfoDictionaryKey: "FocusDirectInstallURL") as? String,
-                  var components = URLComponents(string: value),
-                  components.scheme == "https", components.host != nil else {
-                updateUnavailable = true
-                return
-            }
-            components.queryItems = [URLQueryItem(name: "open", value: UUID().uuidString)]
-            guard let url = components.url else {
-                updateUnavailable = true
-                return
-            }
-            UIApplication.shared.open(url) { accepted in
+            UIApplication.shared.open(update.installURL) { accepted in
                 updateUnavailable = !accepted
             }
         } label: {
@@ -594,7 +615,8 @@ struct TodayHeaderView: View {
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
         .accessibilityIdentifier("today-app-update")
-        .accessibilityHint("打开焦点AI 最新版的直装页面")
+        .accessibilityValue(update.version)
+        .accessibilityHint("向 iOS 发起安装请求")
     }
 
     private var costs: some View {

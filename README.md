@@ -41,7 +41,7 @@ GitHub `main` 是稳定代码源。开始前运行 `./ci/safe-sync.sh main`。�
 
 ## iPhone 直装发布
 
-焦点改动完成并验证通过后，直接把新版本发到 App 内的「今日 → 更新」。日常交付使用 Ad Hoc 直装，无需提交 TestFlight。
+焦点改动完成并验证通过后，直接把新版本发到 App 内的「今日 → 更新」。点「更新」后由 iOS 确认并安装，不打开浏览器。日常交付使用 Ad Hoc 直装，无需提交 TestFlight。
 
 在黑苹果的干净工作树准备比直装页已发布版本更新的版本和构建号，例如 `python3 ci/publish-direct-install.py --prepare --version 1.0.25 --build 17`。把输出的 `archive_path` 和 `archive_sha256` 交给 `codex/focus-adhoc-signing` 分支上的 Ad Hoc 签名任务。该分支沿用 `testflight.yml` 作为任务入口，执行的是本机 Ad Hoc 签名导出，产物为 `Focus-AdHoc.ipa`。
 
