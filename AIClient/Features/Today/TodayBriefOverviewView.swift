@@ -419,6 +419,8 @@ struct TodayHeaderView: View {
     @Environment(\.openURL) private var openURL
     @State private var rechargeUnavailable = false
     @State private var updateUnavailable = false
+    @State private var installRequestedAt: Date?
+    @State private var installerAccepted = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var updateCheck: UpdateCheck = .unchecked
     @State private var checkingUpdate = false
@@ -599,11 +601,30 @@ struct TodayHeaderView: View {
 
     private func updateButton(_ update: AvailableUpdate) -> some View {
         Button {
+            guard installRequestedAt == nil else { return }
+            let requestedAt = Date()
+            installerAccepted = false
+            installRequestedAt = requestedAt
             UIApplication.shared.open(update.installURL) { accepted in
-                updateUnavailable = !accepted
+                guard installRequestedAt == requestedAt else { return }
+                if accepted {
+                    installerAccepted = true
+                } else {
+                    installRequestedAt = nil
+                    updateUnavailable = true
+                }
             }
         } label: {
-            Label("更新", systemImage: "arrow.down.circle")
+            HStack(spacing: 4) {
+                if installRequestedAt == nil {
+                    Label("更新", systemImage: "arrow.down.circle")
+                } else if installerAccepted {
+                    Label("已请求安装", systemImage: "checkmark.circle")
+                } else {
+                    ProgressView().controlSize(.small)
+                    Text("请求安装中")
+                }
+            }
                 .font(.subheadline.weight(.semibold))
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 8)
@@ -614,6 +635,14 @@ struct TodayHeaderView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
+        .disabled(installRequestedAt != nil)
+        .task(id: installRequestedAt) {
+            guard let started = installRequestedAt else { return }
+            do {
+                try await Task.sleep(for: .seconds(max(0, started.addingTimeInterval(60).timeIntervalSinceNow)))
+            } catch { return }
+            if installRequestedAt == started { installRequestedAt = nil }
+        }
         .accessibilityIdentifier("today-app-update")
         .accessibilityValue(update.version)
         .accessibilityHint("向 iOS 发起安装请求")
