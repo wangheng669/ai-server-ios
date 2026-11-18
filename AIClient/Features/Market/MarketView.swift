@@ -3351,12 +3351,21 @@ private struct MarketDetailBreadth: View {
     }
 }
 
+private enum MarketDetailPageStyle {
+    static let canvas = InvestmentDesign.canvas
+    static let card = Color(uiColor: .secondarySystemGroupedBackground)
+    static let accent = InvestmentDesign.accent
+    static let extended = Color(uiColor: .systemIndigo)
+    static let cornerRadius: CGFloat = 14
+}
+
 private struct MarketIndexDetailView: View {
     let symbol: String
     let store: MarketStore
     let showsNavigationBar: Bool
     let onSelectSymbol: (String) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedPeriod: MarketChartPeriod
     @State private var displayedChart: MarketDetailChartRender?
     @State private var presentedValuation: CompanyValuationHistoryRoute?
@@ -3412,45 +3421,47 @@ private struct MarketIndexDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            detailToolbar
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    detailHeader
-                    MarketDetailChart(
-                        selectedPeriod: $selectedPeriod,
-                        symbol: chartSymbol,
-                        store: store,
-                        renderedChart: $displayedChart
-                    )
-                    .id(chartSymbol)
-                    keyData
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        detailHeader
+                        Divider().padding(.horizontal, 14)
+                        MarketDetailChart(
+                            selectedPeriod: $selectedPeriod,
+                            symbol: chartSymbol,
+                            store: store,
+                            renderedChart: $displayedChart
+                        )
+                        .id(chartSymbol)
+                    }
+                    .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
 
+                    keyData
                     if showsCompanyProfile { companyProfile }
                     if isIndex {
                         MarketDetailBreadth(
                             title: isAShareIndex ? "市场温度" : "成分表现",
                             breadth: detailBreadth
                         )
+                        .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
+                        componentStocks
                     }
-                    if isIndex { componentStocks }
                     MarketSummary(quote: quote, isIndex: isIndex)
-                        .padding(.bottom, 18)
-                        .overlay(alignment: .top) { Divider().padding(.horizontal, 18) }
-                    Text("数据来源：\(quote?.dataSource ?? "行情服务") · \(quote?.freshnessLabel ?? "更新中")")
+                    Text(quoteSourceText)
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 22)
-                        .padding(.bottom, 20)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 6)
                 }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 16)
             }
             .scrollIndicators(.hidden)
             .accessibilityIdentifier("market-detail-scroll")
-            detailActions
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .background(MarketStyle.surface)
         }
-        .background(MarketStyle.surface.ignoresSafeArea())
+        .background(MarketDetailPageStyle.canvas.ignoresSafeArea())
         .accessibilityAction(.escape) { dismiss() }
         .toolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -3475,12 +3486,31 @@ private struct MarketIndexDetailView: View {
         }
     }
 
-    private var detailActions: some View {
-        DetailSheetControls(
-            closeLabel: "关闭行情详情",
-            closeIdentifier: "market-detail-close",
-            onClose: dismiss.callAsFunction
-        ) {
+    private var detailToolbar: some View {
+        HStack(spacing: 9) {
+            if let quote {
+                MarketInstrumentLogo(quote: quote, path: companyLogoPath, size: 37)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(quote?.detailPresentationName ?? CoreDescriptor(symbol: symbol).name)
+                    .font(.title3.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .accessibilityIdentifier("market-detail-title")
+                HStack(spacing: 6) {
+                    Text(instrumentSubtitle)
+                    Text("·").accessibilityHidden(true)
+                    Text(quoteStatus)
+                        .foregroundStyle(quote?.hasActiveExtendedSessionQuote == true && quote?.stale != true
+                                         && !store.isShowingCachedSnapshot ? MarketDetailPageStyle.extended : .secondary)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 0)
             if let xueqiuURL {
                 Button {
                     UIApplication.shared.open(xueqiuURL)
@@ -3488,30 +3518,45 @@ private struct MarketIndexDetailView: View {
                     Image("XueqiuMark")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 28, height: 28)
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .frame(width: 25, height: 25)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("在雪球打开\(quote?.presentationName ?? symbol)")
                 .accessibilityIdentifier("market-xueqiu-link")
             }
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭行情详情")
+                .accessibilityIdentifier("market-detail-close")
         }
+        .padding(.leading, 15)
+        .padding(.trailing, 10)
+        .padding(.top, 11)
+        .padding(.bottom, 8)
+    }
+
+    private var instrumentSubtitle: String {
+        let instrument = quote?.detailInstrumentLabel ?? CoreDescriptor(symbol: symbol).code
+        return [instrument, quote?.currency].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var quoteStatus: String {
+        if store.isShowingCachedSnapshot || quote?.stale == true { return "行情待更新" }
+        return quote?.freshnessLabel ?? "更新中"
+    }
+
+    private var quoteSourceText: String {
+        guard let quote else { return "行情数据更新中" }
+        let regular = quote.dataSource ?? "行情服务"
+        if quote.hasActiveExtendedSessionQuote, let source = quote.sessionDataSource, source != regular {
+            return "常规行情来源 \(regular) · \(quote.tradingSession.displayLabel)来源 \(source)"
+        }
+        return "行情来源 \(regular)"
     }
 
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(quote?.detailPresentationName ?? CoreDescriptor(symbol: symbol).name)
-                    .font(.title3.weight(.bold))
-                    .lineLimit(2)
-                    .accessibilityIdentifier("market-detail-title")
-                Text(quote?.detailInstrumentLabel ?? CoreDescriptor(symbol: symbol).code)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .padding(.bottom, 8)
             if let quote, showsStockSessionQuotes {
                 stockSessionHeader(quote)
                 if selectedRange != .day { detailChange }
@@ -3527,13 +3572,9 @@ private struct MarketIndexDetailView: View {
                         detailChange
                     }
                 }
-                HStack(spacing: 6) {
-                    Text(quote?.marketAsOfLabel ?? "行情更新中")
-                    Text("·")
-                    Text(sessionText)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text(quote?.marketAsOfLabel ?? "行情更新中")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 if selectedRange == .day, let quote, quote.hasActiveExtendedSessionQuote {
                     Text("较最近常规收盘 · \(number(quote.price, digits: marketPriceDigits(quote.price, symbol: quote.symbol)))")
                         .font(.caption)
@@ -3541,9 +3582,9 @@ private struct MarketIndexDetailView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 4)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var showsStockSessionQuotes: Bool {
@@ -3564,14 +3605,13 @@ private struct MarketIndexDetailView: View {
                     StockSessionPriceCell(column: column, symbol: quote.symbol, showsTitle: true)
                 }
             }
-            .padding(3)
-            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 10))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("market-detail-stock-sessions")
 
             Text(StockSessionQuotes.sourceNote(indicative: quote.hasIndicativeOvernightPrice))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
             if quote.stale == true || store.isShowingCachedSnapshot {
                 Text(quote.marketAsOfLabel)
                     .font(.caption2)
@@ -3625,45 +3665,41 @@ private struct MarketIndexDetailView: View {
     }
 
     private var keyData: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("行情数据")
-                .font(.headline)
-                .accessibilityIdentifier("market-detail-statistics")
-            if quote?.hasActiveExtendedSessionQuote == true {
-                Text(yearChart.map {
-                    "常规时段数据 · \($0.tradingDate)"
-                } ?? "最近常规交易时段数据")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Grid(horizontalSpacing: 20, verticalSpacing: 12) {
-                GridRow {
-                    metric(isCrypto ? "24H开盘" : "开盘", quote?.openPrice)
-                    metric("最高", quote?.high)
-                }
-                GridRow {
-                    metric("最低", quote?.low)
-                    metric(quote?.hasActiveExtendedSessionQuote == true ? "常规收盘" : "昨收",
-                           quote?.hasActiveExtendedSessionQuote == true ? quote?.price : quote?.previousClose)
-                }
-                GridRow {
-                    metric("成交量", quote?.volume, compact: true)
-                    textMetric("振幅", amplitudeText)
-                }
-                GridRow {
-                    metric("涨跌额", quote?.changeValue)
-                    textMetric("年化波动率", detailVolatilityText)
-                }
-                GridRow {
-                    metric("52周最高", market52WeekHigh(yearChart, symbol: chartSymbol))
-                    metric("52周最低", quote?.week52Low ?? market52WeekLow(yearChart))
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading),
+                            count: dynamicTypeSize.isAccessibilitySize ? 2 : 3)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("行情数据")
+                    .font(.headline)
+                    .accessibilityIdentifier("market-detail-statistics")
+                Spacer(minLength: 0)
+                if quote?.hasActiveExtendedSessionQuote == true {
+                    Text(yearChart.map { "常规盘 · \($0.tradingDate)" } ?? "最近常规盘")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                metric(isCrypto ? "24H开盘" : "开盘", quote?.openPrice)
+                metric("最高", quote?.high)
+                metric("最低", quote?.low)
+                metric(quote?.hasActiveExtendedSessionQuote == true ? "常规收盘" : "昨收",
+                       quote?.hasActiveExtendedSessionQuote == true ? quote?.price : quote?.previousClose)
+                metric("成交量", quote?.volume, compact: true)
+                textMetric("振幅", amplitudeText)
+                metric("涨跌额", quote?.changeValue)
+                metric("52周最高", market52WeekHigh(yearChart, symbol: chartSymbol))
+                metric("52周最低", quote?.week52Low ?? market52WeekLow(yearChart))
+            }
+            Divider()
+            companyMetric("年化波动率", value: detailVolatilityText)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("年化波动率")
+                .accessibilityValue(detailVolatilityText)
+                .accessibilityIdentifier("market-detail-metric-年化波动率")
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
-        .padding(.bottom, 24)
-        .overlay(alignment: .top) { Divider().padding(.horizontal, 20) }
+        .padding(14)
+        .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
     }
 
     private var yearChart: MarketChart? {
@@ -3675,19 +3711,12 @@ private struct MarketIndexDetailView: View {
     }
 
     private var companyProfile: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("公司资料").font(.system(size: 19, weight: .semibold))
-            HStack(alignment: .center, spacing: 12) {
-                if let quote { CompanyLogo(quote: quote, path: companyLogoPath) }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(quote?.presentationName ?? symbol).font(.subheadline.weight(.semibold))
-                    Text("\(quote?.displayCode ?? symbol) · \(companyMarketLabel(symbol))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("公司资料").font(.headline)
+                Spacer()
+                Text(companyMarketLabel(symbol)).font(.caption2).foregroundStyle(.secondary)
             }
-            Divider()
             if let marketCap = quote?.marketCap {
                 companyMetric("总市值", value: compactNumber(marketCap))
             }
@@ -3701,9 +3730,8 @@ private struct MarketIndexDetailView: View {
                 companyMetric("基础数据", value: source)
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 20)
-        .overlay(alignment: .top) { Divider().padding(.horizontal, 18) }
+        .padding(14)
+        .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
     }
 
     private var formattedNetIncome: String {
@@ -3718,15 +3746,16 @@ private struct MarketIndexDetailView: View {
             HStack(spacing: 8) {
                 Text(kind.metricTitle)
                     .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
                 Text(value.map { number($0, digits: 2) } ?? "—")
                     .monospacedDigit()
                     .foregroundStyle(.primary)
-                Spacer()
                 Image(systemName: "chart.xyaxis.line")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(kind.color)
             }
             .font(.footnote)
+            .frame(minHeight: 30)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -3760,20 +3789,18 @@ private struct MarketIndexDetailView: View {
     }
 
     private func textMetric(_ title: String, _ value: String, _ color: Color = .primary) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: true, vertical: false)
-            Spacer(minLength: 0)
             Text(value)
-                .font(.footnote.weight(.medium))
+                .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
         }
-        .frame(maxWidth: .infinity)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(value)
@@ -3844,16 +3871,12 @@ private struct MarketIndexDetailView: View {
             .overlay(alignment: .top) { Divider() }
             .overlay(alignment: .bottom) { Divider() }
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 20)
+        .padding(14)
+        .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
     }
 
-    private var sessionText: String {
-        quote?.tradingSession.displayLabel ?? "行情更新"
-    }
     private var isCrypto: Bool { symbol.hasPrefix("BINANCE:") }
     private var isCommodity: Bool { quote?.instrumentType == "commodity-future" || symbol.hasSuffix("1!") }
-    private var sessionColor: Color { quote?.marketSession == "regular" || quote?.marketSession == "always-open" ? MarketStyle.loss : .secondary }
 
 }
 
@@ -4419,7 +4442,7 @@ private struct MarketDetailChart: View {
     var body: some View {
         let source = sourceSnapshot
         let renderKey = MarketDetailChartRenderKey(symbol: symbol, period: selectedPeriod, snapshotID: source?.id)
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7) {
             periodPicker
             HStack(alignment: .firstTextBaseline) {
                 Text(selectedPointIndex == nil
@@ -4459,9 +4482,7 @@ private struct MarketDetailChart: View {
                 .padding(.trailing, 48)
                 .accessibilityLabel("成交量")
             }
-            Text(chartCaption)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            chartLegend
             if presentation?.lineSegments.contains(where: \.isMissing) == true {
                 Text("虚线表示数据缺口，期间走势未知")
                     .font(.caption)
@@ -4493,8 +4514,8 @@ private struct MarketDetailChart: View {
             .tint(.secondary)
             .accessibilityIdentifier("market-chart-data")
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
         .onChange(of: selectedPeriod) { _, _ in
             selectedPointIndex = nil
         }
@@ -4543,6 +4564,8 @@ private struct MarketDetailChart: View {
                     periodControls
                 }
             }
+            .padding(.horizontal, 3)
+            .background(MarketDetailPageStyle.canvas, in: RoundedRectangle(cornerRadius: 9))
             if showsMinutePeriods {
                 ScrollView(.horizontal) {
                     HStack(spacing: 4) {
@@ -4579,7 +4602,7 @@ private struct MarketDetailChart: View {
             Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
         }
         .font(.footnote.weight(selectedPeriod.isMinute ? .semibold : .medium))
-        .foregroundStyle(selectedPeriod.isMinute ? .primary : .secondary)
+        .foregroundStyle(selectedPeriod.isMinute ? MarketDetailPageStyle.accent : .secondary)
         .frame(maxWidth: .infinity, minHeight: 44)
         .background(periodSelectionBackground(isSelected: selectedPeriod.isMinute))
     }
@@ -4591,7 +4614,7 @@ private struct MarketDetailChart: View {
         } label: {
             Text(period.rawValue)
                 .font(.footnote.weight(selectedPeriod == period ? .semibold : .medium))
-                .foregroundStyle(selectedPeriod == period ? .primary : .secondary)
+                .foregroundStyle(selectedPeriod == period ? MarketDetailPageStyle.accent : .secondary)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(periodSelectionBackground(isSelected: selectedPeriod == period))
                 .contentShape(Rectangle())
@@ -4604,7 +4627,7 @@ private struct MarketDetailChart: View {
 
     private func periodSelectionBackground(isSelected: Bool) -> some View {
         RoundedRectangle(cornerRadius: 8)
-            .fill(isSelected ? Color.secondary.opacity(0.12) : .clear)
+            .fill(isSelected ? MarketDetailPageStyle.accent.opacity(0.11) : .clear)
             .padding(.vertical, 4)
     }
 
@@ -4661,7 +4684,7 @@ private struct MarketDetailChart: View {
             }
             .padding(.trailing, 48)
         }
-        .frame(height: 240)
+        .frame(height: 212)
         .overlay {
             GeometryReader { proxy in
                 Color.clear
@@ -4782,12 +4805,24 @@ private struct MarketDetailChart: View {
         return "\(summary)，起点\(start)，终点\(end)，绘制\(drawnCount)个数据点"
     }
 
-    private var chartCaption: String {
-        let dated = chart.map { "\(chartDisplayTitle) · \($0.tradingDate)" } ?? chartDisplayTitle
-        let sessionText = presentation?.extendedSessionLabel.map { " · \($0)" } ?? ""
-        return presentation?.hasVolume == true
-            ? "\(dated)\(sessionText) · 成交量"
-            : "\(dated)\(sessionText)"
+    private var chartLegend: some View {
+        HStack(spacing: 11) {
+            if let label = presentation?.extendedSessionLabel {
+                HStack(spacing: 4) {
+                    Capsule().fill(chartColor).frame(width: 10, height: 2)
+                    Text("常规盘")
+                }
+                HStack(spacing: 4) {
+                    Capsule().fill(MarketDetailPageStyle.extended).frame(width: 10, height: 2)
+                    Text(label)
+                }
+            }
+            if presentation?.hasVolume == true {
+                Text("成交量")
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
     }
     private var chartColor: Color {
         if selectedRange != .day, let periodReturn = chart?.periodReturn?.percent {
@@ -4981,7 +5016,7 @@ private struct MarketSessionLineChart: View {
                 guard let firstIndex = segment.indices.first,
                       let lastIndex = segment.indices.last else { continue }
                 let firstPoint = points[firstIndex]
-                let color = segment.isMissing ? Color.secondary : segment.isRegular ? regularColor : MarketStyle.purple
+                let color = segment.isMissing ? Color.secondary : segment.isRegular ? regularColor : MarketDetailPageStyle.extended
                 if segment.indices.count == 1 {
                     let position = canvasPoint(firstPoint, at: firstIndex)
                     let dot = CGRect(x: position.x - 2, y: position.y - 2, width: 4, height: 4)
@@ -5173,17 +5208,8 @@ private struct MarketSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(MarketStyle.gain)
-                Text("行情洞察")
-                    .font(.system(size: 19, weight: .semibold))
-                Spacer()
-                Text(quote?.freshnessLabel ?? "更新中")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            Text(quote?.hasActiveExtendedSessionQuote == true ? "常规盘表现" : "行情概况")
+                .font(.headline)
             Text(summary)
                 .font(.subheadline)
                 .lineSpacing(4)
@@ -5192,16 +5218,17 @@ private struct MarketSummary: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
     }
 
     private var summary: String {
         guard let quote else { return "正在获取最新行情。" }
-        let subject = isIndex ? "指数" : "价格"
+        let subject = quote.hasActiveExtendedSessionQuote ? "常规收盘" : isIndex ? "指数" : "价格"
         let direction = quote.changeValue >= 0 ? "高于" : "低于"
         guard let high = quote.high, let low = quote.low, high > low else {
-            return "\(subject)当前\(direction)昨收，最新行情仍在更新。"
+            return "\(subject)\(direction)昨收，最新行情仍在更新。"
         }
         let position = (quote.price - low) / (high - low)
         let positionText: String
@@ -5211,7 +5238,7 @@ private struct MarketSummary: View {
         default: positionText = "区间中部"
         }
         let digits = marketDetailPriceDigits(value: low, price: quote.price, symbol: quote.symbol)
-        return "\(subject)当前\(direction)昨收，日内运行于 \(number(low, digits: digits))–\(number(high, digits: digits))，目前位于\(positionText)。"
+        return "\(subject)\(direction)昨收，日内运行于 \(number(low, digits: digits))–\(number(high, digits: digits))，目前位于\(positionText)。"
     }
 
 
