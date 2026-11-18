@@ -91,6 +91,9 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || 'main' }}
 
+      - name: Verify no-test policy
+        run: ruby ci/check-no-tests.rb
+
       - name: Verify supported Xcode
         run: |
           set -euo pipefail

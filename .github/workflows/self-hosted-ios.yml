@@ -38,6 +38,9 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
+      - name: Verify no-test policy
+        run: ruby ci/check-no-tests.rb
+
       - name: Report build started
         if: inputs.install_on_device
         continue-on-error: true

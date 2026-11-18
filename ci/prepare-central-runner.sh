@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ruby "$(dirname "${BASH_SOURCE[0]}")/check-no-tests.rb"
+
 cache_root=${IOS_BUILD_CACHE_ROOT:-${RUNNER_TOOL_CACHE:-/tmp}/ai-server-ios}
 mkdir -p "$cache_root"
 
