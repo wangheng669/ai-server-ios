@@ -138,7 +138,6 @@ struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
     let bottomInset: CGFloat
     @Binding var selectedSectionKey: String?
-    let onRefresh: () async -> Void
     let onOpenHighlight: (TodayWorldFinalReportOverviewItem) -> Void
     let onOpenSystem: (TodayWorldFinalReportSystem) -> Void
 
@@ -223,7 +222,6 @@ struct TodayBriefOverviewView: View {
                     .id("today-reading-top")
                 }
                 .scrollIndicators(.hidden)
-                .refreshable { await onRefresh() }
                 .accessibilityIdentifier("today-overview")
                 .onChange(of: selectedSectionKey) { _, _ in
                     proxy.scrollTo("today-reading-top", anchor: .top)

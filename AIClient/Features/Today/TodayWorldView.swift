@@ -386,7 +386,6 @@ struct TodayWorldView: View {
             brief: brief,
             bottomInset: bottomChromeHeight,
             selectedSectionKey: $selectedSectionKey,
-            onRefresh: { await store.load(force: true) },
             onOpenHighlight: { item in
                 activeBriefSheet = .highlight(TodayReadingEvent.highlight(item, systems: brief.systems, date: brief.date))
             },
@@ -449,7 +448,6 @@ struct TodayWorldView: View {
             .padding(.horizontal, 20).padding(.top, 6)
             .padding(.bottom, bottomChromeHeight + 12)
         }
-        .refreshable { await store.load(force: true) }
         .accessibilityIdentifier("today-status-scroll")
     }
 
