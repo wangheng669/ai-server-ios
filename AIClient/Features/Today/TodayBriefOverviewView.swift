@@ -417,8 +417,9 @@ struct TodayHeaderView: View {
     @Environment(\.openURL) private var openURL
     @State private var rechargeUnavailable = false
     @State private var updateUnavailable = false
-    @State private var installRequestedAt: Date?
-    @State private var installerAccepted = false
+    @AppStorage("focus.requestedUpdateRelease") private var requestedUpdateRelease = ""
+    @State private var isOpeningInstaller = false
+    @State private var completedUpdateVersion: String?
     @Environment(\.scenePhase) private var scenePhase
     @State private var updateCheckAttempt = 0
     @State private var updateCheckFailed = false
@@ -426,7 +427,10 @@ struct TodayHeaderView: View {
     @State private var showsUpdateCheckError = false
     private struct AvailableUpdate {
         let version: String
+        let build: Int
         let installURL: URL
+
+        var releaseID: String { "\(version)+\(build)" }
     }
 
     private struct PublishedVersion: Decodable {
@@ -469,6 +473,7 @@ struct TodayHeaderView: View {
                 }
                 updateControl
             }
+            installStatus
             ViewThatFits(in: .horizontal) {
                 HStack {
                     rechargeButton
@@ -508,13 +513,20 @@ struct TodayHeaderView: View {
         .alert("无法发起安装", isPresented: $updateUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("iOS 没有接受安装请求。请稍后再点「更新」。")
+            Text("无法打开 iOS 安装入口，请稍后重试。")
         }
         .alert("未能检查更新", isPresented: $showsUpdateCheckError) {
             Button("重试") { updateCheckAttempt += 1 }
             Button("取消", role: .cancel) {}
         } message: {
             Text("无法确认是否有新版本，请检查网络后重试。已确认可用的更新入口会继续保留。")
+        }
+        .onAppear(perform: showCompletedUpdate)
+        .task(id: completedUpdateVersion) {
+            guard completedUpdateVersion != nil else { return }
+            do { try await Task.sleep(for: .seconds(6)) }
+            catch { return }
+            completedUpdateVersion = nil
         }
         .task(id: scenePhase == .active ? updateCheckAttempt : nil, priority: .utility) {
             guard scenePhase == .active else { return }
@@ -523,6 +535,26 @@ struct TodayHeaderView: View {
                 do { try await Task.sleep(for: .seconds(300)) }
                 catch { return }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var installStatus: some View {
+        if let completedUpdateVersion {
+            Label("已更新至 \(completedUpdateVersion)", systemImage: "checkmark.circle.fill")
+                .font(.subheadline)
+                .foregroundStyle(TodayBriefStyle.accent)
+                .accessibilityIdentifier("today-app-update-completed")
+        } else if let update = availableUpdate, requestedUpdateRelease == update.releaseID, !isOpeningInstaller {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("已向 iOS 发起 \(update.version) 安装", systemImage: "arrow.down.to.line")
+                    .font(.subheadline.weight(.medium))
+                Text("在系统弹窗确认安装后，可在主屏幕的焦点图标上查看进度。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("today-app-update-handed-off")
         }
     }
 
@@ -557,14 +589,27 @@ struct TodayHeaderView: View {
         return numbers + Array(repeating: 0, count: 3 - numbers.count) + [build]
     }
 
+    private var installedRelease: (version: String, order: [Int])? {
+        guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              let buildString = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+              let build = Int(buildString), let order = numericVersion(version, build: build) else { return nil }
+        return (version, order)
+    }
+
+    private func showCompletedUpdate() {
+        let parts = requestedUpdateRelease.split(separator: "+", omittingEmptySubsequences: false)
+        guard parts.count == 2, let build = Int(parts[1]),
+              let requested = numericVersion(String(parts[0]), build: build),
+              let installed = installedRelease,
+              !installed.order.lexicographicallyPrecedes(requested) else { return }
+        requestedUpdateRelease = ""
+        completedUpdateVersion = installed.version
+    }
+
     @MainActor
     private func checkForUpdate() async {
         do {
-            guard let entry = installEntryURL,
-                  let localVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-                  let localBuildString = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-                  let localBuild = Int(localBuildString),
-                  let local = numericVersion(localVersion, build: localBuild) else {
+            guard let entry = installEntryURL, let installed = installedRelease else {
                 throw URLError(.badURL)
             }
             let channel = entry.deletingLastPathComponent()
@@ -585,8 +630,8 @@ struct TodayHeaderView: View {
                   let installURL = published.installURL(in: channel) else {
                 throw URLError(.cannotParseResponse)
             }
-            if local.lexicographicallyPrecedes(remote) {
-                availableUpdate = AvailableUpdate(version: published.version, installURL: installURL)
+            if installed.order.lexicographicallyPrecedes(remote) {
+                availableUpdate = AvailableUpdate(version: published.version, build: published.build, installURL: installURL)
             } else {
                 availableUpdate = nil
             }
@@ -600,28 +645,25 @@ struct TodayHeaderView: View {
 
     private func updateButton(_ update: AvailableUpdate) -> some View {
         Button {
-            guard installRequestedAt == nil else { return }
-            let requestedAt = Date()
-            installerAccepted = false
-            installRequestedAt = requestedAt
-            UIApplication.shared.open(update.installURL) { accepted in
-                guard installRequestedAt == requestedAt else { return }
-                if accepted {
-                    installerAccepted = true
+            guard !isOpeningInstaller else { return }
+            isOpeningInstaller = true
+            UIApplication.shared.open(update.installURL) { opened in
+                isOpeningInstaller = false
+                if opened {
+                    requestedUpdateRelease = update.releaseID
                 } else {
-                    installRequestedAt = nil
                     updateUnavailable = true
                 }
             }
         } label: {
             HStack(spacing: 4) {
-                if installRequestedAt == nil {
-                    Label("更新", systemImage: "arrow.down.circle")
-                } else if installerAccepted {
-                    Label("已请求安装", systemImage: "checkmark.circle")
-                } else {
+                if isOpeningInstaller {
                     ProgressView().controlSize(.small)
-                    Text("请求安装中")
+                    Text("发起中")
+                } else if requestedUpdateRelease == update.releaseID {
+                    Label("重新发起", systemImage: "arrow.clockwise")
+                } else {
+                    Label("更新", systemImage: "arrow.down.circle")
                 }
             }
                 .font(.subheadline.weight(.semibold))
@@ -634,14 +676,7 @@ struct TodayHeaderView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
-        .disabled(installRequestedAt != nil)
-        .task(id: installRequestedAt) {
-            guard let started = installRequestedAt else { return }
-            do {
-                try await Task.sleep(for: .seconds(max(0, started.addingTimeInterval(60).timeIntervalSinceNow)))
-            } catch { return }
-            if installRequestedAt == started { installRequestedAt = nil }
-        }
+        .disabled(isOpeningInstaller)
         .accessibilityIdentifier("today-app-update")
         .accessibilityValue(update.version)
         .accessibilityHint("向 iOS 发起安装请求")
