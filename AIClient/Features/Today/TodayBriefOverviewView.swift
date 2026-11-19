@@ -11,7 +11,6 @@ enum TodayBriefStyle {
             : UIColor(red: 0.22, green: 0.36, blue: 0.27, alpha: 1)
     })
     static let rule = Color(uiColor: .separator).opacity(0.25)
-    static let readingSurface = accent.opacity(0.065)
 }
 
 enum TodayOverviewSelection {
@@ -186,7 +185,6 @@ struct TodayBriefOverviewView: View {
                         ForEach(Array(brief.watchItems.enumerated()), id: \.offset) { index, event in
                             TodayBriefEventContent(event: event)
                                 .padding(16)
-                                .background(TodayBriefStyle.readingSurface, in: RoundedRectangle(cornerRadius: 16))
                                 .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(TodayBriefStyle.rule) }
                                 .accessibilityIdentifier("today-watch-\(index)")
                         }
@@ -246,23 +244,6 @@ private struct TodayBriefCarousel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("本期要闻").font(.headline).accessibilityAddTraits(.isHeader)
-                Spacer()
-                if events.count > 1 {
-                    pageButton("chevron.left", title: "上一条", offset: -1)
-                    Text("\(index + 1) / \(events.count)")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                        .accessibilityLabel("第 \(index + 1) 条，共 \(events.count) 条")
-                        .accessibilityIdentifier("today-highlight-position")
-                    pageButton("chevron.right", title: "下一条", offset: 1)
-                }
-            }
-            .frame(minHeight: 44)
-            .padding(.leading, 16)
-            .padding(.trailing, 4)
-            TodayBriefStyle.rule.frame(height: 1)
-
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(Array(events.enumerated()), id: \.offset) { position, event in
@@ -285,33 +266,28 @@ private struct TodayBriefCarousel: View {
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $selectedIndex, anchor: .leading)
             .accessibilityIdentifier("today-highlight-carousel")
+
+            if events.count > 1 {
+                Text("\(index + 1) / \(events.count)")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .accessibilityLabel("要闻页码")
+                    .accessibilityValue("第 \(index + 1) 条，共 \(events.count) 条")
+                    .accessibilityAdjustableAction { direction in
+                        let target = index + (direction == .increment ? 1 : -1)
+                        guard events.indices.contains(target) else { return }
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                            selectedIndex = target
+                        }
+                    }
+                    .accessibilityIdentifier("today-highlight-position")
+            }
         }
-        .background(TodayBriefStyle.readingSurface)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(TodayBriefStyle.rule).allowsHitTesting(false) }
         .onChange(of: events.count) { _, count in
             if index >= count { selectedIndex = 0 }
         }
-    }
-
-    private func pageButton(_ icon: String, title: String, offset: Int) -> some View {
-        let target = index + offset
-        return Button {
-            guard events.indices.contains(target) else { return }
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
-                selectedIndex = target
-            }
-        } label: {
-            Image(systemName: icon)
-                .font(.subheadline.weight(.semibold))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(TodayBriefStyle.accent)
-        .disabled(!events.indices.contains(target))
-        .opacity(events.indices.contains(target) ? 1 : 0.4)
-        .accessibilityLabel(title)
     }
 }
 
