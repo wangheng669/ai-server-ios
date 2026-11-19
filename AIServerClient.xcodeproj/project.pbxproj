@@ -744,10 +744,12 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 9;
+				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NotificationContentExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = ("$(inherited)", "-framework", UserNotificationsUI);
 				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.NotificationContentExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -769,6 +771,7 @@
 				INFOPLIST_FILE = NotificationContentExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = ("$(inherited)", "-framework", UserNotificationsUI);
 				PRODUCT_BUNDLE_IDENTIFIER = com.wangheng.aiserverclient.NotificationContentExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
