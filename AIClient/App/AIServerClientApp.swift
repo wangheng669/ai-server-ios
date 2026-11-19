@@ -682,6 +682,14 @@ private struct EditorialRootView: View {
             guard scenePhase == .active else { return }
             await pageStores.feed.prepareXueqiuForOpening()
         }
+        .task(id: scenePhase == .active, priority: .utility) {
+            guard scenePhase == .active, selectedTab != .investment else { return }
+            await marketStore.preloadDashboard()
+            guard !Task.isCancelled, selectedTab != .investment else { return }
+            let stocks = ResearchHomeContent.stocks(in: marketStore.dashboard, region: .unitedStates)
+            let symbols = ResearchHomeContent.afterHoursSymbols(for: stocks)
+            await marketStore.preloadListCharts(symbols: marketStore.missingAfterHoursSymbols(symbols))
+        }
         .task(id: NotificationNavigationTaskID(
             requestID: personPushNavigation.request?.id,
             canPresent: scenePhase != .background,

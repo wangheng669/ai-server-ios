@@ -119,6 +119,13 @@ extension MarketChart {
 }
 
 extension MarketStore {
+    func missingAfterHoursSymbols(_ symbols: [String]) -> [String] {
+        symbols.filter { symbol in
+            guard let quote = quote(symbol: symbol) else { return false }
+            return dayChartForSessionQuotes(symbol: symbol)?.stockAfterHoursEnd(for: quote) == nil
+        }
+    }
+
     func dayChartForSessionQuotes(symbol: String) -> MarketChart? {
         guard let snapshot = chartSnapshot(symbol: symbol, range: .day) else { return nil }
         if snapshot.isRestored {

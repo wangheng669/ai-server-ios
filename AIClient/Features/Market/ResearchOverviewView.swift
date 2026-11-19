@@ -8,6 +8,16 @@ enum ResearchHomeContent {
     static let primaryMarkets = [("标普500", "^GSPC"), ("沪深300", "000300.SS"), ("日经225", "^N225")]
     static let sectors = [("半导体", "NVDA"), ("软件云", "MSFT"), ("能源", "SHEL"), ("消费", "AMZN")]
     static var chartSymbols: [String] { primaryMarkets.map(\.1) }
+
+    static func stocks(in dashboard: MarketDashboard?, region: MarketRegion) -> [MarketQuote] {
+        Array((dashboard?.componentsByRegion[region.dashboardID] ?? []).prefix(4))
+    }
+
+    static func afterHoursSymbols(for stocks: [MarketQuote]) -> [String] {
+        stocks.filter {
+            $0.tradingSession == .overnight || $0.tradingSession == .premarket || $0.tradingSession == .closed
+        }.map(\.symbol)
+    }
 }
 
 private enum ResearchStyle {
@@ -124,15 +134,12 @@ private struct ResearchOverviewView: View {
     private var chartSymbols: [String] { ResearchHomeContent.chartSymbols }
     private let stockRegions: [MarketRegion] = [.unitedStates, .china, .japan, .korea, .europe]
     private var stocks: [MarketQuote] {
-        // Keep the server's existing membership and ordering, with no synthetic quotes.
-        Array((store.dashboard?.componentsByRegion[stockRegion.dashboardID] ?? []).prefix(4))
+        ResearchHomeContent.stocks(in: store.dashboard, region: stockRegion)
     }
 
     private var afterHoursSymbols: [String] {
         guard rootTabIsActive, scenePhase == .active, stockRegion == .unitedStates else { return [] }
-        return stocks.filter {
-            $0.tradingSession == .overnight || $0.tradingSession == .premarket || $0.tradingSession == .closed
-        }.map(\.symbol)
+        return ResearchHomeContent.afterHoursSymbols(for: stocks)
     }
 
     var body: some View {
@@ -166,18 +173,15 @@ private struct ResearchOverviewView: View {
             let symbols = afterHoursSymbols
             guard !symbols.isEmpty else { return }
             while !Task.isCancelled {
-                let missing = symbols.filter { symbol in
-                    guard let quote = store.quote(symbol: symbol) else { return false }
-                    return store.dayChartForSessionQuotes(symbol: symbol)?.stockAfterHoursEnd(for: quote) == nil
-                }
+                let missing = store.missingAfterHoursSymbols(symbols)
                 guard !missing.isEmpty else { return }
                 await store.preloadListCharts(symbols: missing)
                 do { try await Task.sleep(for: .seconds(60)) }
                 catch { return }
             }
         }
-        .task(id: "\(rootTabIsActive):\(scenePhase)") {
-            guard rootTabIsActive, scenePhase == .active else { return }
+        .task(id: rootTabIsActive && scenePhase == .active && store.dashboard != nil) {
+            guard rootTabIsActive, scenePhase == .active, store.dashboard != nil else { return }
             while !Task.isCancelled {
                 await store.preloadListCharts(symbols: chartSymbols)
                 do { try await Task.sleep(for: .seconds(30)) }
@@ -440,9 +444,12 @@ private struct ResearchOverviewView: View {
 
     private var marketDate: String {
         // Markets close in different time zones; identify the displayed snapshot as an update.
-        guard let timestamp = store.quote(symbol: "^GSPC")?.timestamp else { return "指数与股票" }
+        let isCached = store.isShowingCachedSnapshot
+        guard let timestamp = store.quote(symbol: "^GSPC")?.timestamp else {
+            return isCached ? "缓存行情" : "指数与股票"
+        }
         let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)
-        return Self.marketDateFormatter.string(from: date) + "更新"
+        return Self.marketDateFormatter.string(from: date) + (isCached ? "缓存行情" : "更新")
     }
 }
 
