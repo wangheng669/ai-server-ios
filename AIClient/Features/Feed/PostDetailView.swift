@@ -115,10 +115,7 @@ struct PostDetailView: View {
     @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
     @State private var weiboImageSelection: ImageGallerySelection?
-    @State private var speechPlayer: AVPlayer?
-    @State private var isSpeechLoading = false
-    @State private var isSpeechPlaying = false
-    @State private var speechErrorMessage: String?
+    @State private var xueqiuOpenFailed = false
     @State private var presentedArticleLink: InAppBrowserDestination?
     @Environment(\.dismiss) private var dismiss
 
@@ -228,42 +225,21 @@ struct PostDetailView: View {
             await refreshServerContextsIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
-            if notification.object as? AVPlayerItem === speechPlayer?.currentItem {
-                speechPlayer = nil
-                isSpeechPlaying = false
-                speechErrorMessage = "音频播放失败，请稍后重试"
-                return
-            }
             guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
             player = nil
             videoPlaybackFailed = true
             isVideoReady = false
         }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
-            guard notification.object as? AVPlayerItem === speechPlayer?.currentItem else { return }
-            speechPlayer = nil
-            isSpeechPlaying = false
-        }
         .onDisappear {
             player?.pause()
-            speechPlayer?.pause()
             bilibiliPlaybackRetryTask?.cancel()
             bilibiliInterpretationTask?.cancel()
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if let speechErrorMessage {
-                InlineActionNotice(message: speechErrorMessage, retry: {
-                    Task { await toggleXueqiuSpeech() }
-                }) { self.speechErrorMessage = nil }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-            }
         }
     }
 
     private var sheetCloseBottomPadding: CGFloat {
         post.isWeiboRSS || isWeChatArticle
-            || ["知乎", "Truth", "雪球"].contains(post.sourceName) ? 72 : 16
+            || ["知乎", "Truth"].contains(post.sourceName) ? 72 : 16
     }
 
     private var hidesNavigationBar: Bool {
@@ -1063,7 +1039,11 @@ struct PostDetailView: View {
             openArticleLink(url)
             return .handled
         })
-        .safeAreaInset(edge: .bottom, spacing: 0) { xueqiuDetailBottomBar }
+        .alert("无法打开雪球 App", isPresented: $xueqiuOpenFailed) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("请确认已安装雪球 App。")
+        }
     }
 
     private var xueqiuDetailAuthor: some View {
@@ -1088,6 +1068,26 @@ struct PostDetailView: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let link = post.linkURL, link.scheme == "https", link.host()?.lowercased() == "xueqiu.com" {
+                Button {
+                    Task {
+                        let opened = await UIApplication.shared.open(link, options: [.universalLinksOnly: true])
+                        xueqiuOpenFailed = !opened
+                    }
+                } label: {
+                    Image("XueqiuMark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 32, height: 32)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("在雪球 App 中打开原帖")
+                .accessibilityIdentifier("xueqiu-open-original-app")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1098,54 +1098,6 @@ struct PostDetailView: View {
             return date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour().minute())
         } ?? post.formattedTime ?? ""
         return time.isEmpty ? "来自雪球" : "修改于 \(time) · 来自雪球"
-    }
-
-    private var xueqiuDetailBottomBar: some View {
-        Button { Task { await toggleXueqiuSpeech() } } label: {
-            Label(isSpeechLoading ? "准备朗读" : isSpeechPlaying ? "暂停朗读" : "朗读",
-                  systemImage: isSpeechPlaying ? "pause.fill" : "speaker.wave.2")
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .disabled(isSpeechLoading)
-        .accessibilityLabel(isSpeechPlaying ? "暂停朗读" : "朗读正文")
-        .font(.system(size: 13, weight: .medium))
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider().opacity(0.55) }
-    }
-
-    @MainActor
-    private func toggleXueqiuSpeech() async {
-        if let speechPlayer {
-            if speechPlayer.timeControlStatus == .playing {
-                speechPlayer.pause()
-                isSpeechPlaying = false
-            } else {
-                speechPlayer.play()
-                isSpeechPlaying = true
-            }
-            return
-        }
-        isSpeechLoading = true
-        speechErrorMessage = nil
-        defer { isSpeechLoading = false }
-        do {
-            let url = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .synthesizeSpeech(text: post.xueqiuBodyContent)
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-            try? AVAudioSession.sharedInstance().setActive(true)
-            let newPlayer = AVPlayer(url: url)
-            speechPlayer = newPlayer
-            newPlayer.play()
-            isSpeechPlaying = true
-        } catch is CancellationError {
-            return
-        } catch {
-            speechErrorMessage = NetworkErrorPresentation.message(for: error)
-        }
     }
 
     private func xueqiuRichText(_ value: String, links: [XueqiuTextLink] = []) -> Text {
