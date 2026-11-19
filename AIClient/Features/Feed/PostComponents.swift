@@ -1330,9 +1330,9 @@ actor ImageLoader {
         await avatarWarmup
     }
 
-    static func prefetchAvatars(_ urls: [URL]) async {
+    static func prefetchAvatars(_ urls: [URL], maximumCount: Int = 12) async {
         var seen = Set<URL>()
-        let requests = urls.filter { seen.insert($0).inserted }.prefix(12).map {
+        let requests = urls.filter { seen.insert($0).inserted }.prefix(maximumCount).map {
             PrefetchRequest(url: $0, width: 44, height: 44, prefersCompactXAvatar: true)
         }
         await prefetch(requests, maximumConcurrentLoads: 4)

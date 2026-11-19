@@ -91,6 +91,7 @@ struct TodayBriefProjection {
     let watchItems: [TodayWorldFinalReportOverviewItem]
     let sections: [Section]
     let systems: [TodayWorldFinalReportSystem]
+    let avatarURLs: [URL]
     let displayDate: String
     let overviewHeadline: String?
     private let highlightPostIDs: [Int]
@@ -106,7 +107,9 @@ struct TodayBriefProjection {
         self.highlights = highlights
         watchItems = report.overview.watchItems
         self.systems = systems
-        sections = report.sections.map { Section($0, overview: report.overview) }
+        let sections = report.sections.map { Section($0, overview: report.overview) }
+        self.sections = sections
+        avatarURLs = sections.flatMap(\.supplementarySystems).compactMap { TodaySystemAvatar.remoteURL(for: $0) }
         highlightPostIDs = highlights.flatMap(\.postIDs)
         let headline = report.overview.headline
         let canonicalHeadline = TodayReadingEvent.canonical(headline)
@@ -744,7 +747,7 @@ struct TodaySystemAvatar: View {
     let system: TodayWorldFinalReportSystem
     let size: CGFloat
 
-    private static let companyAssets: [String: String] = [
+    nonisolated private static let companyAssets: [String: String] = [
         "altman": "TodayCompanyOpenAI",
         "musk": "TodayCompanyXAI",
         "nadella": "TodayCompanyMicrosoft",
@@ -762,6 +765,11 @@ struct TodaySystemAvatar: View {
         "quiver-quantitative": "TodayCompanyQuiverQuantitative"
     ]
 
+    nonisolated static func remoteURL(for system: TodayWorldFinalReportSystem) -> URL? {
+        guard companyAssets[system.systemKey] == nil else { return nil }
+        return system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL)
+    }
+
     var body: some View {
         if let asset = Self.companyAssets[system.systemKey] {
             Image(asset)
@@ -771,7 +779,7 @@ struct TodaySystemAvatar: View {
                 .accessibilityLabel("\(todayBriefSystemName(system.systemName)) 公司标识")
         } else {
             AvatarView(
-                url: system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL),
+                url: Self.remoteURL(for: system),
                 name: system.systemName,
                 size: size
             )

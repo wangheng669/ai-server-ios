@@ -307,6 +307,7 @@ struct TodayWorldView: View {
 
     var body: some View {
         let preparation = PreparationRequest(ids: preparationIDs, baseURL: ServerConfiguration.currentURL)
+        let avatarURLs = rootTabIsActive && scenePhase == .active ? (store.brief?.avatarURLs ?? []) : []
         NavigationStack {
             VStack(spacing: 0) {
                 TodayHeaderView(
@@ -353,6 +354,9 @@ struct TodayWorldView: View {
         }
         .task(id: preparation, priority: .utility) {
             await TodayChinesePreparation.preloadPosts(ids: preparation.ids, baseURL: preparation.baseURL)
+        }
+        .task(id: avatarURLs, priority: .userInitiated) {
+            await ImageLoader.prefetchAvatars(avatarURLs, maximumCount: avatarURLs.count)
         }
         .task(id: rootTabIsActive && scenePhase == .active) {
             guard rootTabIsActive, scenePhase == .active else { return }
