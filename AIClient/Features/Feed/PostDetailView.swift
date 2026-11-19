@@ -2566,16 +2566,24 @@ struct PostDetailView: View {
         }
     }
 
+    private nonisolated static let rssPreviewPageChrome = #"(?is)<!doctype\s+html\b|<(?:html|head|body)(?=[\s>])|<link\b(?:[^"'<>]|"[^"]*"|'[^']*')*?\srel\s*=\s*(?:"stylesheet"|'stylesheet'|stylesheet(?=[\s/>]))"#
+
     private func loadRSSOriginalArticle(using client: APIClient) async {
         // Read the original article only. This endpoint does not enqueue a cloud translation.
         guard let link = post.linkURL,
               let payload = try? await client.fetchArticlePreview(url: link, preferRemote: true).data,
               !Task.isCancelled else { return }
-        let html = payload.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !html.isEmpty, payload.textContent.count >= post.originalDisplayContent.count {
-            rssOriginalArticleHTML = html
-        }
-        // A failed/empty preview leaves the complete stored RSS content and original link available.
+        let article = post
+        let html = await Task.detached(priority: .userInitiated) { () -> String? in
+            let content = payload.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Page chrome identifies a website shell that cannot replace the stored article.
+            guard !content.isEmpty,
+                  content.range(of: Self.rssPreviewPageChrome, options: .regularExpression) == nil,
+                  payload.textContent.count >= article.originalDisplayContent.count else { return nil }
+            return content
+        }.value
+        guard let html, !Task.isCancelled else { return }
+        rssOriginalArticleHTML = html
     }
 
     private func loadQbitAIArticle(using client: APIClient) async {
