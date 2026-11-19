@@ -91,6 +91,7 @@ struct PostDetailView: View {
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
     @State private var rssOriginalArticleHTML: String?
+    @State private var storedRSSArticleBlocks: [RSSArticleBlock]?
     @State private var qbitAIArticleBlocks: [RSSArticleBlock]?
     @State private var isLoadingQbitAIArticle: Bool
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
@@ -146,6 +147,7 @@ struct PostDetailView: View {
     }
 
     var body: some View {
+        let readerInput = rssReaderInput
         Group {
             if post.isNewYorkTimes { newYorkTimesDetail }
             else if isWeChatArticle { weChatDetail }
@@ -223,6 +225,14 @@ struct PostDetailView: View {
         }
         .task(id: "\(post.id)-\(post.needsXServerContextRefresh)") {
             await refreshServerContextsIfNeeded()
+        }
+        .task(id: readerInput, priority: .userInitiated) {
+            guard let readerInput else { return }
+            let blocks = await Task.detached(priority: .userInitiated) {
+                readerInput.post.rssArticleBlocks(overridingContent: readerInput.originalHTML)
+            }.value
+            guard !Task.isCancelled else { return }
+            storedRSSArticleBlocks = blocks
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
             guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
@@ -437,10 +447,13 @@ struct PostDetailView: View {
                     Divider()
                         .padding(.vertical, 22)
 
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(Array(post.rssArticleBlocks(overridingContent: rssOriginalArticleHTML).enumerated()), id: \.offset) { _, block in
-                            rssArticleBlock(block, isWeChat: false)
+                    if let storedRSSArticleBlocks {
+                        ForEach(storedRSSArticleBlocks.indices, id: \.self) { index in
+                            rssArticleBlock(storedRSSArticleBlocks[index], isWeChat: false)
+                                .padding(.top, index == 0 ? 0 : 24)
                         }
+                    } else {
+                        rssBodyLoading
                     }
                 }
                 .padding(.horizontal, 22)
@@ -500,21 +513,13 @@ struct PostDetailView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 28)
 
-                    if isLoadingQbitAIArticle {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("正在加载完整文章…")
-                                .foregroundStyle(.secondary)
+                    if !isLoadingQbitAIArticle, let blocks = qbitAIArticleBlocks ?? storedRSSArticleBlocks {
+                        ForEach(blocks.indices, id: \.self) { index in
+                            rssArticleBlock(blocks[index], isWeChat: true)
+                                .padding(.top, index == 0 ? 0 : 20)
                         }
-                        .font(.system(size: 15))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 28)
                     } else {
-                        LazyVStack(alignment: .leading, spacing: 20) {
-                            ForEach(Array(weChatArticleBlocks.enumerated()), id: \.offset) { _, block in
-                                rssArticleBlock(block, isWeChat: true)
-                            }
-                        }
+                        rssBodyLoading
                     }
 
                 }
@@ -526,8 +531,24 @@ struct PostDetailView: View {
         .background(Color(uiColor: .systemBackground))
     }
 
-    private var weChatArticleBlocks: [RSSArticleBlock] {
-        qbitAIArticleBlocks ?? post.rssArticleBlocks
+    private struct RSSReaderInput: Equatable {
+        let post: Post
+        let originalHTML: String?
+    }
+
+    private var rssReaderInput: RSSReaderInput? {
+        guard isGenericRSSDetail || isWeChatArticle else { return nil }
+        return RSSReaderInput(post: post, originalHTML: rssOriginalArticleHTML)
+    }
+
+    private var rssBodyLoading: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("正在加载完整文章…").foregroundStyle(.secondary)
+        }
+        .font(.system(size: 15))
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 28)
     }
 
     @ViewBuilder
@@ -956,16 +977,17 @@ struct PostDetailView: View {
     }
 
     private var xueqiuDetail: some View {
-        VStack(spacing: 0) {
+        let presentation = post.xueqiuPresentation
+        return VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: 22) {
                     xueqiuDetailAuthor
 
-                    if let emoji = post.xueqiuStandaloneInlineEmoji {
+                    if let emoji = presentation.standaloneInlineEmoji {
                         InlineEmojiImage(emoji: emoji)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if post.xueqiuBodyInlineEmojis.isEmpty {
-                        xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
+                    } else if presentation.bodyInlineEmojis.isEmpty {
+                        xueqiuRichText(presentation.bodyContent, links: presentation.bodyLinks)
                             .font(.system(size: 20))
                             .lineSpacing(10)
                             .textSelection(.enabled)
@@ -973,37 +995,37 @@ struct PostDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         InlineEmojiText(
-                            text: post.xueqiuBodyContent,
-                            emojis: post.xueqiuBodyInlineEmojis,
+                            text: presentation.bodyContent,
+                            emojis: presentation.bodyInlineEmojis,
                             fontSize: 20,
                             lineSpacing: 10
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if !post.xueqiuBodyImageURLs.isEmpty {
+                    if !presentation.bodyImageURLs.isEmpty {
                         PostMediaGrid(
                             post: post,
-                            imageURLs: post.xueqiuBodyImageURLs,
+                            imageURLs: presentation.bodyImageURLs,
                             singleImageMaxHeight: 620,
                             availableWidth: UIScreen.main.bounds.width - 32,
                             cornerRadius: 8
                         )
                     }
 
-                    if let quoteBody = post.xueqiuQuoteBody {
+                    if let quoteBody = presentation.quoteBody {
                         VStack(alignment: .leading, spacing: 14) {
-                            (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
-                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
+                            (Text(presentation.quoteAuthor.map { "@\($0)： " } ?? "")
+                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: presentation.quoteLinks))
                                 .font(.system(size: 16.5))
                                 .lineSpacing(7)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                            if !post.xueqiuQuoteImageURLs.isEmpty {
+                            if !presentation.quoteImageURLs.isEmpty {
                                 PostMediaGrid(
                                     post: post,
-                                    imageURLs: post.xueqiuQuoteImageURLs,
+                                    imageURLs: presentation.quoteImageURLs,
                                     singleImageMaxHeight: 520,
                                     availableWidth: UIScreen.main.bounds.width - 60,
                                     cornerRadius: 7
@@ -1016,7 +1038,7 @@ struct PostDetailView: View {
                         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
                     }
 
-                    if !post.videoURLs.isEmpty || !post.xueqiuUnplacedImageURLs.isEmpty {
+                    if !post.videoURLs.isEmpty || !presentation.unplacedImageURLs.isEmpty {
                         xMedia
                     }
 
@@ -1100,10 +1122,12 @@ struct PostDetailView: View {
         return time.isEmpty ? "来自雪球" : "修改于 \(time) · 来自雪球"
     }
 
+    private static let xueqiuMentionPattern = try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
+
     private func xueqiuRichText(_ value: String, links: [XueqiuTextLink] = []) -> Text {
         let nsValue = value as NSString
-        let matches = (try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
-            .matches(in: value, range: NSRange(location: 0, length: nsValue.length))) ?? []
+        let matches = Self.xueqiuMentionPattern?
+            .matches(in: value, range: NSRange(location: 0, length: nsValue.length)) ?? []
         var attributed = AttributedString(value)
         for match in matches {
             guard let stringRange = Range(match.range, in: value),
@@ -2562,8 +2586,14 @@ struct PostDetailView: View {
         let html = payload.contentZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? payload.content
             : payload.contentZH
-        guard let articleHTML = QbitAIArticleParser.extractBodyHTML(from: html) else { return }
-        qbitAIArticleBlocks = post.rssArticleBlocks(overridingContent: articleHTML)
+        let article = post
+        let blocks = await Task.detached(priority: .userInitiated) {
+            QbitAIArticleParser.extractBodyHTML(from: html).map {
+                article.rssArticleBlocks(overridingContent: $0)
+            }
+        }.value
+        guard !Task.isCancelled else { return }
+        qbitAIArticleBlocks = blocks
     }
 
     nonisolated private static func containsHanCharacters(_ value: String) -> Bool {

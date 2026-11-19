@@ -2458,27 +2458,13 @@ private struct KnowledgeBookCover: View {
         .accessibilityHidden(true)
     }
 
-    @ViewBuilder
     private var coverArtwork: some View {
-        if let coverURL = book.coverURL {
-            AsyncImage(url: coverURL) { phase in
-                switch phase {
-                case let .success(image):
-                    image.resizable().scaledToFill()
-                default:
-                    LinearGradient(
-                        colors: palette,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                }
+        KnowledgeHomeImage(url: book.coverURL, size: CGSize(width: 92, height: 132)) { image in
+            if let image {
+                image.resizable().scaledToFill()
+            } else {
+                LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
             }
-        } else {
-            LinearGradient(
-                colors: palette,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
         }
     }
 
@@ -2789,10 +2775,16 @@ private struct LearningTopicRow: View {
 
 private struct LearningTopicThumbnail: View {
     let topic: LearningTopic
-    @State private var image: UIImage?
-    @State private var finishedLoading = false
+    @State private var result: (request: ImageLoader.Request, image: UIImage?)?
 
     var body: some View {
+        let size = CGSize(width: 84, height: 58)
+        let request = topic.imageURL(topic.thumbnailURLValue).map {
+            ImageLoader.request(for: $0, targetSize: size, scale: UIScreen.main.scale)
+        }
+        let finished = result?.request == request
+        let image = (finished ? result?.image : nil)
+            ?? request.flatMap { ImageLoader.shared.cachedImage(for: $0) }
         Group {
             if let image {
                 Image(uiImage: image)
@@ -2801,7 +2793,7 @@ private struct LearningTopicThumbnail: View {
             } else {
                 fallback
                     .overlay {
-                        if !finishedLoading {
+                        if request != nil, !finished {
                             ProgressView().controlSize(.mini)
                         }
                     }
@@ -2810,40 +2802,36 @@ private struct LearningTopicThumbnail: View {
         .frame(width: 84, height: 58)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityHidden(true)
-        .task(id: topic.thumbnailURLValue) {
-            await loadImage()
+        .task(id: request) {
+            await loadImage(request)
         }
     }
 
-    private func loadImage() async {
-        image = nil
-        finishedLoading = false
-        guard let url = topic.imageURL(topic.thumbnailURLValue) else {
-            finishedLoading = true
+    private func loadImage(_ request: ImageLoader.Request?) async {
+        guard let request else {
             learningImageLogger.error("Missing thumbnail URL for topic \(topic.id, privacy: .public)")
             return
         }
+        guard result?.request != request || result?.image == nil,
+              ImageLoader.shared.cachedImage(for: request) == nil else { return }
 
         for attempt in 1...3 {
-            if let loadedImage = await ImageLoader.load(
-                url,
-                targetSize: CGSize(width: 84, height: 58)
-            ) {
-                image = loadedImage
-                finishedLoading = true
+            let loadedImage = await ImageLoader.shared.image(for: request)
+            guard !Task.isCancelled else { return }
+            if let loadedImage {
+                result = (request, loadedImage)
                 return
             }
 
-            guard !Task.isCancelled else { return }
             if attempt < 3 {
                 try? await Task.sleep(for: .milliseconds(attempt * 350))
                 guard !Task.isCancelled else { return }
             }
         }
 
-        finishedLoading = true
+        result = (request, nil)
         learningImageLogger.error(
-            "Failed to load thumbnail for topic \(topic.id, privacy: .public): \(url.absoluteString, privacy: .public)"
+            "Failed to load thumbnail for topic \(topic.id, privacy: .public): \(request.url.absoluteString, privacy: .public)"
         )
     }
 
@@ -2932,14 +2920,19 @@ private struct KnowledgeHomeImage<Content: View>: View {
     let url: URL?
     let size: CGSize
     @ViewBuilder let content: (Image?) -> Content
-    @State private var image: UIImage?
+    @State private var result: (request: ImageLoader.Request, image: UIImage)?
 
     var body: some View {
+        let request = url.map { ImageLoader.request(for: $0, targetSize: size, scale: UIScreen.main.scale) }
+        let image = result?.request == request
+            ? result?.image
+            : request.flatMap { ImageLoader.shared.cachedImage(for: $0) }
         content(image.map { Image(uiImage: $0) })
-            .task(id: url) {
-                let loaded = await ImageLoader.load(url, targetSize: size)
-                guard !Task.isCancelled else { return }
-                image = loaded
+            .task(id: request) {
+                guard let request, result?.request != request else { return }
+                guard let loaded = await ImageLoader.shared.image(for: request),
+                      !Task.isCancelled else { return }
+                result = (request, loaded)
             }
     }
 }

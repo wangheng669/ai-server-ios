@@ -223,6 +223,7 @@ private struct ResearchOverviewView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 ResearchSparkline(values: store.listTrendValues(for: quote), color: color)
+                    .equatable()
                     .frame(maxWidth: .infinity).frame(height: 24)
 
                 VStack(alignment: .trailing, spacing: 2) {
@@ -430,14 +431,18 @@ private struct ResearchOverviewView: View {
 
 
 
+    private static let marketDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter
+    }()
+
     private var marketDate: String {
         // Markets close in different time zones; identify the displayed snapshot as an update.
         guard let timestamp = store.quote(symbol: "^GSPC")?.timestamp else { return "指数与股票" }
         let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)
-        let display = DateFormatter()
-        display.locale = Locale(identifier: "zh_CN")
-        display.dateFormat = "M月d日"
-        return display.string(from: date) + "更新"
+        return Self.marketDateFormatter.string(from: date) + "更新"
     }
 }
 
@@ -548,7 +553,7 @@ private struct ResearchStockQuotes: View {
 
 }
 
-private struct ResearchSparkline: View {
+private struct ResearchSparkline: View, Equatable {
     let values: [Double]
     let color: Color
 

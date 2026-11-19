@@ -136,7 +136,6 @@ private struct PeopleSwimlaneExplorer: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchIsFocused: Bool
-    @GestureState private var focusTranslation: CGSize = .zero
     @State private var focusedPersonID: String?
     @State private var searchText = ""
     @State private var searchSource: PeopleSearchSource = .all
@@ -194,6 +193,7 @@ private struct PeopleSwimlaneExplorer: View {
     }
 
     var body: some View {
+        let lanes = lanes
         ZStack(alignment: .top) {
             Color(uiColor: .systemGroupedBackground)
                 .ignoresSafeArea()
@@ -203,7 +203,7 @@ private struct PeopleSwimlaneExplorer: View {
 
                 ScrollView {
                     LazyVStack(spacing: 14) {
-                        focusedPersonHero
+                        focusedPersonHero(lanes: lanes)
 
                         if lanes.isEmpty {
                             emptyRelationships
@@ -309,8 +309,13 @@ private struct PeopleSwimlaneExplorer: View {
         .padding(.bottom, 10)
     }
 
-    private var focusedPersonHero: some View {
-        Button {
+    private func focusedPersonHero(lanes: [PeopleRelationshipCluster]) -> some View {
+        let relationshipCount = Set(lanes.flatMap(\.members).map(\.id)).count
+        let orderedPeople = orderedPeople
+        let person = focusedPerson
+        let previousPerson = adjacentPerson(by: -1, from: person, in: orderedPeople)
+        let nextPerson = adjacentPerson(by: 1, from: person, in: orderedPeople)
+        return Button {
             onOpenPerson(focusedPerson)
         } label: {
             VStack(alignment: .leading, spacing: 16) {
@@ -376,8 +381,7 @@ private struct PeopleSwimlaneExplorer: View {
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(PeoplePressStyle())
-        .offset(x: focusPreviewOffset)
-        .highPriorityGesture(focusGesture)
+        .modifier(PeopleFocusSwipeModifier(onEnded: handleFocusSwipe))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(focusedPerson.name)，\(focusedPersonHeroSubtitle)，\(relationshipCount) 位关联人物")
         .accessibilityHint("点击查看详情，左右滑动切换人物")
@@ -514,50 +518,27 @@ private struct PeopleSwimlaneExplorer: View {
         .accessibilityHidden(true)
     }
 
-    private var previousPerson: SpecialPerson {
-        adjacentPerson(by: -1)
-    }
-
-    private var nextPerson: SpecialPerson {
-        adjacentPerson(by: 1)
-    }
-
-    private func adjacentPerson(by offset: Int) -> SpecialPerson {
-        let orderedPeople = orderedPeople
-        guard let currentIndex = orderedPeople.firstIndex(where: { $0.id == focusedPerson.id }) else {
-            return focusedPerson
+    private func adjacentPerson(by offset: Int, from person: SpecialPerson, in orderedPeople: [SpecialPerson]) -> SpecialPerson {
+        guard let currentIndex = orderedPeople.firstIndex(where: { $0.id == person.id }) else {
+            return person
         }
         let index = (currentIndex + offset + orderedPeople.count) % orderedPeople.count
         return orderedPeople[index]
     }
 
-    private var focusPreviewOffset: CGFloat {
-        max(-18, min(18, focusTranslation.width * 0.18))
-    }
+    private func handleFocusSwipe(_ value: DragGesture.Value) {
+        let horizontal = value.translation.width
+        let vertical = value.translation.height
+        let predictedHorizontal = value.predictedEndTranslation.width
+        let horizontalIntent = abs(horizontal) > abs(vertical) * 0.75
+        let shouldSwitch = abs(horizontal) >= 18 || abs(predictedHorizontal) >= 42
 
-    private var relationshipCount: Int {
-        Set(lanes.flatMap(\.members).map(\.id)).count
-    }
-
-    private var focusGesture: some Gesture {
-        DragGesture(minimumDistance: 8, coordinateSpace: .local)
-            .updating($focusTranslation) { value, state, _ in
-                state = value.translation
-            }
-            .onEnded { value in
-                let horizontal = value.translation.width
-                let vertical = value.translation.height
-                let predictedHorizontal = value.predictedEndTranslation.width
-                let horizontalIntent = abs(horizontal) > abs(vertical) * 0.75
-                let shouldSwitch = abs(horizontal) >= 18 || abs(predictedHorizontal) >= 42
-
-                if horizontalIntent, shouldSwitch {
-                    moveFocus(by: predictedHorizontal < 0 ? 1 : -1)
-                } else if vertical <= -30, abs(vertical) > abs(horizontal) * 0.9 {
-                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                    onOpenPerson(focusedPerson)
-                }
-            }
+        if horizontalIntent, shouldSwitch {
+            moveFocus(by: predictedHorizontal < 0 ? 1 : -1)
+        } else if vertical <= -30, abs(vertical) > abs(horizontal) * 0.9 {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            onOpenPerson(focusedPerson)
+        }
     }
 
     private func relationshipLane(
@@ -1032,6 +1013,21 @@ private struct PeopleSwimlaneExplorer: View {
 
     private var animation: Animation? {
         reduceMotion ? nil : AppModalMotion.animation
+    }
+}
+
+private struct PeopleFocusSwipeModifier: ViewModifier {
+    let onEnded: (DragGesture.Value) -> Void
+    @GestureState private var horizontalOffset: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: max(-18, min(18, horizontalOffset * 0.18)))
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 8, coordinateSpace: .local)
+                    .updating($horizontalOffset) { value, offset, _ in offset = value.translation.width }
+                    .onEnded(onEnded)
+            )
     }
 }
 

@@ -1162,23 +1162,27 @@ struct NewsFeedView: View {
     // Variable-height rich-text and media rows can stall LazyVStack placement.
     // Keep these sources in a virtualized List with a per-source scroll anchor.
     private func virtualizedFeedList(source: FeedSource, posts: [Post]) -> some View {
-        ScrollViewReader { proxy in
+        let isActive = rootTabIsActive && model.source == source
+        return ScrollViewReader { proxy in
             List {
                 ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
                     feedPostCell(source: source, post: post, index: index, posts: posts)
                         .id(post.id)
-                        .onGeometryChange(for: CGRect.self) { geometry in
-                            geometry.frame(in: .named("feed-viewport-\(source.rawValue)"))
-                        } action: { frame in
-                            guard rootTabIsActive, model.source == source else { return }
-                            scrollPositionStore.recordRow(post.id, frame: frame, source: source)
+                        .onGeometryChange(for: Int?.self) { geometry in
+                            geometry.frame(in: .named("feed-viewport-\(source.rawValue)")).maxY > 0 ? index : nil
+                        } action: { index in
+                            scrollPositionStore.recordRow(post.id, index: index, source: source)
                         }
                         .onDisappear { scrollPositionStore.removeRow(post.id, source: source) }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
-                        .task(id: "\(rootTabIsActive)-\(posts.last?.id ?? 0)") {
-                            guard rootTabIsActive, model.source == source, post.id == posts.last?.id else { return }
-                            await model.loadMoreIfNeeded(current: post)
+                        .background {
+                            if post.id == posts.last?.id {
+                                Color.clear.task(id: isActive) {
+                                    guard isActive else { return }
+                                    await model.loadMoreIfNeeded(current: post)
+                                }
+                            }
                         }
                 }
                 if model.isLoadingMore {
@@ -1209,7 +1213,7 @@ struct NewsFeedView: View {
             .scrollContentBackground(.hidden)
             .accessibilityIdentifier("feed-list-\(source.rawValue)")
             .modifier(FeedChromeScrollModifier(
-                isActive: model.source == source,
+                isActive: isActive,
                 isHidden: $isFeedChromeHidden,
                 isAtTop: $isFeedAtTop
             ))
@@ -1361,7 +1365,7 @@ struct NewsFeedView: View {
                 }
                 .accessibilityIdentifier("feed-list-\(source.rawValue)")
                 .modifier(FeedChromeScrollModifier(
-                    isActive: source == model.source,
+                    isActive: rootTabIsActive && source == model.source,
                     isHidden: $isFeedChromeHidden,
                     isAtTop: $isFeedAtTop
                 ))
@@ -2619,24 +2623,30 @@ private func isWeiboLoginURL(_ url: URL?) -> Bool {
 
 private final class FeedScrollPositionStore: ObservableObject {
     private var offsets: [FeedSource: CGPoint] = [:]
-    private var rowFrames: [FeedSource: [Int: CGRect]] = [:]
+    private var rowsBelowTop: [FeedSource: [Int: Int]] = [:]
     private var anchors: [FeedSource: Int] = [:]
     private var restoringSources: Set<FeedSource> = []
 
-    func recordRow(_ id: Int, frame: CGRect, source: FeedSource) {
+    func recordRow(_ id: Int, index: Int?, source: FeedSource) {
+        rowsBelowTop[source, default: [:]][id] = index
         guard !restoringSources.contains(source) else { return }
-        rowFrames[source, default: [:]][id] = frame
-        if let first = rowFrames[source]?.filter({ $0.value.maxY > 0 })
-            .min(by: { $0.value.minY < $1.value.minY }) {
+        updateAnchor(for: source)
+    }
+
+    private func updateAnchor(for source: FeedSource) {
+        if let first = rowsBelowTop[source]?.min(by: { $0.value < $1.value }) {
             anchors[source] = first.key
         }
     }
 
-    func removeRow(_ id: Int, source: FeedSource) { rowFrames[source]?[id] = nil }
+    func removeRow(_ id: Int, source: FeedSource) { rowsBelowTop[source]?[id] = nil }
     func anchor(for source: FeedSource) -> Int? { anchors[source] }
     func setRestoring(_ restoring: Bool, source: FeedSource) {
         if restoring { restoringSources.insert(source) }
-        else { restoringSources.remove(source) }
+        else {
+            restoringSources.remove(source)
+            updateAnchor(for: source)
+        }
     }
 
     func offset(for source: FeedSource) -> CGPoint? { offsets[source] }
@@ -2820,7 +2830,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
 
         switch nextDirection {
         case .towardOlder where tracking.directionalTravel >= 28:
-            isAtTop = false
+            if isAtTop { isAtTop = false }
             setHidden(true)
             tracking.directionalTravel = 0
         case .towardNewer where tracking.directionalTravel >= 10:

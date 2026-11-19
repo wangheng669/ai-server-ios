@@ -604,6 +604,7 @@ private struct TodayWorldReportSourcesView: View {
     }
 
     var body: some View {
+        let events = events
         Group {
             if events.count == 1, let event = events.first {
                 TodayEventDetailView(event: event)
@@ -653,7 +654,7 @@ private struct TodayEventDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 14) {
                     Text([event.sourceLabel, event.date].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary)
@@ -662,6 +663,7 @@ private struct TodayEventDetailView: View {
                         Text(event.summary).font(.body).lineSpacing(5).textSelection(.enabled)
                     }
                 }
+                .padding(.bottom, 24)
                 if !event.details.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("具体进展").font(.headline)
@@ -669,21 +671,23 @@ private struct TodayEventDetailView: View {
                             Text(text).lineSpacing(5).textSelection(.enabled)
                         }
                     }
+                    .padding(.bottom, 24)
                 }
                 if !event.watchItems.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("后续关注").font(.headline)
                         ForEach(event.watchItems, id: \.self) { Text($0).foregroundStyle(.secondary).lineSpacing(4) }
                     }
+                    .padding(.bottom, 24)
                 }
-                Divider()
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("消息来源").font(.headline).padding(.bottom, 12)
-                    if event.postIDs.isEmpty {
-                        Text("本条简报暂未提供原文引用")
-                            .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 12)
-                    }
-                    ForEach(posts) { post in
+                Divider().padding(.bottom, 24)
+                Text("消息来源").font(.headline).padding(.bottom, 12)
+                if event.postIDs.isEmpty {
+                    Text("本条简报暂未提供原文引用")
+                        .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 12)
+                }
+                ForEach(posts) { post in
+                    VStack(alignment: .leading, spacing: 0) {
                         TodayInlineSourceView(post: post, isExpanded: expandedPostID == post.id) {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 expandedPostID = expandedPostID == post.id ? nil : post.id
@@ -691,16 +695,16 @@ private struct TodayEventDetailView: View {
                         }
                         Divider()
                     }
-                    if isLoading {
-                        ProgressView("正在载入来源").font(.caption).padding(.vertical, 16)
-                    }
-                    if !failedIDs.isEmpty && !isLoading {
-                        HStack {
-                            Text(posts.isEmpty ? "暂时无法载入来源" : "部分来源暂未载入").foregroundStyle(.secondary)
-                            Spacer()
-                            Button("重试") { Task { await loadSources() } }
-                        }.font(.subheadline).padding(.vertical, 16)
-                    }
+                }
+                if isLoading {
+                    ProgressView("正在载入来源").font(.caption).padding(.vertical, 16)
+                }
+                if !failedIDs.isEmpty && !isLoading {
+                    HStack {
+                        Text(posts.isEmpty ? "暂时无法载入来源" : "部分来源暂未载入").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("重试") { Task { await loadSources() } }
+                    }.font(.subheadline).padding(.vertical, 16)
                 }
             }
             .padding(20)
@@ -718,18 +722,22 @@ private struct TodayEventDetailView: View {
         let url = ServerConfiguration.currentURL
         var loaded = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
         let cached = await TodayWorldPostCache.shared.cachedPosts(ids: event.postIDs, baseURL: url)
+        guard !Task.isCancelled else { return }
         for post in cached { loaded[post.id] = post }
-        posts = event.postIDs.compactMap { loaded[$0] }
+        var orderedPosts = event.postIDs.compactMap { loaded[$0] }
+        if posts != orderedPosts { posts = orderedPosts }
         let missing = event.postIDs.filter { loaded[$0] == nil }
         for start in stride(from: 0, to: missing.count, by: 50) {
             guard !Task.isCancelled else { return }
             let ids = Array(missing[start..<min(start + 50, missing.count)])
+            let requestedIDs = Set(ids)
             do {
                 let batch = try await fetchTodayWorldPostBatch(ids: ids, baseURL: url)
                 await TodayWorldPostCache.shared.store(posts: batch, baseURL: url)
-                for post in batch where event.postIDs.contains(post.id) { loaded[post.id] = post }
                 guard !Task.isCancelled else { return }
-                posts = event.postIDs.compactMap { loaded[$0] }
+                for post in batch where requestedIDs.contains(post.id) { loaded[post.id] = post }
+                orderedPosts = event.postIDs.compactMap { loaded[$0] }
+                if posts != orderedPosts { posts = orderedPosts }
             } catch is CancellationError {
                 return
             } catch {
@@ -737,7 +745,6 @@ private struct TodayEventDetailView: View {
             }
         }
         guard !Task.isCancelled else { return }
-        posts = event.postIDs.compactMap { loaded[$0] }
         failedIDs = event.postIDs.filter { loaded[$0] == nil }
     }
 }

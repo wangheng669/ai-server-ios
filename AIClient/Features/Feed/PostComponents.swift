@@ -1544,6 +1544,7 @@ actor ImageDiskCache {
     private let maxFileCount: Int
     private var isPrepared = false
     private var writesSinceTrim = 0
+    private var trimTask: Task<Void, Never>?
 
     init(directory: URL, maxBytes: Int, maxFileCount: Int) {
         self.directory = directory
@@ -1573,7 +1574,7 @@ actor ImageDiskCache {
             try? mutableFileURL.setResourceValues(resourceValues)
             writesSinceTrim += 1
             if writesSinceTrim >= 24 {
-                trim()
+                scheduleTrim()
             }
         } catch {
             try? FileManager.default.removeItem(at: fileURL)
@@ -1587,6 +1588,8 @@ actor ImageDiskCache {
 
     func trim() {
         prepareIfNeeded()
+        trimTask?.cancel()
+        trimTask = nil
         writesSinceTrim = 0
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
         guard let files = try? FileManager.default.contentsOfDirectory(
@@ -1621,7 +1624,16 @@ actor ImageDiskCache {
         guard !isPrepared else { return }
         isPrepared = true
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        trim()
+        scheduleTrim()
+    }
+
+    private func scheduleTrim() {
+        guard trimTask == nil else { return }
+        trimTask = Task(priority: .utility) { [weak self] in
+            do { try await Task.sleep(for: .seconds(1)) }
+            catch { return }
+            self?.trim()
+        }
     }
 
     private func cachedFileURL(for url: URL) -> URL {
