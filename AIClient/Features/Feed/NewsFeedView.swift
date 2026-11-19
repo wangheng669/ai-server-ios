@@ -163,17 +163,10 @@ private struct FeedEntityChoice: Identifiable, Equatable {
 }
 
 struct NewsFeedView: View {
-    private struct NotificationPostFailure {
-        let postID: Int
-        let notFound: Bool
-    }
-
-    @Binding private var notificationPostID: Int?
     @StateObject private var model: NewsFeedViewModel
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
     @State private var searchedXAuthor: XAuthorDestination?
     @State private var selectedPost: Post?
-    @State private var notificationPostFailure: NotificationPostFailure?
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
@@ -197,12 +190,8 @@ struct NewsFeedView: View {
     private let opensWeChatDetailPreview = ProcessInfo.processInfo.arguments.contains("--wechat-detail-preview")
 
     @MainActor
-    init(
-        model: NewsFeedViewModel? = nil,
-        notificationPostID: Binding<Int?> = .constant(nil)
-    ) {
+    init(model: NewsFeedViewModel? = nil) {
         _model = StateObject(wrappedValue: model ?? NewsFeedViewModel())
-        _notificationPostID = notificationPostID
         WeiboSessionCookieStore.importFromEnvironmentIfPresent()
     }
 
@@ -251,20 +240,8 @@ struct NewsFeedView: View {
             NavigationStack { XAuthorPostsView(author: author) }
         }
         .appSheet(item: $selectedPost) { post in
-            NavigationStack {
-                if let source = FeedSource(rawValue: post.source ?? ""),
-                   source == .weibo || source == .douyin || source == .baidu,
-                   let link = post.linkURL {
-                    EmbeddedWebPage(url: link, source: source)
-                } else {
-                    PostDetailView(
-                        post: post,
-                        preloadedNewYorkTimesArticle: model.preloadedNewYorkTimesArticle(for: post.id),
-                        rssAvatarURL: rssDirectoryAvatarURL(for: post)
-                    )
-                }
-            }
-            .readingSheetPresentation()
+            FeedPostSheetContent(post: post, model: model)
+                .readingSheetPresentation()
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
@@ -288,40 +265,6 @@ struct NewsFeedView: View {
             if post == nil {
                 isFeedChromeHidden = false
             }
-        }
-        .task(id: notificationPostID) {
-            guard let postID = notificationPostID else { return }
-            notificationPostFailure = nil
-            defer {
-                if !Task.isCancelled, notificationPostID == postID {
-                    notificationPostID = nil
-                }
-            }
-            do {
-                let post = try await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: postID)
-                guard !Task.isCancelled, notificationPostID == postID else { return }
-                selectedPost = post
-            } catch {
-                guard !Task.isCancelled, notificationPostID == postID else { return }
-                let notFound: Bool
-                if case APIError.httpStatus(404) = error {
-                    notFound = true
-                } else {
-                    notFound = false
-                }
-                notificationPostFailure = NotificationPostFailure(postID: postID, notFound: notFound)
-            }
-        }
-        .alert("无法打开文章", isPresented: Binding(
-            get: { notificationPostFailure != nil },
-            set: { if !$0 { notificationPostFailure = nil } }
-        ), presenting: notificationPostFailure) { failure in
-            if !failure.notFound {
-                Button("重试") { notificationPostID = failure.postID }
-            }
-            Button("关闭", role: .cancel) {}
-        } message: { failure in
-            Text(failure.notFound ? "这篇文章已不可用。" : "暂时无法加载文章，请重试。")
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
             guard count > 0, isFeedAtTop else { return }
@@ -922,11 +865,6 @@ struct NewsFeedView: View {
         return rawSource
     }
 
-    private func feedID(from source: String?) -> Int? {
-        guard let source, source.lowercased().hasPrefix("rss:") else { return nil }
-        return Int(source.dropFirst(4))
-    }
-
     private var currentYouTubePersonFilter: YouTubePersonFilter {
         YouTubePersonFilter.allCases.first { $0.person == model.selectedYouTubePerson } ?? .all
     }
@@ -1454,7 +1392,7 @@ struct NewsFeedView: View {
         let displayPost = model.postForDisplay(post)
         return NewsCardView(
             post: displayPost,
-            rssAvatarURL: rssDirectoryAvatarURL(for: displayPost),
+            rssAvatarURL: rssDirectoryAvatarURL(for: displayPost, feeds: model.rssFeeds),
             usesWeChatStyle: source == .wechat,
             isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
             isExpandedFlash: expandedFlashIDs.contains(post.id),
@@ -1494,12 +1432,6 @@ struct NewsFeedView: View {
                 baseURL: ServerConfiguration.currentURL
             )
         }
-    }
-
-    private func rssDirectoryAvatarURL(for post: Post) -> URL? {
-        guard post.isRSS,
-              let feedID = feedID(from: post.source) else { return nil }
-        return model.rssFeeds.first { $0.id == feedID }?.preferredAvatarURL
     }
 
     private func xNewPostsPill(action: @escaping () -> Void) -> some View {
@@ -1691,6 +1623,39 @@ private struct FeedTimelineLoadingView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
     }
+}
+
+struct FeedPostSheetContent: View {
+    let post: Post
+    let model: NewsFeedViewModel?
+    var loadsStoredDetail = true
+
+    var body: some View {
+        NavigationStack {
+            if let source = FeedSource(rawValue: post.source ?? ""),
+               source == .weibo || source == .douyin || source == .baidu,
+               let link = post.linkURL {
+                EmbeddedWebPage(url: link, source: source)
+            } else {
+                PostDetailView(
+                    post: post,
+                    preloadedNewYorkTimesArticle: model?.preloadedNewYorkTimesArticle(for: post.id),
+                    rssAvatarURL: rssDirectoryAvatarURL(for: post, feeds: model?.rssFeeds ?? []),
+                    loadsStoredDetail: loadsStoredDetail
+                )
+            }
+        }
+    }
+}
+
+private func feedID(from source: String?) -> Int? {
+    guard let source, source.lowercased().hasPrefix("rss:") else { return nil }
+    return Int(source.dropFirst(4))
+}
+
+private func rssDirectoryAvatarURL(for post: Post, feeds: [RSSFeedSource]) -> URL? {
+    guard post.isRSS, let feedID = feedID(from: post.source) else { return nil }
+    return feeds.first { $0.id == feedID }?.preferredAvatarURL
 }
 
 private struct EmbeddedWebPage: View {

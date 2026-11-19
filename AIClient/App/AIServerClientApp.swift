@@ -95,7 +95,7 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
         let content = response.notification.request.content
         await MainActor.run {
-            PersonPushNavigationStore.shared.handle(userInfo: content.userInfo)
+            PersonPushNavigationStore.shared.handle(content)
         }
     }
 
@@ -109,15 +109,22 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
     }
 }
 
-struct PersonPushNavigationRequest: Equatable {
-    let id = UUID()
-    let kind: String
-    let contentID: String
-    let details: PushNotificationDestination?
-}
-
 struct PushNotificationDestination: Identifiable, Equatable {
-    let id: UUID
+    enum Target: Equatable {
+        case post(Int)
+        case detail(UUID)
+    }
+
+    let id = UUID()
+    let target: Target
+    let title: String
+    let summary: String
+    let prefersLargeSheet: Bool
+
+    var opensPost: Bool {
+        if case .post = target { return true }
+        return false
+    }
 }
 
 struct PushNotificationDetails: Decodable {
@@ -140,25 +147,46 @@ struct PushNotificationDetails: Decodable {
 }
 
 struct PushNotificationDetailsView: View {
+    private enum LoadedContent {
+        case post(Post)
+        case detail(PushNotificationDetails)
+    }
+
+    private enum LoadFailure {
+        case unavailable, retryable
+    }
+
     let destination: PushNotificationDestination
-    private let loadDetails: () async throws -> PushNotificationDetails
-    @State private var details: PushNotificationDetails?
-    @State private var loadFailed = false
-    @State private var expired = false
+    private let feedModel: NewsFeedViewModel?
+    private let loadDetails: ((UUID) async throws -> PushNotificationDetails)?
+    @State private var loadedContent: LoadedContent?
+    @State private var failure: LoadFailure?
     @State private var attempt = 0
     @State private var browser: InAppBrowserDestination?
     @State private var gallerySelection: ImageGallerySelection?
 
-    init(destination: PushNotificationDestination, loadDetails: (() async throws -> PushNotificationDetails)? = nil) {
+    init(
+        destination: PushNotificationDestination,
+        feedModel: NewsFeedViewModel? = nil,
+        loadDetails: ((UUID) async throws -> PushNotificationDetails)? = nil
+    ) {
         self.destination = destination
-        self.loadDetails = loadDetails ?? {
-            try await APIClient(baseURL: ServerConfiguration.currentURL).fetchPushNotification(id: destination.id)
-        }
+        self.feedModel = feedModel
+        self.loadDetails = loadDetails
+    }
+
+    private var needsLargeSheet: Bool {
+        if destination.prefersLargeSheet { return true }
+        guard case .detail(let details) = loadedContent else { return false }
+        return details.sec13f != nil || details.report != nil
     }
 
     var body: some View {
         Group {
-            if let details {
+            switch loadedContent {
+            case .post(let post):
+                FeedPostSheetContent(post: post, model: feedModel, loadsStoredDetail: false)
+            case .detail(let details):
                 if let snapshot = details.sec13f {
                     Sec13FNotificationView(snapshot: snapshot)
                 } else if let report = details.report, report.version == 1 {
@@ -166,53 +194,86 @@ struct PushNotificationDetailsView: View {
                 } else {
                     content(details)
                 }
-            } else if loadFailed {
-                ContentUnavailableView {
-                    Label("无法打开通知", systemImage: "bell.slash")
-                } description: {
-                    Text(expired ? "这条通知的详情已不可用。" : "暂时无法加载详情，请重试。")
-                } actions: {
-                    if !expired {
-                        Button("重试") { attempt += 1 }
-                            .buttonStyle(.borderedProminent)
-                    }
-                }
-            } else {
-                ProgressView("正在加载通知")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case nil:
+                preview
             }
         }
-        .presentationDetents(details?.sec13f != nil || details?.report != nil ? [.large] : [.medium, .large])
+        .presentationDetents(needsLargeSheet ? [.large] : [.medium, .large])
         .task(id: attempt) {
-            loadFailed = false
-            expired = false
-            do {
-                let loaded = try await loadDetails()
-                guard !Task.isCancelled else { return }
-                details = loaded
-            } catch {
-                guard !Task.isCancelled else { return }
-                if case APIError.httpStatus(404) = error { expired = true }
-                loadFailed = true
-            }
+            await fetchContent()
         }
         .imageGallery(item: $gallerySelection)
         .inAppBrowserCover(item: $browser)
     }
 
+    private var preview: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                message(title: destination.title, body: destination.summary)
+                switch failure {
+                case .unavailable:
+                    Text("这条通知的详情已不可用。").foregroundStyle(.secondary)
+                case .retryable:
+                    Text("暂时无法加载详情。").foregroundStyle(.secondary)
+                    Button("重试") { attempt += 1 }
+                        .buttonStyle(.bordered)
+                case nil:
+                    ProgressView("正在获取完整详情")
+                        .controlSize(.small)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+    }
+
+    private func fetchContent() async {
+        failure = nil
+        let api = APIClient(baseURL: ServerConfiguration.currentURL)
+        do {
+            let loaded: LoadedContent
+            switch destination.target {
+            case .post(let id):
+                loaded = .post(try await api.fetchPost(id: id))
+            case .detail(let id):
+                let details = if let loadDetails {
+                    try await loadDetails(id)
+                } else {
+                    try await api.fetchPushNotification(id: id)
+                }
+                loaded = .detail(details)
+            }
+            try Task.checkCancellation()
+            loadedContent = loaded
+        } catch {
+            guard !Task.isCancelled else { return }
+            if case APIError.httpStatus(404) = error {
+                failure = .unavailable
+            } else {
+                failure = .retryable
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func message(title: String, body: String) -> some View {
+        if !title.isEmpty {
+            Text(title)
+                .font(.title2.bold())
+                .accessibilityAddTraits(.isHeader)
+        }
+        if !body.isEmpty {
+            Text(body)
+                .font(.body)
+                .textSelection(.enabled)
+        }
+    }
+
     private func content(_ details: PushNotificationDetails) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if !details.title.isEmpty {
-                    Text(details.title)
-                        .font(.title2.bold())
-                        .accessibilityAddTraits(.isHeader)
-                }
-                if !details.body.isEmpty {
-                    Text(details.body)
-                        .font(.body)
-                        .textSelection(.enabled)
-                }
+                message(title: details.title, body: details.body)
                 if let imageURL = details.imageURL {
                     Button {
                         gallerySelection = ImageGallerySelection(urls: [imageURL], initialIndex: 0)
@@ -260,17 +321,20 @@ enum NotificationPresentationDismissal {
         while let presented = root.presentedViewController {
             var top = presented
             while let child = top.presentedViewController { top = child }
-            if let transition = top.transitionCoordinator {
+            if top.isBeingPresented || top.isBeingDismissed, let transition = top.transitionCoordinator {
                 await withCheckedContinuation { continuation in
-                    let registered = transition.animate(alongsideTransition: nil) { _ in
-                        continuation.resume()
+                    var pending: CheckedContinuation<Void, Never>? = continuation
+                    let finish = {
+                        pending?.resume()
+                        pending = nil
                     }
-                    if !registered { continuation.resume() }
+                    let registered = transition.animate(alongsideTransition: nil) { _ in finish() }
+                    if !registered { finish() }
                 }
             }
             guard root.presentedViewController != nil else { break }
             await withCheckedContinuation { continuation in
-                root.dismiss(animated: true) { continuation.resume() }
+                root.dismiss(animated: false) { continuation.resume() }
             }
         }
     }
@@ -301,21 +365,24 @@ private struct NotificationPresentationAnchor: UIViewRepresentable {
 final class PersonPushNavigationStore: ObservableObject {
     static let shared = PersonPushNavigationStore()
 
-    @Published private(set) var request: PersonPushNavigationRequest?
+    @Published private(set) var request: PushNotificationDestination?
 
-    func handle(userInfo: [AnyHashable: Any]) {
-        let kind = userInfo["kind"] as? String ?? ""
-        let contentID = userInfo["content_id"] as? String ?? ""
-        let details: PushNotificationDestination?
-        switch kind {
-        case "post":
-            guard let id = Int(contentID), id > 0 else { return }
-            details = nil
-        default:
-            guard let value = userInfo["notification_id"] as? String, let id = UUID(uuidString: value) else { return }
-            details = PushNotificationDestination(id: id)
+    func handle(_ content: UNNotificationContent) {
+        let kind = content.userInfo["kind"] as? String
+        let target: PushNotificationDestination.Target
+        if kind == "post" {
+            guard let value = content.userInfo["content_id"] as? String, let id = Int(value), id > 0 else { return }
+            target = .post(id)
+        } else {
+            guard let value = content.userInfo["notification_id"] as? String, let id = UUID(uuidString: value) else { return }
+            target = .detail(id)
         }
-        request = PersonPushNavigationRequest(kind: kind, contentID: contentID, details: details)
+        request = PushNotificationDestination(
+            target: target,
+            title: content.title,
+            summary: content.body,
+            prefersLargeSheet: kind == "post" || kind == "sec13f" || content.categoryIdentifier == "focus-report"
+        )
     }
 
     func clear() {
@@ -458,7 +525,6 @@ private struct EditorialRootView: View {
     @State private var learningStore = LearningStore()
     @State private var pageStores = EditorialPageStores()
     @State private var selectedTab = EditorialPreview.initialTab
-    @State private var notificationPostID: Int?
     @State private var notificationPresentationAnchor: UIView?
     @State private var presentedNotificationDetails: PushNotificationDestination?
     @State private var lastDynamicTab: EditorialTab = .observation
@@ -488,10 +554,7 @@ private struct EditorialRootView: View {
                 GoogleSignalView(sentiment: signalSentiment)
             }
             tabContent(.observation) {
-                NewsFeedView(
-                    model: pageStores.feed,
-                    notificationPostID: $notificationPostID
-                )
+                NewsFeedView(model: pageStores.feed)
             }
             tabContent(.investment) {
                 MarketView(
@@ -528,7 +591,7 @@ private struct EditorialRootView: View {
         })
         .inAppBrowserCover(item: $presentedExternalLink)
         .sheet(item: $presentedNotificationDetails) { details in
-            PushNotificationDetailsView(destination: details)
+            PushNotificationDetailsView(destination: details, feedModel: details.opensPost ? pageStores.feed : nil)
                 .id(details.id)
                 .presentationDragIndicator(.visible)
         }
@@ -621,24 +684,20 @@ private struct EditorialRootView: View {
         }
         .task(id: NotificationNavigationTaskID(
             requestID: personPushNavigation.request?.id,
-            isActive: scenePhase == .active,
+            canPresent: scenePhase != .background,
             anchorReady: notificationPresentationAnchor != nil
         )) {
-            guard scenePhase == .active,
+            guard scenePhase != .background,
                   let request = personPushNavigation.request,
                   let root = notificationPresentationAnchor?.window?.rootViewController else { return }
-            await NotificationPresentationDismissal.dismissPresentedContent(from: root)
+            if root.presentedViewController != nil {
+                await NotificationPresentationDismissal.dismissPresentedContent(from: root)
+            }
             guard !Task.isCancelled, personPushNavigation.request?.id == request.id else { return }
             presentedExternalLink = nil
             showsSignalFilters = false
-            presentedNotificationDetails = request.details
-            switch request.kind {
-            case "post":
-                selectedTab = .observation
-                notificationPostID = Int(request.contentID)
-            default:
-                break
-            }
+            if request.opensPost { selectedTab = .observation }
+            presentedNotificationDetails = request
             personPushNavigation.clear()
         }
         .onChange(of: selectedTab, initial: true) { _, tab in
@@ -675,7 +734,7 @@ private struct EditorialRootView: View {
 
 private struct NotificationNavigationTaskID: Equatable {
     let requestID: UUID?
-    let isActive: Bool
+    let canPresent: Bool
     let anchorReady: Bool
 }
 
