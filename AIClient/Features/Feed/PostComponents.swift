@@ -1632,7 +1632,7 @@ actor ImageDiskCache {
         trimTask = Task(priority: .utility) { [weak self] in
             do { try await Task.sleep(for: .seconds(1)) }
             catch { return }
-            self?.trim()
+            await self?.trim()
         }
     }
 
