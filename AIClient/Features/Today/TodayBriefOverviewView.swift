@@ -11,6 +11,7 @@ enum TodayBriefStyle {
             : UIColor(red: 0.22, green: 0.36, blue: 0.27, alpha: 1)
     })
     static let rule = Color(uiColor: .separator).opacity(0.25)
+    static let readingSurface = accent.opacity(0.065)
 }
 
 enum TodayOverviewSelection {
@@ -140,6 +141,14 @@ struct TodayBriefOverviewView: View {
     @State private var showsWatchItems = false
 
     var body: some View {
+        GeometryReader { geometry in
+            // Leave room below the pager for the report's section links.
+            let readingHeight = min(480, max(208, geometry.size.height - bottomInset - 166))
+            reportScroll(readingHeight: readingHeight)
+        }
+    }
+
+    private func reportScroll(readingHeight: CGFloat) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 if brief.isPartial {
@@ -149,7 +158,7 @@ struct TodayBriefOverviewView: View {
                         .accessibilityIdentifier("today-partial-edition")
                 }
                 if !brief.highlights.isEmpty {
-                    TodayBriefCarousel(events: brief.highlights)
+                    TodayBriefCarousel(events: brief.highlights, readingHeight: readingHeight)
                         .id(brief.date)
                 }
                 if let headline = brief.overviewHeadline {
@@ -175,7 +184,10 @@ struct TodayBriefOverviewView: View {
                         .accessibilityIdentifier("today-watch-items")
                     if showsWatchItems {
                         ForEach(Array(brief.watchItems.enumerated()), id: \.offset) { index, event in
-                            TodayBriefEventCard(event: event)
+                            TodayBriefEventContent(event: event)
+                                .padding(16)
+                                .background(TodayBriefStyle.readingSurface, in: RoundedRectangle(cornerRadius: 16))
+                                .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(TodayBriefStyle.rule) }
                                 .accessibilityIdentifier("today-watch-\(index)")
                         }
                     }
@@ -226,13 +238,14 @@ struct TodayBriefOverviewView: View {
 
 private struct TodayBriefCarousel: View {
     let events: [TodayReadingEvent]
+    let readingHeight: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedIndex: Int?
 
     private var index: Int { selectedIndex ?? 0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 0) {
             HStack {
                 Text("本期要闻").font(.headline).accessibilityAddTraits(.isHeader)
                 Spacer()
@@ -245,28 +258,37 @@ private struct TodayBriefCarousel: View {
                     pageButton("chevron.right", title: "下一条", offset: 1)
                 }
             }
-            if events.count == 1, let event = events.first {
-                TodayBriefEventCard(event: event)
-                    .accessibilityIdentifier("today-highlight-0")
-            } else {
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 10) {
-                        ForEach(Array(events.enumerated()), id: \.offset) { position, event in
-                            TodayBriefEventCard(event: event, loadsSources: position == index)
-                                .containerRelativeFrame(.horizontal) { width, _ in max(1, width - 26) }
-                                .accessibilityIdentifier("today-highlight-\(position)")
-                                .id(position)
+            .frame(minHeight: 44)
+            .padding(.leading, 16)
+            .padding(.trailing, 4)
+            TodayBriefStyle.rule.frame(height: 1)
+
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(Array(events.enumerated()), id: \.offset) { position, event in
+                        ScrollView(.vertical) {
+                            TodayBriefEventContent(event: event, loadsSources: position == index)
+                                .padding(16)
                         }
+                        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+                        .frame(height: readingHeight)
+                        .containerRelativeFrame(.horizontal)
+                        .accessibilityIdentifier("today-highlight-\(position)")
+                        .id(position)
                     }
-                    .scrollTargetLayout()
-                    .padding(.trailing, 26)
                 }
-                .scrollIndicators(.hidden)
-                .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-                .scrollPosition(id: $selectedIndex, anchor: .leading)
-                .accessibilityIdentifier("today-highlight-carousel")
+                .scrollTargetLayout()
             }
+            .frame(height: readingHeight)
+            .scrollIndicators(.hidden, axes: .horizontal)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $selectedIndex, anchor: .leading)
+            .accessibilityIdentifier("today-highlight-carousel")
         }
+        .background(TodayBriefStyle.readingSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(TodayBriefStyle.rule).allowsHitTesting(false) }
         .onChange(of: events.count) { _, count in
             if index >= count { selectedIndex = 0 }
         }
@@ -325,7 +347,7 @@ private struct TodayBriefCategories: View {
     }
 }
 
-private struct TodayBriefEventCard: View {
+private struct TodayBriefEventContent: View {
     let event: TodayReadingEvent
     var loadsSources = true
 
@@ -336,7 +358,7 @@ private struct TodayBriefEventCard: View {
                     .foregroundStyle(TodayBriefStyle.accent)
             }
             Text(event.title)
-                .font(.system(.title2, design: .serif, weight: .bold))
+                .font(.title2.weight(.bold))
                 .accessibilityAddTraits(.isHeader)
                 .textSelection(.enabled)
             if !event.summary.isEmpty {
@@ -350,18 +372,10 @@ private struct TodayBriefEventCard: View {
                 }
             }
             Divider()
-            if loadsSources {
-                TodayEventSources(postIDs: event.postIDs)
-            } else {
-                Text("消息来源 · \(event.postIDs.count) 篇原文")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            TodayEventSources(postIDs: event.postIDs, loadsSources: loadsSources)
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TodayBriefStyle.accent.opacity(0.065), in: RoundedRectangle(cornerRadius: 16))
-        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(TodayBriefStyle.rule) }
         .accessibilityElement(children: .contain)
     }
 }

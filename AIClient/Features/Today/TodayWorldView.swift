@@ -533,6 +533,7 @@ struct TodayReadingEvent: Sendable {
 
 struct TodayEventSources: View {
     let postIDs: [Int]
+    var loadsSources = true
 
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
@@ -548,7 +549,7 @@ struct TodayEventSources: View {
     }
 
     var body: some View {
-        let request = rootTabIsActive && scenePhase == .active && !postIDs.isEmpty
+        let request = loadsSources && rootTabIsActive && scenePhase == .active && !postIDs.isEmpty
             ? Request(postIDs: postIDs, baseURL: ServerConfiguration.currentURL, retryAttempt: retryAttempt)
             : nil
         VStack(alignment: .leading, spacing: 0) {
