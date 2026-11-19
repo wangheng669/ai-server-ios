@@ -421,13 +421,19 @@ struct TodayHeaderView: View {
     @State private var rechargeUnavailable = false
     @State private var updateUnavailable = false
     @AppStorage("focus.requestedUpdateRelease") private var requestedUpdateRelease = ""
-    @State private var isOpeningInstaller = false
+    @State private var installerPresentation: InstallerPresentation?
+    @State private var showsInstallOptions = false
     @State private var completedUpdateVersion: String?
     @Environment(\.scenePhase) private var scenePhase
     @State private var updateCheckAttempt = 0
     @State private var updateCheckFailed = false
     @State private var availableUpdate: AvailableUpdate?
     @State private var showsUpdateCheckError = false
+
+    private enum InstallerPresentation: Equatable {
+        case requesting, waitingForConfirmation
+    }
+
     private struct AvailableUpdate {
         let version: String
         let build: Int
@@ -518,6 +524,12 @@ struct TodayHeaderView: View {
         } message: {
             Text("无法打开 iOS 安装入口，请稍后重试。")
         }
+        .alert("已发起安装", isPresented: $showsInstallOptions, presenting: availableUpdate) { update in
+            Button("重新发起") { requestInstallation(update) }
+            Button("关闭", role: .cancel) {}
+        } message: { _ in
+            Text("如果没有看到系统安装弹窗，可以重新发起。已确认安装时，请在主屏幕查看焦点图标的进度。")
+        }
         .alert("未能检查更新", isPresented: $showsUpdateCheckError) {
             Button("重试") { updateCheckAttempt += 1 }
             Button("取消", role: .cancel) {}
@@ -530,6 +542,12 @@ struct TodayHeaderView: View {
             do { try await Task.sleep(for: .seconds(6)) }
             catch { return }
             completedUpdateVersion = nil
+        }
+        .task(id: installerPresentation) {
+            guard installerPresentation == .waitingForConfirmation else { return }
+            do { try await Task.sleep(for: .seconds(15)) }
+            catch { return }
+            installerPresentation = nil
         }
         .task(id: scenePhase == .active ? updateCheckAttempt : nil, priority: .utility) {
             guard scenePhase == .active else { return }
@@ -548,7 +566,8 @@ struct TodayHeaderView: View {
                 .font(.subheadline)
                 .foregroundStyle(TodayBriefStyle.accent)
                 .accessibilityIdentifier("today-app-update-completed")
-        } else if let update = availableUpdate, requestedUpdateRelease == update.releaseID, !isOpeningInstaller {
+        } else if let update = availableUpdate, requestedUpdateRelease == update.releaseID,
+                  installerPresentation != .requesting {
             VStack(alignment: .leading, spacing: 4) {
                 Label("已向 iOS 发起 \(update.version) 安装", systemImage: "arrow.down.to.line")
                     .font(.subheadline.weight(.medium))
@@ -646,25 +665,35 @@ struct TodayHeaderView: View {
         }
     }
 
+    private func requestInstallation(_ update: AvailableUpdate) {
+        guard installerPresentation == nil else { return }
+        installerPresentation = .requesting
+        UIApplication.shared.open(update.installURL) { opened in
+            if opened {
+                requestedUpdateRelease = update.releaseID
+                installerPresentation = .waitingForConfirmation
+            } else {
+                installerPresentation = nil
+                updateUnavailable = true
+            }
+        }
+    }
+
     private func updateButton(_ update: AvailableUpdate) -> some View {
-        Button {
-            guard !isOpeningInstaller else { return }
-            isOpeningInstaller = true
-            UIApplication.shared.open(update.installURL) { opened in
-                isOpeningInstaller = false
-                if opened {
-                    requestedUpdateRelease = update.releaseID
-                } else {
-                    updateUnavailable = true
-                }
+        let alreadyRequested = requestedUpdateRelease == update.releaseID
+        return Button {
+            if alreadyRequested {
+                showsInstallOptions = true
+            } else {
+                requestInstallation(update)
             }
         } label: {
             HStack(spacing: 4) {
-                if isOpeningInstaller {
+                if let installerPresentation {
                     ProgressView().controlSize(.small)
-                    Text("发起中")
-                } else if requestedUpdateRelease == update.releaseID {
-                    Label("重新发起", systemImage: "arrow.clockwise")
+                    Text(installerPresentation == .requesting ? "发起中" : "等待确认")
+                } else if alreadyRequested {
+                    Label("安装状态", systemImage: "info.circle")
                 } else {
                     Label("更新", systemImage: "arrow.down.circle")
                 }
@@ -679,10 +708,10 @@ struct TodayHeaderView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
-        .disabled(isOpeningInstaller)
+        .disabled(installerPresentation != nil)
         .accessibilityIdentifier("today-app-update")
         .accessibilityValue(update.version)
-        .accessibilityHint("向 iOS 发起安装请求")
+        .accessibilityHint(alreadyRequested ? "查看安装说明" : "向 iOS 发起安装请求")
     }
 
     private var costs: some View {
