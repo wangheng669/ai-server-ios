@@ -448,65 +448,6 @@ private struct PeopleSwimlaneExplorer: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var focusDock: some View {
-        HStack(spacing: 14) {
-            sidePerson(previousPerson)
-
-            HStack(spacing: 11) {
-                AvatarView(
-                    url: focusedPerson.avatarURL(baseURL: store.baseURL),
-                    name: focusedPerson.name,
-                    size: 48,
-                    assetName: focusedPerson.avatarAssetName
-                )
-                .overlay {
-                    Circle()
-                        .stroke(Color.accentColor.opacity(0.55), lineWidth: 2)
-                        .padding(-3)
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(focusedPerson.name)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Text(focusedPerson.organizationName ?? focusedPerson.roles.first?.title ?? focusedPerson.topic.rawValue)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.primary.opacity(0.76))
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            sidePerson(nextPerson)
-        }
-        .padding(.horizontal, 22)
-        .offset(x: focusPreviewOffset)
-        .frame(maxWidth: .infinity)
-        .frame(height: 78)
-        .background(.regularMaterial)
-        .overlay(alignment: .top) {
-            Divider()
-        }
-        .overlay(alignment: .top) {
-            Capsule()
-                .fill(Color.secondary.opacity(0.2))
-                .frame(width: 24, height: 3)
-                .offset(y: 6)
-                .allowsHitTesting(false)
-        }
-        .contentShape(Rectangle())
-        .clipped()
-        .highPriorityGesture(focusGesture)
-        .onTapGesture { onOpenPerson(focusedPerson) }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(focusedPerson.name)，\(relationshipCount) 位关联人物")
-        .accessibilityHint("点击或上滑查看详情，左右滑动切换人物")
-        .accessibilityAction(named: "上一个人物") { moveFocus(by: -1) }
-        .accessibilityAction(named: "下一个人物") { moveFocus(by: 1) }
-    }
-
     private func sidePerson(_ person: SpecialPerson) -> some View {
         AvatarView(
             url: person.avatarURL(baseURL: store.baseURL),
