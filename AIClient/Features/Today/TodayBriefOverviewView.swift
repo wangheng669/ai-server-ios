@@ -173,6 +173,7 @@ struct TodayBriefProjection: Sendable {
     let date: String
     let postCount: Int
     let sourceCount: Int
+    let highlights: [TodayWorldFinalReportOverviewItem]
     let sections: [Section]
     let systems: [TodayWorldFinalReportSystem]
     let avatarURLs: [URL]
@@ -189,17 +190,18 @@ struct TodayBriefProjection: Sendable {
         sourceCount = edition.sourceCount
         self.systems = systems
         let overview = report.overview
+        highlights = overview.highlights
         let sections = report.sections.map { Section($0, overview: overview, systems: systems) }
         self.sections = sections
         avatarURLs = sections.flatMap(\.avatarURLs)
-        highlightPostIDs = overview.highlights.flatMap(\.postIDs)
+        highlightPostIDs = highlights.flatMap(\.postIDs)
         let headline = overview.headline
         let canonicalHeadline = TodayReadingEvent.canonical(headline)
-        overviewHeadline = headline.isEmpty || overview.highlights.contains {
+        overviewHeadline = headline.isEmpty || highlights.contains {
             TodayReadingEvent.canonical($0.title ?? "") == canonicalHeadline
         } ? nil : headline
         rows = Self.makeRows(
-            highlights: overview.highlights,
+            highlights: highlights,
             companies: sections.flatMap(\.companyRows),
             watchItems: overview.watchItems,
             systems: systems
