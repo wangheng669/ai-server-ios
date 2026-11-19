@@ -63,37 +63,121 @@ enum TodayOverviewSelection {
     }
 }
 
-struct TodayBriefProjection {
-    struct Section: Identifiable {
+struct TodayBriefProjection: Sendable {
+    fileprivate struct OverviewCard: Sendable {
+        let item: TodayWorldFinalReportOverviewItem
+        let id: String
+        let summary: String?
+        let sources: String
+        let sourceCount: Int
+
+        init(_ item: TodayWorldFinalReportOverviewItem, systems: [TodayWorldFinalReportSystem]) {
+            self.item = item
+            id = item.id
+            summary = TodayReadingEvent.additionalDetails([item.text], excluding: [item.title ?? ""]).first
+            let postIDs = Set(item.postIDs)
+            let related = systems.filter {
+                item.systemKeys.contains($0.systemKey) || !postIDs.isDisjoint(with: $0.postIDs)
+            }
+            sources = TodayReadingEvent.unique(related.map { todayBriefSystemName($0.systemName) }).joined(separator: " · ")
+            sourceCount = postIDs.count
+        }
+    }
+
+    fileprivate struct CompanyCard: Sendable {
+        let system: TodayWorldFinalReportSystem
+        let name: String
+        let avatar: TodaySystemAvatar.Source
+        let paragraphs: [String]
+        let watch: String?
+        let sources: String
+        let sourceCount: Int
+
+        init(_ system: TodayWorldFinalReportSystem) {
+            self.system = system
+            name = todayBriefSystemName(system.systemName)
+            avatar = TodaySystemAvatar.Source(system)
+            paragraphs = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: [system.headline])
+            watch = system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
+            sources = system.sourceNames.joined(separator: " · ")
+            sourceCount = Set(system.postIDs).count
+        }
+    }
+
+    fileprivate struct Row: Identifiable, Sendable {
+        enum Content: Sendable {
+            case heading(String, Int)
+            case group(String)
+            case highlight(OverviewCard, index: Int, showsDivider: Bool)
+            case company(CompanyCard)
+            case watch(OverviewCard)
+        }
+
+        let id: String
+        let content: Content
+        let bottomSpacing: CGFloat
+    }
+
+    struct Section: Identifiable, Sendable {
         let id: String
         let name: String
-        let groups: [TodayWorldFinalReportGroup]
-        let highlights: [TodayWorldFinalReportOverviewItem]
-        let watchItems: [TodayWorldFinalReportOverviewItem]
-        let supplementarySystems: [TodayWorldFinalReportSystem]
-        let supplementarySystemIDs: Set<String>
+        fileprivate let rows: [Row]
+        fileprivate let companyRows: [Row]
+        fileprivate let avatarURLs: [URL]
+        fileprivate let supplementarySystems: [TodayWorldFinalReportSystem]
 
-        init(_ section: TodayWorldFinalReportSection, overview: TodayWorldFinalReportOverview) {
+        init(
+            _ section: TodayWorldFinalReportSection,
+            overview: TodayWorldFinalReportOverview,
+            systems: [TodayWorldFinalReportSystem]
+        ) {
             id = section.id
             name = section.sectionName
-            groups = section.groups
-            highlights = TodayOverviewSelection.highlights(in: section, overview: overview)
-            watchItems = TodayOverviewSelection.items(overview.watchItems, in: section)
-            supplementarySystems = TodayOverviewSelection.supplementarySystems(in: section, overview: overview)
-            supplementarySystemIDs = Set(supplementarySystems.map(\.id))
+            let supplementary = TodayOverviewSelection.supplementarySystems(in: section, overview: overview)
+            supplementarySystems = supplementary
+            let eligibleIDs = Set(supplementary.map(\.id))
+            var companyRows: [Row] = []
+            var avatarURLs: [URL] = []
+            if !supplementary.isEmpty {
+                companyRows.append(Row(
+                    id: "section-\(section.id)",
+                    content: .heading(section.sectionName + "动态", supplementary.count),
+                    bottomSpacing: 16
+                ))
+                for group in section.groups {
+                    let visible = group.systems.filter { eligibleIDs.contains($0.id) }
+                    guard !visible.isEmpty else { continue }
+                    let groupID = "\(section.id)-\(group.id)"
+                    companyRows.append(Row(id: "group-\(groupID)", content: .group(group.groupName), bottomSpacing: 0))
+                    for system in visible {
+                        let card = CompanyCard(system)
+                        if case .remote(let url?) = card.avatar { avatarURLs.append(url) }
+                        companyRows.append(Row(id: "company-\(groupID)-\(system.id)", content: .company(card), bottomSpacing: 0))
+                    }
+                }
+                if let last = companyRows.popLast() {
+                    companyRows.append(Row(id: last.id, content: last.content, bottomSpacing: 20))
+                }
+            }
+            self.companyRows = companyRows
+            self.avatarURLs = avatarURLs
+            rows = TodayBriefProjection.makeRows(
+                highlights: TodayOverviewSelection.highlights(in: section, overview: overview),
+                companies: companyRows,
+                watchItems: TodayOverviewSelection.items(overview.watchItems, in: section),
+                systems: systems
+            )
         }
     }
 
     let date: String
     let postCount: Int
     let sourceCount: Int
-    let highlights: [TodayWorldFinalReportOverviewItem]
-    let watchItems: [TodayWorldFinalReportOverviewItem]
     let sections: [Section]
     let systems: [TodayWorldFinalReportSystem]
     let avatarURLs: [URL]
-    let displayDate: String
     let overviewHeadline: String?
+    fileprivate let rows: [Row]
     private let highlightPostIDs: [Int]
 
     init?(edition: TodayPublishedEdition) {
@@ -103,37 +187,63 @@ struct TodayBriefProjection {
         date = edition.date
         postCount = edition.postCount
         sourceCount = edition.sourceCount
-        let highlights = report.overview.highlights
-        self.highlights = highlights
-        watchItems = report.overview.watchItems
         self.systems = systems
-        let sections = report.sections.map { Section($0, overview: report.overview) }
+        let overview = report.overview
+        let sections = report.sections.map { Section($0, overview: overview, systems: systems) }
         self.sections = sections
-        avatarURLs = sections.flatMap(\.supplementarySystems).compactMap { TodaySystemAvatar.remoteURL(for: $0) }
-        highlightPostIDs = highlights.flatMap(\.postIDs)
-        let headline = report.overview.headline
+        avatarURLs = sections.flatMap(\.avatarURLs)
+        highlightPostIDs = overview.highlights.flatMap(\.postIDs)
+        let headline = overview.headline
         let canonicalHeadline = TodayReadingEvent.canonical(headline)
-        overviewHeadline = headline.isEmpty || highlights.contains {
+        overviewHeadline = headline.isEmpty || overview.highlights.contains {
             TodayReadingEvent.canonical($0.title ?? "") == canonicalHeadline
         } ? nil : headline
-
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        if let date = parser.date(from: date) {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "zh_CN")
-            formatter.dateFormat = "M月d日 EEEE"
-            displayDate = formatter.string(from: date)
-        } else {
-            displayDate = date
-        }
+        rows = Self.makeRows(
+            highlights: overview.highlights,
+            companies: sections.flatMap(\.companyRows),
+            watchItems: overview.watchItems,
+            systems: systems
+        )
     }
 
     func preparationIDs(sectionKey: String?) -> [Int] {
         let selectedSections = sectionKey.map { key in sections.filter { $0.id == key } } ?? sections
         let visiblePostIDs = selectedSections.lazy.flatMap(\.supplementarySystems).prefix(4).flatMap(\.postIDs)
         return TodayChinesePreparation.prioritizedIDs(highlights: highlightPostIDs, visible: Array(visiblePostIDs))
+    }
+
+    private static func makeRows(
+        highlights: [TodayWorldFinalReportOverviewItem],
+        companies: [Row],
+        watchItems: [TodayWorldFinalReportOverviewItem],
+        systems: [TodayWorldFinalReportSystem]
+    ) -> [Row] {
+        var rows: [Row] = []
+        if !highlights.isEmpty {
+            rows.append(Row(id: "highlights", content: .heading("今日要闻", highlights.count), bottomSpacing: 6))
+            for (index, item) in highlights.enumerated() {
+                let card = OverviewCard(item, systems: systems)
+                let isLast = index == highlights.count - 1
+                rows.append(Row(
+                    id: "highlight-\(index)-\(card.id)",
+                    content: .highlight(card, index: index, showsDivider: !isLast),
+                    bottomSpacing: isLast ? 20 : 0
+                ))
+            }
+        }
+        rows.append(contentsOf: companies)
+        if !watchItems.isEmpty {
+            rows.append(Row(id: "watch", content: .heading("持续观察", watchItems.count), bottomSpacing: 8))
+            for (index, item) in watchItems.enumerated() {
+                let card = OverviewCard(item, systems: systems)
+                rows.append(Row(
+                    id: "watch-\(index)-\(card.id)",
+                    content: .watch(card),
+                    bottomSpacing: index == watchItems.count - 1 ? 20 : 8
+                ))
+            }
+        }
+        return rows
     }
 }
 
@@ -146,73 +256,26 @@ struct TodayBriefOverviewView: View {
 
     var body: some View {
         let section = brief.sections.first { $0.id == selectedSectionKey }
-        let highlights = section?.highlights ?? brief.highlights
-        let sections = section.map { [$0] } ?? brief.sections
-        let watchItems = section?.watchItems ?? brief.watchItems
         VStack(spacing: 0) {
             TodayBriefCategories(sections: brief.sections, selection: $selectedSectionKey)
                 .padding(.horizontal, 22)
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         Text("\(brief.postCount) 条动态 · \(brief.sourceCount) 个信息源 · \(brief.systems.count) 组动向")
                             .font(.caption).foregroundStyle(.secondary)
                             .accessibilityIdentifier("today-report-metadata")
+                            .padding(.bottom, 20)
+                            .id("today-reading-top")
                         if selectedSectionKey == nil, let headline = brief.overviewHeadline {
                             Text(headline)
                                 .font(.title3.weight(.medium)).lineSpacing(5)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .padding(.bottom, 20)
                         }
-                        if !highlights.isEmpty {
-                            VStack(alignment: .leading, spacing: 0) {
-                                sectionHeading("今日要闻", count: highlights.count)
-                                    .padding(.bottom, 6)
-                                ForEach(Array(highlights.enumerated()), id: \.element.id) { index, item in
-                                    Button { onOpenHighlight(item) } label: {
-                                        TodayBriefArticle(
-                                            title: item.title ?? "",
-                                            paragraphs: TodayReadingEvent.additionalDetails([item.text], excluding: [item.title ?? ""]),
-                                            source: sourceLabel(for: item),
-                                            sourceCount: Set(item.postIDs).count,
-                                            isLead: index == 0
-                                        )
-                                    }
-                                    .buttonStyle(TodayBriefButtonStyle())
-                                    .accessibilityIdentifier("today-highlight-\(index)")
-                                    if index < highlights.count - 1 {
-                                        TodayBriefStyle.rule.frame(height: 0.5)
-                                    }
-                                }
-                            }
-                        }
-                        ForEach(sections) { section in
-                            if !section.supplementarySystems.isEmpty {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    sectionHeading(section.name + "动态", count: section.supplementarySystems.count)
-                                        .padding(.bottom, 16)
-                                    ForEach(section.groups) { group in
-                                        let visible = group.systems.filter { section.supplementarySystemIDs.contains($0.id) }
-                                        if !visible.isEmpty {
-                                            Text(group.groupName)
-                                                .font(.caption.weight(.medium))
-                                                .foregroundStyle(TodayBriefStyle.secondary)
-                                                .padding(.top, 8)
-                                            ForEach(visible) { system in
-                                                TodayBriefCompanyRow(system: system) { onOpenSystem(system) }
-                                                TodayBriefStyle.rule.frame(height: 0.5)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if !watchItems.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                sectionHeading("持续观察", count: watchItems.count)
-                                ForEach(watchItems) { item in
-                                    watchItem(item)
-                                }
-                            }
+                        ForEach(section?.rows ?? brief.rows) { row in
+                            rowContent(row.content)
+                                .padding(.bottom, row.bottomSpacing)
                         }
                         Text("本期内容已全部展示")
                             .font(.caption).foregroundStyle(.tertiary)
@@ -222,7 +285,6 @@ struct TodayBriefOverviewView: View {
                     .padding(.horizontal, 22)
                     .padding(.top, 8)
                     .padding(.bottom, bottomInset + 20)
-                    .id("today-reading-top")
                 }
                 .scrollIndicators(.hidden)
                 .accessibilityIdentifier("today-overview")
@@ -234,16 +296,44 @@ struct TodayBriefOverviewView: View {
         .background(TodayBriefStyle.canvas)
     }
 
-    private func sourceLabel(for item: TodayWorldFinalReportOverviewItem) -> String {
-        let ids = Set(item.postIDs)
-        let systems = brief.systems.filter {
-            item.systemKeys.contains($0.systemKey) || !ids.isDisjoint(with: $0.postIDs)
+    @ViewBuilder
+    private func rowContent(_ content: TodayBriefProjection.Row.Content) -> some View {
+        switch content {
+        case let .heading(title, count):
+            sectionHeading(title, count: count)
+        case let .group(name):
+            Text(name)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(TodayBriefStyle.secondary)
+                .padding(.top, 8)
+        case let .highlight(card, index, showsDivider):
+            VStack(spacing: 0) {
+                Button { onOpenHighlight(card.item) } label: {
+                    TodayBriefArticle(
+                        title: card.item.title ?? "",
+                        summary: card.summary,
+                        source: card.sources,
+                        sourceCount: card.sourceCount,
+                        isLead: index == 0
+                    )
+                }
+                .buttonStyle(TodayBriefButtonStyle())
+                .accessibilityIdentifier("today-highlight-\(index)")
+                if showsDivider { TodayBriefStyle.rule.frame(height: 0.5) }
+            }
+        case let .company(card):
+            VStack(spacing: 0) {
+                TodayBriefCompanyRow(card: card) { onOpenSystem(card.system) }
+                TodayBriefStyle.rule.frame(height: 0.5)
+            }
+        case let .watch(card):
+            watchItem(card)
         }
-        return TodayReadingEvent.unique(systems.map { todayBriefSystemName($0.systemName) }).joined(separator: " · ")
     }
 
-    private func watchItem(_ item: TodayWorldFinalReportOverviewItem) -> some View {
-        Button { onOpenHighlight(item) } label: {
+    private func watchItem(_ card: TodayBriefProjection.OverviewCard) -> some View {
+        let item = card.item
+        return Button { onOpenHighlight(item) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 Label("待跟进", systemImage: "binoculars")
                     .font(.caption.weight(.medium))
@@ -263,7 +353,7 @@ struct TodayBriefOverviewView: View {
                         .foregroundStyle(TodayBriefStyle.secondary)
                         .lineSpacing(4)
                 }
-                articleFooter(sourceLabel(for: item), count: Set(item.postIDs).count)
+                articleFooter(card.sources, count: card.sourceCount)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
@@ -272,7 +362,7 @@ struct TodayBriefOverviewView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(TodayBriefButtonStyle())
-        .accessibilityIdentifier("today-watch-\(item.id)")
+        .accessibilityIdentifier("today-watch-\(card.id)")
     }
 
     private func sectionHeading(_ title: String, count: Int) -> some View {
@@ -320,7 +410,7 @@ private struct TodayBriefCategories: View {
 
 private struct TodayBriefArticle: View {
     let title: String
-    let paragraphs: [String]
+    let summary: String?
     let source: String
     let sourceCount: Int
     let isLead: Bool
@@ -336,7 +426,7 @@ private struct TodayBriefArticle: View {
                     .font(isLead ? .system(.title2, design: .serif, weight: .bold) : .headline)
                     .lineSpacing(3)
             }
-            if let summary = paragraphs.first {
+            if let summary {
                 Text(summary).font(.subheadline).lineSpacing(3).lineLimit(3)
                     .foregroundStyle(isLead ? Color.white.opacity(0.86) : TodayBriefStyle.secondary)
             }
@@ -354,33 +444,33 @@ private struct TodayBriefArticle: View {
 }
 
 private struct TodayBriefCompanyRow: View {
-    let system: TodayWorldFinalReportSystem
+    let card: TodayBriefProjection.CompanyCard
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 9) {
-                    TodaySystemAvatar(system: system, size: 24)
-                    Text(todayBriefSystemName(system.systemName))
+                    TodaySystemAvatar(source: card.avatar, name: card.name, size: 24)
+                    Text(card.name)
                         .font(.subheadline.weight(.medium)).foregroundStyle(TodayBriefStyle.accent)
                     Spacer(minLength: 8)
                     Image(systemName: "arrow.up.right").font(.caption)
                         .foregroundStyle(TodayBriefStyle.secondary)
                 }
-                Text(system.headline)
+                Text(card.system.headline)
                     .font(.headline).foregroundStyle(.primary).lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
-                ForEach(TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: [system.headline]), id: \.self) { fact in
+                ForEach(card.paragraphs, id: \.self) { fact in
                     Text(fact).font(.subheadline).lineSpacing(5)
                         .foregroundStyle(TodayBriefStyle.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let watch = system.watchItem, !watch.isEmpty {
-                    Text("后续关注 · " + watch).font(.subheadline).lineSpacing(4)
+                if let watch = card.watch {
+                    Text(watch).font(.subheadline).lineSpacing(4)
                         .foregroundStyle(TodayBriefStyle.accent)
                 }
-                articleFooter(system.sourceNames.joined(separator: " · "), count: Set(system.postIDs).count)
+                articleFooter(card.sources, count: card.sourceCount)
             }
             .multilineTextAlignment(.leading)
             .padding(.vertical, 20)
@@ -388,7 +478,7 @@ private struct TodayBriefCompanyRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(TodayBriefButtonStyle())
-        .accessibilityIdentifier("today-system-\(system.id)")
+        .accessibilityIdentifier("today-system-\(card.system.id)")
     }
 }
 
@@ -772,8 +862,22 @@ private func todayBriefSystemName(_ name: String) -> String {
 }
 
 /// Company-group identity is independent of whichever author supplied its first post.
-struct TodaySystemAvatar: View {
-    let system: TodayWorldFinalReportSystem
+private struct TodaySystemAvatar: View {
+    enum Source: Sendable {
+        case asset(String)
+        case remote(URL?)
+
+        init(_ system: TodayWorldFinalReportSystem) {
+            if let asset = TodaySystemAvatar.companyAssets[system.systemKey] {
+                self = .asset(asset)
+            } else {
+                self = .remote(system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL))
+            }
+        }
+    }
+
+    let source: Source
+    let name: String
     let size: CGFloat
 
     nonisolated private static let companyAssets: [String: String] = [
@@ -794,24 +898,16 @@ struct TodaySystemAvatar: View {
         "quiver-quantitative": "TodayCompanyQuiverQuantitative"
     ]
 
-    nonisolated static func remoteURL(for system: TodayWorldFinalReportSystem) -> URL? {
-        guard companyAssets[system.systemKey] == nil else { return nil }
-        return system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL)
-    }
-
     var body: some View {
-        if let asset = Self.companyAssets[system.systemKey] {
+        switch source {
+        case .asset(let asset):
             Image(asset)
                 .resizable().scaledToFit()
                 .foregroundStyle(.primary)
                 .frame(width: size, height: size)
-                .accessibilityLabel("\(todayBriefSystemName(system.systemName)) 公司标识")
-        } else {
-            AvatarView(
-                url: Self.remoteURL(for: system),
-                name: system.systemName,
-                size: size
-            )
+                .accessibilityLabel("\(name) 公司标识")
+        case .remote(let url):
+            AvatarView(url: url, name: name, size: size)
         }
     }
 }

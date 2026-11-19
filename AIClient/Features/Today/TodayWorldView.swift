@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct TodayPublishedEdition: Codable, Sendable {
+struct TodayPublishedEdition: Codable, Sendable, Equatable {
     let date: String
     let postCount: Int
     let sourceCount: Int
@@ -21,7 +21,6 @@ final class TodayWorldStore: ObservableObject {
     @Published private(set) var balance: AliyunAccountBalance?
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
-    @Published private(set) var checkedAt: Date?
     @Published private(set) var brief: TodayBriefProjection?
     @Published private(set) var isShowingCachedEdition = false
     @Published private(set) var dailyCosts: DisplaySnapshotCache.Entry<AIUsageDailyCosts>?
@@ -29,6 +28,8 @@ final class TodayWorldStore: ObservableObject {
     @Published private var balanceRequest: (task: Task<Void, Never>, forced: Bool)?
     var isLoadingBalance: Bool { balanceRequest != nil }
     private var balanceKey: String?
+    private var checkedAt: Date?
+    private var displayedEdition: TodayPublishedEdition?
     private let usesCostSnapshots: Bool
     private let usesPublishedSnapshots: Bool
     private let fetchReport: () async throws -> TodayWorldYesterdayReportPayload
@@ -74,6 +75,7 @@ final class TodayWorldStore: ObservableObject {
               ),
               (Self.billingDate(daysAgo: 2)...Self.billingDate(daysAgo: 1)).contains(saved.value.date),
               let cachedBrief = TodayBriefProjection(edition: saved.value) else { return }
+        displayedEdition = saved.value
         brief = cachedBrief
         isShowingCachedEdition = true
     }
@@ -92,7 +94,7 @@ final class TodayWorldStore: ObservableObject {
         let isStale = checkedAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
         guard !Task.isCancelled, !isLoading, force || report == nil || isStale else { return }
         isLoading = true
-        errorMessage = nil
+        if errorMessage != nil { errorMessage = nil }
         defer { isLoading = false }
         let snapshotKey = ServerConfiguration.currentURL.absoluteString
 
@@ -101,15 +103,21 @@ final class TodayWorldStore: ObservableObject {
             guard !Task.isCancelled else { return }
             let edition = TodayPublishedEdition(payload: loadedReport)
             if let edition {
-                if loadedReport != report || isShowingCachedEdition {
-                    brief = TodayBriefProjection(edition: edition)
+                if displayedEdition != edition {
+                    let projection = await Task.detached(priority: .userInitiated) {
+                        TodayBriefProjection(edition: edition)
+                    }.value
+                    guard !Task.isCancelled else { return }
+                    displayedEdition = edition
+                    brief = projection
                 }
-                isShowingCachedEdition = false
+                if isShowingCachedEdition { isShowingCachedEdition = false }
             } else if let brief, brief.date < loadedReport.date {
-                isShowingCachedEdition = true
+                if !isShowingCachedEdition { isShowingCachedEdition = true }
             } else {
-                brief = nil
-                isShowingCachedEdition = false
+                displayedEdition = nil
+                if brief != nil { brief = nil }
+                if isShowingCachedEdition { isShowingCachedEdition = false }
             }
             if loadedReport != report { report = loadedReport }
             checkedAt = Date()
