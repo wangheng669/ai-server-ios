@@ -29,7 +29,7 @@ actor DisplaySnapshotCache {
         read(type, key: key, maximumAge: maximumAge)
     }
 
-    // Billing reads one small, atomically written snapshot before the first frame.
+    // Today reads its atomically written snapshots before the first frame.
     nonisolated func read<Value: Codable & Sendable>(
         _ type: Value.Type, key: String, maximumAge: TimeInterval
     ) -> Entry<Value>? {

@@ -61,6 +61,7 @@
 		A10000000000000000000002 /* NotificationServiceExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* NotificationServiceExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C20000000000000000000001 /* NotificationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* NotificationViewController.swift */; };
 		C20000000000000000000002 /* NotificationContentExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006 /* NotificationContentExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C20000000000000000000011 /* AppIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000012 /* AppIcon.png */; };
 		A11B22C33D44E55F66778890 /* GlobalAssetsRankingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */; };
 		A12DB4EFD18F02485AC3A268 /* PeopleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905EA06C318F52C44CED7F0E /* PeopleModels.swift */; };
 		B55F6FF2942E844AB7A7C342 /* KnowledgeConceptViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5CF07B6B532341EA1E9FFC /* KnowledgeConceptViews.swift */; };
@@ -167,6 +168,7 @@
 		C20000000000000000000004 /* NotificationViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationViewController.swift; sourceTree = "<group>"; };
 		C20000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C20000000000000000000006 /* NotificationContentExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationContentExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C20000000000000000000012 /* AppIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = AppIcon.png; path = AIClient/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png; sourceTree = SOURCE_ROOT; };
 		B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalAssetsRankingView.swift; sourceTree = "<group>"; };
 		BCE6B059538C8DEDE257D7C6 /* PostComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostComponents.swift; sourceTree = "<group>"; };
 		C5FF3634D4DF69CCE8DB1B32 /* InvestmentDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentDesign.swift; sourceTree = "<group>"; };
@@ -309,6 +311,7 @@
 			children = (
 				C20000000000000000000004 /* NotificationViewController.swift */,
 				C20000000000000000000005 /* Info.plist */,
+				C20000000000000000000012 /* AppIcon.png */,
 			);
 			path = NotificationContentExtension;
 			sourceTree = "<group>";
@@ -445,6 +448,7 @@
 			buildConfigurationList = C2000000000000000000000F /* Build configuration list for PBXNativeTarget "NotificationContentExtension" */;
 			buildPhases = (
 				C20000000000000000000009 /* Sources */,
+				C20000000000000000000013 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -501,6 +505,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		C20000000000000000000013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C20000000000000000000011 /* AppIcon.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		67A79DE6F4E9D3A90F78000E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;

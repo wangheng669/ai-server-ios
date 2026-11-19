@@ -34,7 +34,7 @@ struct APIClient {
     func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
         let response: TodayWorldYesterdayReportResponse = try await get(
             baseURL.appending(path: "api/ios/v1/today-world/yesterday-report").appending(queryItems: [.init(name: "view", value: "edition")]),
-            cachePolicy: .reloadIgnoringLocalCacheData
+            retriesTransientFailures: false, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8
         )
         guard response.success else { throw APIError.invalidResponse }
         return response.data

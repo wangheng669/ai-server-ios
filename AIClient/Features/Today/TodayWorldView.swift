@@ -30,7 +30,6 @@ final class TodayWorldStore: ObservableObject {
     var isLoadingBalance: Bool { balanceRequest != nil }
     private var balanceKey: String?
     private let usesCostSnapshots: Bool
-    private var hasRestoredEdition = false
     private let usesPublishedSnapshots: Bool
     private let fetchReport: () async throws -> TodayWorldYesterdayReportPayload
     private let fetchBalance: (Bool) async throws -> AliyunAccountBalance
@@ -65,6 +64,18 @@ final class TodayWorldStore: ObservableObject {
         self.fetchReport = fetchReport ?? Self.fetchCurrentReport
         #endif
         restoreBalanceIfNeeded()
+        restoreEdition()
+    }
+
+    private func restoreEdition() {
+        guard usesPublishedSnapshots,
+              let saved = DisplaySnapshotCache.editions.read(
+                TodayPublishedEdition.self, key: ServerConfiguration.currentURL.absoluteString, maximumAge: 48 * 60 * 60
+              ),
+              (Self.billingDate(daysAgo: 2)...Self.billingDate(daysAgo: 1)).contains(saved.value.date),
+              let cachedBrief = TodayBriefProjection(edition: saved.value) else { return }
+        brief = cachedBrief
+        isShowingCachedEdition = true
     }
 
     private static func fetchCurrentReport() async throws -> TodayWorldYesterdayReportPayload {
@@ -84,32 +95,28 @@ final class TodayWorldStore: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
         let snapshotKey = ServerConfiguration.currentURL.absoluteString
-        async let request = fetchReport()
-
-        if usesPublishedSnapshots, !hasRestoredEdition {
-            let saved = await DisplaySnapshotCache.editions.load(TodayPublishedEdition.self, key: snapshotKey, maximumAge: 48 * 60 * 60)
-            guard !Task.isCancelled else { return }
-            hasRestoredEdition = true
-            if let saved, saved.value.date == Self.billingDate(daysAgo: 1), let cachedBrief = TodayBriefProjection(edition: saved.value) {
-                isShowingCachedEdition = true
-                brief = cachedBrief
-            }
-        }
 
         do {
-            let loadedReport = try await request
+            let loadedReport = try await fetchReport()
             guard !Task.isCancelled else { return }
             let edition = TodayPublishedEdition(payload: loadedReport)
-            if loadedReport != report || isShowingCachedEdition {
-                brief = edition.flatMap { TodayBriefProjection(edition: $0) }
-                report = loadedReport
+            if let edition {
+                if loadedReport != report || isShowingCachedEdition {
+                    brief = TodayBriefProjection(edition: edition)
+                }
+                isShowingCachedEdition = false
+            } else if let brief, brief.date < loadedReport.date {
+                isShowingCachedEdition = true
+            } else {
+                brief = nil
+                isShowingCachedEdition = false
             }
-            isShowingCachedEdition = false
+            if loadedReport != report { report = loadedReport }
             checkedAt = Date()
             if usesPublishedSnapshots {
                 if let edition {
                     await DisplaySnapshotCache.editions.save(edition, key: snapshotKey, at: Date())
-                } else {
+                } else if !isShowingCachedEdition {
                     await DisplaySnapshotCache.editions.remove(key: snapshotKey)
                 }
             }
@@ -320,7 +327,7 @@ struct TodayWorldView: View {
                             .font(.caption2)
                             .padding(.bottom, 5)
                         } else if store.isShowingCachedEdition {
-                            Text(store.isLoading ? "已显示上次日报 · 更新中" : "已显示上次日报")
+                            Text(store.report == nil ? "已显示上次日报" : "已显示上次日报 · \(reportStatusTitle)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .padding(.bottom, 5)

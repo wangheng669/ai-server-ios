@@ -422,11 +422,10 @@ struct TodayHeaderView: View {
     @State private var installRequestedAt: Date?
     @State private var installerAccepted = false
     @Environment(\.scenePhase) private var scenePhase
-    @State private var updateCheck: UpdateCheck = .unchecked
-    @State private var checkingUpdate = false
+    @State private var updateCheckAttempt = 0
+    @State private var updateCheckFailed = false
     @State private var availableUpdate: AvailableUpdate?
     @State private var showsUpdateCheckError = false
-    private enum UpdateCheck { case unchecked, current, available, failed }
     private struct AvailableUpdate {
         let version: String
         let installURL: URL
@@ -514,19 +513,14 @@ struct TodayHeaderView: View {
             Text("iOS 没有接受安装请求。请稍后再点「更新」。")
         }
         .alert("未能检查更新", isPresented: $showsUpdateCheckError) {
-            Button("重试") { Task { await checkForUpdate() } }
+            Button("重试") { updateCheckAttempt += 1 }
             Button("取消", role: .cancel) {}
         } message: {
             Text("无法确认是否有新版本，请检查网络后重试。已确认可用的更新入口会继续保留。")
         }
-        .task(id: scenePhase) {
+        .task(id: scenePhase == .active ? updateCheckAttempt : nil, priority: .utility) {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
-                if checkingUpdate {
-                    do { try await Task.sleep(for: .milliseconds(150)) }
-                    catch { return }
-                    continue
-                }
                 await checkForUpdate()
                 do { try await Task.sleep(for: .seconds(300)) }
                 catch { return }
@@ -536,20 +530,15 @@ struct TodayHeaderView: View {
 
     @ViewBuilder
     private var updateControl: some View {
-        HStack(spacing: 4) {
-            if let availableUpdate { updateButton(availableUpdate) }
-            if updateCheck == .failed {
-                Button { showsUpdateCheckError = true } label: {
-                    Label("检查失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier("today-update-check-failed")
-            } else if availableUpdate == nil && updateCheck == .unchecked {
-                if checkingUpdate {
-                    ProgressView().accessibilityLabel("正在检查更新")
-                } else {
-                    Button("检查更新") { Task { await checkForUpdate() } }
-                        .font(.caption)
+        if availableUpdate != nil || updateCheckFailed {
+            HStack(spacing: 4) {
+                if let availableUpdate { updateButton(availableUpdate) }
+                if updateCheckFailed {
+                    Button { showsUpdateCheckError = true } label: {
+                        Label("检查失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("today-update-check-failed")
                 }
             }
         }
@@ -572,9 +561,6 @@ struct TodayHeaderView: View {
 
     @MainActor
     private func checkForUpdate() async {
-        guard !checkingUpdate else { return }
-        checkingUpdate = true
-        defer { checkingUpdate = false }
         do {
             guard let entry = installEntryURL,
                   let localVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
@@ -589,7 +575,7 @@ struct TodayHeaderView: View {
             }
             components.queryItems = [.init(name: "check", value: UUID().uuidString)]
             guard let url = components.url else { throw URLError(.badURL) }
-            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
             let (data, response) = try await URLSession.shared.data(for: request)
             try Task.checkCancellation()
@@ -603,15 +589,14 @@ struct TodayHeaderView: View {
             }
             if local.lexicographicallyPrecedes(remote) {
                 availableUpdate = AvailableUpdate(version: published.version, installURL: installURL)
-                updateCheck = .available
             } else {
                 availableUpdate = nil
-                updateCheck = .current
             }
+            updateCheckFailed = false
         } catch {
             guard !Task.isCancelled else { return }
             // A failed request never turns a previously verified update into “up to date”.
-            updateCheck = .failed
+            updateCheckFailed = true
         }
     }
 
