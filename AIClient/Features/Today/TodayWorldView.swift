@@ -289,32 +289,13 @@ struct TodayWorldView: View {
     @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
-    @State private var selectedSectionKey: String?
-    @State private var activeBriefSheet: BriefSheet?
     @State private var waitingForRechargeReturn = false
 
     init(store: TodayWorldStore) {
         _store = StateObject(wrappedValue: store)
     }
 
-    private enum BriefSheet: Identifiable {
-        case highlight(TodayReadingEvent)
-        case system(TodayWorldFinalReportSystem, date: String, highlights: [TodayWorldFinalReportOverviewItem])
-        var id: String {
-            switch self {
-            case .highlight(let item): return "highlight-" + item.id
-            case .system(let system, _, _): return "system-" + system.id
-            }
-        }
-    }
-
-    private struct PreparationRequest: Equatable {
-        let ids: [Int]
-        let baseURL: URL
-    }
-
     var body: some View {
-        let preparation = PreparationRequest(ids: preparationIDs, baseURL: ServerConfiguration.currentURL)
         let avatarURLs = rootTabIsActive && scenePhase == .active ? (store.brief?.avatarURLs ?? []) : []
         NavigationStack {
             VStack(spacing: 0) {
@@ -336,13 +317,15 @@ struct TodayWorldView: View {
                             .font(.caption2)
                             .padding(.bottom, 5)
                         } else if store.isShowingCachedEdition {
-                            Text(store.report == nil ? "已显示上次日报" : "已显示上次日报 · \(reportStatusTitle)")
-                                .font(.caption2)
+                            Text(cachedEditionStatus)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .padding(.bottom, 5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 6)
                                 .accessibilityIdentifier("today-cached-edition")
                         }
-                        reportView(brief)
+                        TodayBriefOverviewView(brief: brief, bottomInset: bottomChromeHeight)
                     } else {
                         emptyReportView
                     }
@@ -351,17 +334,9 @@ struct TodayWorldView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .sheet(item: $activeBriefSheet) { route in
-            TodayDetailSheet(title: "事件详情", detents: [.large]) {
-                briefSheet(route)
-            }
-        }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await loadReport()
-        }
-        .task(id: preparation, priority: .utility) {
-            await TodayChinesePreparation.preloadPosts(ids: preparation.ids, baseURL: preparation.baseURL)
         }
         .task(id: avatarURLs, priority: .userInitiated) {
             await ImageLoader.prefetchAvatars(avatarURLs, maximumCount: avatarURLs.count)
@@ -386,23 +361,6 @@ struct TodayWorldView: View {
         let refresh = waitingForRechargeReturn
         waitingForRechargeReturn = false
         await store.load(force: refresh)
-    }
-
-    private var preparationIDs: [Int] {
-        guard rootTabIsActive, scenePhase == .active, !store.isShowingCachedEdition, store.errorMessage == nil else { return [] }
-        return store.brief?.preparationIDs(sectionKey: selectedSectionKey) ?? []
-    }
-
-    private func reportView(_ brief: TodayBriefProjection) -> some View {
-        TodayBriefOverviewView(
-            brief: brief,
-            bottomInset: bottomChromeHeight,
-            selectedSectionKey: $selectedSectionKey,
-            onOpenHighlight: { item in
-                activeBriefSheet = .highlight(TodayReadingEvent.highlight(item, systems: brief.systems, date: brief.date))
-            },
-            onOpenSystem: { activeBriefSheet = .system($0, date: brief.date, highlights: brief.highlights) }
-        )
     }
 
     private var emptyReportView: some View {
@@ -491,14 +449,14 @@ struct TodayWorldView: View {
         return store.report?.report.final?.error
     }
 
-    @ViewBuilder
-    private func briefSheet(_ route: BriefSheet) -> some View {
-        switch route {
-        case .system(let system, let date, let highlights):
-            TodayWorldReportSourcesView(system: system, reportDate: date, highlights: highlights)
-        case .highlight(let event):
-            TodayEventDetailView(event: event)
+    private var cachedEditionStatus: String {
+        guard let report = store.report else { return "已显示上次日报" }
+        var parts = ["已显示上次日报", reportStatusTitle]
+        if let reason = reportStatusReason, !reason.isEmpty { parts.append(reason) }
+        if report.admission?.state == "paused" {
+            parts.append("本期已收录 \(report.postCount) 条动态")
         }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -508,14 +466,11 @@ func todayWorldSourceAvatarURL(_ key: String) -> URL? {
 }
 
 // Reading content stays tied to explicit report references; facts are not inferred to be separate events.
-struct TodayReadingEvent: Identifiable {
-    let id: String
+struct TodayReadingEvent: Sendable {
     let title: String
     let summary: String
     let sourceLabel: String
-    let date: String
     let details: [String]
-    let watchItems: [String]
     let postIDs: [Int]
 
     static func canonical(_ text: String) -> String {
@@ -557,176 +512,91 @@ struct TodayReadingEvent: Identifiable {
         }
     }
 
-    static func highlight(_ item: TodayWorldFinalReportOverviewItem, systems: [TodayWorldFinalReportSystem], date: String) -> Self {
+    static func highlight(_ item: TodayWorldFinalReportOverviewItem, systems: [TodayWorldFinalReportSystem]) -> Self {
         let itemPostIDs = Set(item.postIDs)
         let related = systems.filter {
             item.systemKeys.contains($0.systemKey) || !itemPostIDs.isDisjoint(with: $0.postIDs)
         }
         let ids = item.postIDs.isEmpty ? related.flatMap(\.postIDs) : item.postIDs
         let sourceIDs = Set(ids.filter { $0 > 0 })
-        let title = item.title?.isEmpty == false ? item.title! : "事件详情"
+        let title = item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.text
         let summary = additionalDetails([item.context, item.text].compactMap { $0 }, excluding: [title]).joined(separator: "\n")
         let facts = related.flatMap(\.facts).filter {
             !$0.postIDs.isEmpty && Set($0.postIDs).isSubset(of: sourceIDs)
         }
-        return Self(id: item.id, title: title,
-                    summary: summary, sourceLabel: unique(related.map(\.systemName)).joined(separator: " · "),
-                    date: date, details: additionalDetails(facts.map(\.text), excluding: [title, summary]),
-                    watchItems: [], postIDs: sourceIDs.sorted())
-    }
-
-    static func system(_ system: TodayWorldFinalReportSystem, date: String) -> Self {
-        let paragraphs = additionalDetails(system.facts.map(\.text), excluding: [system.headline])
-        return Self(id: system.id, title: system.headline, summary: paragraphs.first ?? "",
-                    sourceLabel: system.systemName, date: date, details: Array(paragraphs.dropFirst()),
-                    watchItems: unique([system.watchItem].compactMap { $0 }),
-                    postIDs: Array(Set(system.postIDs.filter { $0 > 0 })).sorted())
+        return Self(title: title, summary: summary,
+                    sourceLabel: unique(related.map(\.systemName)).joined(separator: " · "),
+                    details: additionalDetails(facts.map(\.text), excluding: [title, summary]),
+                    postIDs: sourceIDs.sorted())
     }
 }
 
-private struct TodayWorldReportSourcesView: View {
-    let system: TodayWorldFinalReportSystem
-    let reportDate: String
-    var highlights: [TodayWorldFinalReportOverviewItem] = []
-    @State private var selectedEvent: TodayReadingEvent?
+struct TodayEventSources: View {
+    let postIDs: [Int]
 
-    private var events: [TodayReadingEvent] {
-        let matches = highlights.filter {
-            $0.systemKeys.contains(system.systemKey) || !Set($0.postIDs).isDisjoint(with: system.postIDs)
-        }
-        // A company report may contain additional material beyond the selected highlights.
-        // Only use a directory when multiple explicit events cover all of its cited sources.
-        let covered = Set(matches.flatMap(\.postIDs))
-        guard matches.count > 1, Set(system.postIDs).isSubset(of: covered) else {
-            return [.system(system, date: reportDate)]
-        }
-        return matches.map { .highlight($0, systems: [system], date: reportDate) }
-    }
-
-    var body: some View {
-        let events = events
-        Group {
-            if events.count == 1, let event = events.first {
-                TodayEventDetailView(event: event)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(system.systemName).font(.title2.weight(.semibold))
-                        Text(reportDate).font(.subheadline).foregroundStyle(.secondary).padding(.top, 6).padding(.bottom, 20)
-                        ForEach(events) { event in
-                            Button { selectedEvent = event } label: {
-                                HStack(spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text(event.title).font(.headline).foregroundStyle(.primary)
-                                        Text(event.summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
-                                    }
-                                    Spacer(minLength: 0)
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                                }
-                                .multilineTextAlignment(.leading).padding(.vertical, 18)
-                            }
-                            .buttonStyle(.plain)
-                            Divider()
-                        }
-                        if let watch = system.watchItem, !watch.isEmpty {
-                            Text("后续关注").font(.headline).padding(.top, 24)
-                            Text(watch).foregroundStyle(.secondary).padding(.top, 8)
-                        }
-                    }.padding(20)
-                        .padding(.bottom, 76)
-                }
-                .todayDetailTitle("公司动态")
-            }
-        }
-        .background(Color(uiColor: .systemBackground))
-        .sheet(item: $selectedEvent) { event in
-            TodayDetailSheet { TodayEventDetailView(event: event) }
-        }
-    }
-}
-
-private struct TodayEventDetailView: View {
-    let event: TodayReadingEvent
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     @State private var posts: [Post] = []
-    @State private var isLoading = false
     @State private var failedIDs: [Int] = []
     @State private var expandedPostID: Int?
+    @State private var retryAttempt = 0
 
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text([event.sourceLabel, event.date].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(event.title).font(.title2.weight(.semibold)).textSelection(.enabled)
-                    if !event.summary.isEmpty {
-                        Text(event.summary).font(.body).lineSpacing(5).textSelection(.enabled)
-                    }
-                }
-                .padding(.bottom, 24)
-                if !event.details.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("具体进展").font(.headline)
-                        ForEach(event.details, id: \.self) { text in
-                            Text(text).lineSpacing(5).textSelection(.enabled)
-                        }
-                    }
-                    .padding(.bottom, 24)
-                }
-                if !event.watchItems.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("后续关注").font(.headline)
-                        ForEach(event.watchItems, id: \.self) { Text($0).foregroundStyle(.secondary).lineSpacing(4) }
-                    }
-                    .padding(.bottom, 24)
-                }
-                Divider().padding(.bottom, 24)
-                Text("消息来源").font(.headline).padding(.bottom, 12)
-                if event.postIDs.isEmpty {
-                    Text("本条简报暂未提供原文引用")
-                        .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 12)
-                }
-                ForEach(posts) { post in
-                    VStack(alignment: .leading, spacing: 0) {
-                        TodayInlineSourceView(post: post, isExpanded: expandedPostID == post.id) {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                expandedPostID = expandedPostID == post.id ? nil : post.id
-                            }
-                        }
-                        Divider()
-                    }
-                }
-                if isLoading {
-                    ProgressView("正在载入来源").font(.caption).padding(.vertical, 16)
-                }
-                if !failedIDs.isEmpty && !isLoading {
-                    HStack {
-                        Text(posts.isEmpty ? "暂时无法载入来源" : "部分来源暂未载入").foregroundStyle(.secondary)
-                        Spacer()
-                        Button("重试") { Task { await loadSources() } }
-                    }.font(.subheadline).padding(.vertical, 16)
-                }
-            }
-            .padding(20)
-            .padding(.bottom, 76)
-        }
-        .background(Color(uiColor: .systemBackground))
-        .todayDetailTitle("事件详情")
-        .task(id: event.id) { await loadSources() }
+    private struct Request: Equatable {
+        let postIDs: [Int]
+        let baseURL: URL
+        let retryAttempt: Int
     }
 
-    @MainActor private func loadSources() async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-        let url = ServerConfiguration.currentURL
+    var body: some View {
+        let request = rootTabIsActive && scenePhase == .active && !postIDs.isEmpty
+            ? Request(postIDs: postIDs, baseURL: ServerConfiguration.currentURL, retryAttempt: retryAttempt)
+            : nil
+        VStack(alignment: .leading, spacing: 0) {
+            Text("消息来源" + (postIDs.isEmpty ? "" : " · \(postIDs.count) 篇原文"))
+                .font(.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            if postIDs.isEmpty {
+                Text("本条简报暂未提供原文引用")
+                    .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+            }
+            ForEach(posts) { post in
+                TodayInlineSourceView(post: post, isExpanded: expandedPostID == post.id) {
+                    expandedPostID = expandedPostID == post.id ? nil : post.id
+                }
+                Divider()
+            }
+            if request != nil && posts.count + failedIDs.count < postIDs.count {
+                ProgressView("正在载入来源").font(.caption).padding(.top, 10)
+            } else if !failedIDs.isEmpty {
+                HStack {
+                    Text(posts.isEmpty ? "暂时无法载入来源" : "部分来源暂未载入")
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("重试") { retryAttempt += 1 }
+                }
+                .font(.subheadline)
+                .padding(.top, 6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: request) {
+            guard let request else { return }
+            await loadSources(request)
+        }
+    }
+
+    @MainActor private func loadSources(_ request: Request) async {
+        guard !Task.isCancelled else { return }
+        let url = request.baseURL
+        let postIDs = request.postIDs
+        failedIDs = []
         var loaded = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
-        let cached = await TodayWorldPostCache.shared.cachedPosts(ids: event.postIDs, baseURL: url)
+        let cached = await TodayWorldPostCache.shared.cachedPosts(ids: postIDs, baseURL: url)
         guard !Task.isCancelled else { return }
         for post in cached { loaded[post.id] = post }
-        var orderedPosts = event.postIDs.compactMap { loaded[$0] }
+        var orderedPosts = postIDs.compactMap { loaded[$0] }
         if posts != orderedPosts { posts = orderedPosts }
-        let missing = event.postIDs.filter { loaded[$0] == nil }
+        let missing = postIDs.filter { loaded[$0] == nil }
         for start in stride(from: 0, to: missing.count, by: 50) {
             guard !Task.isCancelled else { return }
             let ids = Array(missing[start..<min(start + 50, missing.count)])
@@ -736,7 +606,7 @@ private struct TodayEventDetailView: View {
                 await TodayWorldPostCache.shared.store(posts: batch, baseURL: url)
                 guard !Task.isCancelled else { return }
                 for post in batch where requestedIDs.contains(post.id) { loaded[post.id] = post }
-                orderedPosts = event.postIDs.compactMap { loaded[$0] }
+                orderedPosts = postIDs.compactMap { loaded[$0] }
                 if posts != orderedPosts { posts = orderedPosts }
             } catch is CancellationError {
                 return
@@ -745,16 +615,11 @@ private struct TodayEventDetailView: View {
             }
         }
         guard !Task.isCancelled else { return }
-        failedIDs = event.postIDs.filter { loaded[$0] == nil }
+        failedIDs = postIDs.filter { loaded[$0] == nil }
     }
 }
 
 enum TodayChinesePreparation {
-    static func prioritizedIDs(highlights: [Int], visible: [Int]) -> [Int] {
-        var seen = Set<Int>()
-        return Array((highlights + visible).filter { $0 > 0 && seen.insert($0).inserted }.prefix(12))
-    }
-
     static func isChinese(_ text: String) -> Bool {
         text.range(of: "[\\p{Han}]", options: .regularExpression) != nil
             && !XPostTextFormatter.containsUntranslatedEnglishPassage(text)
@@ -765,16 +630,6 @@ enum TodayChinesePreparation {
             post.hasTranslation ? post.displayContent : post.xStoredOriginalContent,
             post.meta?.replyContext?.displayText, post.meta?.quotedTweet?.displayText
         ].compactMap { $0 })
-    }
-
-    static func preloadPosts(ids: [Int], baseURL: URL) async {
-        guard !ids.isEmpty, !Task.isCancelled else { return }
-        let cached = await TodayWorldPostCache.shared.cachedPosts(ids: ids, baseURL: baseURL)
-        let cachedIDs = Set(cached.map(\.id))
-        let missing = ids.filter { !cachedIDs.contains($0) }
-        guard !missing.isEmpty, !Task.isCancelled,
-              let fetched = try? await fetchTodayWorldPostBatch(ids: missing, baseURL: baseURL) else { return }
-        await TodayWorldPostCache.shared.store(posts: fetched, baseURL: baseURL)
     }
 }
 
@@ -885,9 +740,8 @@ private struct TodayInlineSourceView: View {
             }
         }
         .padding(.vertical, 16)
-        .task(id: post.id) { await prepareChinese() }
         .task(id: isExpanded) {
-            if isExpanded && translationFailed { await prepareChinese() }
+            if isExpanded { await prepareChinese() }
         }
     }
 

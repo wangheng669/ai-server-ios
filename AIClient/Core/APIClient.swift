@@ -1135,6 +1135,7 @@ struct TodayWorldFinalReport: Codable, Sendable, Equatable {
     let status: String
     let stage: String?
     let error: String?
+    let completenessStatus: String?
     let sections: [TodayWorldFinalReportSection]
     let sectionCount: Int
     let groupCount: Int
@@ -1150,6 +1151,7 @@ struct TodayWorldFinalReport: Codable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case status, stage, error, sections, model, overview
+        case completenessStatus = "completeness_status"
         case sectionCount = "section_count"
         case groupCount = "group_count"
         case systemCount = "system_count"
@@ -1166,6 +1168,7 @@ struct TodayWorldFinalReport: Codable, Sendable, Equatable {
         status = try container.decode(String.self, forKey: .status)
         stage = try container.decodeIfPresent(String.self, forKey: .stage)
         error = try container.decodeIfPresent(String.self, forKey: .error)
+        completenessStatus = try container.decodeIfPresent(String.self, forKey: .completenessStatus)
         let decodedSections = try container.decodeIfPresent([TodayWorldFinalReportSection].self, forKey: .sections) ?? []
         sections = decodedSections
         sectionCount = try container.decodeIfPresent(Int.self, forKey: .sectionCount) ?? decodedSections.count
