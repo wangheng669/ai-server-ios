@@ -53,7 +53,11 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
+        let notificationCenter = UNUserNotificationCenter.current()
+        notificationCenter.delegate = self
+        notificationCenter.setNotificationCategories(Set(["person-post", "focus-post", "focus-report"].map {
+            UNNotificationCategory(identifier: $0, actions: [], intentIdentifiers: [])
+        }))
         #if DEBUG
         if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil { return true }
         #endif
