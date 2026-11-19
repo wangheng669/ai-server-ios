@@ -12,6 +12,7 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
+        view.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
 
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
