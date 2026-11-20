@@ -5,6 +5,7 @@ enum TodayBriefStyle {
     static let horizontalInset: CGFloat = 22
     static let rule = Color(uiColor: .separator).opacity(0.28)
     static let secondary = Color(uiColor: .secondaryLabel)
+    static var surfaceOutline: Color { accent.opacity(0.16) }
     static let accent = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.67, green: 0.84, blue: 0.72, alpha: 1)
@@ -114,14 +115,13 @@ struct TodayBriefProjection: Sendable {
 }
 
 struct TodayBriefOverviewView: View {
-    @State private var selectedCard: TodayBriefProjection.Card?
-
     let brief: TodayBriefProjection
     let viewport: CGSize
     let cachedEditionMessage: String?
     let reportError: String?
     let isRefreshing: Bool
     let retryReport: () async -> Void
+    let openSources: ([Int]) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -134,54 +134,11 @@ struct TodayBriefOverviewView: View {
                     .padding(TodayBriefStyle.horizontalInset)
             } else {
                 Spacer(minLength: 0)
-                TodayBriefDeck(brief: brief, viewport: viewport) { selectedCard = $0 }
+                TodayBriefDeck(brief: brief, viewport: viewport) { openSources($0.postIDs) }
                 Spacer(minLength: 0)
             }
         }
         .accessibilityIdentifier("today-overview")
-        .appSheet(item: $selectedCard) { card in
-            sourceSheet(postIDs: card.postIDs)
-                .appPresentationDetents([.large])
-                .appPresentationCornerRadius(28)
-                .appPresentationDragIndicator()
-        }
-    }
-
-    private func sourceSheet(postIDs: [Int]) -> some View {
-        ScrollView {
-            Group {
-                if postIDs.isEmpty {
-                    Text("暂无原文")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    cardSources(postIDs)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, TodayBriefStyle.horizontalInset)
-            .padding(.bottom, 20)
-        }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            Button {
-                selectedCard = nil
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("关闭原文")
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.horizontal, 12)
-            .background(Color(uiColor: .systemBackground))
-        }
-        .background(Color(uiColor: .systemBackground))
-        .accessibilityIdentifier("today-brief-reading-sheet")
     }
 
     @ViewBuilder
@@ -198,7 +155,7 @@ struct TodayBriefOverviewView: View {
                         .accessibilityIdentifier("today-partial-edition")
                 }
                 if reportError != nil {
-                    retryButton
+                    TodayReportRetryButton(isRefreshing: isRefreshing, retry: retryReport)
                 }
             }
             .font(.footnote)
@@ -208,35 +165,98 @@ struct TodayBriefOverviewView: View {
             .padding(.vertical, 8)
         }
     }
+}
 
-    private func cardSources(_ ids: [Int]) -> some View {
-        let available = ids.compactMap { brief.sources[$0] }
-        let missing = ids.count - available.count
-        return LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(available) { source in
-                if source.id != available.first?.id {
-                    Divider()
+struct TodayOriginalsPanel: View {
+    @AccessibilityFocusState private var closeFocused: Bool
+
+    let sources: [TodaySourcePresentation]
+    let referenceCount: Int
+    let width: CGFloat
+    let isRefreshing: Bool
+    let retryReport: () async -> Void
+    let close: () -> Void
+
+    private var singleSource: TodaySourcePresentation? {
+        referenceCount == 1 ? sources.first : nil
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 24)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                if let singleSource {
+                    TodaySourceAuthorView(source: singleSource)
+                } else {
+                    Text("原文")
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
                 }
-                TodayInlineSourceView(source: source)
-                    .padding(.vertical, 12)
+                Spacer(minLength: 4)
+                DetailSheetCloseButton(action: close, accessibilityLabel: "关闭原文")
+                    .accessibilityIdentifier("today-originals-close")
+                    .accessibilityFocused($closeFocused)
             }
-            if missing > 0 {
-                HStack {
-                    Text("\(missing) 篇原文暂不可用").font(.footnote).foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    retryButton
+            .padding(.leading, 20)
+            .padding(.trailing, 12)
+            .padding(.vertical, 10)
+            TodayBriefStyle.rule.frame(height: 1)
+                .padding(.horizontal, 20)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(sources) { source in
+                        if source.id != sources.first?.id {
+                            Divider()
+                        }
+                        if singleSource == nil {
+                            TodaySourceAuthorView(source: source)
+                                .accessibilityAddTraits(.isHeader)
+                        }
+                        TodayInlineSourceView(source: source, width: max(1, width - 40))
+                    }
+                    sourceStatus
                 }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollBounceBehavior(.basedOnSize)
         }
+        .background(Color(uiColor: .systemBackground), in: shape)
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
+        .shadow(color: TodayBriefStyle.accent.opacity(0.17), radius: 24, x: 0, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("today-originals-panel")
+        .accessibilityAction(.escape) { close() }
+        .onAppear { closeFocused = true }
     }
 
     @ViewBuilder
-    private var retryButton: some View {
+    private var sourceStatus: some View {
+        let missing = referenceCount - sources.count
+        if referenceCount == 0 {
+            Text("暂无原文").font(.footnote).foregroundStyle(.secondary)
+        } else if missing > 0 {
+            HStack {
+                Text("\(missing) 篇原文暂不可用").font(.footnote).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                TodayReportRetryButton(isRefreshing: isRefreshing, retry: retryReport)
+            }
+        }
+    }
+}
+
+private struct TodayReportRetryButton: View {
+    let isRefreshing: Bool
+    let retry: () async -> Void
+
+    var body: some View {
         if isRefreshing {
             ProgressView().controlSize(.small)
                 .accessibilityLabel("正在刷新日报")
         } else {
-            Button("重试") { Task { await retryReport() } }
+            Button("重试") { Task { await retry() } }
                 .font(.footnote.weight(.medium))
                 .tint(TodayBriefStyle.accent)
                 .frame(minHeight: 36)
@@ -567,9 +587,10 @@ struct TodayHeaderView: View {
                 if let availableUpdate { updateButton(availableUpdate) }
                 if updateCheckFailed {
                     Button { showsUpdateCheckError = true } label: {
-                        Label("检查更新", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Label("检查更新", systemImage: "arrow.clockwise")
+                            .modifier(TodayHeaderActionLabel())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("today-update-check-failed")
                 }
             }
@@ -678,16 +699,9 @@ struct TodayHeaderView: View {
                     Label("更新", systemImage: "arrow.down.circle")
                 }
             }
-                .font(.subheadline.weight(.semibold))
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.accentColor.opacity(0.1), in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            .modifier(TodayHeaderActionLabel())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.accentColor)
         .disabled(installerPresentation != nil)
         .accessibilityIdentifier("today-app-update")
         .accessibilityValue(update.version)
@@ -695,30 +709,38 @@ struct TodayHeaderView: View {
     }
 
     private var headerActions: some View {
-        HStack(spacing: 8) {
-            Button {
-                showsBilling.toggle()
-            } label: {
-                HStack(spacing: 5) {
-                    Text("阿里云余额")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text(balance?.formattedAmount ?? (needsRetry ? "暂不可用" : "—"))
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                        .accessibilityIdentifier("today-aliyun-balance")
-                    Image(systemName: showsBilling ? "chevron.up" : "chevron.down")
-                        .font(.caption2.weight(.semibold)).accessibilityHidden(true)
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                balanceControl
+                Spacer(minLength: 0)
+                updateControl
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("today-billing-details")
-            .accessibilityValue(showsBilling ? "已展开" : "已收起")
-            Spacer(minLength: 0)
-            updateControl
+            VStack(alignment: .leading, spacing: 0) {
+                balanceControl
+                updateControl
+            }
         }
+    }
+
+    private var balanceControl: some View {
+        Button {
+            showsBilling.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Text("阿里云余额").foregroundStyle(TodayBriefStyle.secondary)
+                Text(balance?.formattedAmount ?? (needsRetry ? "暂不可用" : "—"))
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .accessibilityIdentifier("today-aliyun-balance")
+                Image(systemName: showsBilling ? "chevron.up" : "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            .modifier(TodayHeaderActionLabel())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("today-billing-details")
+        .accessibilityValue(showsBilling ? "已展开" : "已收起")
     }
 
     private var billingDetails: some View {
@@ -750,7 +772,8 @@ struct TodayHeaderView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
-        .background(TodayBriefStyle.accent.opacity(0.075), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 16))
+        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(TodayBriefStyle.surfaceOutline) }
     }
 
     private var billingCosts: some View {
@@ -809,6 +832,21 @@ func todayBriefSystemName(_ name: String) -> String {
 }
 
 /// Company-group identity is independent of whichever author supplied its first post.
+private struct TodayHeaderActionLabel: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(TodayBriefStyle.accent)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color(uiColor: .systemBackground), in: Capsule())
+            .overlay { Capsule().strokeBorder(TodayBriefStyle.surfaceOutline) }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}
+
 private struct TodaySystemAvatar: View {
     enum Source: Sendable {
         case asset(String)

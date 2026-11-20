@@ -291,9 +291,11 @@ private func fetchTodayWorldPostBatch(ids: ArraySlice<Int>, baseURL: URL) async 
 struct TodayWorldView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
     @State private var waitingForRechargeReturn = false
+    @State private var originalPostIDs: [Int]?
 
     init(store: TodayWorldStore) {
         _store = StateObject(wrappedValue: store)
@@ -302,37 +304,16 @@ struct TodayWorldView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { viewport in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        TodayHeaderView(
-                            waitingForRechargeReturn: $waitingForRechargeReturn,
-                            balance: store.balance,
-                            dailyCosts: store.dailyCosts, isLoading: store.isLoadingBalance,
-                            needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) }
-                        )
-                        if let brief = store.brief {
-                            TodayBriefOverviewView(
-                                brief: brief,
-                                viewport: viewport.size,
-                                cachedEditionMessage: store.isShowingCachedEdition ? cachedEditionStatus : nil,
-                                reportError: store.errorMessage.map { "\($0)。正在查看上次加载的日报。" },
-                                isRefreshing: store.isLoading,
-                                retryReport: { await store.loadReport(force: true) }
-                            )
-                            .id(brief.date)
-                        } else {
-                            emptyReportView
-                        }
+                ZStack {
+                    pageContent(viewport: viewport.size)
+                        .allowsHitTesting(originalPostIDs == nil)
+                        .accessibilityHidden(originalPostIDs != nil)
+                    if let originalPostIDs, let brief = store.brief {
+                        originalsOverlay(postIDs: originalPostIDs, brief: brief, viewport: viewport.size)
+                            .transition(.opacity)
                     }
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: max(0, viewport.size.height - bottomChromeHeight - 8),
-                        alignment: .top
-                    )
                 }
-                .scrollIndicators(.hidden)
-                .scrollBounceBehavior(.basedOnSize)
-                .padding(.bottom, bottomChromeHeight + 8)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: originalPostIDs != nil)
             }
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
@@ -351,9 +332,68 @@ struct TodayWorldView: View {
                 await store.loadBalance()
             }
         }
+        .onChange(of: rootTabIsActive) { _, active in
+            if !active { originalPostIDs = nil }
+        }
+        .onChange(of: store.brief?.date) {
+            originalPostIDs = nil
+        }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
             Task { await loadReport() }
+        }
+    }
+
+    private func pageContent(viewport: CGSize) -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                TodayHeaderView(
+                    waitingForRechargeReturn: $waitingForRechargeReturn,
+                    balance: store.balance,
+                    dailyCosts: store.dailyCosts, isLoading: store.isLoadingBalance,
+                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) }
+                )
+                if let brief = store.brief {
+                    TodayBriefOverviewView(
+                        brief: brief,
+                        viewport: viewport,
+                        cachedEditionMessage: store.isShowingCachedEdition ? cachedEditionStatus : nil,
+                        reportError: store.errorMessage.map { "\($0)。正在查看上次加载的日报。" },
+                        isRefreshing: store.isLoading,
+                        retryReport: { await store.loadReport(force: true) },
+                        openSources: { originalPostIDs = $0 }
+                    )
+                    .id(brief.date)
+                } else {
+                    emptyReportView
+                }
+            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: max(0, viewport.height - bottomChromeHeight - 8),
+                alignment: .top
+            )
+        }
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+        .padding(.bottom, bottomChromeHeight + 8)
+    }
+
+    private func originalsOverlay(postIDs: [Int], brief: TodayBriefProjection, viewport: CGSize) -> some View {
+        let panelWidth = min(460, viewport.width * 0.84)
+        let panelHeight = min(560, viewport.height * 0.68)
+        return ZStack {
+            Color.black.opacity(0.04)
+                .accessibilityHidden(true)
+            TodayOriginalsPanel(
+                sources: postIDs.compactMap { brief.sources[$0] },
+                referenceCount: postIDs.count,
+                width: panelWidth,
+                isRefreshing: store.isLoading,
+                retryReport: { await store.loadReport(force: true) },
+                close: { originalPostIDs = nil }
+            )
+            .frame(width: panelWidth, height: panelHeight)
         }
     }
 
@@ -542,20 +582,30 @@ struct TodaySourcePresentation: Identifiable, Sendable {
     }
 }
 
-struct TodayInlineSourceView: View {
+struct TodaySourceAuthorView: View {
     let source: TodaySourcePresentation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                AvatarView(url: source.avatarURL, name: source.author, size: 28)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(source.author).font(.subheadline.weight(.semibold))
-                    if let time = source.time {
-                        Text(time).font(.caption).foregroundStyle(.secondary)
-                    }
+        HStack(spacing: 10) {
+            AvatarView(url: source.avatarURL, name: source.author, size: 30)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(source.author).font(.subheadline.weight(.semibold))
+                if let time = source.time {
+                    Text(time).font(.caption).foregroundStyle(.secondary)
                 }
             }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct TodayInlineSourceView: View {
+    let source: TodaySourcePresentation
+    let width: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
             if !source.text.isEmpty {
                 Text(source.text).font(.body).lineSpacing(4).textSelection(.enabled)
             }
@@ -564,12 +614,12 @@ struct TodayInlineSourceView: View {
                     .font(.subheadline).lineSpacing(4).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if source.hasMedia {
-                XFeedMediaView(post: source.post, showsQuotedPost: false)
+                XFeedMediaView(post: source.post, timelineWidth: width, showsQuotedPost: false)
             }
             if let quote = source.quote {
                 XFeedQuotedPostCard(
                     quote: quote,
-                    availableWidth: max(UIScreen.main.bounds.width - 78, 1),
+                    availableWidth: width,
                     isDetail: true
                 )
             }
