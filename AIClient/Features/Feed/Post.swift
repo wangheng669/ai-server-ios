@@ -1545,6 +1545,23 @@ struct Post: Codable, Identifiable, Hashable {
         }.first
         return raw.flatMap { MediaURL.feedImage($0, variant: .tile) }
     }
+    var weChatCardPreviewURL: URL? {
+        guard let previewURL else { return nil }
+        var source = ImageLoader.sourceImageURL(from: previewURL)
+        if source.host == "wechat2rss.bestblogs.dev", source.path == "/img-proxy",
+           let original = URLComponents(url: source, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "u" })?.value,
+           let url = URL(string: original) {
+            source = url
+        }
+        guard source.scheme == "https", source.host == "mmbiz.qpic.cn",
+              var parts = URLComponents(url: source, resolvingAgainstBaseURL: false),
+              let items = parts.queryItems,
+              items.contains(where: { $0.name == "wx_fmt" && $0.value?.lowercased() == "png" }) else { return previewURL }
+        parts.queryItems = items.filter { $0.name != "tp" } + [URLQueryItem(name: "tp", value: "webp")]
+        return parts.string.flatMap(MediaURL.image)
+    }
+
     var youtubeCoverURL: URL? {
         if let previewURL { return previewURL }
         guard let videoID = youtubeVideoID else { return nil }

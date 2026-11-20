@@ -681,7 +681,15 @@ private struct EditorialRootView: View {
         }
         .task(id: scenePhase == .active, priority: .utility) {
             guard scenePhase == .active else { return }
-            await pageStores.feed.prepareXueqiuForOpening()
+            async let directory: Void = pageStores.feed.prepareXueqiuForOpening()
+            await pageStores.feed.prepareVideoAndFlashPages()
+            await directory
+        }
+        .task(id: scenePhase == .active, priority: .background) {
+            guard scenePhase == .active, selectedTab != .learning else { return }
+            async let overview: Void = learningStore.loadOverview()
+            await peopleStore.load()
+            await overview
         }
         .task(id: scenePhase == .active, priority: .utility) {
             guard scenePhase == .active, selectedTab != .investment else { return }

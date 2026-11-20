@@ -140,9 +140,28 @@ final class LearningStore {
     private enum OverviewSection { case catalog, bookshelf, concepts, videos }
     private var restoredSections: Set<OverviewSection> = []
     private(set) var catalog: LearningCatalog?
-    private(set) var bookshelf: LearningBookshelf?
-    private(set) var conceptLibrary: KnowledgeConceptLibrary?
-    private(set) var videoLibrary: LearningVideoLibrary?
+    private(set) var bookshelf: LearningBookshelf? {
+        didSet {
+            let covers = bookshelf?.books.prefix(3).compactMap(\.coverURL) ?? []
+            if covers != oldValue?.books.prefix(3).compactMap(\.coverURL) {
+                prepareCovers(covers, size: CGSize(width: 120, height: 128))
+            }
+        }
+    }
+    private(set) var conceptLibrary: KnowledgeConceptLibrary? {
+        didSet {
+            if let cover = conceptLibrary?.concepts.first?.coverURL, cover != oldValue?.concepts.first?.coverURL {
+                prepareCovers([cover], size: CGSize(width: 68, height: 68))
+            }
+        }
+    }
+    private(set) var videoLibrary: LearningVideoLibrary? {
+        didSet {
+            if let cover = videoLibrary?.lessons.first?.coverURL, cover != oldValue?.lessons.first?.coverURL {
+                prepareCovers([cover], size: CGSize(width: 112, height: 74))
+            }
+        }
+    }
     private(set) var isLoading = false
     private(set) var isBookshelfLoading = false
     private(set) var isConceptLibraryLoading = false
@@ -155,7 +174,6 @@ final class LearningStore {
     private(set) var hasLoadedOverview = false
     private var overviewTask: Task<Void, Never>?
     private var overviewLoadedAt: Date?
-    private var overviewImageTask: Task<Void, Never>?
     private let service: LearningService
 
     init(service: LearningService = LearningService()) { self.service = service }
@@ -191,20 +209,16 @@ final class LearningStore {
             } else {
                 overviewLoadedAt = nil
             }
-            prewarmOverviewImages()
         }
         overviewTask = task
         await task.value
         overviewTask = nil
     }
 
-    private func prewarmOverviewImages() {
-        overviewImageTask?.cancel()
-        let images = [(videoLibrary?.lessons.first?.coverURL, CGSize(width: 112, height: 74)),
-                      (conceptLibrary?.concepts.first?.coverURL, CGSize(width: 68, height: 68))]
-            + (bookshelf?.books.prefix(3).map { ($0.coverURL, CGSize(width: 120, height: 128)) } ?? [])
-        overviewImageTask = Task(priority: .utility) {
-            await runWithLimitedConcurrency(images, maximumConcurrentRequests: 2) { url, size in
+    private func prepareCovers(_ urls: [URL], size: CGSize) {
+        guard !urls.isEmpty else { return }
+        Task(priority: .utility) {
+            await runWithLimitedConcurrency(urls, maximumConcurrentRequests: 2) { url in
                 _ = await ImageLoader.load(url, targetSize: size)
             }
         }

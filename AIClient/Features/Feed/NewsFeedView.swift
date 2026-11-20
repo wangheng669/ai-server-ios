@@ -3868,10 +3868,11 @@ struct NewsCardView: View {
     private var youtubeCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let cover = post.youtubeCoverURL {
+                let size = ImageLoader.youtubeCardCoverSize(screenWidth: UIScreen.main.bounds.width)
                 RemoteImage(
                     url: cover,
-                    targetWidth: max((UIScreen.main.bounds.width - 24) / 2, 120),
-                    height: max((UIScreen.main.bounds.width - 44) / 2, 120) * 9 / 16,
+                    targetWidth: size.width,
+                    height: size.height,
                     cornerRadius: 9,
                     contentMode: .fill
                 )
@@ -3982,9 +3983,10 @@ struct NewsCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let previewURL = post.previewURL {
-                RemoteImage(url: previewURL, height: 86, cornerRadius: 10)
-                    .frame(width: 98, height: 86)
+            if let previewURL = post.weChatCardPreviewURL {
+                let size = ImageLoader.weChatCardCoverSize
+                RemoteImage(url: previewURL, targetWidth: size.width, height: size.height, cornerRadius: 10)
+                    .frame(width: size.width, height: size.height)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .padding(.top, 1)
             }

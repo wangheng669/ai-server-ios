@@ -142,8 +142,8 @@ actor FeedDiskCache {
 actor FeedPresentationPrewarmer {
     static let shared = FeedPresentationPrewarmer()
 
-    func warm(_ posts: [Post]) async {
-        async let warmImages: Void = ImageLoader.prefetchFeedImages(for: posts)
+    func warm(_ posts: [Post], source: FeedSource) async {
+        async let warmImages: Void = ImageLoader.prefetchFeedImages(for: posts, source: source)
         for post in posts {
             if post.isXueqiu {
                 _ = post.xueqiuPresentation
@@ -991,7 +991,7 @@ final class NewsFeedViewModel: ObservableObject {
         }
 
         // Retain shared work for the new page and either direction of the next swipe.
-        let nearby = Set(adjacentSources(to: next) + [next, .xueqiu])
+        let nearby = Set(adjacentSources(to: next) + [next, .xueqiu, .youtube, .flash])
         for candidate in Array(openingRequests.keys) where !nearby.contains(candidate) {
             openingRequests.removeValue(forKey: candidate)?.task.cancel()
         }
@@ -1008,6 +1008,12 @@ final class NewsFeedViewModel: ObservableObject {
             showPreparedSnapshot(prepared.snapshot)
         }
         await startFirstPage(restoringSnapshot: true)
+    }
+
+    func prepareVideoAndFlashPages() async {
+        async let videos: Void = prepareSource(.youtube)
+        await prepareSource(.flash)
+        await videos
     }
 
     func prepareAdjacentSources() async {
@@ -1060,7 +1066,7 @@ final class NewsFeedViewModel: ObservableObject {
                 let snapshot = Snapshot(posts: posts, page: 1, canLoadMore: hasMorePages(source, count: posts.count))
                 if self.source != source || firstPageTask == nil {
                     preparedPages[source] = PreparedPage(snapshot: snapshot, fetchedAt: Date())
-                    schedulePresentationPrewarm(for: posts)
+                    schedulePresentationPrewarm(for: posts, source: source)
                 }
                 return snapshot
             } catch {
@@ -1086,7 +1092,7 @@ final class NewsFeedViewModel: ObservableObject {
             showPreparedSnapshot(snapshot)
         }
         preparedPages[source] = PreparedPage(snapshot: snapshot, fetchedAt: nil)
-        schedulePresentationPrewarm(for: snapshot.posts)
+        schedulePresentationPrewarm(for: snapshot.posts, source: source)
     }
 
     private func showPreparedSnapshot(_ snapshot: Snapshot) {
@@ -1310,8 +1316,9 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    private func schedulePresentationPrewarm(for posts: [Post]) {
-        Task(priority: .utility) { await FeedPresentationPrewarmer.shared.warm(posts) }
+    private func schedulePresentationPrewarm(for posts: [Post], source: FeedSource? = nil) {
+        let page = source ?? self.source
+        Task(priority: .utility) { await FeedPresentationPrewarmer.shared.warm(posts, source: page) }
     }
 
     private func scheduleNewYorkTimesPrefetch(for posts: [Post], cancelsPrevious: Bool) {

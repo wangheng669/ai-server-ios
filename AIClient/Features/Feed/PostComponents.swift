@@ -1283,7 +1283,13 @@ actor ImageLoader {
         return Request(url: MediaURL.image(source.absoluteString) ?? source, pixelLimit: pixelLimit, scale: scale, isAvatar: true)
     }
 
-    static func prefetchFeedImages(for posts: [Post]) async {
+    static func youtubeCardCoverSize(screenWidth: CGFloat) -> CGSize {
+        CGSize(width: max((screenWidth - 24) / 2, 120), height: max((screenWidth - 44) / 2, 120) * 9 / 16)
+    }
+
+    static let weChatCardCoverSize = CGSize(width: 98, height: 86)
+
+    static func prefetchFeedImages(for posts: [Post], source: FeedSource) async {
         let visiblePosts = posts.prefix(12)
         guard !visiblePosts.isEmpty else { return }
 
@@ -1300,7 +1306,14 @@ actor ImageLoader {
         for post in visiblePosts.prefix(socialTimeline ? 12 : 4) {
             guard requests.count < 8 else { break }
             let mediaURLs: [URL]
-            if socialTimeline, post.videoURLs.isEmpty {
+            var targetSize = CGSize(width: screenWidth, height: 260)
+            if source == .youtube {
+                mediaURLs = [post.youtubeCoverURL].compactMap { $0 }
+                targetSize = youtubeCardCoverSize(screenWidth: screenWidth)
+            } else if source == .wechat {
+                mediaURLs = [post.weChatCardPreviewURL].compactMap { $0 }
+                targetSize = weChatCardCoverSize
+            } else if socialTimeline, post.videoURLs.isEmpty {
                 mediaURLs = Array(post.feedImageURLs.prefix(4))
             } else {
                 mediaURLs = [post.source == "x" ? post.xFeedVideoPoster : post.previewURL].compactMap { $0 }
@@ -1308,8 +1321,8 @@ actor ImageLoader {
             for mediaURL in mediaURLs.prefix(8 - requests.count) {
                 requests.append(.init(
                     url: mediaURL,
-                    width: screenWidth,
-                    height: 260,
+                    width: targetSize.width,
+                    height: targetSize.height,
                     prefersCompactXAvatar: false
                 ))
             }
