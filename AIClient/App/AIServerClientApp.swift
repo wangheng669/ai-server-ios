@@ -766,20 +766,22 @@ private struct RootNavigationBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             item(.world, title: "今日", icon: "newspaper")
             intelligenceItem
             item(.investment, title: "研究", icon: "chart.bar")
             item(.learning, title: "知识", icon: "book")
         }
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity)
-        .background {
-            Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom)
+        .padding(5)
+        .frame(maxWidth: 420)
+        .overlay {
+            Capsule()
+                .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5)
+                .allowsHitTesting(false)
         }
-        .overlay(alignment: .top) {
-            Divider().allowsHitTesting(false)
-        }
+        .padding(.horizontal, 20)
+        .padding(.top, 6)
+        .padding(.bottom, 3)
     }
 
     private var intelligenceItem: some View {
@@ -850,8 +852,13 @@ private struct RootNavigationBar: View {
         .symbolRenderingMode(.monochrome)
         .padding(.horizontal, 4)
         .padding(.vertical, 5)
-        .foregroundStyle(isSelected ? accent : Color.secondary)
-        .frame(maxWidth: .infinity, minHeight: 50)
-        .contentShape(Rectangle())
+        .foregroundStyle(isSelected ? accent : Color.primary.opacity(0.72))
+        .frame(maxWidth: .infinity, minHeight: 46)
+        .background {
+            if isSelected {
+                Capsule().fill(accent.opacity(0.10))
+            }
+        }
+        .contentShape(Capsule())
     }
 }
