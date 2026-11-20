@@ -294,9 +294,12 @@ private struct TodayBriefDeck: View {
     var body: some View {
         GeometryReader { geometry in
             let showsControls = brief.cards.count > 1 && geometry.size.height >= 320
-            let deckHeight = max(0, geometry.size.height - (showsControls ? 44 : 0))
+            let deckPadding: CGFloat = 36
+            let maximumCardHeight: CGFloat = 540
+            let availableHeight = geometry.size.height - (showsControls ? 44 : 0)
+            let deckHeight = min(max(0, availableHeight), maximumCardHeight + deckPadding)
             let cardWidth = min(max(0, geometry.size.width - 44), 480)
-            let cardHeight = min(max(0, deckHeight - 36), 540)
+            let cardHeight = max(0, deckHeight - deckPadding)
 
             VStack(spacing: 0) {
                 ZStack(alignment: .top) {
@@ -426,20 +429,6 @@ private struct TodayBriefCardFace: View {
                     .lineSpacing(4)
                     .lineLimit(compact ? 2 : 5)
             }
-
-            Spacer(minLength: 0)
-
-            HStack {
-                Text("查看全文")
-                Spacer(minLength: 8)
-                Image(systemName: "arrow.up.right")
-                    .accessibilityHidden(true)
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(TodayBriefStyle.accent)
-            .padding(.top, 12)
-            .overlay(alignment: .top) { TodayBriefStyle.rule.frame(height: 1) }
-            .layoutPriority(2)
         }
         .multilineTextAlignment(.leading)
         .padding(compact ? 15 : 24)
@@ -602,19 +591,8 @@ struct TodayHeaderView: View {
     let isLoading: Bool
     let needsRetry: Bool
     let retry: () async -> Void
-    let reportDate: String?
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("今日").font(.title.bold())
-                    .accessibilityAddTraits(.isHeader)
-                if let reportDate {
-                    Text("日报 · \(reportDate)")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
             headerActions
             installStatus
             if showsBilling {

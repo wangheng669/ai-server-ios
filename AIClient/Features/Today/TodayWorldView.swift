@@ -306,8 +306,7 @@ struct TodayWorldView: View {
                     waitingForRechargeReturn: $waitingForRechargeReturn,
                     balance: store.balance,
                     dailyCosts: store.dailyCosts, isLoading: store.isLoadingBalance,
-                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) },
-                    reportDate: store.brief?.date ?? store.report?.date
+                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) }
                 )
                 Group {
                     if let brief = store.brief {
