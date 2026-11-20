@@ -392,6 +392,8 @@ struct TodayWorldView: View {
         let panelHeight = min(660, max(0, viewport.height - 52 - bottomInset))
         return ZStack(alignment: .bottom) {
             TodayBriefStyle.surface
+                .contentShape(Rectangle())
+                .onTapGesture { originalPostIDs = nil }
                 .accessibilityHidden(true)
             TodayOriginalsPanel(
                 sources: postIDs.compactMap { brief.sources[$0] },

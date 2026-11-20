@@ -141,7 +141,7 @@ struct TodayBriefOverviewView: View {
 }
 
 struct TodayOriginalsPanel: View {
-    @AccessibilityFocusState private var closeFocused: Bool
+    @AccessibilityFocusState private var headingFocused: Bool
 
     let sources: [TodaySourcePresentation]
     let referenceCount: Int
@@ -157,22 +157,20 @@ struct TodayOriginalsPanel: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            Group {
                 if let singleSource {
                     TodaySourceAuthorView(source: singleSource)
                 } else {
                     Text("原文")
                         .font(.headline)
-                        .accessibilityAddTraits(.isHeader)
                 }
-                Spacer(minLength: 4)
-                DetailSheetCloseButton(action: close, accessibilityLabel: "关闭原文")
-                    .accessibilityIdentifier("today-originals-close")
-                    .accessibilityFocused($closeFocused)
             }
-            .padding(.leading, TodayBriefStyle.horizontalInset)
-            .padding(.trailing, 12)
-            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.vertical, 16)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($headingFocused)
             TodayBriefStyle.rule.frame(height: 1)
                 .padding(.horizontal, TodayBriefStyle.horizontalInset)
 
@@ -197,12 +195,13 @@ struct TodayOriginalsPanel: View {
         }
         .background(TodayBriefStyle.surface, in: shape)
         .clipShape(shape)
+        .contentShape(shape)
         .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
         .shadow(color: TodayBriefStyle.accent.opacity(0.11), radius: 18, x: 0, y: 7)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("today-originals-panel")
         .accessibilityAction(.escape) { close() }
-        .onAppear { closeFocused = true }
+        .onAppear { headingFocused = true }
     }
 
     @ViewBuilder
