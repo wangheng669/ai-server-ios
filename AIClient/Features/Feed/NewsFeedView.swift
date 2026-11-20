@@ -281,9 +281,12 @@ struct NewsFeedView: View {
             guard rootTabIsActive, model.source == .xueqiu else { return }
             await model.loadXueqiuDirectory()
         }
+        .task(id: rootTabIsActive && scenePhase == .active ? model.source : nil, priority: .utility) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            await model.prepareAdjacentSources()
+        }
         .task(id: rootTabIsActive ? model.source : nil) {
             guard rootTabIsActive else { return }
-            let shouldWarmAdjacentSources = !hasLoadedFeedOnce
             await model.loadInitial()
             guard !Task.isCancelled else { return }
             hasLoadedFeedOnce = true
@@ -314,11 +317,6 @@ struct NewsFeedView: View {
                 selectedPost = first
             }
             #endif
-            if shouldWarmAdjacentSources {
-                do { try await Task.sleep(for: .seconds(1)) }
-                catch { return }
-                await model.warmSourceCache()
-            }
         }
     }
 
@@ -1163,6 +1161,7 @@ struct NewsFeedView: View {
     // Keep these sources in a virtualized List with a per-source scroll anchor.
     private func virtualizedFeedList(source: FeedSource, posts: [Post]) -> some View {
         let isActive = rootTabIsActive && model.source == source
+        let canPaginate = isActive && !model.isLoading && !model.isSwitchingSource
         return ScrollViewReader { proxy in
             List {
                 ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
@@ -1178,19 +1177,23 @@ struct NewsFeedView: View {
                         .listRowBackground(Color.clear)
                         .background {
                             if post.id == posts.last?.id {
-                                Color.clear.task(id: isActive) {
-                                    guard isActive else { return }
+                                Color.clear.task(id: canPaginate) {
+                                    guard canPaginate else { return }
                                     await model.loadMoreIfNeeded(current: post)
                                 }
                             }
                         }
                 }
-                if model.isLoadingMore {
+                if isActive, model.isLoadingMore {
                     ProgressView().frame(maxWidth: .infinity).listRowSeparator(.hidden)
                 }
-                if model.errorMessage != nil {
+                if isActive, model.errorMessage != nil {
                     Button("加载失败，点按重试") {
-                        if let last = posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                        if !model.hasLoadedFirstPage(for: source) {
+                            Task { await model.refresh() }
+                        } else if let last = posts.last {
+                            Task { await model.loadMoreIfNeeded(current: last) }
+                        }
                     }
                     .listRowSeparator(.hidden)
                 }
@@ -1229,6 +1232,8 @@ struct NewsFeedView: View {
         if source == .zhihu || source == .xueqiu {
             virtualizedFeedList(source: source, posts: posts)
         } else {
+            let isActive = rootTabIsActive && model.source == source
+            let canPaginate = isActive && !model.isLoading && !model.isSwitchingSource
             let visiblePosts = visiblePosts(for: source, posts: posts)
             let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
             let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
@@ -1312,8 +1317,8 @@ struct NewsFeedView: View {
                             )
                             Color.clear
                                 .frame(height: 1)
-                                .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(paginationTaskPostID)") {
-                                    guard rootTabIsActive, source == model.source else { return }
+                                .task(id: "\(canPaginate)-page-\(paginationTaskPostID)") {
+                                    guard canPaginate else { return }
                                     if isSelectedRSSPage {
                                         await model.loadMoreSelectedRSSIfNeeded(current: tail)
                                     } else if isSelectedWeChatPage {
@@ -1332,17 +1337,17 @@ struct NewsFeedView: View {
                            let rawTail = posts.last {
                             Color.clear
                                 .frame(height: 1)
-                                .task(id: "\(rootTabIsActive)-empty-page-\(rawTail.id)") {
-                                    guard rootTabIsActive, source == model.source else { return }
+                                .task(id: "\(canPaginate)-empty-page-\(rawTail.id)") {
+                                    guard canPaginate else { return }
                                     await model.loadMoreIfNeeded(current: rawTail)
                                 }
                         }
-                        if model.isLoadingMore
+                        if isActive && (model.isLoadingMore
                             || (isSelectedRSSPage && model.isLoadingMoreRSSSelection)
-                            || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection) {
+                            || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection)) {
                             ProgressView().padding(20)
                         }
-                        if model.errorMessage != nil {
+                        if isActive, model.errorMessage != nil {
                             Button("加载失败，点按重试") {
                                 if source == .rss,
                                    model.selectedRSSFeedID != nil,
@@ -1352,6 +1357,8 @@ struct NewsFeedView: View {
                                           model.selectedWeChatFeedID != nil,
                                           let last = model.selectedWeChatPosts.last {
                                     Task { await model.loadMoreSelectedWeChatIfNeeded(current: last) }
+                                } else if !model.hasLoadedFirstPage(for: source) {
+                                    Task { await model.refresh() }
                                 } else if let last = model.posts.last {
                                     Task { await model.loadMoreIfNeeded(current: last) }
                                 }
@@ -1545,7 +1552,8 @@ struct NewsFeedView: View {
         for source: FeedSource,
         topInset: CGFloat = FeedChromeLayout.headerHeight
     ) -> some View {
-        if source == model.source, model.isLoading {
+        if source == model.source ? model.isLoading || model.isSwitchingSource
+            : !model.hasLoadedFirstPage(for: source) {
             FeedTimelineLoadingView(topInset: topInset)
         } else {
             VStack {

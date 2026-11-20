@@ -675,8 +675,9 @@ private struct EditorialRootView: View {
         .task(id: scenePhase == .active, priority: .utility) {
             guard scenePhase == .active, selectedTab == .world else { return }
             async let signal: Void = GoogleSignalService().prepareFirstPage()
+            async let adjacentFeeds: Void = pageStores.feed.prepareAdjacentSources()
             await pageStores.feed.loadInitial()
-            await signal
+            _ = await (signal, adjacentFeeds)
         }
         .task(id: scenePhase == .active, priority: .utility) {
             guard scenePhase == .active else { return }
