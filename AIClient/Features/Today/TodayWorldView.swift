@@ -320,10 +320,10 @@ struct TodayWorldView: View {
                         }
                         TodayBriefOverviewView(
                             brief: brief,
-                            bottomInset: bottomChromeHeight,
                             isRefreshing: store.isLoading,
                             retrySources: { await store.loadReport(force: true) }
                         )
+                        .id(brief.date)
                     } else {
                         emptyReportView
                     }

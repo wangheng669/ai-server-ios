@@ -41,9 +41,11 @@ struct TodayBriefProjection: Sendable {
         let watch: String?
         let sources: String
         let postIDs: [Int]
+        let context: String
 
-        init(_ system: TodayWorldFinalReportSystem) {
+        init(_ system: TodayWorldFinalReportSystem, context: String) {
             self.system = system
+            self.context = context
             name = todayBriefSystemName(system.systemName)
             avatar = TodaySystemAvatar.Source(system)
             paragraphs = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: [system.headline])
@@ -53,41 +55,27 @@ struct TodayBriefProjection: Sendable {
         }
     }
 
-    fileprivate struct CompanyRow: Identifiable, Sendable {
+    fileprivate struct Card: Identifiable, Sendable {
+        enum Section: String, CaseIterable, Sendable {
+            case highlights = "今日要闻"
+            case companies = "全部栏目"
+            case watch = "持续观察"
+        }
+
         enum Content: Sendable {
-            case heading(String)
-            case group(String)
+            case event(TodayReadingEvent)
             case company(CompanyCard)
         }
 
         let id: String
+        let section: Section
         let content: Content
-    }
 
-    private struct Section: Sendable {
-        fileprivate let rows: [CompanyRow]
-        fileprivate let avatarURLs: [URL]
-
-        init(_ section: TodayWorldFinalReportSection, overview: TodayWorldFinalReportOverview) {
-            let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.id))
-            var rows: [CompanyRow] = []
-            var avatarURLs: [URL] = []
-            if !eligibleIDs.isEmpty {
-                rows.append(.init(id: "section-\(section.id)", content: .heading(section.sectionName + "动态")))
-                for group in section.groups {
-                    let visible = group.systems.filter { eligibleIDs.contains($0.id) }
-                    guard !visible.isEmpty else { continue }
-                    let groupID = "\(section.id)-\(group.id)"
-                    rows.append(.init(id: "group-\(groupID)", content: .group(group.groupName)))
-                    for system in visible {
-                        let card = CompanyCard(system)
-                        if case .remote(let url?) = card.avatar { avatarURLs.append(url) }
-                        rows.append(.init(id: "company-\(groupID)-\(system.id)", content: .company(card)))
-                    }
-                }
+        var postIDs: [Int] {
+            switch content {
+            case let .event(event): event.postIDs
+            case let .company(company): company.postIDs
             }
-            self.rows = rows
-            self.avatarURLs = avatarURLs
         }
     }
 
@@ -95,11 +83,9 @@ struct TodayBriefProjection: Sendable {
     let postCount: Int
     let sourceCount: Int
     let isPartial: Bool
-    let highlights: [TodayReadingEvent]
-    let watchItems: [TodayReadingEvent]
     let avatarURLs: [URL]
     let overviewHeadline: String?
-    fileprivate let companyRows: [CompanyRow]
+    fileprivate let cards: [Card]
     let sourceIDs: [Int]
     var sourcePosts: [Int: Post] = [:]
 
@@ -115,16 +101,30 @@ struct TodayBriefProjection: Sendable {
         sourceCount = edition.sourceCount
         isPartial = report.completenessStatus == "partial"
         let overview = report.overview
-        highlights = overview.highlights.map { TodayReadingEvent.highlight($0, systems: systems) }
-        watchItems = overview.watchItems.map { TodayReadingEvent.highlight($0, systems: systems) }
-        let sections = report.sections.map { Section($0, overview: overview) }
-        companyRows = sections.flatMap(\.rows)
-        avatarURLs = sections.flatMap(\.avatarURLs)
-        let companySourceIDs = companyRows.flatMap { row -> [Int] in
-            guard case let .company(card) = row.content else { return [] }
-            return card.postIDs
+        let highlights = overview.highlights.map { TodayReadingEvent.highlight($0, systems: systems) }
+        let watchItems = overview.watchItems.map { TodayReadingEvent.highlight($0, systems: systems) }
+        var companyCards: [Card] = []
+        var avatarURLs: [URL] = []
+        for section in report.sections {
+            let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.id))
+            for group in section.groups {
+                let context = [section.sectionName, group.groupName].filter { !$0.isEmpty }.joined(separator: " · ")
+                for system in group.systems where eligibleIDs.contains(system.id) {
+                    let company = CompanyCard(system, context: context)
+                    if case .remote(let url?) = company.avatar { avatarURLs.append(url) }
+                    companyCards.append(Card(
+                        id: "company-\(section.id)-\(group.id)-\(system.id)",
+                        section: .companies,
+                        content: .company(company)
+                    ))
+                }
+            }
         }
-        sourceIDs = Set((highlights + watchItems).flatMap(\.postIDs) + companySourceIDs).sorted()
+        cards = highlights.map { Card(id: "highlight-" + $0.id, section: .highlights, content: .event($0)) }
+            + companyCards
+            + watchItems.map { Card(id: "watch-" + $0.id, section: .watch, content: .event($0)) }
+        self.avatarURLs = avatarURLs
+        sourceIDs = Set(cards.flatMap(\.postIDs)).sorted()
         let headline = overview.headline
         let canonicalHeadline = TodayReadingEvent.canonical(headline)
         overviewHeadline = headline.isEmpty || highlights.contains {
@@ -135,51 +135,101 @@ struct TodayBriefProjection: Sendable {
 
 struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
-    let bottomInset: CGFloat
     let isRefreshing: Bool
     let retrySources: () async -> Void
 
-    private enum Section: String {
-        case highlights = "今日要闻"
-        case companies = "全部栏目"
-        case watch = "持续观察"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectedCardID: String?
+
+    private var activeIndex: Int {
+        brief.cards.firstIndex { $0.id == selectedCardID } ?? 0
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    editionIntro
-                    sectionLinks { proxy.scrollTo($0, anchor: .top) }
+        VStack(alignment: .leading, spacing: 8) {
+            editionIntro
+            if !brief.cards.isEmpty {
+                sectionLinks
+                cardPager
+                if brief.cards.count > 1 {
+                    pageIndicator
+                }
+            } else if let headline = brief.overviewHeadline {
+                Text(headline).font(.subheadline).lineSpacing(4)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityIdentifier("today-overview")
+        .onChange(of: brief.cards.map(\.id)) { _, ids in
+            if let selectedCardID, !ids.contains(selectedCardID) {
+                self.selectedCardID = ids.first
+            }
+        }
+    }
 
-                    if !brief.highlights.isEmpty {
-                        sectionHeading(.highlights)
-                        ForEach(brief.highlights) { event in
-                            TodayBriefEventContent(event: event, sourcePosts: brief.sourcePosts)
-                            Divider()
+    private var cardPager: some View {
+        GeometryReader { geometry in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(brief.cards) { card in
+                        ScrollView(.vertical) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if card.id == brief.cards.first?.id, let headline = brief.overviewHeadline {
+                                    Text(headline).font(.subheadline).lineSpacing(4)
+                                        .foregroundStyle(TodayBriefStyle.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Divider()
+                                }
+                                cardContent(card.content)
+                            }
+                            .padding(16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                    }
-                    if !brief.companyRows.isEmpty {
-                        sectionHeading(.companies)
-                        ForEach(brief.companyRows) { row in
-                            companyRow(row.content)
-                        }
-                    }
-                    if !brief.watchItems.isEmpty {
-                        sectionHeading(.watch)
-                        ForEach(brief.watchItems) { event in
-                            TodayBriefEventContent(event: event, sourcePosts: brief.sourcePosts)
-                            Divider()
-                        }
+                        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+                        .frame(height: geometry.size.height)
+                        .containerRelativeFrame(.horizontal)
+                        .id(card.id)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .padding(.bottom, bottomInset + 20)
+                .scrollTargetLayout()
             }
-            .accessibilityIdentifier("today-overview")
+            .scrollIndicators(.hidden, axes: .horizontal)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $selectedCardID, anchor: .leading)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(TodayBriefStyle.accent.opacity(0.22))
+                    .allowsHitTesting(false)
+            }
+            .accessibilityIdentifier("today-card-pager")
         }
-        .id(brief.date)
+    }
+
+    private var pageIndicator: some View {
+        Text("\(activeIndex + 1) / \(brief.cards.count)")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("日报卡片")
+            .accessibilityValue("第 \(activeIndex + 1) 张，共 \(brief.cards.count) 张")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: showCard(at: activeIndex + 1)
+                case .decrement: showCard(at: activeIndex - 1)
+                @unknown default: break
+                }
+            }
+    }
+
+    private func showCard(at index: Int) {
+        guard brief.cards.indices.contains(index) else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+            selectedCardID = brief.cards[index].id
+        }
     }
 
     private var editionIntro: some View {
@@ -205,71 +255,49 @@ struct TodayBriefOverviewView: View {
                 }
                 .font(.subheadline)
             }
-            if let headline = brief.overviewHeadline {
-                Text(headline).font(.subheadline).lineSpacing(4)
-                    .foregroundStyle(TodayBriefStyle.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 
     @ViewBuilder
-    private func sectionLinks(jump: @escaping (Section) -> Void) -> some View {
-        let destinations: [Section] = [
-            brief.highlights.isEmpty ? nil : .highlights,
-            brief.companyRows.isEmpty ? nil : .companies,
-            brief.watchItems.isEmpty ? nil : .watch
-        ].compactMap { $0 }
-
+    private var sectionLinks: some View {
+        let destinations = TodayBriefProjection.Card.Section.allCases.compactMap { section in
+            brief.cards.firstIndex { $0.section == section }
+        }
         if destinations.count > 1 {
-            ViewThatFits(in: .horizontal) {
+            ScrollView(.horizontal) {
                 HStack(spacing: 8) {
-                    sectionButtons(destinations, jump: jump)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    sectionButtons(destinations, jump: jump)
+                    ForEach(destinations, id: \.self) { index in
+                        let section = brief.cards[index].section
+                        let isSelected = brief.cards[activeIndex].section == section
+                        Button { showCard(at: index) } label: {
+                            Text(section.rawValue)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(TodayBriefStyle.accent)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(TodayBriefStyle.accent.opacity(isSelected ? 0.17 : 0.07), in: Capsule())
+                                .fixedSize(horizontal: true, vertical: false)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    }
                 }
             }
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private func sectionButtons(_ destinations: [Section], jump: @escaping (Section) -> Void) -> some View {
-        ForEach(destinations, id: \.self) { section in
-            Button { jump(section) } label: {
-                Text(section.rawValue)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(TodayBriefStyle.accent)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(TodayBriefStyle.accent.opacity(0.08), in: Capsule())
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("跳到本节")
-        }
-    }
-
-    private func sectionHeading(_ section: Section) -> some View {
-        Text(section.rawValue)
-            .font(.title2.bold())
-            .accessibilityAddTraits(.isHeader)
-            .id(section)
     }
 
     @ViewBuilder
-    private func companyRow(_ content: TodayBriefProjection.CompanyRow.Content) -> some View {
+    private func cardContent(_ content: TodayBriefProjection.Card.Content) -> some View {
         switch content {
-        case let .heading(title):
-            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
-        case let .group(name):
-            Text(name).font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
+        case let .event(event):
+            TodayBriefEventContent(event: event, sourcePosts: brief.sourcePosts)
         case let .company(card):
             TodayBriefCompanyRow(card: card, sourcePosts: brief.sourcePosts)
-            Divider()
         }
     }
 }
@@ -314,6 +342,10 @@ private struct TodayBriefCompanyRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !card.context.isEmpty {
+                Text(card.context).font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             HStack(spacing: 9) {
                 TodaySystemAvatar(source: card.avatar, name: card.name, size: 24)
                 Text(card.name).font(.subheadline.weight(.semibold)).foregroundStyle(TodayBriefStyle.accent)
