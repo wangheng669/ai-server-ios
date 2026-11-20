@@ -279,7 +279,7 @@ private struct TodayBriefDeck: View {
         let headerRowHeight: CGFloat = 48
         let controlsHeight: CGFloat = 44
         // Reserve the header and controls from the viewport once, regardless of banners or billing.
-        let cardHeight = min(455, max(0, viewport.height - headerRowHeight - controlsHeight - deckPadding))
+        let cardHeight = min(495, max(0, viewport.height - headerRowHeight - controlsHeight - deckPadding))
         let deckHeight = cardHeight + deckPadding
         let cardWidth = min(max(0, viewport.width - 44), 480)
 
