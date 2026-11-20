@@ -92,6 +92,7 @@ struct CompanyResearchFinancials: Decodable, Hashable {
     let unit: String
     let years: [CompanyResearchFinancialYear]
     let quarters: [CompanyResearchFinancialPeriod]?
+    let interims: [CompanyResearchFinancialPeriod]?
     let forecasts: [CompanyResearchFinancialForecast]?
     let source: CompanyResearchSource
 }
@@ -111,6 +112,8 @@ struct CompanyResearchFinancialPeriod: Decodable, Hashable, Identifiable {
     let revenue: Double
     let netProfit: Double
     let note: String?
+    let filedOn: String?
+    let source: CompanyResearchSource?
 
     var id: String { period }
 }
@@ -120,6 +123,7 @@ struct CompanyResearchFinancialYear: Decodable, Hashable, Identifiable {
     let revenue: Double
     let netProfit: Double
     let roe: Double
+    let source: CompanyResearchSource?
 
     var id: String { year }
 }
@@ -197,7 +201,7 @@ struct CompanyResearchService {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let usesSnapshot = onCached != nil && session === URLSession.shared
-        let key = url.absoluteString
+        let key = "verified-disclosures:" + url.absoluteString
         let preparedRequest = request
         async let reply = session.data(for: preparedRequest)
         if usesSnapshot, let onCached,
@@ -235,6 +239,7 @@ final class CompanyResearchStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var isShowingSavedCompanies = false
     private(set) var lastLoadedAt: Date?
+    private var loadTask: Task<Void, Never>?
     private let fetch: ((@MainActor (CompanyResearchPayload) -> Void)?) async throws -> CompanyResearchPayload
     private let refreshInterval: TimeInterval
 
@@ -255,10 +260,23 @@ final class CompanyResearchStore: ObservableObject {
     }
 
     func load(force: Bool = false, now: Date = Date()) async {
-        guard !isLoading, force || companies.isEmpty else { return }
+        if let loadTask {
+            await loadTask.value
+            return
+        }
+        guard force || companies.isEmpty else { return }
+        let task = Task { await refresh(now: now) }
+        loadTask = task
+        await task.value
+    }
+
+    private func refresh(now: Date) async {
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            loadTask = nil
+        }
         do {
             let payload = try await fetch { cached in
                 guard self.companies.isEmpty else { return }
@@ -286,8 +304,25 @@ final class CompanyResearchStore: ObservableObject {
 @MainActor
 struct CompanyResearchView: View {
     private enum FinancialRange: String, CaseIterable {
-        case quarterly = "季度"
-        case annual = "年度"
+        case quarterly
+        case interim
+        case annual
+
+        var label: String {
+            switch self {
+            case .quarterly: "季度"
+            case .interim: "半年度"
+            case .annual: "年度"
+            }
+        }
+
+        func periods(in financials: CompanyResearchFinancials) -> [CompanyResearchFinancialPeriod] {
+            switch self {
+            case .quarterly: financials.quarters ?? []
+            case .interim: financials.interims ?? []
+            case .annual: []
+            }
+        }
     }
 
     private enum Section: String, CaseIterable {
@@ -298,21 +333,13 @@ struct CompanyResearchView: View {
         case research = "事件"
     }
 
-    @StateObject private var store: CompanyResearchStore
+    @ObservedObject var store: CompanyResearchStore
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedSection: Section = .overview
     @State private var financialRange: FinancialRange = .quarterly
     @State private var presentedCompany: CompanyResearchProfile?
     @State private var presentedValuation: CompanyValuationHistoryRoute?
-
-    init() {
-        _store = StateObject(wrappedValue: CompanyResearchStore())
-    }
-
-    init(store: CompanyResearchStore) {
-        _store = StateObject(wrappedValue: store)
-    }
 
     var body: some View {
         NavigationStack {
@@ -323,17 +350,25 @@ struct CompanyResearchView: View {
                 } else if !store.companies.isEmpty {
                     companyHub
                 } else if let errorMessage = store.errorMessage {
-                    ContentUnavailableView(errorMessage, systemImage: "building.2.crop.circle", description: Text("请稍后重新进入公司页"))
+                    ContentUnavailableView {
+                        Label(errorMessage, systemImage: "building.2.crop.circle")
+                    } description: {
+                        Text("暂时无法取得公司资料")
+                    } actions: {
+                        Button("重新加载") { Task { await store.load(force: true) } }
+                    }
                 } else {
                     ContentUnavailableView("暂无公司", systemImage: "building.2", description: Text("公司档案将在服务端持续补充"))
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .appSheet(item: $presentedCompany) { company in
-                companyPage(company)
-                    .appPresentationDetents([.large])
-                    .appPresentationCornerRadius(28)
+            .appSheet(item: $presentedCompany) { route in
+                if let company = store.companies.first(where: { $0.id == route.id }) {
+                    companyPage(company)
+                        .appPresentationDetents([.large])
+                        .appPresentationCornerRadius(28)
+                }
             }
         }
         .task(id: rootTabIsActive) {
@@ -710,28 +745,42 @@ struct CompanyResearchView: View {
     }
 
     private func nativeNextReport(_ company: CompanyResearchProfile) -> some View {
-        HStack(spacing: 13) {
-            Image(systemName: "calendar")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(companyAccent(company))
-                .frame(width: 38, height: 38)
-                .background(companyAccent(company).opacity(0.09), in: Circle())
-            VStack(alignment: .leading, spacing: 3) {
-                Text("下次财报").font(.headline)
-                Text("\(company.nextReport.reportType) · \(company.questions.count)项待验证")
-                    .font(.caption).foregroundStyle(.secondary)
+        let financials = company.financials
+        let latest = ((financials.quarters ?? []) + (financials.interims ?? []))
+            .filter { $0.filedOn != nil && $0.source != nil }
+            .max { ($0.filedOn ?? "") < ($1.filedOn ?? "") }
+        return VStack(alignment: .leading, spacing: 12) {
+            if let latest, let source = latest.source, let filedOn = latest.filedOn {
+                Link(destination: source.url) {
+                    HStack(spacing: 9) {
+                        Image(systemName: "doc.text")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("最新已核对财报").font(.subheadline.weight(.semibold))
+                            Text(latest.period).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(filedOn).font(.caption.monospacedDigit())
+                        Image(systemName: "arrow.up.right").font(.caption2)
+                    }
+                }
+                Divider()
             }
-            Spacer()
-            Text(reportDate(company.nextReport.expectedDate))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(companyAccent(company))
+            Link(destination: company.nextReport.source.url) {
+                HStack(spacing: 9) {
+                    Image(systemName: "calendar")
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("下次财报").font(.subheadline.weight(.semibold))
+                        Text(company.nextReport.reportType).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(reportDate(company.nextReport.expectedDate)).font(.caption.monospacedDigit())
+                    Image(systemName: "arrow.up.right").font(.caption2)
+                }
+            }
         }
+        .foregroundStyle(companyAccent(company))
         .padding(16)
         .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.primary.opacity(0.055), lineWidth: 0.5)
-        }
     }
 
     private func dashboardMetric(_ label: String, _ value: String) -> some View {
@@ -821,6 +870,16 @@ struct CompanyResearchView: View {
             } else {
                 emptySection("商业资料待补充", icon: "arrow.triangle.branch", detail: "服务端尚未建立这家公司的商业模式档案")
             }
+            researchBlock("股份回购") {
+                Text("\(company.buyback.status) · 截至 \(company.buyback.asOfDate)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !company.buyback.amount.isEmpty, company.buyback.amount != "--" {
+                    Text(company.buyback.amount).font(.subheadline.weight(.semibold))
+                }
+                Text(company.buyback.progressNote).font(.subheadline)
+                Link(company.buyback.source.title, destination: company.buyback.source.url)
+                    .font(.caption)
+            }
         }
         .padding(.top, 12)
     }
@@ -844,7 +903,8 @@ struct CompanyResearchView: View {
             }
             if let consensus = company.consensus {
                 researchBlock("市场一致预期") {
-                    Text(consensus.period).font(.caption).foregroundStyle(.secondary)
+                    Text("\(consensus.period) · 截至 \(consensus.asOfDate)")
+                        .font(.caption).foregroundStyle(.secondary)
                     ForEach(consensus.metrics, id: \.label) { metric in
                         HStack {
                             Text(metric.label).font(.subheadline)
@@ -933,7 +993,11 @@ struct CompanyResearchView: View {
     }
 
     private func financialSection(_ company: CompanyResearchProfile) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let periods = financialRange.periods(in: company.financials)
+        let source = financialRange == .annual
+            ? company.financials.years.last?.source ?? company.financials.source
+            : periods.last?.source ?? company.financials.source
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("经营趋势").font(.title3.bold())
@@ -947,12 +1011,11 @@ struct CompanyResearchView: View {
             }
 
             Picker("财报周期", selection: $financialRange) {
-                ForEach(FinancialRange.allCases, id: \.self) { range in
-                    Text(range.rawValue).tag(range)
+                ForEach(financialRanges(for: company), id: \.self) { range in
+                    Text(range.label).tag(range)
                 }
             }
             .pickerStyle(.segmented)
-            .disabled((company.financials.quarters ?? []).isEmpty)
 
             Chart {
                 ForEach(displayedFinancialPeriods(company)) { item in
@@ -969,7 +1032,7 @@ struct CompanyResearchView: View {
                         BarMark(x: .value("周期", item.period), y: .value("金额", netProfit))
                             .foregroundStyle(item.isForecast ? Color.orange : companyAccent(company))
                             .cornerRadius(5)
-                            .position(by: .value("指标", "归母净利润"))
+                            .position(by: .value("指标", "净利润"))
                             .annotation(position: .top, spacing: 4) {
                                 chartValueLabel(netProfit, color: item.isForecast ? .orange : companyAccent(company))
                             }
@@ -985,7 +1048,7 @@ struct CompanyResearchView: View {
             HStack(spacing: 18) {
                 Label("营业收入", systemImage: "square.fill")
                     .foregroundStyle(companyAccent(company).opacity(0.38))
-                Label("归母净利润", systemImage: "square.fill")
+                Label("净利润", systemImage: "square.fill")
                     .foregroundStyle(companyAccent(company))
                 if hasForecast(company) {
                     Label("预测", systemImage: "square.fill")
@@ -995,21 +1058,21 @@ struct CompanyResearchView: View {
             }
             .font(.caption)
 
-            if financialRange == .quarterly,
-               let latest = company.financials.quarters?.last,
-               let previous = company.financials.quarters?.dropLast().last {
+            if let latest = periods.last {
                 Divider()
-                Text("最新季度 · \(latest.period)")
+                Text("最新\(financialRange.label) · \(latest.period)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    changeMetric("营收", latest.revenue, growth: growth(latest.revenue, previous.revenue), color: companyAccent(company), changeLabel: "环比")
-                    changeMetric("净利润", latest.netProfit, growth: growth(latest.netProfit, previous.netProfit), color: companyAccent(company), changeLabel: "环比")
+                if financialRange == .quarterly, let previous = periods.dropLast().last {
+                    HStack(spacing: 8) {
+                        changeMetric("营收", latest.revenue, growth: growth(latest.revenue, previous.revenue), color: companyAccent(company), changeLabel: "环比")
+                        changeMetric("净利润", latest.netProfit, growth: growth(latest.netProfit, previous.netProfit), color: companyAccent(company), changeLabel: "环比")
+                    }
                 }
                 if let note = latest.note, !note.isEmpty {
-                    Label(note, systemImage: "info.circle.fill")
+                    Label(note, systemImage: "info.circle")
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else if let latest = company.financials.years.last,
@@ -1026,17 +1089,17 @@ struct CompanyResearchView: View {
             }
 
             Divider()
-            if financialRange == .quarterly, !(company.financials.quarters ?? []).isEmpty {
-                quarterlyFinancialTable(company)
+            if !periods.isEmpty {
+                reportedFinancialTable(periods)
             } else {
                 financialTable(company)
             }
 
-            Link(destination: company.financials.source.url) {
+            Link(destination: source.url) {
                 HStack {
                     Label("查看原始财报", systemImage: "doc.text")
                     Spacer()
-                    Text(company.financials.source.title).lineLimit(1)
+                    Text(source.title).lineLimit(1)
                     Image(systemName: "arrow.up.right")
                 }
                 .font(.caption.weight(.medium))
@@ -1057,13 +1120,17 @@ struct CompanyResearchView: View {
         var id: String { "\(isForecast ? "forecast" : "actual")-\(period)" }
     }
 
+    private func financialRanges(for company: CompanyResearchProfile) -> [FinancialRange] {
+        FinancialRange.allCases.filter { $0 == .annual || !$0.periods(in: company.financials).isEmpty }
+    }
+
     private func displayedFinancialPeriods(_ company: CompanyResearchProfile) -> [CompanyResearchChartPeriod] {
-        let range = financialRange == .quarterly ? "quarterly" : "annual"
+        let range = financialRange.rawValue
         let forecasts = (company.financials.forecasts ?? [])
             .filter { $0.range == range }
             .map { CompanyResearchChartPeriod(period: "\($0.period)E", revenue: $0.revenue, netProfit: $0.netProfit, isForecast: true) }
-        if financialRange == .quarterly, let quarters = company.financials.quarters, !quarters.isEmpty {
-            return quarters.map {
+        if financialRange != .annual {
+            return financialRange.periods(in: company.financials).map {
                 CompanyResearchChartPeriod(period: $0.period, revenue: $0.revenue, netProfit: $0.netProfit, isForecast: false)
             } + forecasts
         }
@@ -1073,14 +1140,13 @@ struct CompanyResearchView: View {
     }
 
     private func hasForecast(_ company: CompanyResearchProfile) -> Bool {
-        let range = financialRange == .quarterly ? "quarterly" : "annual"
-        return company.financials.forecasts?.contains { $0.range == range } == true
+        company.financials.forecasts?.contains { $0.range == financialRange.rawValue } == true
     }
 
-    private func quarterlyFinancialTable(_ company: CompanyResearchProfile) -> some View {
+    private func reportedFinancialTable(_ periods: [CompanyResearchFinancialPeriod]) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
-                tableCell("季度", alignment: .leading, weight: .semibold)
+                tableCell("报告期", alignment: .leading, weight: .semibold)
                 tableCell("营收", alignment: .trailing, weight: .semibold)
                 tableCell("净利润", alignment: .trailing, weight: .semibold)
                 tableCell("净利率", alignment: .trailing, weight: .semibold)
@@ -1088,7 +1154,7 @@ struct CompanyResearchView: View {
             .foregroundStyle(.secondary)
             .padding(.bottom, 8)
 
-            ForEach(Array((company.financials.quarters ?? []).enumerated()), id: \.element.id) { index, item in
+            ForEach(Array(periods.enumerated()), id: \.element.id) { index, item in
                 if index > 0 { Divider() }
                 HStack(spacing: 4) {
                     tableCell(item.period, alignment: .leading, weight: .medium)
@@ -1220,20 +1286,14 @@ struct CompanyResearchView: View {
         .accessibilityLabel("\(company.shortName)标志")
     }
 
-    @ViewBuilder
     private func companyLogoContent(_ company: CompanyResearchProfile) -> some View {
-        AsyncImage(url: resolvedCompanyLogoURL(company)) { phase in
-            if case let .success(image) = phase {
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .padding(6)
-            } else {
-                Text(String(company.shortName.prefix(1)))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(companyAccent(company))
-            }
-        }
+        RemoteImage(
+            url: resolvedCompanyLogoURL(company),
+            targetWidth: 36,
+            height: 26,
+            contentMode: .fit
+        )
+        .frame(width: 36, height: 26)
     }
 
     private func resolvedCompanyLogoURL(_ company: CompanyResearchProfile) -> URL {
@@ -1280,6 +1340,7 @@ struct CompanyResearchView: View {
 
     private func openCompany(_ company: CompanyResearchProfile) {
         selectedSection = .overview
+        financialRange = financialRanges(for: company).first ?? .annual
         presentedCompany = company
     }
 

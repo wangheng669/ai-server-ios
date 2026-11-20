@@ -217,6 +217,8 @@ struct IndustryPanoramaView: View {
     @State private var selectedStageID: String?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var lastLoadedAt: Date?
+    @Environment(\.scenePhase) private var scenePhase
 
     private var selectedIndustry: IndustryPayload? {
         industries.first(where: { $0.id == selectedID }) ?? industries.first
@@ -266,8 +268,9 @@ struct IndustryPanoramaView: View {
         .background(IndustryPalette.canvas)
         .tint(IndustryPalette.accent)
         .onChange(of: selectedID) { _, _ in selectedStageID = nil }
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive, industries.isEmpty else { return }
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            if let lastLoadedAt, Date().timeIntervalSince(lastLoadedAt) < 300 { return }
             await load()
         }
     }
@@ -418,6 +421,7 @@ struct IndustryPanoramaView: View {
             }
             guard !Task.isCancelled else { return }
             industries = loaded
+            lastLoadedAt = Date()
             if selectedID == nil || !loaded.contains(where: { $0.id == selectedID }) { selectedID = loaded.first?.id }
             errorMessage = nil
         } catch {

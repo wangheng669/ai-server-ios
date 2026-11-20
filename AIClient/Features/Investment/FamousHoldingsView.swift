@@ -29,7 +29,6 @@ private struct HoldingDetailRoute: Identifiable, Equatable {
 
 struct FamousHoldingsView: View {
     let store: FamousHoldingsStore
-    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var selectedIndex = 0
     @State private var selectedDetail: HoldingDetailRoute?
 
@@ -42,13 +41,8 @@ struct FamousHoldingsView: View {
             if managers.count > 1 { managerSelector }
             Group {
                 if managers.indices.contains(selectedIndex) {
-                    let manager = managers[selectedIndex]
-                    overview(store.detail(for: manager) ?? manager)
-                        .task(id: rootTabIsActive ? manager.reportIdentity : nil) {
-                            guard rootTabIsActive else { return }
-                            await store.loadDetail(for: manager)
-                        }
-                } else if store.isLoading {
+                    overview(managers[selectedIndex])
+                } else if store.isLoading || store.errorMessage == nil && store.holdings == nil {
                     ContentLoadingPlaceholder(title: "正在读取公开持仓披露", layout: .cards)
                         .frame(maxHeight: .infinity, alignment: .top)
                 } else {
@@ -58,8 +52,7 @@ struct FamousHoldingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(HoldingsPalette.canvas.ignoresSafeArea())
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
+        .task {
             await store.load()
             #if DEBUG
             if selectedDetail == nil,
@@ -83,14 +76,13 @@ struct FamousHoldingsView: View {
     }
 
     private func overview(_ manager: FamousHoldingsManager) -> some View {
-        let topPositions = Array(currentPositions(manager).sorted { $0.weightPct > $1.weightPct }.prefix(10))
-        return ScrollView {
+        ScrollView {
             VStack(spacing: 0) {
                 hero(manager)
                 sectionDivider
-                portfolioSnapshot(manager, topPositions: topPositions)
+                portfolioSnapshot(manager)
                 sectionDivider
-                coreHoldings(manager, topPositions: topPositions)
+                coreHoldings(manager)
                 sectionDivider
                 quarterlyActivity(manager)
                 sectionDivider
@@ -185,8 +177,8 @@ struct FamousHoldingsView: View {
         .accessibilityAction(named: "上一个人物") { moveManager(by: -1) }
     }
 
-    private func portfolioSnapshot(_ manager: FamousHoldingsManager, topPositions: [FamousHoldingChange]) -> some View {
-        let concentration = topPositions.reduce(0) { $0 + $1.weightPct }
+    private func portfolioSnapshot(_ manager: FamousHoldingsManager) -> some View {
+        let concentration = manager.topPositions.reduce(0) { $0 + $1.weightPct }
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 0) {
                 snapshotMetric(
@@ -200,14 +192,14 @@ struct FamousHoldingsView: View {
                 summaryDivider
                 snapshotMetric(
                     "前十集中度",
-                    manager.hasCompletePositions ? percent(concentration) : "—",
-                    topPositions.first.map { "首位 \(percent($0.weightPct))" }
+                    manager.topPositions.isEmpty ? "—" : percent(concentration),
+                    manager.topPositions.first.map { "首位 \(percent($0.weightPct))" }
                 )
                 summaryDivider
                 snapshotMetric("季度变动", "\(manager.changesCount) 只", activityCaption(manager.summary))
             }
 
-            if manager.hasCompletePositions, !topPositions.isEmpty {
+            if !manager.sectors.isEmpty {
                 sectorAllocation(manager)
             }
         }
@@ -243,7 +235,15 @@ struct FamousHoldingsView: View {
     }
 
     private func sectorAllocation(_ manager: FamousHoldingsManager) -> some View {
-        let sectors = Array(sectorData(manager).prefix(4))
+        let colors = [HoldingsPalette.purple, HoldingsPalette.orange, HoldingsPalette.teal]
+        var sectors = zip(manager.sectors.prefix(3), colors).map {
+            HoldingSector(name: $0.0.name, value: $0.0.weightPct, color: $0.1)
+        }
+        let remainder = manager.sectors.dropFirst(3).reduce(0) { $0 + $1.weightPct }
+        if remainder > 0 {
+            sectors.append(HoldingSector(name: "其他行业", value: remainder, color: .gray))
+        }
+        let total = sectors.reduce(0) { $0 + $1.value }
         return VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Text("行业配置")
@@ -252,7 +252,7 @@ struct FamousHoldingsView: View {
                 ForEach(sectors) { sector in
                     HStack(spacing: 3) {
                         Circle().fill(sector.color).frame(width: 5, height: 5)
-                        Text("\(sector.name) \(percent(sector.value))")
+                        Text("\(sector.name) \(percent(sector.value))").lineLimit(1)
                     }
                     .font(.system(size: 8.5, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -264,7 +264,7 @@ struct FamousHoldingsView: View {
                     ForEach(sectors) { sector in
                         RoundedRectangle(cornerRadius: 3)
                             .fill(sector.color)
-                            .frame(width: max(3, proxy.size.width * sector.value / 100))
+                            .frame(width: max(0, proxy.size.width - 2 * CGFloat(sectors.count - 1)) * sector.value / total)
                     }
                 }
             }
@@ -273,12 +273,12 @@ struct FamousHoldingsView: View {
         }
     }
 
-    private func coreHoldings(_ manager: FamousHoldingsManager, topPositions: [FamousHoldingChange]) -> some View {
-        let positions = topPositions.prefix(5)
+    private func coreHoldings(_ manager: FamousHoldingsManager) -> some View {
+        let positions = manager.topPositions.prefix(5)
         return VStack(spacing: 0) {
             sectionHeader(
                 title: "核心持仓",
-                detail: manager.hasCompletePositions ? "前 5 · 共 \(manager.positionsCount) 只" : "查看完整持仓",
+                detail: positions.isEmpty ? "查看完整持仓" : "前 \(positions.count) · 共 \(manager.positionsCount) 只",
                 action: { selectedDetail = HoldingDetailRoute(managerKey: manager.key) }
             )
 
@@ -427,15 +427,16 @@ struct FamousHoldingsView: View {
     }
 
     private func portfolioValueChangeCaption(_ manager: FamousHoldingsManager) -> String {
-        guard let change = manager.valueChangeFromPreviousReport else { return "暂无上期数据" }
-        let arrow = change.amountUsd > 0 ? "↑" : change.amountUsd < 0 ? "↓" : "→"
-        return "\(arrow) \(compactDollarValue(abs(change.amountUsd))) \(signedPercent(change.percent))"
+        guard let previous = manager.analytics.previousTotalValueUsd, previous > 0 else { return "暂无上期数据" }
+        let change = manager.analytics.totalValueChangeUsd
+        let arrow = change > 0 ? "↑" : change < 0 ? "↓" : "→"
+        return "\(arrow) \(compactDollarValue(abs(change))) \(signedPercent(manager.analytics.totalValueChangePct))"
     }
 
     private func portfolioValueChangeTint(_ manager: FamousHoldingsManager) -> Color {
-        guard let change = manager.valueChangeFromPreviousReport else { return .secondary }
-        if change.amountUsd > 0 { return HoldingsPalette.red }
-        if change.amountUsd < 0 { return HoldingsPalette.green }
+        guard let previous = manager.analytics.previousTotalValueUsd, previous > 0 else { return .secondary }
+        if manager.analytics.totalValueChangeUsd > 0 { return HoldingsPalette.red }
+        if manager.analytics.totalValueChangeUsd < 0 { return HoldingsPalette.green }
         return .secondary
     }
 
@@ -551,29 +552,6 @@ struct FamousHoldingsView: View {
         let next = selectedIndex + offset
         guard managers.indices.contains(next) else { return }
         withAnimation(.easeInOut(duration: 0.22)) { selectedIndex = next }
-    }
-
-    private func currentPositions(_ manager: FamousHoldingsManager) -> [FamousHoldingChange] {
-        manager.hasCompletePositions ? (manager.positions ?? []) : []
-    }
-
-    private func sectorData(_ manager: FamousHoldingsManager) -> [HoldingSector] {
-        var totals: [String: Double] = [:]
-        for change in currentPositions(manager) {
-            totals[sectorName(displaySymbol(change)), default: 0] += max(0, change.weightPct)
-        }
-        let known = min(totals.values.reduce(0, +), 100)
-        totals["其他", default: 0] += max(0, 100 - known)
-        let colors: [String: Color] = [
-            "信息技术": HoldingsPalette.purple,
-            "非必需消费": HoldingsPalette.orange,
-            "医疗保健": HoldingsPalette.teal,
-            "金融": HoldingsPalette.pink,
-            "通信服务": HoldingsPalette.green,
-            "其他": .gray
-        ]
-        return totals.map { HoldingSector(name: $0.key, value: $0.value, color: colors[$0.key] ?? .gray) }
-            .sorted { $0.value > $1.value }
     }
 
     private func sectorName(_ symbol: String?) -> String {

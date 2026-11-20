@@ -30,6 +30,7 @@ private struct MarketDetailRoute: Identifiable, Equatable {
 private final class MarketDetailStores: ObservableObject {
     lazy var globalRanking = GlobalRankingStore()
     lazy var holdings = FamousHoldingsStore()
+    lazy var companies = CompanyResearchStore()
 }
 
 struct MarketView: View {
@@ -134,6 +135,7 @@ struct MarketView: View {
         ResearchHomeView(
             store: store,
             researchStore: institutionResearchStore,
+            companyStore: detailStores.companies,
             onOpenMacro: {
                 showsMacro = true
             },
@@ -247,6 +249,12 @@ struct MarketView: View {
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await store.runUpdates()
+        }
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            async let companies: Void = detailStores.companies.loadIfNeeded()
+            async let holdings: Void = holdingsStore.load()
+            _ = await (companies, holdings)
         }
         .task(id: rootTabIsActive && scenePhase == .active) {
             guard rootTabIsActive, scenePhase == .active else { return }
@@ -3474,14 +3482,15 @@ private struct MarketIndexDetailView: View {
                 .appPresentationCornerRadius(28)
         }
         .task(id: historicalSymbol) {
-            await store.loadChart(symbol: chartSymbol, range: selectedRange)
-            guard !Task.isCancelled else { return }
+            async let chart: Void = store.loadChart(symbol: chartSymbol, range: selectedRange)
             async let yearChart: Void = store.loadChart(symbol: chartSymbol, range: .year)
-            if isIndex { await store.loadIndexConstituents(symbol: historicalSymbol) }
-            await yearChart
-            if let quote, !isCommodity, symbol != "^VIX" {
+            if isIndex {
+                await store.loadIndexConstituents(symbol: historicalSymbol)
+            } else if let quote, !isCommodity, symbol != "^VIX" {
                 await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
             }
+            _ = await (chart, yearChart)
+            guard !Task.isCancelled else { return }
             #if DEBUG
             if let preview = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-pe-history-preview=") }) {
                 let value = String(preview.dropFirst("--market-pe-history-preview=".count))
@@ -3831,19 +3840,19 @@ private struct MarketIndexDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 let items = store.indexConstituents[historicalSymbol]?.items ?? []
                 ForEach(items) { item in
                     if item.detailAvailable {
                         Button {
                             onSelectSymbol(item.quote.symbol)
                         } label: {
-                            MarketConstituentRow(item: item, trend: store.trendValues(for: item.quote))
+                            MarketConstituentRow(item: item, store: store)
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("打开行情详情")
                     } else {
-                        MarketConstituentRow(item: item, trend: store.trendValues(for: item.quote))
+                        MarketConstituentRow(item: item, store: store)
                             .accessibilityHint("该本地代码仅展示当前行情")
                     }
                     if item.id != items.last?.id { Divider().padding(.leading, 52) }
@@ -5274,12 +5283,17 @@ private struct MarketSummary: View {
 
 private struct MarketConstituentRow: View {
     let item: MarketIndexConstituent
-    let trend: [Double]
+    let store: MarketStore
     private var quote: MarketQuote { item.quote }
+    private var logoPath: String? { item.logoPath ?? store.companyLogoPaths[quote.symbol] }
+    private var trend: [Double] {
+        let values = store.trendValues(for: quote)
+        return values.count > 1 ? values : store.listTrendValues(for: quote)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            CompanyLogo(quote: quote, path: item.logoPath)
+            CompanyLogo(quote: quote, path: logoPath)
             VStack(alignment: .leading, spacing: 4) {
                 Text(quote.presentationName).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 HStack(spacing: 5) {
@@ -5308,6 +5322,16 @@ private struct MarketConstituentRow: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(minHeight: 64)
+        .task(id: quote.symbol) {
+            if item.detailAvailable, trend.count < 2 {
+                await store.loadChart(symbol: quote.symbol, range: .day)
+            }
+        }
+        .task(id: quote.symbol) {
+            if item.detailAvailable, logoPath == nil {
+                await store.loadCompanyLogo(symbol: quote.symbol, name: quote.name)
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(quote.presentationName)，\(quote.symbol)，市值 \(quote.marketCap.map(compactNumber) ?? "未知")，最新价 \(number(quote.price, digits: marketPriceDigits(quote.price, symbol: quote.symbol)))，\(quote.formattedPercent)，点按查看详情")
     }

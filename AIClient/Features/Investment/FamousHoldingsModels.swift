@@ -36,6 +36,9 @@ struct FamousHoldingsManager: Codable, Identifiable {
     let summary: FamousHoldingsSummary
     let changesCount: Int
     let changes: [FamousHoldingChange]
+    let topPositions: [FamousHoldingChange]
+    let sectors: [FamousHoldingsSector]
+    let analytics: FamousHoldingsAnalytics
     let positions: [FamousHoldingChange]?
     let exitedPositions: [FamousHoldingChange]?
 
@@ -49,40 +52,7 @@ struct FamousHoldingsManager: Codable, Identifiable {
         (positions?.count ?? 0) == positionsCount && (exitedPositions?.count ?? 0) == summary.exited
     }
 
-    var valueChangeFromPreviousReport: FamousHoldingsValueChange? {
-        let positions = positions ?? []
-        let exitedPositions = exitedPositions ?? []
-        guard hasCompletePositions,
-              positions.count(where: { $0.action == .new }) == summary.new,
-              positions.count(where: { $0.action == .increased }) == summary.increased,
-              positions.count(where: { $0.action == .decreased }) == summary.decreased,
-              summary.unchanged.map({ unchangedCount in
-                  positions.count(where: { $0.action == .unchanged }) == unchangedCount
-              }) ?? true,
-              positions.allSatisfy({ $0.action != .exited && $0.previousValueUsd != nil }),
-              exitedPositions.allSatisfy({ $0.action == .exited && $0.previousValueUsd != nil }) else {
-            return nil
-        }
 
-        let currentTotalValueUsd = positions.reduce(0) { $0 + $1.valueUsd }
-        let currentTotalTolerance = max(1, abs(totalValueUsd) * 0.000_000_001)
-        guard abs(currentTotalValueUsd - totalValueUsd) <= currentTotalTolerance else { return nil }
-
-        let previousCurrentPositionsValueUsd = positions.reduce(0) { partialResult, change in
-            partialResult + (change.previousValueUsd ?? 0)
-        }
-        let previousExitedPositionsValueUsd = exitedPositions.reduce(0) { partialResult, change in
-            partialResult + (change.previousValueUsd ?? 0)
-        }
-        let previousTotalValueUsd = previousCurrentPositionsValueUsd + previousExitedPositionsValueUsd
-        guard previousTotalValueUsd > 0 else { return nil }
-
-        let amountUsd = totalValueUsd - previousTotalValueUsd
-        return FamousHoldingsValueChange(
-            amountUsd: amountUsd,
-            percent: amountUsd / previousTotalValueUsd * 100
-        )
-    }
 }
 
 struct FamousHoldingsReportIdentity: Hashable {
@@ -96,9 +66,15 @@ struct FamousHoldingsReportIdentity: Hashable {
     }
 }
 
-struct FamousHoldingsValueChange: Equatable {
-    let amountUsd: Double
-    let percent: Double
+struct FamousHoldingsAnalytics: Codable {
+    let previousTotalValueUsd: Double?
+    let totalValueChangeUsd: Double
+    let totalValueChangePct: Double
+}
+
+struct FamousHoldingsSector: Codable {
+    let name: String
+    let weightPct: Double
 }
 
 struct FamousHoldingChange: Codable, Identifiable {

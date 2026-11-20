@@ -42,6 +42,7 @@ struct ResearchHomeView: View {
     @State private var visitedSections: Set<ResearchSection> = []
     let store: MarketStore
     @ObservedObject var researchStore: InstitutionResearchStore
+    let companyStore: CompanyResearchStore
     let onOpenMacro: () -> Void
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
@@ -88,7 +89,7 @@ struct ResearchHomeView: View {
                         onOpenMarketDetail: onOpenMarketDetail, onOpenRetailInvestors: onOpenRetailInvestors
                     )
                 }
-                sectionContent(.company) { CompanyResearchView() }
+                sectionContent(.company) { CompanyResearchView(store: companyStore) }
                 sectionContent(.industry) { IndustryPanoramaView() }
                 sectionContent(.macro) { ChinaMacroView() }
                 sectionContent(.viewpoints) {
