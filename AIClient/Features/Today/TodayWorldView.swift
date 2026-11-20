@@ -439,7 +439,9 @@ struct TodayWorldView: View {
     }
 
     private var cachedEditionStatus: String {
-        guard let report = store.report else { return "已显示上次日报" }
+        guard let report = store.report else {
+            return store.isLoading ? "已显示缓存日报，正在检查更新" : "已显示缓存日报"
+        }
         var parts = ["已显示上次日报", reportStatusTitle]
         if let reason = reportStatusReason, !reason.isEmpty { parts.append(reason) }
         if report.admission?.state == "paused" {

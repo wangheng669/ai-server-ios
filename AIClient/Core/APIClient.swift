@@ -34,7 +34,9 @@ struct APIClient {
     func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
         let response: TodayWorldYesterdayReportResponse = try await get(
             baseURL.appending(path: "api/ios/v1/today-world/yesterday-report").appending(queryItems: [.init(name: "view", value: "edition")]),
-            retriesTransientFailures: false, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 8,
+            retryableNetworkErrors: [.timedOut, .networkConnectionLost]
         )
         guard response.success else { throw APIError.invalidResponse }
         return response.data
@@ -702,7 +704,8 @@ struct APIClient {
         retriesTransientFailures: Bool = true,
         cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
         timeoutInterval: TimeInterval = 30,
-        authorization: String? = nil
+        authorization: String? = nil,
+        retryableNetworkErrors: Set<URLError.Code>? = nil
     ) async throws -> Response {
         let attempts = retriesTransientFailures ? 2 : 1
         for attempt in 0..<attempts {
@@ -725,7 +728,8 @@ struct APIClient {
                 }
             } catch let error as URLError {
                 if error.code == .cancelled { throw CancellationError() }
-                guard attempt + 1 < attempts else { throw error }
+                guard attempt + 1 < attempts,
+                      retryableNetworkErrors?.contains(error.code) ?? true else { throw error }
                 #if DEBUG
                 print("Feed request failed (attempt \(attempt + 1)): \(url.absoluteString) — \(error)")
                 #endif

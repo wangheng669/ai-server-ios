@@ -205,7 +205,7 @@ struct TodayBriefOverviewView: View {
     @ViewBuilder
     private var editionStatus: some View {
         if let reportError {
-            Label("已显示上次日报 · \(reportError)", systemImage: "exclamationmark.circle")
+            Label("已显示缓存日报 · \(reportError)", systemImage: "exclamationmark.circle")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         } else if let cachedEditionMessage {
