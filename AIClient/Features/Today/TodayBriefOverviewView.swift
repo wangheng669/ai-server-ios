@@ -120,7 +120,6 @@ struct TodayBriefOverviewView: View {
     let cachedEditionMessage: String?
     let reportError: String?
     let isRefreshing: Bool
-    let showsCards: Bool
     let retryReport: () async -> Void
     let openSources: ([Int]) -> Void
 
@@ -136,7 +135,6 @@ struct TodayBriefOverviewView: View {
             } else {
                 Spacer(minLength: 0)
                 TodayBriefDeck(brief: brief, viewport: viewport) { openSources($0.postIDs) }
-                    .opacity(showsCards ? 1 : 0)
                 Spacer(minLength: 0)
             }
         }
@@ -358,10 +356,6 @@ private struct TodayBriefDeck: View {
         let index = brief.cards.firstIndex { $0.id == visibleCardID } ?? 0
         return HStack(spacing: 12) {
             pageButton("上一条", icon: "chevron.left", target: index - 1)
-            Text("\(index + 1) / \(brief.cards.count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("第 \(index + 1) 张，共 \(brief.cards.count) 张")
             pageButton("下一条", icon: "chevron.right", target: index + 1)
         }
     }
@@ -375,8 +369,8 @@ private struct TodayBriefDeck: View {
             }
         } label: {
             Image(systemName: icon)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(enabled ? TodayBriefStyle.accent : Color.secondary.opacity(0.4))
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(Color.secondary.opacity(enabled ? 0.78 : 0.36))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }

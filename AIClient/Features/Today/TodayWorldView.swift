@@ -360,7 +360,6 @@ struct TodayWorldView: View {
                         cachedEditionMessage: store.isShowingCachedEdition ? cachedEditionStatus : nil,
                         reportError: store.errorMessage.map { "\($0)。正在查看上次加载的日报。" },
                         isRefreshing: store.isLoading,
-                        showsCards: originalPostIDs == nil,
                         retryReport: { await store.loadReport(force: true) },
                         openSources: { originalPostIDs = $0 }
                     )
