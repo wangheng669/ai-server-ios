@@ -9,13 +9,27 @@ enum InstitutionResearchAge: String {
     case recent = "近期观点", historical = "历史观点", unverified = "日期待核验"
 }
 
+struct InstitutionResearchCoverage: Decodable, Identifiable {
+    let institutionKey: String
+    let institutionNameZh: String
+    let officialResearchUrl: URL
+    let isActive: Bool
+    let lastCheckedAt: String?
+    let latestPublishedOn: String?
+    let activeReportCount: Int
+
+    var id: String { institutionKey }
+}
+
 struct InstitutionResearchPayload: Decodable {
+    let sources: [InstitutionResearchCoverage]
     let institutionsCount: Int
     let items: [InstitutionResearchItem]
     let updatedAt: Date?
     let institutionShortNames: [String]
 
-    init(institutionsCount: Int, items: [InstitutionResearchItem], updatedAt: Date?) {
+    init(sources: [InstitutionResearchCoverage], institutionsCount: Int, items: [InstitutionResearchItem], updatedAt: Date?) {
+        self.sources = sources.filter(\.isActive)
         self.institutionsCount = institutionsCount
         self.items = items.sorted { $0.publishedOn == $1.publishedOn ? $0.id < $1.id : $0.publishedOn > $1.publishedOn }
         self.updatedAt = updatedAt
@@ -75,7 +89,7 @@ struct InstitutionResearchItem: Decodable, Identifiable, Hashable {
 
 extension InstitutionResearchPayload {
     private enum CodingKeys: String, CodingKey {
-        case reports, updatedAt
+        case reports, updatedAt, sources
     }
 
     private struct ReportRecord: Decodable {
@@ -93,9 +107,10 @@ extension InstitutionResearchPayload {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let items = try values.decode([ReportRecord].self, forKey: .reports)
             .filter(\.isActive).map(\.item)
-        let institutionsCount = Set(items.map(\.institution)).count
         let timestamp = try values.decodeIfPresent(String.self, forKey: .updatedAt)
-        self.init(institutionsCount: institutionsCount, items: items, updatedAt: marketISODate(timestamp))
+        let sources = try values.decode([InstitutionResearchCoverage].self, forKey: .sources)
+        let institutionsCount = sources.count(where: { $0.isActive && $0.activeReportCount > 0 })
+        self.init(sources: sources, institutionsCount: institutionsCount, items: items, updatedAt: marketISODate(timestamp))
     }
 }
 
@@ -245,9 +260,10 @@ struct InstitutionResearchView: View {
         let filtered = filteredItems(items)
         VStack(spacing: 0) {
             filters
-            if !items.isEmpty {
+            if let payload = store.payload {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        coverage(payload)
                         HStack {
                             Text("\(filtered.count) 篇研究")
                             Spacer()
@@ -257,7 +273,7 @@ struct InstitutionResearchView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 14)
                         if filtered.isEmpty {
-                            ContentUnavailableView("没有符合条件的报告", systemImage: "line.3.horizontal.decrease.circle")
+                            ContentUnavailableView(items.isEmpty ? "暂无公开研究" : "没有符合条件的报告", systemImage: "line.3.horizontal.decrease.circle")
                         }
                         ForEach(filtered) { item in
                             NavigationLink {
@@ -267,7 +283,7 @@ struct InstitutionResearchView: View {
                             .accessibilityIdentifier("institution-report-\(item.id)")
                             Divider().opacity(0.45)
                         }
-                        Text("中文为机器翻译，英文原文可对照。报告发布日期超过30天标为历史观点。")
+                        Text("部分报告提供中文机器翻译。发表超过 30 天的报告标为历史观点。")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 18)
@@ -278,6 +294,7 @@ struct InstitutionResearchView: View {
                     }
                     .padding(.horizontal, 18)
                 }
+                .refreshable { await store.load(force: true) }
             } else if store.isLoading {
                 ContentLoadingPlaceholder(title: "正在载入研究报告")
                     .frame(maxHeight: .infinity, alignment: .top)
@@ -300,6 +317,37 @@ struct InstitutionResearchView: View {
         .onChange(of: rootTabIsActive) { _, active in
             if !active { searchIsFocused = false }
         }
+    }
+
+    private func coverage(_ payload: InstitutionResearchPayload) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(payload.sources) { source in
+                    Link(destination: source.officialResearchUrl) {
+                        HStack {
+                            Text(source.institutionNameZh)
+                            Spacer()
+                            Text(coverageStatus(source)).foregroundStyle(.secondary)
+                            Image(systemName: "arrow.up.right").font(.caption2)
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+            .padding(.top, 10)
+        } label: {
+            Text("已收录 \(payload.institutionsCount) / \(payload.sources.count) 家机构")
+                .font(.caption.weight(.medium))
+        }
+        .padding(.top, 12)
+    }
+
+    private func coverageStatus(_ source: InstitutionResearchCoverage) -> String {
+        if source.activeReportCount > 0, let date = source.latestPublishedOn {
+            return "\(source.activeReportCount) 篇 · 最新 \(date)"
+        }
+        if source.lastCheckedAt == nil { return "暂无采集记录" }
+        return "已检查 · 暂无入库"
     }
 
     private var filters: some View {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GlobalAssetsRankingView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     let store: GlobalRankingStore
 
     var body: some View {
@@ -10,6 +11,12 @@ struct GlobalAssetsRankingView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         overview(ranking)
+                        if store.globalAssetsLoadFailed {
+                            Button("更新失败，点击重试") { Task { await store.loadGlobalAssets(force: true) } }
+                                .font(.caption)
+                                .padding(.horizontal, InvestmentDesign.pageInset)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         rankingSection(ranking)
                         sourceFooter(ranking)
                     }
@@ -31,8 +38,13 @@ struct GlobalAssetsRankingView: View {
             }
         }
         .background(InvestmentDesign.surface)
-        .task(id: rootTabIsActive) {
-            if rootTabIsActive, store.globalAssets == nil { await store.loadGlobalAssets() }
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await store.loadGlobalAssets()
+                do { try await Task.sleep(for: .seconds(300)) }
+                catch { return }
+            }
         }
     }
 
@@ -46,7 +58,7 @@ struct GlobalAssetsRankingView: View {
                     Text("全球资产")
                         .font(.system(size: 16, weight: .bold))
                         .lineLimit(1)
-                    Text("按实时总市值排名")
+                    Text("按采集时的总市值排名")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -55,6 +67,12 @@ struct GlobalAssetsRankingView: View {
                 Spacer()
                 Text("\(ranking.assets.count) 项")
                     .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            if let collectedAt = marketISODate(ranking.fetchedAt) {
+                Label("采集于 \(collectedAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "clock")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 

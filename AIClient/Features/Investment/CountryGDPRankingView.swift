@@ -160,8 +160,9 @@ struct GlobalAssetsService {
 
     func ranking(onCached: @escaping @MainActor (GlobalAssetsRanking) -> Void) async throws -> GlobalAssetsRanking {
         let url = baseURL.appending(path: "api/ios/v1/economy/global-assets")
-        var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
             let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: data)
             guard payload.success, !payload.data.assets.isEmpty else {
@@ -181,6 +182,7 @@ final class GlobalRankingStore {
     private(set) var isLoadingGlobalAssets = false
     private(set) var countryGDPLoadFailed = false
     private(set) var globalAssetsLoadFailed = false
+    private var globalAssetsLoadedAt: Date?
 
     private let countryGDPService: CountryGDPService
     private let globalAssetsService: GlobalAssetsService
@@ -206,8 +208,9 @@ final class GlobalRankingStore {
         }
     }
 
-    func loadGlobalAssets() async {
+    func loadGlobalAssets(force: Bool = false) async {
         guard !isLoadingGlobalAssets else { return }
+        if !force, let globalAssetsLoadedAt, Date().timeIntervalSince(globalAssetsLoadedAt) < 60 { return }
         isLoadingGlobalAssets = true
         globalAssetsLoadFailed = false
         defer { isLoadingGlobalAssets = false }
@@ -215,10 +218,11 @@ final class GlobalRankingStore {
             globalAssets = try await globalAssetsService.ranking { cached in
                 if self.globalAssets == nil { self.globalAssets = cached }
             }
+            globalAssetsLoadedAt = Date()
         } catch is CancellationError {
             return
         } catch {
-            if globalAssets == nil { globalAssetsLoadFailed = true }
+            globalAssetsLoadFailed = true
         }
     }
 }
