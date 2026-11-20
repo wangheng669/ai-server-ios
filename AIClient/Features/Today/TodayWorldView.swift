@@ -346,13 +346,14 @@ struct TodayWorldView: View {
 
     private func pageContent(viewport: CGSize) -> some View {
         let readingHeight = max(0, viewport.height - bottomChromeHeight - 8)
+        let topInset = store.brief == nil ? 0 : min(32, max(0, (readingHeight - 480) / 6))
         return ScrollView {
             VStack(spacing: TodayBriefStyle.toolsSpacing) {
                 toolsButton
                 if let brief = store.brief {
                     TodayBriefOverviewView(
                         brief: brief,
-                        viewport: CGSize(width: viewport.width, height: readingHeight),
+                        viewport: CGSize(width: viewport.width, height: readingHeight - topInset),
                         openSources: { originalPostIDs = $0 }
                     )
                     .id(brief.date)
@@ -360,11 +361,8 @@ struct TodayWorldView: View {
                     emptyReportView
                 }
             }
-            .frame(
-                maxWidth: .infinity,
-                minHeight: readingHeight,
-                alignment: store.brief == nil ? .top : .center
-            )
+            .padding(.top, topInset)
+            .frame(maxWidth: .infinity, minHeight: readingHeight, alignment: .top)
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
@@ -393,7 +391,7 @@ struct TodayWorldView: View {
         let bottomInset = viewport.height * 0.22
         let panelHeight = min(660, max(0, viewport.height - 52 - bottomInset))
         return ZStack(alignment: .bottom) {
-            Color.black.opacity(0.025)
+            TodayBriefStyle.surface
                 .accessibilityHidden(true)
             TodayOriginalsPanel(
                 sources: postIDs.compactMap { brief.sources[$0] },

@@ -3,8 +3,8 @@ import UIKit
 
 enum TodayBriefStyle {
     static let horizontalInset: CGFloat = 22
-    static let toolsRowHeight: CGFloat = 48
-    static let toolsSpacing: CGFloat = 8
+    static let toolsRowHeight: CGFloat = 44
+    static let toolsSpacing: CGFloat = 4
     static let maximumCardWidth: CGFloat = 480
     static let cardCornerRadius: CGFloat = 28
     static let surface = Color(uiColor: .systemBackground)
@@ -237,8 +237,15 @@ private struct TodayReportRetryButton: View {
     }
 }
 
+private struct TodayBriefCardButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onTapGesture { configuration.trigger() }
+            .accessibilityAction { configuration.trigger() }
+    }
+}
+
 private struct TodayBriefDeck: View {
-    @State private var visibleCardID: String?
 
     let brief: TodayBriefProjection
     let viewport: CGSize
@@ -249,7 +256,7 @@ private struct TodayBriefDeck: View {
     var body: some View {
         let deckPadding: CGFloat = 24
         let toolsHeight = TodayBriefStyle.toolsRowHeight + TodayBriefStyle.toolsSpacing
-        let cardHeight = min(495, max(0, viewport.height - toolsHeight - deckPadding))
+        let cardHeight = min(468, max(0, viewport.height - toolsHeight - deckPadding))
         let deckHeight = cardHeight + deckPadding
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
 
@@ -279,7 +286,7 @@ private struct TodayBriefDeck: View {
                         .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
                         .contentShape(shape)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(TodayBriefCardButtonStyle())
                     .accessibilityHint("查看原文")
                     .accessibilityIdentifier("today-card-\(card.id)")
                     .frame(width: viewport.width, height: viewport.height)
@@ -290,7 +297,6 @@ private struct TodayBriefDeck: View {
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
         .scrollTargetBehavior(.paging)
-        .scrollPosition(id: $visibleCardID)
         .accessibilityIdentifier("today-card-pager")
     }
 }
@@ -301,29 +307,41 @@ private struct TodayBriefCardFace: View {
     let compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 10 : 20) {
+        VStack(alignment: .leading, spacing: compact ? 14 : 22) {
             identity
 
             if let text = card.text {
-                Text(text)
-                    .font(compact ? .body : .title3)
-                    .foregroundStyle(.primary)
-                    .lineSpacing(compact ? 4 : 7)
-                    .layoutPriority(1)
+                ViewThatFits(in: .vertical) {
+                    bodyText(text)
+                    ScrollView {
+                        bodyText(text)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
             }
         }
         .multilineTextAlignment(.leading)
-        .padding(compact ? 16 : 26)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(compact ? 18 : 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             LinearGradient(
-                colors: [TodayBriefStyle.accent.opacity(0.07), .clear],
+                colors: [TodayBriefStyle.accent.opacity(0.065), .clear],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         }
         .clipShape(RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius))
         .accessibilityElement(children: .combine)
+    }
+
+    private func bodyText(_ text: String) -> some View {
+        Text(text)
+            .font(compact ? .body : .title2)
+            .foregroundStyle(.primary)
+            .lineSpacing(compact ? 4 : 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var identity: some View {
