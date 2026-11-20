@@ -1026,9 +1026,15 @@ struct NewsFeedView: View {
         } else {
             let posts = model.posts(for: source)
             ZStack {
-                feedList(for: source, posts: posts)
-                    .opacity(posts.isEmpty ? 0 : 1)
-                    .allowsHitTesting(!posts.isEmpty)
+                Group {
+                    if source == .x {
+                        xTimelineList(posts)
+                    } else {
+                        feedList(for: source, posts: posts)
+                    }
+                }
+                .opacity(posts.isEmpty ? 0 : 1)
+                .allowsHitTesting(!posts.isEmpty)
 
                 if posts.isEmpty {
                     feedStatus(for: source)
@@ -1155,6 +1161,82 @@ struct NewsFeedView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func xTimelineList(_ posts: [Post]) -> some View {
+        let isActive = rootTabIsActive && model.source == .x
+        let paginationPost = posts.dropLast(2).last ?? posts.last
+        return GeometryReader { geometry in
+            let cardWidth = max(1, geometry.size.width - NewsCardView.xHorizontalInset * 2)
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                        let displayed = model.postForDisplay(post)
+                        NewsCardView(post: displayed, onOpen: { openPost(displayed) }, xTimelineWidth: cardWidth)
+                            .equatable()
+                            .accessibilityIdentifier("feed-post-\(post.id)")
+                            .alignmentGuide(.listRowSeparatorLeading) { _ in NewsCardView.xHorizontalInset }
+                            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in
+                                dimensions.width - NewsCardView.xHorizontalInset
+                            }
+                            .listRowSeparatorTint(Color.primary.opacity(0.08))
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .task(id: isActive) {
+                                guard isActive else { return }
+                                if index % 4 == 2 {
+                                    let upcoming = Array(posts.dropFirst(index + 2).prefix(4))
+                                    async let images: Void = ImageLoader.prefetchXTimelineImages(for: upcoming)
+                                    await model.translateXPostIfNeeded(post)
+                                    await images
+                                } else {
+                                    await model.translateXPostIfNeeded(post)
+                                }
+                            }
+                            .task(id: isActive && post.id == paginationPost?.id ? posts.last?.id : nil) {
+                                guard isActive, !Task.isCancelled,
+                                      post.id == paginationPost?.id, model.errorMessage == nil else { return }
+                                // Finish the page request even when a fast swipe recycles its anchor row.
+                                await Task {
+                                    await model.loadMoreIfNeeded(current: post, thresholdPostID: post.id)
+                                }.value
+                            }
+                    }
+                    if isActive, model.isLoadingMore {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .listRowSeparator(.hidden)
+                    }
+                    if isActive, model.errorMessage != nil, let last = posts.last {
+                        Button("加载失败，点按重试") {
+                            Task { await model.loadMoreIfNeeded(current: last) }
+                        }
+                        .listRowSeparator(.hidden)
+                    }
+                    Color.clear.frame(height: 55).listRowSeparator(.hidden)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .accessibilityIdentifier("feed-list-x")
+                .modifier(FeedChromeScrollModifier(
+                    isActive: isActive,
+                    isHidden: $isFeedChromeHidden,
+                    isAtTop: $isFeedAtTop
+                ))
+                .overlay(alignment: .top) {
+                    if isActive, !model.pendingRealtimePosts.isEmpty {
+                        xNewPostsPill {
+                            withAnimation(.snappy(duration: 0.35)) {
+                                model.acceptPendingRealtimePosts()
+                                if let first = model.posts.first { proxy.scrollTo(first.id, anchor: .top) }
+                            }
+                        }
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+            }
+        }
     }
 
     // Variable-height rich-text and media rows can stall LazyVStack placement.
@@ -1376,19 +1458,6 @@ struct NewsFeedView: View {
                     isHidden: $isFeedChromeHidden,
                     isAtTop: $isFeedAtTop
                 ))
-                .overlay(alignment: .top) {
-                    if source == .x, model.source == .x, !model.pendingRealtimePosts.isEmpty {
-                        xNewPostsPill {
-                            withAnimation(.snappy(duration: 0.35)) {
-                                model.acceptPendingRealtimePosts()
-                                proxy.scrollTo("feed-top", anchor: .top)
-                            }
-                        }
-                        .padding(.top, isFeedChromeHidden ? 12 : FeedChromeLayout.headerHeight + 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
 
             }
         }
@@ -1427,10 +1496,6 @@ struct NewsFeedView: View {
                 openPost(displayPost)
             }
         })
-        .task(id: "\(rootTabIsActive)-\(source == model.source)-x-translation-\(post.id)") {
-            guard rootTabIsActive, source == .x, source == model.source else { return }
-            await model.translateXPostIfNeeded(post)
-        }
         .task(id: "\(rootTabIsActive)-youtube-prewarm-\(post.id)") {
             guard rootTabIsActive,
                   source == .youtube,
@@ -3087,7 +3152,7 @@ private final class XAttributedTextBox {
     init(_ value: AttributedString) { self.value = value }
 }
 
-struct NewsCardView: View {
+struct NewsCardView: View, Equatable {
     @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
     private static let xTimelineCache: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
@@ -3121,110 +3186,112 @@ struct NewsCardView: View {
         else { socialCard }
     }
 
+    static let xHorizontalInset: CGFloat = 18
+    var xTimelineWidth: CGFloat? = nil
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.post == rhs.post && lhs.xTimelineWidth == rhs.xTimelineWidth
+            && lhs.rssAvatarURL == rhs.rssAvatarURL && lhs.usesWeChatStyle == rhs.usesWeChatStyle
+            && lhs.isFeaturedBilibili == rhs.isFeaturedBilibili && lhs.isExpandedFlash == rhs.isExpandedFlash
+    }
+
     private var xCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let content = xTimelineContent
+        let width = xTimelineWidth ?? UIScreen.main.bounds.width - Self.xHorizontalInset * 2
+        let showsExpansion = !isXTextExpanded && XTimelineTextLayout.needsExpansion(content, width: width)
+        return VStack(alignment: .leading, spacing: 11) {
             if let attribution = post.xRepostAttributionText {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.2.squarepath")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(attribution)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(.secondary)
-                .padding(.leading, 54)
-                .accessibilityElement(children: .combine)
+                Label(attribution, systemImage: "arrow.2.squarepath")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
-            HStack(alignment: .top, spacing: 10) {
-                AvatarView(
-                    url: post.avatarURL,
-                    name: post.authorName,
-                    size: 44,
-                    cornerRadius: xAvatarCornerRadius
-                )
+            xAuthorHeader
                 .contentShape(Rectangle())
                 .onTapGesture { onOpen?() }
+                .accessibilityIdentifier("feed-x-author-\(post.id)")
 
-                VStack(alignment: .leading, spacing: 5) {
-                    xAuthorHeader
+            if !content.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    xRichText(content)
+                        .font(.system(size: XTimelineTextLayout.fontSize))
+                        .lineSpacing(XTimelineTextLayout.lineSpacing)
+                        .lineLimit(showsExpansion ? XTimelineTextLayout.lineLimit : nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .contentShape(Rectangle())
                         .onTapGesture { onOpen?() }
-                        .accessibilityIdentifier("feed-x-author-\(post.id)")
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        xRichText(xTimelineContent)
-                            .font(.system(size: 15, weight: .regular))
-                            .lineSpacing(2)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(isLongXPost && !isXTextExpanded ? 9 : nil)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        if isLongXPost && !isXTextExpanded {
-                            Button(action: { isXTextExpanded = true }) {
-                                Text("显示更多")
-                                    .font(.system(size: 15, weight: .regular))
-                                    .foregroundStyle(.blue)
-                            }
+                    if showsExpansion {
+                        Button("显示更多") { isXTextExpanded = true }
+                            .font(.subheadline.weight(.medium))
                             .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
                             .accessibilityLabel("展开完整帖子正文")
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { onOpen?() }
-
-                    if let reply = post.xReplyContext,
-                       let replyText = reply.displayText {
-                        XReplyContextCard(reply: reply, text: replyText, isTimeline: true)
-                            .contentShape(Rectangle())
-                            .onTapGesture { onOpen?() }
-                    }
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        XFeedMediaView(post: post, onOpenQuote: onOpen)
-                        FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false, showsTimelineActions: true)
-                            .padding(.top, 6)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            if let reply = post.xReplyContext, let replyText = reply.displayText {
+                XReplyContextCard(reply: reply, text: replyText, isTimeline: true)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen?() }
+            }
+
+            if post.images?.isEmpty == false || post.videos?.isEmpty == false || post.xQuotedPost != nil {
+                XFeedMediaView(post: post, timelineWidth: width, onOpenQuote: onOpen)
+            }
+
+            FeedEngagementRow(post: post, showsTimelineActions: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Report the complete intrinsic row height to the lazy stack, including
-        // bounded multiline text, rather than accepting a stale height proposal.
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
+        .padding(.horizontal, Self.xHorizontalInset)
+        .padding(.top, 15)
+        .padding(.bottom, 10)
         .accessibilityElement(children: .contain)
     }
 
     private var xAuthorHeader: some View {
-        HStack(spacing: 4) {
-            Text(post.authorName)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .layoutPriority(3)
+        HStack(spacing: 10) {
+            AvatarView(
+                url: post.avatarURL,
+                name: post.authorName,
+                size: 38,
+                cornerRadius: xAvatarCornerRadius
+            )
 
-            if verificationStore.isVerified(handle: post.authorHandle, reported: post.user?.verified) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(xVerificationColor)
-                    .accessibilityLabel("已认证")
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(post.authorName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .lineLimit(1)
+
+                    if verificationStore.isVerified(handle: post.authorHandle, reported: post.user?.verified) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(xVerificationColor)
+                            .accessibilityLabel("已认证")
+                    }
+                }
+                if let handle = post.authorHandle {
+                    Text(handle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
-            if let handle = post.authorHandle {
-                Text(handle)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
+            Spacer(minLength: 8)
+
             if let time = post.formattedTime {
-                Text("· \(time)").lineLimit(1)
+                Text(time)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
-        .font(.system(size: 15))
-        .foregroundStyle(.secondary)
     }
 
     private var xTimelineContent: String {
@@ -3235,10 +3302,6 @@ struct NewsCardView: View {
         let value = XPostTextFormatter.timelineText(post.displayContent)
         Self.xTimelineCache.setObject(value as NSString, forKey: key, cost: value.utf8.count)
         return value
-    }
-
-    private var isLongXPost: Bool {
-        XTimelineTextLayout.needsExpansion(xTimelineContent, width: UIScreen.main.bounds.width - 78)
     }
 
     private func xRichText(_ value: String) -> Text {
@@ -3277,7 +3340,7 @@ struct NewsCardView: View {
         let usesOrganizationShape = type.contains("business")
             || type.contains("government")
             || type.contains("organization")
-        return usesOrganizationShape ? 10 : 22
+        return usesOrganizationShape ? 10 : 19
     }
 
     private var xueqiuCard: some View {

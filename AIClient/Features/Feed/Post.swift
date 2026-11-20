@@ -1540,10 +1540,8 @@ struct Post: Codable, Identifiable, Hashable {
         imageURLs.first ?? (videos ?? []).compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.compactMap(MediaURL.image).first
     }
     var xFeedVideoPoster: URL? {
-        let raw = feedContentImages.first?.url ?? (videos ?? []).lazy.compactMap {
-            $0.coverURL ?? $0.previewImageURL ?? $0.preview
-        }.first
-        return raw.flatMap { MediaURL.feedImage($0, variant: .tile) }
+        let cover = videos?.lazy.compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.first
+        return (cover ?? feedContentImages.first?.url).flatMap { MediaURL.feedImage($0, variant: .tile) }
     }
     var weChatCardPreviewURL: URL? {
         guard let previewURL else { return nil }

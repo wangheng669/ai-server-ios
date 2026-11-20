@@ -962,6 +962,7 @@ struct RemoteImage: View {
     var cornerRadius: CGFloat = 0
     var contentMode: ContentMode = .fill
     var onImageLoaded: ((UIImage) -> Void)? = nil
+    var usesTimelinePlaceholder = false
     @State private var result: (request: ImageLoader.Request, image: UIImage?)?
 
     var body: some View {
@@ -970,13 +971,17 @@ struct RemoteImage: View {
         let request = ImageLoader.request(for: url, targetSize: size, scale: screen.scale)
         let loaded = result?.request == request ? result?.image : nil
         ZStack {
-            Color.clear
+            usesTimelinePlaceholder ? Color(uiColor: .secondarySystemBackground) : Color.clear
             if let image = loaded ?? ImageLoader.shared.cachedImage(for: request) {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
             } else if result?.request == request {
                 Image(systemName: "photo").foregroundStyle(.secondary)
+                    .accessibilityLabel("图片加载失败")
+            } else if usesTimelinePlaceholder {
+                Image(systemName: "photo").foregroundStyle(.tertiary)
+                    .accessibilityLabel("图片加载中")
             } else {
                 ProgressView().foregroundStyle(.secondary)
             }
@@ -1290,6 +1295,11 @@ actor ImageLoader {
     static let weChatCardCoverSize = CGSize(width: 98, height: 86)
 
     static func prefetchFeedImages(for posts: [Post], source: FeedSource) async {
+        if source == .x {
+            await prefetchXTimelineImages(for: posts)
+            return
+        }
+
         let visiblePosts = posts.prefix(12)
         guard !visiblePosts.isEmpty else { return }
 
@@ -1341,6 +1351,28 @@ actor ImageLoader {
         let uniqueRequests = requests.filter { seen.insert($0.url).inserted }
         await prefetch(uniqueRequests, maximumConcurrentLoads: 4)
         await avatarWarmup
+    }
+
+    static func prefetchXTimelineImages(for posts: [Post]) async {
+        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
+        var requests: [PrefetchRequest] = []
+        for post in posts.prefix(4) {
+            let media = post.videos?.isEmpty == false
+                ? [post.xFeedVideoPoster].compactMap { $0 }
+                : Array(post.feedImageURLs.prefix(4))
+            let quoteMedia = post.xQuotedPost?.media?.compactMap(\.feedDisplayURL).prefix(2)
+            for url in media {
+                requests.append(.init(url: url, width: screenWidth, height: 280, prefersCompactXAvatar: false))
+            }
+            if let avatar = post.avatarURL {
+                requests.append(.init(url: avatar, width: 38, height: 38, prefersCompactXAvatar: true))
+            }
+            for url in quoteMedia ?? [] {
+                requests.append(.init(url: url, width: screenWidth, height: 240, prefersCompactXAvatar: false))
+            }
+        }
+        var seen = Set<URL>()
+        await prefetch(requests.filter { seen.insert($0.url).inserted }, maximumConcurrentLoads: 4)
     }
 
     static func prefetchAvatars(_ urls: [URL], maximumCount: Int = 12) async {
@@ -1696,6 +1728,8 @@ struct PostMediaGrid: View {
     @State private var loadedSingleImageAspectRatio: CGFloat?
     @State private var loadedVideoAspectRatio: CGFloat?
 
+    private var isXTimelinePreview: Bool { usesFeedSizedImages && post.source == "x" }
+
     private var knownCompactImageURLs: Set<URL> {
         guard post.isRSS else { return [] }
         let knownURLs = Set((post.images ?? []).filter(\.isKnownInlineAsset).compactMap { MediaURL.image($0.url) })
@@ -1765,7 +1799,7 @@ struct PostMediaGrid: View {
     }
 
     private func recordLoadedImage(_ image: UIImage, at url: URL, isSingleImage: Bool) {
-        if isSingleImage, image.size.width > 0, image.size.height > 0 {
+        if isSingleImage, !isXTimelinePreview, image.size.width > 0, image.size.height > 0 {
             loadedSingleImageAspectRatio = image.size.width / image.size.height
         }
 
@@ -1833,7 +1867,8 @@ struct PostMediaGrid: View {
                         height: resolvedSingleImageHeight,
                         cornerRadius: cornerRadius,
                         contentMode: singleImageContentMode,
-                        onImageLoaded: { recordLoadedImage($0, at: url, isSingleImage: true) }
+                        onImageLoaded: isXTimelinePreview ? nil : { recordLoadedImage($0, at: url, isSingleImage: true) },
+                        usesTimelinePlaceholder: isXTimelinePreview
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -1849,7 +1884,8 @@ struct PostMediaGrid: View {
                                 height: multiImageHeight,
                                 cornerRadius: 6,
                                 contentMode: .fit,
-                                onImageLoaded: { recordLoadedImage($0, at: url, isSingleImage: false) }
+                                onImageLoaded: isXTimelinePreview ? nil : { recordLoadedImage($0, at: url, isSingleImage: false) },
+                                usesTimelinePlaceholder: isXTimelinePreview
                             )
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         }
@@ -1905,6 +1941,10 @@ struct ImageGallerySelection: Identifiable {
 }
 
 enum XTimelineTextLayout {
+    static let fontSize: CGFloat = 16
+    static let lineSpacing: CGFloat = 3
+    static let lineLimit = 8
+
     private static let cache: NSCache<NSString, NSNumber> = {
         let cache = NSCache<NSString, NSNumber>()
         cache.countLimit = 400
@@ -1915,16 +1955,17 @@ enum XTimelineTextLayout {
         let width = max(1, width)
         let key = "\(width)|\(text)" as NSString
         if let cached = cache.object(forKey: key) { return cached.boolValue }
-        let font = UIFont.systemFont(ofSize: 15)
+        let font = UIFont.systemFont(ofSize: fontSize)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 2
+        paragraph.lineSpacing = lineSpacing
         let height = (text as NSString).boundingRect(
             with: CGSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font, .paragraphStyle: paragraph],
             context: nil
         ).height
-        let expanded = height > font.lineHeight * 9 + 2 * 8 + 0.5
+        let collapsedHeight = font.lineHeight * CGFloat(lineLimit) + lineSpacing * CGFloat(lineLimit - 1)
+        let expanded = height > collapsedHeight + 0.5
         cache.setObject(NSNumber(value: expanded), forKey: key)
         return expanded
     }
@@ -1932,6 +1973,7 @@ enum XTimelineTextLayout {
 
 struct XFeedMediaView: View {
     let post: Post
+    var timelineWidth: CGFloat? = nil
     var showsQuotedPost = true
     var onOpenQuote: (() -> Void)? = nil
 
@@ -1942,6 +1984,7 @@ struct XFeedMediaView: View {
                     url: videoURL,
                     fallbackURL: post.feedPlaybackFallbackURL,
                     thumbnailURL: post.xFeedVideoPoster,
+                    generatesThumbnailWhenMissing: timelineWidth == nil,
                     reportsPlaybackEvents: true,
                     observationSurface: "x-feed"
                 )
@@ -1952,7 +1995,7 @@ struct XFeedMediaView: View {
                 PostMediaGrid(
                     post: post,
                     usesFeedSizedImages: true,
-                    singleImageMaxHeight: 420,
+                    singleImageMaxHeight: timelineWidth == nil ? 420 : 280,
                     availableWidth: availableWidth,
                     cornerRadius: 12
                 )
@@ -1967,7 +2010,7 @@ struct XFeedMediaView: View {
     }
 
     private var availableWidth: CGFloat {
-        max(UIScreen.main.bounds.width - 78, 1)
+        max(timelineWidth ?? (UIScreen.main.bounds.width - 78), 1)
     }
 
     private var videoHeight: CGFloat {
@@ -2040,7 +2083,10 @@ struct XFeedQuotedPostCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(
+            Color(uiColor: isDetail ? .systemBackground : .secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
@@ -2086,7 +2132,8 @@ struct XFeedQuotedPostCard: View {
                 targetWidth: availableWidth - 24,
                 height: quotedMediaHeight(media),
                 cornerRadius: 8,
-                contentMode: .fit
+                contentMode: .fit,
+                usesTimelinePlaceholder: !isDetail
             )
             .frame(maxWidth: .infinity)
             .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
@@ -2186,6 +2233,10 @@ struct XVideoPlayerView: View {
     private let onAspectRatioResolved: ((CGFloat) -> Void)?
     private let observationSurface: String
 
+    private var hasPosterSource: Bool {
+        thumbnailURL != nil || fallbackThumbnailURL != nil || generatesThumbnailWhenMissing
+    }
+
     init(
         url: URL,
         fallbackURL: URL? = nil,
@@ -2220,18 +2271,20 @@ struct XVideoPlayerView: View {
                 Image(uiImage: thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
-            } else if playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {
+            } else if hasPosterSource, playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {
                 ProgressView().tint(.white)
             }
 
-            XPlayerLayerView(
-                player: player,
-                videoGravity: contentMode == .fill ? .resizeAspectFill : .resizeAspect,
-                onReadyForDisplay: markVideoReady,
-                onFailure: markPlaybackFailed
-            )
-                .opacity(isVideoReady ? 1 : 0.001)
-                .allowsHitTesting(false)
+            if let player {
+                XPlayerLayerView(
+                    player: player,
+                    videoGravity: contentMode == .fill ? .resizeAspectFill : .resizeAspect,
+                    onReadyForDisplay: markVideoReady,
+                    onFailure: markPlaybackFailed
+                )
+                    .opacity(isVideoReady ? 1 : 0.001)
+                    .allowsHitTesting(false)
+            }
 
             switch playbackState {
             case .idle:
@@ -2262,7 +2315,7 @@ struct XVideoPlayerView: View {
                 .frame(maxHeight: .infinity, alignment: .bottom)
             }
 
-            if thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
+            if hasPosterSource, thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
                 Button {
                     thumbnailFailed = false
                     Task { await loadThumbnail(ignoringCache: true) }
@@ -2468,7 +2521,7 @@ struct XVideoPlayerView: View {
 
     @MainActor
     private func loadThumbnail(ignoringCache: Bool = false) async {
-        guard thumbnail == nil else { return }
+        guard hasPosterSource, thumbnail == nil else { return }
         if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: playbackURL as NSURL) {
             thumbnail = cached
             return
