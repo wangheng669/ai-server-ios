@@ -225,7 +225,7 @@ struct TodayOriginalsPanel: View {
         .background(Color(uiColor: .systemBackground), in: shape)
         .clipShape(shape)
         .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
-        .shadow(color: TodayBriefStyle.accent.opacity(0.17), radius: 24, x: 0, y: 8)
+        .shadow(color: TodayBriefStyle.accent.opacity(0.13), radius: 20, x: 0, y: 8)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("today-originals-panel")
         .accessibilityAction(.escape) { close() }

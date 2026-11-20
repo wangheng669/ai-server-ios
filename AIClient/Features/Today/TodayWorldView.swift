@@ -381,9 +381,9 @@ struct TodayWorldView: View {
 
     private func originalsOverlay(postIDs: [Int], brief: TodayBriefProjection, viewport: CGSize) -> some View {
         let panelWidth = min(460, viewport.width * 0.84)
-        let panelHeight = min(560, viewport.height * 0.68)
+        let panelHeight = min(520, viewport.height * 0.62)
         return ZStack {
-            Color.black.opacity(0.04)
+            Color.black.opacity(0.025)
                 .accessibilityHidden(true)
             TodayOriginalsPanel(
                 sources: postIDs.compactMap { brief.sources[$0] },
@@ -394,6 +394,7 @@ struct TodayWorldView: View {
                 close: { originalPostIDs = nil }
             )
             .frame(width: panelWidth, height: panelHeight)
+            .padding(.bottom, min(44, viewport.height * 0.06))
         }
     }
 
