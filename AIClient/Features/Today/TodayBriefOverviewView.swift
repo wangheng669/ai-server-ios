@@ -284,26 +284,11 @@ private struct TodayBriefDeck: View {
         let cardWidth = min(max(0, viewport.width - 44), 480)
 
         VStack(spacing: 0) {
-            ZStack(alignment: .top) {
-                if brief.cards.count > 1 {
-                    shape
-                        .fill(Color(red: 0.91, green: 0.95, blue: 0.92))
-                        .frame(width: cardWidth * 0.87, height: cardHeight)
-                        .offset(y: 28)
-                        .accessibilityHidden(true)
-                    shape
-                        .fill(Color(red: 0.95, green: 0.97, blue: 0.95))
-                        .frame(width: cardWidth * 0.94, height: cardHeight)
-                        .offset(y: 21)
-                        .accessibilityHidden(true)
-                }
-
-                cards(
-                    width: cardWidth,
-                    height: cardHeight,
-                    viewport: CGSize(width: viewport.width, height: deckHeight)
-                )
-            }
+            cards(
+                width: cardWidth,
+                height: cardHeight,
+                viewport: CGSize(width: viewport.width, height: deckHeight)
+            )
             .frame(height: deckHeight)
 
             if brief.cards.count > 1 {
@@ -313,8 +298,7 @@ private struct TodayBriefDeck: View {
     }
 
     private func cards(width: CGFloat, height: CGFloat, viewport: CGSize) -> some View {
-        let animatesCards = !reduceMotion
-        return ScrollView(.horizontal) {
+        ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
                 ForEach(brief.cards) { card in
                     Button { open(card) } label: {
@@ -334,12 +318,23 @@ private struct TodayBriefDeck: View {
                     .buttonStyle(.plain)
                     .accessibilityHint("查看原文")
                     .accessibilityIdentifier("today-card-\(card.id)")
-                    .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                        content
-                            .scaleEffect(animatesCards && !phase.isIdentity ? 0.95 : 1)
-                            .rotationEffect(.degrees(animatesCards ? phase.value * 4 : 0), anchor: .bottom)
-                    }
                     .padding(.top, 14)
+                    .background(alignment: .top) {
+                        if brief.cards.count > 1 {
+                            ZStack(alignment: .top) {
+                                shape
+                                    .fill(Color(red: 0.91, green: 0.95, blue: 0.92))
+                                    .frame(width: width * 0.87, height: height)
+                                    .offset(y: 28)
+                                shape
+                                    .fill(Color(red: 0.95, green: 0.97, blue: 0.95))
+                                    .frame(width: width * 0.94, height: height)
+                                    .offset(y: 21)
+                            }
+                            .accessibilityHidden(true)
+                            .allowsHitTesting(false)
+                        }
+                    }
                     .frame(width: viewport.width, height: viewport.height, alignment: .top)
                 }
             }
